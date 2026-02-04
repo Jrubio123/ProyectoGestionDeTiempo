@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    container_name: gestion_tiempo_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  back:
+    build: ./back
+    container_name: gestion_tiempo_back
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      - db
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./back:/usr/src/app
+      - /usr/src/app/node_modules  # Evita que se sobrescriba node_modules
+    command: sh -c "npm install && npm run dev"
+
+  front:
+    build: ./front
+    container_name: gestion_tiempo_front
+    restart: always
+    depends_on:
+      - back
+    ports:
+      - "3000:80"  # Nginx corre en el puerto 80 dentro del contenedor
+    volumes:
+      - ./front:/usr/share/nginx/html:ro  # Monta tu HTML directamente
+
+volumes:
+  db_data:

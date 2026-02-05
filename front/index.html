@@ -9,26 +9,19 @@
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     
     <link rel="stylesheet" href="/styles/app.css">
+    <link rel="stylesheet" href="/components/navbar/navbar.css">
+    <link rel="stylesheet" href="/components/sidebar/sidebar.css">
 
     <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script defer src="/js/cliente.js"></script>
+    <script defer src="/components/navbar/navbar.js"></script>
+    <script defer src="/components/sidebar/sidebar.js"></script>
+    <script defer src="/components/loader.js"></script>
 </head>
-<body class="h-screen flex overflow-hidden bg-gray-100">
-    
-    <div id="sidebar-container" class="w-64 bg-white hidden md:block border-r">
-        <div class="p-4 font-bold text-blue-900">Menú</div>
-        <nav class="p-2">
-            <a href="#cliente" class="block p-2 hover:bg-blue-50 text-blue-800">Clientes</a>
-        </nav>
-    </div>
-
-    <div class="flex-1 flex flex-col">
-        <div class="bg-white shadow p-4">
-            <h1 class="font-bold">Sistema de Gestión</h1>
-        </div>
-        
-        <main id="view-container" class="flex-1 overflow-y-auto p-6"></main>
-    </div>
+<body class="bg-gray-100">
+    <div id="navbar-container"></div>
+    <div id="sidebar-container"></div>
+    <main id="view-container" class="min-h-screen p-6" style="padding-top: 90px; padding-left: 300px;"></main>
 
     <script src="/router.js"></script>
 </body>

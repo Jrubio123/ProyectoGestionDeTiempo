@@ -1,5 +1,4 @@
 // js/cliente.js
-// Asegúrate de que esté disponible en el scope global
 window.clientesApp = function() {
     const API = "http://localhost:4000";
 

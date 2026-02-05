@@ -1,28 +1,118 @@
-<aside class="w-64 bg-slate-900 text-white h-full flex flex-col shadow-xl overflow-y-auto">
-    <div class="p-6 text-2xl font-bold border-b border-slate-800">
-        ⏱ TiempoPro
+<aside class="sidebar">
+    <div class="sidebar-header">
+        <h2 class="sidebar-title">Navegación</h2>
+        <button class="sidebar-toggle" id="sidebarToggle">
+            <span class="toggle-icon">☰</span>
+        </button>
     </div>
-    <nav class="flex-1 p-4 space-y-1 text-sm">
-        <a href="#inicio" class="block p-2 rounded hover:bg-slate-800 transition">🏠 Inicio</a>
+    
+    <div class="sidebar-menu">
+        <div class="menu-section">
+            <h3 class="menu-title">Principal</h3>
+            <ul class="menu-list">
+                <li class="menu-item active">
+                    <a href="#inicio" class="menu-link">
+                        <span class="menu-icon">🏠</span>
+                        <span class="menu-text">Inicio</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="#cliente" class="menu-link">
+                        <span class="menu-icon">👥</span>
+                        <span class="menu-text">Clientes</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="#tarifas" class="menu-link">
+                        <span class="menu-icon">💰</span>
+                        <span class="menu-text">Tarifas</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
         
-        <div class="pt-4 pb-2 text-xs font-semibold text-slate-500 uppercase">Gestión Maestro</div>
-        <a href="#cliente" class="block p-2 rounded hover:bg-slate-800 transition">🏢 Clientes</a>
-        <a href="#tarifas" class="block p-2 rounded hover:bg-slate-800 transition">💰 Tarifas</a>
-        <a href="#permisos-coordinador" class="block p-2 rounded hover:bg-slate-800 transition">🔑 Permisos Coord.</a>
+        <div class="menu-section">
+            <h3 class="menu-title">Coordinador</h3>
+            <ul class="menu-list">
+                <li class="menu-item">
+                    <a href="#asignacion-coordinador" class="menu-link">
+                        <span class="menu-icon">🧭</span>
+                        <span class="menu-text">Asignación Coord.</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="#permisos-coordinador" class="menu-link">
+                        <span class="menu-icon">🛂</span>
+                        <span class="menu-text">Permisos Coord.</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="#asociar-subconsultores" class="menu-link">
+                        <span class="menu-icon">🧩</span>
+                        <span class="menu-text">Subconsultores</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="#mis-asignaciones-coordinador" class="menu-link">
+                        <span class="menu-icon">📋</span>
+                        <span class="menu-text">Mis Asig. Coord.</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="#aprobar-rechazar-coordinador" class="menu-link">
+                        <span class="menu-icon">✅</span>
+                        <span class="menu-text">Aprobar/Rech.</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
         
-        <div class="pt-4 pb-2 text-xs font-semibold text-slate-500 uppercase">Asignaciones</div>
-        <a href="#asignacion-coordinador" class="block p-2 rounded hover:bg-slate-800 transition">📅 Asig. Coordinador</a>
-        <a href="#asignacion-consultor" class="block p-2 rounded hover:bg-slate-800 transition">👤 Asig. Consultor</a>
-        <a href="#asociar-subconsultores" class="block p-2 rounded hover:bg-slate-800 transition">👥 Sub-Consultores</a>
+        <div class="menu-section">
+            <h3 class="menu-title">Consultor</h3>
+            <ul class="menu-list">
+                <li class="menu-item">
+                    <a href="#asignacion-consultor" class="menu-link">
+                        <span class="menu-icon">📌</span>
+                        <span class="menu-text">Asignación Cons.</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="#mis-asignaciones-consultor" class="menu-link">
+                        <span class="menu-icon">🧾</span>
+                        <span class="menu-text">Mis Asig. Cons.</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="#registro-horas-consultor" class="menu-link">
+                        <span class="menu-icon">⏱️</span>
+                        <span class="menu-text">Registro Horas</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
         
-        <div class="pt-4 pb-2 text-xs font-semibold text-slate-500 uppercase">Mis Operaciones</div>
-        <a href="#mis-asignaciones-coordinador" class="block p-2 rounded hover:bg-slate-800 transition">📂 Mis Asig. Coord.</a>
-        <a href="#mis-asignaciones-consultor" class="block p-2 rounded hover:bg-slate-800 transition">📂 Mis Asig. Cons.</a>
-        <a href="#registro-horas-consultor" class="block p-2 rounded hover:bg-slate-800 transition">⏱ Registro Horas</a>
-        
-        <div class="pt-4 pb-2 text-xs font-semibold text-slate-500 uppercase">Aprobaciones y Cobros</div>
-        <a href="#aprobar-rechazar-coordinador" class="block p-2 rounded hover:bg-slate-800 transition">⚖️ Aprobar/Rechazar</a>
-        <a href="#mis-cuentas-cobros" class="block p-2 rounded hover:bg-slate-800 transition">💵 Mis Cuentas Cobro</a>
-        <a href="#generar-cuenta-cobro" class="block p-2 rounded hover:bg-slate-800 transition">📝 Generar Cobro</a>
-    </nav>
+        <div class="menu-section">
+            <h3 class="menu-title">Operación</h3>
+            <ul class="menu-list">
+                <li class="menu-item">
+                    <a href="#asignacion-fabrica-mesa-servicio" class="menu-link">
+                        <span class="menu-icon">🏭</span>
+                        <span class="menu-text">Fábrica/Mesa</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="#mis-cuentas-cobros" class="menu-link">
+                        <span class="menu-icon">💳</span>
+                        <span class="menu-text">Cuentas Cobro</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="#generar-cuenta-cobro" class="menu-link">
+                        <span class="menu-icon">🧮</span>
+                        <span class="menu-text">Generar Cobro</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
 </aside>

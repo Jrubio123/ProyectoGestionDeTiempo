@@ -20,7 +20,7 @@ async function loadView(view) {
 }
 
 const routes = {
-    inicio: "dashboard",
+    inicio: "inicio",
     cliente: "cliente",
     tarifas: "tarifas",
     "permisos-coordinador": "permisos-coordinador",
@@ -42,7 +42,7 @@ function router() {
     if (view) {
         loadView(view);
     } else {
-        loadView("dashboard");
+        loadView("inicio");
     }
 }
 

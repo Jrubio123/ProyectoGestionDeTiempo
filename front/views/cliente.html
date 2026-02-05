@@ -1,54 +1,171 @@
-<div x-data="clientesApp"> <div class="bg-white p-6 rounded shadow">
-    <h1 class="text-2xl font-bold mb-6 text-blue-900">Gestión de Clientes</h1>
+<div x-data="clientesApp" class="max-w-6xl mx-auto space-y-8 animate-fade-in-up">
+  
+  <div class="flex flex-col md:flex-row md:items-center md:justify-between bg-white/80 backdrop-blur-sm p-6 rounded-2xl shadow-sm border border-gray-100">
+    <div>
+      <h1 class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-[#667eea] to-[#764ba2]">
+        Gestión de Clientes
+      </h1>
+      <p class="text-gray-500 text-sm mt-1">Administra tu cartera de clientes de forma eficiente.</p>
+    </div>
+    
+  </div>
 
-    <form @submit.prevent="guardarCliente" class="grid grid-cols-2 gap-4 mb-6">
-      <div>
-        <label class="block text-sm font-semibold mb-2">Nombre cliente</label>
-        <input class="border p-2 w-full" x-model="form.titulo" @input="validarTitulo()">
-        <p class="text-red-600 text-sm" x-text="errors.titulo"></p>
-      </div>
-      <div>
-        <label class="block text-sm font-semibold mb-2">NIT</label>
-        <input class="border p-2 w-full" x-model="form.nit" @input="validarNit()">
-        <p class="text-red-600 text-sm" x-text="errors.nit"></p>
-      </div>
-      <div>
-        <label class="block text-sm font-semibold mb-2">Prefijo</label>
-        <input class="border p-2 w-full" x-model="form.prefijo">
-      </div>
-      <div>
-        <label class="block text-sm font-semibold mb-2">Correlativo</label>
-        <input class="border p-2 w-full bg-gray-100" :value="form.correlativo" disabled>
-      </div>
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+    
+    <div class="lg:col-span-4">
+      <div class="bg-white p-6 rounded-2xl shadow-lg border border-gray-100 sticky top-6 transition-all duration-300 hover:shadow-xl">
+        <h2 class="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
+          <span class="w-1 h-6 bg-gradient-to-b from-[#667eea] to-[#764ba2] rounded-full"></span>
+          <span x-text="form.id ? 'Editar Cliente' : 'Registrar Cliente'"></span>
+        </h2>
 
-      <div class="col-span-2 flex gap-3 mt-3">
-        <button class="bg-blue-900 text-white px-4 py-2 rounded disabled:opacity-50" :disabled="!formValido">
-          <span x-text="form.id ? 'Actualizar' : 'Guardar'"></span>
-        </button>
-        <button type="button" class="bg-gray-600 text-white px-4 py-2 rounded" @click="nuevoCliente">
-          Nuevo
-        </button>
-      </div>
-    </form>
-
-    <div class="border-t pt-4">
-      <div class="grid grid-cols-4 font-bold mb-2 bg-gray-50 p-2">
-        <div>Cliente</div>
-        <div>NIT</div>
-        <div>Código</div>
-        <div>Acciones</div>
-      </div>
-      <template x-for="cliente in clientes" :key="cliente.id">
-        <div class="grid grid-cols-4 py-2 border-b hover:bg-gray-50">
-            <div x-text="cliente.titulo"></div>
-            <div x-text="cliente.nit"></div>
-            <div x-text="`${cliente.prefijo || ''}${cliente.correlativo || ''}`"></div>
-            <div class="flex gap-2">
-                <button class="text-blue-700" @click="editarCliente(cliente)">✏️</button>
-                <button class="text-red-600" @click="eliminarCliente(cliente.id)">🗑</button>
+        <form @submit.prevent="guardarCliente" class="space-y-5">
+          
+          <div class="group">
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5 ml-1">Nombre Cliente</label>
+            <div class="relative">
+              <input 
+                class="w-full pl-4 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-700 placeholder-gray-400 focus:outline-none focus:bg-white focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 transition-all duration-200"
+                :class="{'border-red-300 focus:border-red-500 focus:ring-red-200': errors.titulo}"
+                x-model="form.titulo" 
+                @input="validarTitulo()"
+                placeholder="Ej: Tech Solutions S.A."
+              >
+              <div class="absolute right-3 top-3.5" x-show="!errors.titulo && form.titulo.length > 2">
+                <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+              </div>
             </div>
+            <p class="text-red-500 text-xs mt-1 ml-1 font-medium animate-pulse" x-text="errors.titulo" x-show="errors.titulo"></p>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5 ml-1">NIT</label>
+            <input 
+              class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-700 placeholder-gray-400 focus:outline-none focus:bg-white focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 transition-all duration-200 font-mono text-sm"
+              :class="{'border-red-300 focus:border-red-500 focus:ring-red-200': errors.nit}"
+              x-model="form.nit" 
+              @input="validarNit()"
+              placeholder="000.000.000-0"
+            >
+            <p class="text-red-500 text-xs mt-1 ml-1 font-medium" x-text="errors.nit" x-show="errors.nit"></p>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5 ml-1">Prefijo</label>
+              <input class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-700 focus:outline-none focus:bg-white focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 transition-all" x-model="form.prefijo" placeholder="CLI">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5 ml-1">Código</label>
+              <input class="w-full px-4 py-3 bg-gray-100 border border-gray-200 rounded-xl text-gray-500 cursor-not-allowed font-mono text-center" :value="form.correlativo || '---'" disabled>
+            </div>
+          </div>
+
+          <div class="pt-4 flex gap-3">
+            <button 
+              type="button" 
+              @click="nuevoCliente"
+              class="flex-1 px-4 py-3 bg-white text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-50 hover:border-gray-300 hover:text-gray-900 transition-all duration-200 font-medium text-sm"
+            >
+              Cancelar
+            </button>
+            
+            <button 
+              type="submit"
+              class="flex-[2] px-4 py-3 text-white transition-all duration-200 bg-gradient-to-r from-[#667eea] to-[#764ba2] rounded-xl font-bold shadow-md hover:shadow-lg hover:shadow-purple-500/30 hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
+              :disabled="!formValido"
+            >
+              <span x-show="!form.id">Guardar Cliente</span>
+              <span x-show="form.id">Actualizar Cambios</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="lg:col-span-8">
+      <div class="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+        
+        <div class="px-6 py-4 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
+          <h3 class="font-bold text-gray-700">Listado Reciente</h3>
+          <span class="bg-purple-100 text-purple-700 text-xs font-bold px-3 py-1 rounded-full" x-text="clientes.length + ' Registros'"></span>
         </div>
-      </template>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="text-xs font-bold text-gray-400 uppercase bg-gray-50 border-b border-gray-100">
+                <th class="px-6 py-4">Cliente</th>
+                <th class="px-6 py-4">Información Fiscal</th>
+                <th class="px-6 py-4 text-center">Código</th>
+                <th class="px-6 py-4 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-50">
+              <template x-for="cliente in clientes" :key="cliente.id">
+                <tr class="hover:bg-purple-50/30 transition-colors duration-150 group" :class="{'bg-purple-50': form.id === cliente.id}">
+                  
+                  <td class="px-6 py-4">
+                    <div class="flex items-center">
+                      <div class="w-8 h-8 rounded-full bg-gradient-to-br from-[#667eea] to-[#764ba2] flex items-center justify-center text-white font-bold text-xs mr-3 shadow-sm">
+                        <span x-text="cliente.titulo.charAt(0)"></span>
+                      </div>
+                      <span class="font-semibold text-gray-700 group-hover:text-purple-700 transition-colors" x-text="cliente.titulo"></span>
+                    </div>
+                  </td>
+
+                  <td class="px-6 py-4">
+                    <span class="text-gray-500 font-mono text-sm bg-gray-100 px-2 py-1 rounded-md border border-gray-200" x-text="cliente.nit"></span>
+                  </td>
+
+                  <td class="px-6 py-4 text-center">
+                    <span class="text-xs font-bold text-gray-400" x-text="`${cliente.prefijo || ''}-${cliente.correlativo || ''}`"></span>
+                  </td>
+
+                  <td class="px-6 py-4 text-right">
+                    <div class="flex items-center justify-end gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        @click="editarCliente(cliente)"
+                        class="p-2 text-gray-400 hover:text-purple-600 hover:bg-purple-100 rounded-lg transition-all"
+                        title="Editar"
+                      >
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                      </button>
+                      
+                      <button 
+                        @click="eliminarCliente(cliente.id)"
+                        class="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                        title="Eliminar"
+                      >
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+              
+              <tr x-show="clientes.length === 0">
+                <td colspan="4" class="px-6 py-12 text-center text-gray-400">
+                  <div class="flex flex-col items-center justify-center">
+                    <svg class="w-12 h-12 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path></svg>
+                    <p>No hay clientes registrados aún.</p>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
+  
+  <style>
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fade-in-up {
+      animation: fadeInUp 0.5s ease-out forwards;
+    }
+  </style>
 </div>

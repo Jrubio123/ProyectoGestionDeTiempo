@@ -33,9 +33,33 @@ function initNavbar() {
 }
 
 function performSearch(query) {
-    if (query.trim()) {
-        console.log("Buscando:", query);
-        alert(`Buscando: ${query}`);
+    const q = query.trim().toLowerCase();
+    if (!q) return;
+
+    const views = [
+        { label: "Inicio", hash: "#inicio" },
+        { label: "Clientes", hash: "#cliente" },
+        { label: "Tarifas", hash: "#tarifas" },
+        { label: "Asignación Coordinador", hash: "#asignacion-coordinador" },
+        { label: "Permisos Coordinador", hash: "#permisos-coordinador" },
+        { label: "Asociar Subconsultores", hash: "#asociar-subconsultores" },
+        { label: "Asignación Consultor", hash: "#asignacion-consultor" },
+        { label: "Mis Asignaciones Coordinador", hash: "#mis-asignaciones-coordinador" },
+        { label: "Mis Asignaciones Consultor", hash: "#mis-asignaciones-consultor" },
+        { label: "Asignación Fábrica Mesa Servicio", hash: "#asignacion-fabrica-mesa-servicio" },
+        { label: "Registro Horas Consultor", hash: "#registro-horas-consultor" },
+        { label: "Aprobar/Rechazar Coordinador", hash: "#aprobar-rechazar-coordinador" },
+        { label: "Mis Cuentas Cobros", hash: "#mis-cuentas-cobros" },
+        { label: "Generar Cuenta Cobro", hash: "#generar-cuenta-cobro" }
+    ];
+
+    const match = views.find(v => v.label.toLowerCase() === q) ||
+        views.find(v => v.label.toLowerCase().includes(q));
+
+    if (match) {
+        window.location.hash = match.hash;
+    } else {
+        alert("No se encontró esa vista");
     }
 }
 

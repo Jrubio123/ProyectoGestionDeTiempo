@@ -1,0 +1,41 @@
+<h2>Login</h2>
+
+<input id="nombre" placeholder="Nombre"><br><br>
+<input id="email" placeholder="Email"><br><br>
+<input id="password" type="password" placeholder="Clave"><br><br>
+
+<button onclick="register()">Crear usuario</button>
+<button onclick="login()">Entrar</button>
+
+<script>
+const API = "http://localhost:4000";
+
+async function register() {
+  const res = await fetch(API + "/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      nombre_usuario: nombre.value,
+      email: email.value,
+      password: password.value
+    })
+  });
+
+  const data = await res.json();
+  alert(JSON.stringify(data));
+}
+
+async function login() {
+  const res = await fetch(API + "/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: email.value,
+      password: password.value
+    })
+  });
+
+  const data = await res.json();
+  alert(JSON.stringify(data));
+}
+</script>

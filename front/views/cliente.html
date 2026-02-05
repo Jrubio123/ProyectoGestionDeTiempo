@@ -1,0 +1,335 @@
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6" x-data="clienteForm()">
+    
+    <!-- Formulario de Cliente -->
+    <form @submit.prevent="guardarCliente" class="space-y-6 mb-8">
+        
+        <!-- Nombre del Cliente -->
+        <div>
+            <label class="block text-sm font-semibold text-blue-900 mb-2">
+                Nombre del Cliente <span class="text-red-600">*</span>
+            </label>
+            <input 
+                type="text" 
+                x-model="form.titulo"
+                @input="validarTituloUnico"
+                class="w-full px-4 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                :class="{'border-red-500': errors.titulo}"
+                required
+            />
+            <p x-show="errors.titulo" class="text-red-600 text-sm mt-1" x-text="errors.titulo"></p>
+        </div>
+
+        <!-- NIT -->
+        <div>
+            <label class="block text-sm font-semibold text-blue-900 mb-2">
+                NIT <span class="text-red-600">*</span>
+            </label>
+            <input 
+                type="text" 
+                x-model="form.nit"
+                @input="validarNitUnico"
+                class="w-full px-4 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                :class="{'border-red-500': errors.nit}"
+                required
+            />
+            <p x-show="errors.nit" class="text-red-600 text-sm mt-1" x-text="errors.nit"></p>
+        </div>
+
+        <!-- Prefijo -->
+        <div>
+            <label class="block text-sm font-semibold text-blue-900 mb-2">
+                Prefijo
+            </label>
+            <input 
+                type="text" 
+                x-model="form.prefijo"
+                class="w-full px-4 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                maxlength="20"
+            />
+        </div>
+
+        <!-- Correlativo (Deshabilitado) -->
+        <div>
+            <label class="block text-sm font-semibold text-blue-900 mb-2">
+                Correlativo
+            </label>
+            <input 
+                type="number" 
+                x-model="form.correlativo"
+                class="w-full px-4 py-2 border border-gray-300 rounded bg-gray-100 cursor-not-allowed"
+                disabled
+            />
+        </div>
+
+        <!-- Razón Social (Nombre Cliente) -->
+        <div>
+            <label class="block text-sm font-semibold text-blue-900 mb-2">
+                Razón Social
+            </label>
+            <input 
+                type="text" 
+                x-model="form.razon_social"
+                class="w-full px-4 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+        </div>
+
+        <!-- Botones de Acción -->
+        <div class="flex items-center justify-center gap-4 pt-4">
+           <button 
+                type="button"
+                @click="guardarCliente()"
+                :disabled="!formValido"
+                class="px-6 py-2 bg-blue-900 text-white rounded hover:bg-blue-800 disabled:bg-gray-400 disabled:cursor-not-allowed transition"
+            >
+                Guardar
+            </button>
+
+            
+            <button 
+                type="button"
+                @click="nuevoCliente"
+                class="px-6 py-2 bg-blue-900 text-white rounded hover:bg-blue-800 transition"
+            >
+                Nuevo
+            </button>
+            
+            <button 
+                type="button"
+                @click="recargarClientes"
+                class="p-2 text-blue-900 hover:bg-blue-50 rounded transition"
+                title="Recargar"
+            >
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+            </button>
+        </div>
+    </form>
+
+    <!-- Filtro por Cliente -->
+    <div class="mb-4 flex items-center gap-4">
+        <label class="text-sm font-semibold text-blue-900">Cliente:</label>
+        <select 
+            x-model="filtroCliente"
+            @change="filtrarClientes"
+            class="flex-1 px-4 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+        >
+            <option value="">Todos</option>
+            <template x-for="cliente in clientesUnicos" :key="cliente">
+                <option :value="cliente" x-text="cliente"></option>
+            </template>
+        </select>
+    </div>
+
+    <!-- Separador -->
+    <div class="h-2 bg-blue-900 mb-4"></div>
+
+    <!-- Encabezados de la Tabla -->
+    <div class="grid grid-cols-5 gap-4 px-4 py-3 bg-gray-50 font-semibold text-blue-900 text-sm border-b-2 border-blue-900">
+        <div>Cliente</div>
+        <div>NIT</div>
+        <div>Prefijo Correlativo</div>
+        <div>Razón Social</div>
+        <div class="text-center">Acciones</div>
+    </div>
+
+    <!-- Lista de Clientes -->
+    <div class="divide-y divide-gray-200 max-h-96 overflow-y-auto">
+        <template x-for="cliente in clientesFiltrados" :key="cliente.id">
+            <div 
+                class="grid grid-cols-5 gap-4 px-4 py-3 hover:bg-blue-50 cursor-pointer transition"
+                :class="{'bg-blue-100': clienteSeleccionado?.id === cliente.id}"
+            >
+                <div class="text-sm" x-text="cliente.titulo"></div>
+                <div class="text-sm" x-text="cliente.nit"></div>
+                <div class="text-sm" x-text="cliente.prefijo + cliente.correlativo"></div>
+                <div class="text-sm" x-text="cliente.razon_social"></div>
+                <div class="flex justify-center gap-2">
+                    <button 
+                        @click="editarCliente(cliente)"
+                        class="p-2 text-blue-900 hover:bg-blue-100 rounded transition"
+                        title="Editar"
+                    >
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                    </button>
+                    <button 
+                        @click="eliminarCliente(cliente)"
+                        class="p-2 text-red-600 hover:bg-red-50 rounded transition"
+                        title="Eliminar"
+                    >
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </template>
+    </div>
+
+    <!-- Modal de Error (cuando el cliente tiene consultorías) -->
+    <div 
+        x-show="mostrarModalError"
+        class="fixed inset-0 bg-black bg-opacity-25 flex items-center justify-center z-50"
+        x-cloak
+    >
+        <div class="bg-white rounded-lg shadow-xl p-6 max-w-md">
+            <p class="text-center text-blue-900 font-bold text-sm leading-relaxed mb-4">
+                ¡El Cliente ya tiene registros de Consultorías asociados, no se puede Eliminar!
+            </p>
+            <button 
+                @click="mostrarModalError = false"
+                class="mx-auto block p-2 text-red-600 hover:bg-red-50 rounded transition"
+            >
+                <svg class="w-9 h-9" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                </svg>
+            </button>
+        </div>
+    </div>
+
+</div>
+
+<script>
+function clienteForm() {
+    return {
+        form: {
+            id: null,
+            titulo: '',
+            nit: '',
+            prefijo: '',
+            correlativo: 0,
+            razon_social: ''
+        },
+        errors: {},
+        clientes: [],
+        clientesFiltrados: [],
+        clientesUnicos: [],
+        filtroCliente: '',
+        clienteSeleccionado: null,
+        mostrarModalError: false,
+        modoEdicion: false,
+
+        async init() {
+            await this.cargarClientes();
+        },
+
+        async cargarClientes() {
+            try {
+                const response = await fetch('/api/clientes');
+                this.clientes = await response.json();
+                this.clientesFiltrados = [...this.clientes];
+                this.clientesUnicos = [...new Set(this.clientes.map(c => c.titulo))].sort();
+            } catch (error) {
+                console.error('Error cargando clientes:', error);
+            }
+        },
+
+        validarTituloUnico() {
+            if (!this.modoEdicion) {
+                const existe = this.clientes.some(c => c.titulo === this.form.titulo);
+                this.errors.titulo = existe ? 'El cliente ya existe' : '';
+            }
+        },
+
+        validarNitUnico() {
+            if (!this.modoEdicion) {
+                const existe = this.clientes.some(c => c.nit === this.form.nit);
+                this.errors.nit = existe ? 'El NIT ya existe' : '';
+            }
+        },
+
+        get formValido() {
+            return this.form.titulo && this.form.nit && !this.errors.titulo && !this.errors.nit;
+        },
+
+        editarCliente(cliente) {
+            this.form = { ...cliente };
+            this.clienteSeleccionado = cliente;
+            this.modoEdicion = true;
+            this.errors = {};
+        },
+
+        async eliminarCliente(cliente) {
+            // Verificar si tiene consultorías asociadas
+            try {
+                const response = await fetch(`/api/clientes/${cliente.id}/consultorias`);
+                const consultorias = await response.json();
+
+                if (consultorias.length > 0) {
+                    this.mostrarModalError = true;
+                    return;
+                }
+
+                if (confirm('¿Está seguro de eliminar este cliente?')) {
+                    await fetch(`/api/clientes/${cliente.id}`, { method: 'DELETE' });
+                    await this.cargarClientes();
+                }
+            } catch (error) {
+                console.error('Error eliminando cliente:', error);
+            }
+        },
+
+        nuevoCliente() {
+            this.form = {
+                id: null,
+                titulo: '',
+                nit: '',
+                prefijo: '',
+                correlativo: 0,
+                razon_social: ''
+            };
+            this.errors = {};
+            this.clienteSeleccionado = null;
+            this.modoEdicion = false;
+        },
+
+        filtrarClientes() {
+            if (this.filtroCliente === '') {
+                this.clientesFiltrados = [...this.clientes];
+            } else {
+                this.clientesFiltrados = this.clientes.filter(c => c.titulo === this.filtroCliente);
+            }
+        },
+
+        async recargarClientes() {
+            this.filtroCliente = '';
+            await this.cargarClientes();
+        }
+    }
+}
+</script>
+
+<script>
+function clienteForm() {
+  return {
+    nombre: '',
+
+    get formValido() {
+      return this.nombre.trim() !== ''
+    },
+
+    async guardarCliente() {
+      const res = await fetch('http://localhost:4000/clientes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nombre: this.nombre
+        })
+      })
+
+      if (res.ok) {
+        alert("Cliente guardado ✅")
+        this.nombre = ''
+      } else {
+        alert("Error guardando cliente ❌")
+      }
+    }
+  }
+}
+</script>
+
+<style>
+[x-cloak] { display: none !important; }
+</style>

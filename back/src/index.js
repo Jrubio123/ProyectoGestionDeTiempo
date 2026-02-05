@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const { Pool } = require("pg");
-const path = require('path');
+
 
 const app = express();
 
@@ -30,21 +30,12 @@ const pool = new Pool({
    SERVIR ARCHIVOS DEL FRONTEND
 =============================== */
 // Ajusta esta ruta si tu carpeta 'front' está en otro nivel relativo
-const FRONTEND_PATH = path.join(__dirname, '..', '..', 'front'); 
-app.use(express.static(FRONTEND_PATH));
+// Frontend se sirve por separado (no está en este contenedor)
 
 /* ===============================
    RUTAS DE VISTAS (SPA)
 =============================== */
-app.get('/views/:view', (req, res) => {
-    let viewName = req.params.view;
-    if (!viewName.endsWith('.html')) viewName += '.html';
-    
-    const viewFile = path.join(FRONTEND_PATH, 'views', viewName);
-    res.sendFile(viewFile, (err) => {
-        if (err) res.status(404).send('<p class="text-red-500">Vista no encontrada</p>');
-    });
-});
+// (sin rutas de vistas aquí)
 
 /* ===============================
    API - CLIENTES (AQUÍ ESTABA EL FALTANTE)
@@ -122,9 +113,175 @@ app.delete("/clientes/:id", async (req, res) => {
   }
 });
 
+/* ===============================
+   API - CATÁLOGOS
+=============================== */
+
+// Consultores activos
+app.get("/consultores", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        u.id,
+        u.nombre_usuario AS nombre,
+        u.moneda_cobro AS moneda
+      FROM usuarios u
+      LEFT JOIN roles r ON u.rol_usuario_id = r.id
+      WHERE u.activo = true
+        AND (r.titulo IN ('Consultor', 'Consultor Principal') OR u.tipo_consultor IS NOT NULL)
+      ORDER BY u.nombre_usuario ASC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener consultores" });
+  }
+});
+
+// Módulos activos
+app.get("/modulos", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, titulo
+      FROM modulo
+      WHERE activo = true
+      ORDER BY titulo ASC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener módulos" });
+  }
+});
+
+// Tipos de asignación activos
+app.get("/tipos-asignacion", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, titulo
+      FROM tipo_asignacion
+      WHERE activo = true
+      ORDER BY id ASC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener tipos de asignación" });
+  }
+});
+
+/* ===============================
+   API - TARIFAS
+=============================== */
+
+// Obtener tarifas
+app.get("/tarifas", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        tc.id,
+        tc.id_cliente AS cliente_id,
+        tc.consultor_id,
+        tc.modulo_id,
+        tc.id_tipo_asignacion AS tipo_asignacion_id,
+        tc.valor_tarifa AS valor,
+        tc.activo,
+        c.titulo AS nombre_cliente,
+        u.nombre_usuario AS nombre_consultor,
+        m.titulo AS nombre_modulo,
+        ta.titulo AS tipo_asignacion,
+        u.moneda_cobro AS moneda
+      FROM tarifa_consultor tc
+      JOIN clientes c ON c.id = tc.id_cliente
+      JOIN usuarios u ON u.id = tc.consultor_id
+      LEFT JOIN modulo m ON m.id = tc.modulo_id
+      LEFT JOIN tipo_asignacion ta ON ta.id = tc.id_tipo_asignacion
+      WHERE tc.activo = true
+      ORDER BY tc.id DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener tarifas" });
+  }
+});
+
+// Crear tarifa
+app.post("/tarifas", async (req, res) => {
+  const { cliente_id, consultor_id, modulo_id, tipo_asignacion_id, valor } = req.body;
+
+  try {
+    if (!cliente_id || !consultor_id || !tipo_asignacion_id || !valor) {
+      return res.status(400).json({ error: "Faltan campos requeridos" });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO tarifa_consultor 
+        (id_cliente, consultor_id, modulo_id, id_tipo_asignacion, valor_tarifa, activo)
+       VALUES ($1, $2, $3, $4, $5, true)
+       RETURNING *`,
+      [
+        cliente_id,
+        consultor_id,
+        modulo_id || null,
+        tipo_asignacion_id || null,
+        valor
+      ]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al guardar tarifa" });
+  }
+});
+
+// Actualizar tarifa
+app.put("/tarifas/:id", async (req, res) => {
+  const { id } = req.params;
+  const { cliente_id, consultor_id, modulo_id, tipo_asignacion_id, valor } = req.body;
+
+  try {
+    const result = await pool.query(
+      `UPDATE tarifa_consultor
+       SET id_cliente = $1,
+           consultor_id = $2,
+           modulo_id = $3,
+           id_tipo_asignacion = $4,
+           valor_tarifa = $5
+       WHERE id = $6
+       RETURNING *`,
+      [
+        cliente_id,
+        consultor_id,
+        modulo_id || null,
+        tipo_asignacion_id || null,
+        valor,
+        id
+      ]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar tarifa" });
+  }
+});
+
+// Eliminar tarifa (soft delete)
+app.delete("/tarifas/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    await pool.query("UPDATE tarifa_consultor SET activo = false WHERE id = $1", [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al eliminar tarifa" });
+  }
+});
+
 // Ruta Default para SPA (Siempre al final)
-app.get('*', (req, res) => {
-    res.sendFile(path.join(FRONTEND_PATH, 'index.html'));
+app.get("/", (req, res) => {
+  res.json({ ok: true, message: "API activo. Abre el frontend en http://localhost:3000" });
 });
 
 const PORT = process.env.BACK_PORT || 4000;

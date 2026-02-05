@@ -192,19 +192,6 @@ CREATE INDEX idx_modulo_activo ON modulo(activo);
 
 COMMENT ON TABLE modulo IS 'Módulos de consultoría (IT, AT, FI, etc)';
 
--- Tabla: PerfilCasoFabrica
--- Esta tabla cataloga los perfiles que antes estaban "quemados"
-CREATE TABLE perfil_caso_fabrica (
-    id SERIAL PRIMARY KEY,
-    titulo VARCHAR(100) NOT NULL UNIQUE, -- ABAP, ABAP TM, CPI, etc
-    descripcion TEXT,
-    activo BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-COMMENT ON TABLE perfil_caso_fabrica IS 'Catálogo de perfiles para casos de fábrica';
-
 -- Tablas auxiliares para conversión de números a letras
 CREATE TABLE period_1 (
     id SERIAL PRIMARY KEY,
@@ -436,7 +423,6 @@ CREATE TABLE reporte_horas (
     cliente_id INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
     tipo_asignacion_id INTEGER REFERENCES tipo_asignacion(id) ON DELETE SET NULL,
     modulo_id INTEGER REFERENCES modulo(id) ON DELETE SET NULL,
-    perfil_caso_fabrica_id INTEGER REFERENCES perfil_caso_fabrica(id) ON DELETE SET NULL,
     
     -- Usuarios (antes Person/Group o email quemado, ahora FK)
     coordinador_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
@@ -597,58 +583,20 @@ INSERT INTO roles (titulo, descripcion, activo) VALUES
 ('Consultor Principal', 'Consultor líder de equipo', true),
 ('Mesa de Servicio', 'Soporte y mesa de servicio', true);
 
--- Insertar tipos de documento
-INSERT INTO documento_identidad (titulo, codigo, activo) VALUES
-('Cédula de Ciudadanía', 'CC', true),
-('Cédula de Extranjería', 'CE', true),
-('Pasaporte', 'PA', true),
-('NIT', 'NIT', true),
-('Tarjeta de Identidad', 'TI', true);
-
--- Insertar tipos de cuenta bancaria
+-- Insertar tipos de cuenta bancaria (actualizado según tu tabla)
 INSERT INTO tipo_cuenta_bancaria (titulo, tipo_cuenta, tipo_transaccion, activo) VALUES
-('Cuenta de Ahorros', 1, '37', true),
-('Cuenta Corriente', 2, '27', true);
+('Cuenta Corriente', 1, '27', true),
+('Cuenta de Ahorros', 7, '37', true),
+('Abono depósitos electrónicos', 9, '52', true);
 
--- Insertar módulos básicos
-INSERT INTO modulo (titulo, nombre_completo, descripcion, activo) VALUES
-('IT', 'Integration Technologies', 'Módulo de tecnologías de integración SAP', true),
-('AT', 'Analytical Technologies', 'Módulo de tecnologías analíticas y BI', true),
-('FI', 'Finance', 'Módulo financiero SAP', true),
-('MM', 'Materials Management', 'Módulo de gestión de materiales', true),
-('SD', 'Sales and Distribution', 'Módulo de ventas y distribución', true),
-('PP', 'Production Planning', 'Módulo de planificación de producción', true),
-('HR', 'Human Resources', 'Módulo de recursos humanos', true);
-
--- Insertar tipos de asignación
+-- Insertar tipos de asignación (actualizado según tu lista)
 INSERT INTO tipo_asignacion (titulo, descripcion, activo) VALUES
-('Full Time', 'Asignación de tiempo completo', true),
+('Full time', 'Asignación de tiempo completo (40 horas/semana)', true),
 ('Part Time', 'Asignación de medio tiempo', true),
-('Mesa de Fábrica', 'Asignación por mesa de fábrica', true),
-('Por Horas', 'Asignación por horas', true),
-('Por Proyecto', 'Asignación por proyecto específico', true);
-
--- Insertar perfiles de caso fábrica
-INSERT INTO perfil_caso_fabrica (titulo, descripcion, activo) VALUES
-('ABAP', 'Desarrollador ABAP', true),
-('ABAP TM', 'ABAP Transportation Management', true),
-('CPI', 'Cloud Platform Integration', true),
-('FIORI', 'Desarrollador FIORI/UI5', true),
-('BASIS', 'Administrador BASIS', true),
-('FUNCIONAL FI', 'Consultor Funcional Finanzas', true),
-('FUNCIONAL MM', 'Consultor Funcional Materiales', true),
-('FUNCIONAL SD', 'Consultor Funcional Ventas', true);
-
--- Insertar algunos bancos colombianos comunes
-INSERT INTO bancos (titulo, codigo_bancolombia, codigo_conversor, activo) VALUES
-('Bancolombia', '007', '1007', true),
-('Banco de Bogotá', '001', '1001', true),
-('Davivienda', '051', '1051', true),
-('BBVA Colombia', '013', '1013', true),
-('Banco Popular', '002', '1002', true),
-('Banco Occidente', '023', '1023', true),
-('Banco AV Villas', '052', '1052', true),
-('Banco Caja Social', '032', '1032', true);
+('Tiempo y costo fijo', 'Proyectos con tiempo y costo definidos desde el inicio', true),
+('Horas por demanda', 'Horas asignadas según demanda del cliente', true),
+('Mesa de servicio', 'Soporte continuo por mesa de servicio/service desk', true),
+('Fábrica', 'Modelo de fábrica para desarrollo y soporte', true);
 
 -- ============================================================================
 -- VISTAS ÚTILES
@@ -881,3 +829,190 @@ COMMENT ON DATABASE CURRENT_DATABASE() IS 'Sistema de Gestión de Tiempo y Consu
 -- ============================================================================
 -- FIN DEL SCRIPT
 -- ============================================================================
+
+-- Insertar datos de bancos
+INSERT INTO bancos (titulo, codigo_bancolombia, codigo_conversor, activo) VALUES
+('BANCAMIA S.A.', '1.059,00', '1.059,00', true),
+('BANCO AGRARIO', '1.040,00', '1.040,00', true),
+('BANCO AV VILLAS', '6.013.677,00', '1.052,00', true),
+('BANCO BTG PACTUAL', '1.805,00', '1.805,00', true),
+('BANCO CAJA SOCIAL BCSC SA', '5.600.829,00', '1.032,00', true),
+('BANCO COOPERATIVO COOPCENTRAL', '1.066,00', '1.066,00', true),
+('BANCO CREDIFINANCIERA SA.', '1.558,00', '1.558,00', true),
+('BANCO DAVIVIENDA SA', '5.895.142,00', '1.051,00', true),
+('BANCO DE BOGOTA', '5.600.010,00', '1.001,00', true),
+('BANCO DE OCCIDENTE', '5.600.230,00', '1.023,00', true),
+('BANCO FALABELLA S.A.', '1.062,00', '1.062,00', true),
+('BANCO FINANDINA S.A.', '1.063,00', '1.063,00', true),
+('BANCO GNB SUDAMERIS', '5.600.120,00', '1.012,00', true),
+('BANCO J.P. MORGAN COLOMBIA S.A', '1.071,00', '1.071,00', true),
+('BANCO MUNDO MUJER', '1.047,00', '1.047,00', true),
+('BANCO PICHINCHA', '1.060,00', '1.060,00', true),
+('BANCO POPULAR', '5.600.023,00', '1.002,00', true),
+('BANCO SANTANDER DE NEGOCIOS CO', '1.065,00', '1.065,00', true),
+('BANCO SERFINANZA S.A', '1.069,00', '1.069,00', true),
+('BANCO W S.A.', '1.053,00', '1.053,00', true),
+('BANCOLDEX S.A.', '1.031,00', '1.031,00', true),
+('BANCOLOMBIA', '5.600.078,00', '1.007,00', true),
+('BANCOOMEVA', '1.061,00', '1.061,00', true),
+('BBVA COLOMBIA', '5.600.133,00', '1.013,00', true),
+('CITIBANK', '5.600.094,00', '1.009,00', true),
+('COLTEFINANCIERA S.A', '1.370,00', '1.370,00', true),
+('CONFIAR', '1.292,00', '1.292,00', true),
+('COOFINEP COOPERATIVA FINANCIER', '1.291,00', '1.291,00', true),
+('COOPERATIVA FINANCIERA DE ANTI', '1.283,00', '1.283,00', true),
+('COOTRAFA COOPERATIVA FINANCIER', '1.289,00', '1.289,00', true),
+('DAVIPLATA', '1.551,00', '1.551,00', true),
+('FINANCIERA JURISCOOP S.A. COMP', '1.121,00', '1.121,00', true),
+('GIROS Y FINANZAS CF', '1.303,00', '1.303,00', true),
+('IRIS', '1.637,00', '1.637,00', true),
+('ITAU', '5.600.146,00', '1.014,00', true),
+('ITAU antes Corpbanca', '5.600.065,00', '1.006,00', true),
+('LULO BANK S.A.', '1.070,00', '1.070,00', true),
+('MIBANCO S.A.', '1.067,00', '1.067,00', true),
+('MOVII', '1.801,00', '1.801,00', true),
+('NEQUI', '1.507,00', '1.507,00', true),
+('RAPPIPAY', '1.151,00', '1.151,00', true),
+('SCOTIABANK COLPATRIA S.A', '5.600.191,00', '1.019,00', true),
+('Ualá', '1.804,00', '1.804,00', true),
+('Banco BCP', '', '', true),
+('BBVA MÉXICO', '', '', true),
+('AMERANT BANK', '', '', true),
+('WISE', '', '', true),
+('BANK OF AMERICA', '', '', true),
+('CHOICE FINANCIAL GROUP', '', '', true),
+('WELLS FARGO BANK', '', '', true),
+('CIBC', '', '', true),
+('BANCO SANTANDER CHILE', '', '', true),
+('Banco Internacional del Perú - Interbank', '', '', true),
+('SANTANDER MONTEVIDEO DE URUGUAY', '', '', true),
+('Banreservas', '', '', true),
+('Banamex', '', '', true),
+('Banco Santander', '', '', true);
+
+-- Insertar datos de clientes
+INSERT INTO clientes (titulo, nit, prefijo, correlativo, activo) VALUES
+('PREBEL S.A.', '890905032', 'PREBEL', 1, true),
+('IBM de Colombia S.A.S.', '860002120', 'IBM', 5, true),
+('EMPRESA COLOMBIANA DE CEMENTOS S.A.S.', '900907364', 'ALION', 32, true),
+('LINEA DIRECTA S.A.S.', '811017000', 'LD', 4, true),
+('CORONA', '8909000857', 'CORONA', 17, true),
+('UMA', '9012610480', 'UMA', 1, true),
+('UNIBAN', '8909042242', 'UNIBAN', 1, true),
+('ALCSA', '97410-2', 'ALCSA', 1, true),
+('AXITY COL', '830055791', 'AXITYCOL', 1, true),
+('AXITY CHILE', '76138168', 'AXITYCH', 1, true),
+('DITRANSA', '800242427', 'DITRANSA', 1, true),
+('HOLCIM', '900583745', 'HOLCIM', 1, true),
+('INCHCAPE', '900587143', 'INCHCAPE', 2, true),
+('NEORIS', '90019608', 'NEORIS', 1, true),
+('NEORIS CHILE', '77394530', 'NEORISCH', 1, true),
+('POSTOBON', '890903939', 'POSTOBON', 1, true),
+('PREMEX', '890922549', 'PREMEX', 1, true),
+('IG SERVICES', '900693655', 'IGSERVICES', 1, true),
+('SURA', '890903790', 'SURA', 1, true),
+('TIERRAGRO', '89091242', 'TIERRAGRO', 1, true),
+('CUEROS VELEZ', '800191700', 'CVELEZ', 1, true),
+('CONASFALTOS', '890929951', 'CONASFALTOS', 1, true),
+('HOGAR Y MODA', '900255181', 'HYM', 1, true),
+('IDOM', 'A48283964', 'IDOM', 1, true),
+('DR BUSINESS', '901445973', 'DRBUSINESS', 1, true),
+('SAFERBO', '890920990', 'SAFERBO', 1, true),
+('RAMO', '8600038318', 'RAMO', 1, true),
+('SOLLA', '8909002918', 'SOLLA', 1, true),
+('PURO POLLO', '8901047193', 'PURO POLLO', 1, true),
+('GRADEZCO', '860007955', 'GRADEZCO', 1, true),
+('PRAGMA', '8110040571', 'PRAGMA', 1, true),
+('AEROCLUB', '8600072141', 'AEROCLUB', 1, true),
+('ICOLTRANS', '860070995', 'ICOLTRANS', 1, true),
+('FONANDES', '800137370', 'FONANDES', 1, true),
+('VALOR MAS', '900969726', 'VALOR MAS', 1, true),
+('PROMEDICO', '890310418', 'PROMEDICO', 1, true),
+('LA CAMPANA', '860056971', 'LA CAMPANA', 1, true),
+('BIG GROUP', '900868312', 'BIG GROUP', 1, true),
+('ERAZO VALENCIA', '860514604', 'ERAZO VALENCIA', 1, true),
+('GRUPO URIBE', '800069933', 'GRUPO URIBE', 1, true),
+('GRUPO APEX', '99057433', 'GRUPO APEX', 1, true),
+('EXITO', '890900608', 'EXITO', 1, true),
+('HUMAX', '811038881', 'HUMAX', 1, true),
+('GASEOSAS POOL', '9008104146', 'GASEOSAS POOL', 1, true);
+
+-- Tabla: DocumentoIdentidad
+CREATE TABLE documento_identidad (
+    id SERIAL PRIMARY KEY,
+    titulo VARCHAR(255) NOT NULL UNIQUE,
+    codigo VARCHAR(10),
+    activo BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Insertar los tipos de documento que necesitas
+INSERT INTO documento_identidad (titulo, codigo, activo) VALUES
+('Cédula', 'CC', true),
+('Cédula de extranjería', 'CE', true),
+('NIT', 'NIT', true),
+('Tarjeta de Identidad', 'TI', true),
+('Pasaporte', 'PSP', true),
+('DNI', 'DNI', true);
+
+-- Insertar datos de módulos SAP con descripciones detalladas
+INSERT INTO modulo (titulo, nombre_completo, descripcion, activo) VALUES
+('IT', 'Infraestructura Tecnológica', 'SAP Basis: Administración de sistemas, monitoreo, transporte y optimización de rendimiento SAP', true),
+('AT', 'Automatizaciones', 'Automatización de procesos en SAP mediante workflows, BAdIs y enhancements', true),
+('FI', 'Finanzas', 'SAP FI (Financial Accounting): Contabilidad general, cuentas por cobrar/pagar, activos fijos, closing', true),
+('CO', 'Controlling', 'SAP CO (Controlling): Cost center accounting, internal orders, product costing, profitability analysis', true),
+('TR', 'Tesorería', 'SAP TR (Treasury): Gestión de tesorería, cash management, gestión de riesgos financieros', true),
+('SD', 'Ventas', 'SAP SD (Sales & Distribution): Gestión de pedidos, entregas, facturación, pricing y shipping', true),
+('MM', 'Gestión de materiales', 'SAP MM (Materials Management): Compras, gestión de inventarios, valuation, invoice verification', true),
+('PP', 'Planificación de Producción', 'SAP PP (Production Planning): MRP, production orders, capacity planning, shop floor control', true),
+('QM', 'Gestión de calidad', 'SAP QM (Quality Management): Planificación de calidad, inspection, certificates, notification processing', true),
+('PM', 'Mantenimiento', 'SAP PM (Plant Maintenance): Mantenimiento preventivo/correctivo, órdenes de mantenimiento, gestión de equipos', true),
+('WF', 'Workflow', 'SAP Workflow: Automatización de procesos de negocio con aprobaciones y routing', true),
+('PS', 'Proyectos', 'SAP PS (Project System): Gestión de proyectos, WBS, networks, budgeting, settlement', true),
+('ABAP', 'Abap Developer', 'Desarrollo ABAP: Programación en ABAP, reports, interfaces, enhancements y forms', true),
+('ABAP TM', 'Abap TM', 'ABAP para Transportation Management: Desarrollo específico para módulo TM', true),
+('TM', 'Transportation management', 'SAP TM (Transportation Management): Planificación, ejecución y facturación de transporte', true),
+('HCM', 'Recursos Humanos', 'SAP HCM (Human Capital Management): Administración de personal, nómina, organización y tiempo', true),
+('BO', 'Business Objects', 'SAP BusinessObjects: Suite de business intelligence, reporting y dashboarding', true),
+('BW', 'Business Warehouse', 'SAP BW (Business Warehouse): Data warehousing, ETL, modeling, reporting y BEx', true),
+('Fiori', 'Fiori', 'SAP Fiori: UX para aplicaciones SAP basada en diseño responsive y user-friendly', true),
+('CPI', 'Cloud', 'SAP CPI (Cloud Platform Integration): Integración en la nube, middlewares y APIs', true),
+('BPC', 'Business Planning and Consolidation', 'SAP BPC: Planning, budgeting, forecasting y financial consolidation', true),
+('EWM', 'Extended Warehouse Manager', 'SAP EWM: Gestión avanzada de almacenes, cross-docking y yard management', true),
+('DS', 'Data Services', 'SAP Data Services: ETL, data quality, profiling y integration', true),
+('FM', 'Funds Management', 'SAP FM (Funds Management): Budgeting público, fondos y commitment management', true),
+('LETRA', 'Logistics (LE) Transportation (TRA)', 'Logística y transporte en SAP LE-TRA', true),
+('GRC', 'Governance Risk and Compliance', 'SAP GRC: Gestión de riesgos, controles de acceso y compliance', true),
+('SQL', 'MS SQL', 'Administración de bases de datos SQL Server para entornos SAP', true),
+('ISH', 'Gestión Hospitalaria', 'SAP IS-H (Industry Solution Healthcare): Soluciones para el sector salud', true),
+('SAC', 'SAP Analytic Cloud', 'SAP SAC: Analytics en la nube, planning y business intelligence', true),
+('BTP', 'SAP Business Technology Platform', 'SAP BTP: Plataforma para desarrollo, integración y extensión de aplicaciones', true),
+('WM', 'Gestión de Almacenes', 'SAP WM (Warehouse Management): Gestión básica de almacenes, picking y putaway', true),
+('PBI', 'Power BI', 'Integración de Power BI con SAP para reporting y visualizaciones', true),
+('.NET', '.NET', 'Desarrollo .NET para integraciones con SAP y aplicaciones complementarias', true),
+('B2B', 'B2B', 'Integraciones B2B con SAP mediante IDOCs, EDIs y middlewares', true),
+('MDG', 'NetWeaver Master Data Management', 'SAP MDG (Master Data Governance): Gestión y gobierno de datos maestros', true),
+('SLCM', 'Student Lifecycle Management', 'SAP SLCM: Solución para gestión del ciclo de vida estudiantil en educación', true),
+('Gerente', 'Gerente de proyectos', 'Project Management Office (PMO) para implementaciones SAP', true),
+('Datos', 'Ingeniero de datos', 'Data engineering, arquitectura de datos y gestión de data lakes para SAP', true),
+('TRM', 'Treasury and Risk Management', 'SAP TRM: Treasury avanzado y gestión de riesgos financieros', true),
+('IBP', 'Integrated Business Planning', 'SAP IBP: Planning de ventas y operaciones en tiempo real', true),
+('BASIS', 'BASIS', 'Administración SAP Basis: Instalación, configuración, monitoreo y performance tuning', true),
+('PI/PO', 'PI/PO', 'SAP Process Integration/Process Orchestration: Middleware para integraciones', true),
+('ARIBA', 'ARIBA', 'SAP Ariba: Procurement, sourcing y supply chain collaboration', true),
+('Cambio', 'Gestión del cambio', 'Change Management para implementaciones y transformaciones SAP', true),
+('CS', 'CS', 'SAP CS (Customer Service): Gestión de servicios post-venta y mantenimiento', true),
+('BCS', 'BCS', 'SAP BCS (Business Consolidation System): Consolidación financiera', true),
+('UIPath', 'UIPath', 'Automatización robótica de procesos (RPA) para SAP con UIPath', true),
+('DATOS', 'Datos maestros', 'Gestión y mantenimiento de datos maestros en SAP (materiales, clientes, proveedores)', true),
+('VMS', 'VMS', 'Vendor Management System para gestión de proveedores', true),
+('RE', 'Bienes Inmuebles', 'SAP RE (Real Estate): Gestión de activos inmobiliarios y leasing', true),
+('LBN', 'LBN', 'Logistics Business Network de SAP', true),
+('B1', 'Business One', 'SAP Business One: ERP para pequeñas y medianas empresas', true),
+('CML', 'CML', 'SAP Commercial Project Management', true),
+('SSF', 'SUCCESS FACTOR', 'SAP SuccessFactors: Solución completa de gestión del talento en la nube', true),
+('FICA', 'FI CONTRATOS', 'SAP FICA (Financial Contract Accounting): Contabilidad de contratos para utilities', true),
+('SSFF', 'Success Factor', 'SAP SuccessFactors especializado en áreas específicas', true),
+('C4C', 'C4C', 'SAP Cloud for Customer: CRM en la nube para ventas y servicio', true),
+('FRONTEND', 'FRONTEND', 'Desarrollo frontend para interfaces SAP: Fiori, WebDynpro, interfaces web', true);

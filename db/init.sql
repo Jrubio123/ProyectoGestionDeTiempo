@@ -222,10 +222,6 @@ CREATE TABLE usuarios (
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash TEXT,
     
-    -- Información de SharePoint (para migración)
-    sharepoint_user_id VARCHAR(255), -- ID del usuario en SharePoint
-    sharepoint_login_name VARCHAR(255), -- LoginName de SharePoint
-    
     -- Rol y estado
     rol_usuario_id INTEGER REFERENCES roles(id),
     activo BOOLEAN DEFAULT true,
@@ -937,16 +933,6 @@ INSERT INTO clientes (titulo, nit, prefijo, correlativo, activo) VALUES
 ('HUMAX', '811038881', 'HUMAX', 1, true),
 ('GASEOSAS POOL', '9008104146', 'GASEOSAS POOL', 1, true);
 
--- Tabla: DocumentoIdentidad
-CREATE TABLE documento_identidad (
-    id SERIAL PRIMARY KEY,
-    titulo VARCHAR(255) NOT NULL UNIQUE,
-    codigo VARCHAR(10),
-    activo BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 -- Insertar los tipos de documento que necesitas
 INSERT INTO documento_identidad (titulo, codigo, activo) VALUES
 ('Cédula', 'CC', true),
@@ -1016,3 +1002,231 @@ INSERT INTO modulo (titulo, nombre_completo, descripcion, activo) VALUES
 ('SSFF', 'Success Factor', 'SAP SuccessFactors especializado en áreas específicas', true),
 ('C4C', 'C4C', 'SAP Cloud for Customer: CRM en la nube para ventas y servicio', true),
 ('FRONTEND', 'FRONTEND', 'Desarrollo frontend para interfaces SAP: Fiori, WebDynpro, interfaces web', true);
+
+-- Insertar TODOS los usuarios SIN referencias a otros usuarios primero
+INSERT INTO usuarios (
+    nombre_usuario,
+    email,
+    password_hash,
+    rol_usuario_id,
+    activo,
+    nro_cuenta_bancaria,
+    banco_id,
+    tipo_cuenta_id,
+    tipo_documento_id,
+    cedula,
+    direccion,
+    telefono,
+    ciudad,
+    tipo_persona,
+    moneda_cobro,
+    tipo_consultor,
+    id_consultor_principal,
+    foto_url,
+    observaciones,
+    created_by
+) VALUES
+-- 1. Administrador
+(
+    'admin_sistema',
+    'admin@silverconsulting.com',
+    '$2a$10$r.jK9zLk4oXeB6m8NvQZ7eY5cR3sT2U1W4I6O9P0Q3M5A7C1E8G2H',
+    1, -- Administrador
+    true,
+    '12344600',
+    1, -- Bancolombia
+    2, -- Cuenta Corriente
+    1, -- Cédula
+    '1122334455',
+    'Carrera 10 #25-30, Oficina 501',
+    '3001234567',
+    'Bogotá',
+    'Natural',
+    'COP',
+    'Interno',
+    NULL,
+    'https://silverconsultingsas.sharepoint.com/sites/Consultorias/Lists/Usuarios/fotos/admin.jpg',
+    'Administrador principal',
+    'system'
+),
+
+-- 2. Coordinador
+(
+    'coord_proyectos',
+    'coordinador@silverconsulting.com',
+    '$2a$10$r.jK9zLk4oXeB6m8NvQZ7eY5cR3sT2U1W4I6O9P0Q3M5A7C1E8G2H',
+    2, -- Coordinador
+    true,
+    '35360231885',
+    1, -- Bancolombia
+    1, -- Cuenta de Ahorros
+    1, -- Cédula
+    '1128442094',
+    'Calle 22A #58-62',
+    '3007397138',
+    'Medellín',
+    'Natural',
+    'USD',
+    'Interno',
+    NULL,
+    'https://silverconsultingsas.sharepoint.com/sites/Consultorias/Lists/Usuarios/fotos/coord.jpg',
+    'Coordinador de proyectos',
+    'admin_sistema'
+),
+
+-- 3. Consultor Principal
+(
+    'jperez_principal',
+    'juan.perez@silverconsulting.com',
+    '$2a$10$r.jK9zLk4oXeB6m8NvQZ7eY5cR3sT2U1W4I6O9P0Q3M5A7C1E8G2H',
+    4, -- Consultor Principal
+    true,
+    '54334671081',
+    2, -- Banco de Bogotá
+    1, -- Cuenta de Ahorros
+    1, -- Cédula
+    '5004984480',
+    'Cra. 35A #77S-113',
+    '3104528506',
+    'Cali',
+    'Natural',
+    'COP',
+    'Externo',
+    NULL,
+    'https://silverconsultingsas.sharepoint.com/sites/Consultorias/Lists/Usuarios/fotos/jperez.jpg',
+    'Consultor SAP FI/CO Senior',
+    'coord_proyectos'
+),
+
+-- 4. Mesa de Servicio
+(
+    'mesa_servicio',
+    'soporte@silverconsulting.com',
+    '$2a$10$r.jK9zLk4oXeB6m8NvQZ7eY5cR3sT2U1W4I6O9P0Q3M5A7C1E8G2H',
+    5, -- Mesa de Servicio
+    true,
+    '21800000699',
+    1, -- Bancolombia
+    1, -- Cuenta de Ahorros
+    1, -- Cédula
+    '901450566',
+    'Carrera 61 #33-65',
+    '3184766436',
+    'Bogotá',
+    'Jurídica',
+    'COP',
+    'Interno',
+    NULL,
+    NULL,
+    'Equipo de soporte',
+    'admin_sistema'
+),
+
+-- 5. Consultor Regular (sin referenciar todavía)
+(
+    'mgomez_consultor',
+    'maria.gomez@silverconsulting.com',
+    '$2a$10$r.jK9zLk4oXeB6m8NvQZ7eY5cR3sT2U1W4I6O9P0Q3M5A7C1E8G2H',
+    3, -- Consultor
+    true,
+    '96638840992',
+    1, -- Bancolombia
+    1, -- Cuenta de Ahorros
+    1, -- Cédula
+    '1063281951',
+    'Calle 2B #81A-190',
+    '3107443071',
+    'Barranquilla',
+    'Natural',
+    'USD',
+    'Asociado',
+    NULL, -- Dejamos NULL por ahora
+    NULL,
+    'Consultor SAP MM Junior',
+    'coord_proyectos'
+),
+
+-- 6. Consultor ABAP (sin referenciar todavía)
+(
+    'drodriguez_abap',
+    'david.rodriguez@silverconsulting.com',
+    '$2a$10$r.jK9zLk4oXeB6m8NvQZ7eY5cR3sT2U1W4I6O9P0Q3M5A7C1E8G2H',
+    3, -- Consultor
+    true,
+    '550001800167957',
+    2, -- Banco de Bogotá
+    2, -- Cuenta Corriente
+    4, -- NIT
+    '900535582',
+    'CR 118 89 B 35 IN 9 AP 102',
+    '3173144288',
+    'Bogotá',
+    'Jurídica',
+    'USD',
+    'Externo',
+    NULL, -- Dejamos NULL por ahora
+    NULL,
+    'Desarrollador ABAP',
+    'coord_proyectos'
+),
+
+-- 7. Consultor Finanzas (sin referenciar todavía)
+(
+    'cruiz_finanzas',
+    'carlos.ruiz@silverconsulting.com',
+    '$2a$10$r.jK9zLk4oXeB6m8NvQZ7eY5cR3sT2U1W4I6O9P0Q3M5A7C1E8G2H',
+    3, -- Consultor
+    true,
+    '20935976920',
+    3, -- Davivienda
+    2, -- Cuenta Corriente
+    1, -- Cédula
+    '3157962318',
+    'CL 36 D SUR 27 D 29 IN 2 AP 407',
+    '3157962318',
+    'Bogotá',
+    'Natural',
+    'COP',
+    'Asociado',
+    NULL, -- Dejamos NULL por ahora
+    NULL,
+    'Consultor SAP Finanzas',
+    'coord_proyectos'
+),
+
+-- 8. Cliente
+(
+    'cliente_prebel',
+    'contacto@prebel.com',
+    '$2a$10$r.jK9zLk4oXeB6m8NvQZ7eY5cR3sT2U1W4I6O9P0Q3M5A7C1E8G2H',
+    NULL, -- Sin rol
+    true,
+    '890905032001',
+    1, -- Bancolombia
+    2, -- Cuenta Corriente
+    4, -- NIT
+    '890905032',
+    'Autopista Medellín km 4.5',
+    '6012345678',
+    'Medellín',
+    'Jurídica',
+    'USD',
+    NULL,
+    NULL,
+    NULL,
+    'Cliente PREBEL',
+    'admin_sistema'
+);
+
+-- Ahora actualizamos los consultores para que reporten al Consultor Principal
+-- Primero necesitamos saber el ID del Consultor Principal
+-- Asumiendo que el Consultor Principal (jperez_principal) tiene ID 3
+
+UPDATE usuarios 
+SET id_consultor_principal = 3 
+WHERE nombre_usuario IN ('mgomez_consultor', 'drodriguez_abap', 'cruiz_finanzas')
+AND email IN (
+    'maria.gomez@silverconsulting.com',
+    'david.rodriguez@silverconsulting.com',
+    'carlos.ruiz@silverconsulting.com'
+);

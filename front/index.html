@@ -1,29 +1,28 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <h1>FRONT FUNCIONANDO</h1>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestión de Tiempo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="/styles/app.css">
 </head>
-<body>
-    <h1>Prueba de conexion con servidor front</h1>
+<body class="h-screen flex overflow-hidden bg-gray-100">
 
-    <button onclick="probar()">Probar conexión</button>
+    <!-- Contenedor de la Sidebar -->
+    <div id="sidebar-container"></div>
 
-    <div id="resultado"></div>
+    <!-- Contenedor de la Derecha (Topbar + Vista) -->
+    <div class="flex-1 flex flex-col">
+        <div id="topbar-container"></div>
+        
+        <!-- Aquí se cargarán las pantallas (views) -->
+        <main id="view-container" class="flex-1 overflow-y-auto p-6"></main>
+    </div>
 
-    <script>
-        async function probar() {
-            try {
-                const res = await fetch("http://localhost:4000/health");
-                const data = await res.json();
-                document.getElementById("resultado").innerText =
-                    "Conexión OK: " + JSON.stringify(data);
-            } catch (e) {
-                document.getElementById("resultado").innerText =
-                    "Error: " + e.message;
-            }
-        }
-    </script>
+    <script src="/menu.js"></script>
 </body>
 </html>

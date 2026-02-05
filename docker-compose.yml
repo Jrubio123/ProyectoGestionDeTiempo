@@ -32,14 +32,10 @@ services:
 
   front:
     build: ./front
-    container_name: gestion_tiempo_front
-    restart: always
-    depends_on:
-      - back
     ports:
-      - "3000:80"  # Nginx corre en el puerto 80 dentro del contenedor
+      - "3000:80"
     volumes:
-      - ./front:/usr/share/nginx/html:ro  # Monta tu HTML directamente
+      - ./front:/usr/share/nginx/html:ro
 
 volumes:
   db_data:

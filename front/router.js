@@ -36,6 +36,10 @@ const routes = {
 };
 
 function router() {
+    if (window.auth && !window.auth.isAuthenticated()) {
+        window.location.href = "/login.html";
+        return;
+    }
     const hash = location.hash.replace("#", "") || "inicio";
     const view = routes[hash];
 

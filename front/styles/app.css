@@ -10,6 +10,10 @@ body {
     margin: 0;
 }
 
+[x-cloak] {
+    display: none !important;
+}
+
 .app-main {
     min-height: 100vh;
     padding: var(--page-gutter);

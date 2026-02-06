@@ -1,4 +1,4 @@
-<div x-data="aprobacionApp" class="max-w-7xl mx-auto space-y-6 animate-fade-in-up">
+<div x-data="aprobacionApp()" class="max-w-7xl mx-auto space-y-6 animate-fade-in-up">
 
     <div class="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-green-50 flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
@@ -26,18 +26,20 @@
             
             <div class="flex-1 min-w-[200px]">
                 <label class="text-xs font-bold text-gray-400 uppercase">Cliente</label>
-                <select x-model="filters.cliente" class="w-full mt-1 p-2 border rounded-lg text-sm bg-white outline-none focus:border-green-500">
-                    <option value="">Todos</option>
-                    <template x-for="c in uniqueClientes" :key="c"><option :value="c" x-text="c"></option></template>
-                </select>
+                <input type="text" x-model="filters.cliente" list="aprClientesList" placeholder="Todos"
+                       class="w-full mt-1 p-2 border rounded-lg text-sm bg-white outline-none focus:border-green-500">
+                <datalist id="aprClientesList">
+                    <template x-for="c in uniqueClientes" :key="c"><option :value="c"></option></template>
+                </datalist>
             </div>
 
             <div class="flex-1 min-w-[200px]">
                 <label class="text-xs font-bold text-gray-400 uppercase">Tipo Asignación</label>
-                <select x-model="filters.tipo" class="w-full mt-1 p-2 border rounded-lg text-sm bg-white outline-none focus:border-green-500">
-                    <option value="">Todos</option>
-                    <template x-for="t in uniqueTipos" :key="t"><option :value="t" x-text="t"></option></template>
-                </select>
+                <input type="text" x-model="filters.tipo" list="aprTiposList" placeholder="Todos"
+                       class="w-full mt-1 p-2 border rounded-lg text-sm bg-white outline-none focus:border-green-500">
+                <datalist id="aprTiposList">
+                    <template x-for="t in uniqueTipos" :key="t"><option :value="t"></option></template>
+                </datalist>
             </div>
 
             <div class="flex-1 min-w-[200px]">
@@ -152,87 +154,3 @@
     </div>
 
 </div>
-
-<script>
-    document.addEventListener('alpine:init', () => {
-        Alpine.data('aprobacionApp', () => ({
-            API: "http://localhost:4000",
-            usuarioId: 2, // MOCKUP: ID del Coordinador logueado
-            
-            reportes: [],
-            filters: { cliente: '', tipo: '', search: '' },
-            
-            modalRechazo: { open: false, id: null, motivo: '' },
-
-            async init() {
-                await this.cargarDatos();
-            },
-
-            async cargarDatos() {
-                try {
-                    const res = await axios.get(`${this.API}/aprobaciones/pendientes/${this.usuarioId}`);
-                    this.reportes = res.data;
-                } catch(e) { console.error(e); }
-            },
-
-            // Computed Properties
-            get reportesFiltrados() {
-                return this.reportes.filter(r => {
-                    const f = this.filters;
-                    const matchCli = !f.cliente || r.nombre_cliente === f.cliente;
-                    const matchTipo = !f.tipo || r.nombre_tipo_asignacion === f.tipo;
-                    const matchSearch = !f.search || 
-                        (r.nombre_consultor.toLowerCase().includes(f.search.toLowerCase())) ||
-                        (r.nro_caso_int_ext || '').toLowerCase().includes(f.search.toLowerCase());
-                    return matchCli && matchTipo && matchSearch;
-                });
-            },
-            
-            get uniqueClientes() { return [...new Set(this.reportes.map(r => r.nombre_cliente))]; },
-            get uniqueTipos() { return [...new Set(this.reportes.map(r => r.nombre_tipo_asignacion))]; },
-            get totalPendiente() { return this.reportesFiltrados.reduce((sum, r) => sum + Number(r.total_cobrar), 0); },
-
-            // Actions
-            async aprobar(id) {
-                if(!confirm("¿Aprobar reporte?")) return;
-                try {
-                    await axios.put(`${this.API}/aprobaciones/${id}`, { estado: 'Aprobado' });
-                    this.quitar(id);
-                    // alert("Aprobado ✅");
-                } catch(e) { alert("Error"); }
-            },
-
-            abrirRechazo(id) {
-                this.modalRechazo = { open: true, id: id, motivo: '' };
-            },
-
-            async confirmarRechazo() {
-                try {
-                    await axios.put(`${this.API}/aprobaciones/${this.modalRechazo.id}`, { 
-                        estado: 'Rechazado', 
-                        motivo: this.modalRechazo.motivo 
-                    });
-                    this.quitar(this.modalRechazo.id);
-                    this.modalRechazo.open = false;
-                } catch(e) { alert("Error"); }
-            },
-
-            quitar(id) {
-                this.reportes = this.reportes.filter(r => r.id !== id);
-            },
-
-            exportarExcel() {
-                // Simulación de exportación CSV cliente
-                const csvContent = "data:text/csv;charset=utf-8," 
-                    + ["Fecha,Consultor,Cliente,Total"].join(",") + "\n"
-                    + this.reportesFiltrados.map(r => `${r.fecha_reporte},${r.nombre_consultor},${r.nombre_cliente},${r.total_cobrar}`).join("\n");
-                const encodedUri = encodeURI(csvContent);
-                window.open(encodedUri);
-            },
-
-            // Utils
-            formatearDinero(val) { return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(val); },
-            formatDate(d) { return d ? d.split('T')[0] : ''; }
-        }))
-    })
-</script>

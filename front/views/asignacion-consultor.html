@@ -1,12 +1,160 @@
-<div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-200">
-    <h1 class="text-3xl font-bold text-gray-800">Bienvenido al Sistema</h1>
-    <p class="text-gray-500 mt-2">Esta es tu pantalla de inicio, similar a tu Power App.</p>
-    
-    <div class="grid grid-cols-3 gap-4 mt-8">
-        <div class="p-4 bg-blue-50 rounded-xl border border-blue-100">
-            <span class="text-blue-600 font-bold text-xl">12</span>
-            <p class="text-blue-800 text-sm">Tareas Pendientes</p>
+<div x-data="asignacionConsultorApp()" class="max-w-7xl mx-auto space-y-6 animate-fade-in-up">
+
+    <div class="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-indigo-50 flex justify-between items-center">
+        <div>
+            <h1 class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">
+                Asignación a Consultores
+            </h1>
+            <p class="text-gray-500 text-sm mt-1">Distribuye los proyectos asignados a tu equipo técnico.</p>
         </div>
-        <!-- Más tarjetas aquí -->
+        <button @click="init" class="p-2 bg-white border border-gray-200 rounded-full hover:rotate-180 transition-transform duration-500 text-indigo-600 shadow-sm">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        </button>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <div class="lg:col-span-1 bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden flex flex-col h-[600px]">
+            <div class="p-4 bg-gray-50 border-b border-gray-100">
+                <h3 class="font-bold text-gray-700">Mis Proyectos</h3>
+                <input type="text" x-model="search" placeholder="Buscar cliente o tipo..." class="w-full mt-2 p-2 border rounded-lg text-sm">
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-2 space-y-2">
+                <template x-for="p in proyectosFiltrados" :key="p._key">
+                    <div @click="seleccionarProyecto(p)" 
+                         class="p-4 rounded-xl border cursor-pointer transition-all hover:shadow-md"
+                         :class="proyectoSelected?._key === p._key ? 'bg-indigo-50 border-indigo-500 ring-1 ring-indigo-500' : 'bg-white border-gray-200 hover:border-indigo-300'">
+                        
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-xs font-bold px-2 py-1 rounded bg-white border" x-text="p.tipo_asignacion"></span>
+                            <span class="text-[10px] text-gray-400" x-text="formatDate(p.created_at)"></span>
+                        </div>
+                        
+                        <h4 class="font-bold text-gray-800 text-sm" x-text="p.cliente"></h4>
+                        <p class="text-xs text-gray-500 mt-1 line-clamp-2" x-text="p.descripcion_consultoria"></p>
+                    </div>
+                </template>
+                
+                <div x-show="proyectosFiltrados.length === 0" class="text-center py-10 text-gray-400 text-sm">
+                    No hay proyectos pendientes.
+                </div>
+            </div>
+        </div>
+
+        <div class="lg:col-span-2 bg-white rounded-2xl shadow-xl border border-gray-100 p-6 relative">
+            
+            <div x-show="!proyectoSelected" class="absolute inset-0 flex flex-col items-center justify-center text-gray-300 bg-white/50 backdrop-blur-sm z-10 rounded-2xl">
+                <svg class="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
+                <p class="text-lg font-medium">Selecciona un proyecto para asignar</p>
+            </div>
+
+            <div x-show="proyectoSelected">
+                <div class="flex justify-between items-center mb-6 pb-4 border-b border-gray-100">
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-800">Asignar Consultor</h2>
+                        <p class="text-sm text-gray-500">Proyecto: <span class="font-bold text-indigo-600" x-text="proyectoSelected?.cliente"></span></p>
+                    </div>
+                    <span class="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-bold uppercase" x-text="proyectoSelected?.tipo_asignacion"></span>
+                </div>
+
+                <form @submit.prevent="guardarAsignacion" class="space-y-6">
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Consultor <span class="text-red-500">*</span></label>
+                            <select x-model="form.consultor_id" @change="buscarTarifa" class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-indigo-500 transition-colors">
+                                <option value="">Seleccione...</option>
+                                <template x-for="c in cat.consultores" :key="c.id">
+                                    <option :value="c.id" x-text="c.nombre"></option>
+                                </template>
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Módulo SAP <span class="text-red-500">*</span></label>
+                            <select x-model="form.modulo_id" @change="buscarTarifa" class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-indigo-500 transition-colors">
+                                <option value="">Seleccione...</option>
+                                <template x-for="m in cat.modulos" :key="m.id">
+                                    <option :value="m.id" x-text="m.titulo"></option>
+                                </template>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div x-show="alertaTarifa.mostrar" 
+                         class="p-4 rounded-xl text-sm font-medium flex items-center justify-between"
+                         :class="alertaTarifa.tipo === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'">
+                        <span class="flex items-center gap-2">
+                            <span x-text="alertaTarifa.mensaje"></span>
+                            <span x-show="alertaTarifa.valor" class="font-mono font-bold text-lg" x-text="formatearDinero(alertaTarifa.valor)"></span>
+                        </span>
+                        
+                        <button type="button" x-show="alertaTarifa.tipo === 'error'" @click="enviarCorreoTarifa" class="text-xs underline hover:text-red-900">
+                            Solicitar Tarifa
+                        </button>
+                    </div>
+
+                    <div class="p-5 bg-gray-50 rounded-xl border border-gray-100 space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-xs font-bold text-gray-500 uppercase">Fecha Inicio</label>
+                                <input type="date" x-model="form.fecha_inicio" @change="calcularDias" class="w-full mt-1 p-2 border rounded-lg text-sm">
+                            </div>
+                            <div>
+                                <label class="text-xs font-bold text-gray-500 uppercase">Fecha Fin</label>
+                                <input type="date" x-model="form.fecha_fin" @change="calcularDias" class="w-full mt-1 p-2 border rounded-lg text-sm">
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-4 pt-2">
+                            <div>
+                                <label class="text-xs font-bold text-gray-500 uppercase">Días Calc.</label>
+                                <input type="number" x-model="form.cantidad_dias" readonly class="w-full mt-1 p-2 bg-gray-100 border rounded-lg text-sm font-mono text-gray-600">
+                            </div>
+                            
+                            <div x-show="esPorHora">
+                                <label class="text-xs font-bold text-gray-500 uppercase">Horas Asignadas</label>
+                                <input type="number" x-model="form.horas_asignadas" class="w-full mt-1 p-2 border rounded-lg text-sm font-mono focus:border-indigo-500 outline-none">
+                            </div>
+
+                            <div class="col-span-1" :class="esPorHora ? '' : 'col-span-2'">
+                                <label class="text-xs font-bold text-gray-500 uppercase">Total Estimado</label>
+                                <div class="w-full mt-1 p-2 bg-indigo-50 border border-indigo-100 rounded-lg text-sm font-bold text-indigo-700 text-right" 
+                                     x-text="calcularTotal()"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div x-show="esMesaServicio">
+                         <div class="grid grid-cols-2 gap-4">
+                             <div>
+                                 <label class="text-xs font-bold text-gray-500 uppercase">Estado</label>
+                                 <select x-model="form.estado_mesa" class="w-full mt-1 p-2 border rounded-lg text-sm">
+                                     <option value="Abierto">Abierto</option>
+                                     <option value="Cerrado">Cerrado</option>
+                                 </select>
+                             </div>
+                             <div>
+                                 <label class="text-xs font-bold text-gray-500 uppercase">Fecha Cierre</label>
+                                 <input type="date" x-model="form.fecha_cierre" class="w-full mt-1 p-2 border rounded-lg text-sm">
+                             </div>
+                         </div>
+                    </div>
+
+                    <div class="pt-4 flex justify-end gap-3">
+                        <button type="button" @click="proyectoSelected = null" class="px-5 py-2.5 bg-white border border-gray-200 text-gray-600 font-bold rounded-xl hover:bg-gray-50 transition-colors">Cancelar</button>
+                        <button type="submit" 
+                            :disabled="!formValido"
+                            class="px-8 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold rounded-xl shadow-lg hover:shadow-indigo-500/30 transition-all hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed">
+                            Confirmar Asignación
+                        </button>
+                    </div>
+
+                </form>
+            </div>
+
+        </div>
+
     </div>
 </div>

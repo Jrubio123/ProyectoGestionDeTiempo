@@ -4,6 +4,9 @@ window.clientesApp = function() {
 
     return {
         clientes: [],
+        filters: {
+            query: ""
+        },
         form: {
             id: null,
             titulo: '',
@@ -134,6 +137,16 @@ window.clientesApp = function() {
                    this.form.nit.trim() &&
                    !this.errors.titulo &&
                    !this.errors.nit;
+        },
+
+        get clientesFiltrados() {
+            const q = this.filters.query.trim().toLowerCase();
+            if (!q) return this.clientes;
+            return this.clientes.filter((c) => {
+                const titulo = String(c.titulo || "").toLowerCase();
+                const nit = String(c.nit || "").toLowerCase();
+                return titulo.includes(q) || nit.includes(q);
+            });
         }
     };
 };

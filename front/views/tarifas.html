@@ -30,52 +30,62 @@
 
                     <div>
                         <label class="block text-xs font-bold text-gray-500 uppercase mb-1 ml-1">Cliente <span class="text-red-500">*</span></label>
-                        <div class="relative">
-                            <select x-model="form.cliente_id" @change="validarDuplicado" class="w-full pl-3 pr-8 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all appearance-none">
-                                <option value="">Seleccione...</option>
-                                <template x-for="c in cat.clientes" :key="c.id">
-                                    <option :value="c.id" x-text="c.titulo"></option>
-                                </template>
-                            </select>
-                            <div class="absolute right-3 top-3.5 pointer-events-none text-gray-400">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                            </div>
-                        </div>
+                        <input type="text"
+                               x-model="form.cliente_id"
+                               list="clientesFormList"
+                               placeholder="Seleccione..."
+                               @change="validarDuplicado"
+                               class="w-full px-3 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all">
+                        <datalist id="clientesFormList">
+                            <template x-for="c in cat.clientes" :key="c.id">
+                                <option :value="c.id" x-text="c.titulo"></option>
+                            </template>
+                        </datalist>
                     </div>
 
                     <div>
                         <label class="block text-xs font-bold text-gray-500 uppercase mb-1 ml-1">Consultor <span class="text-red-500">*</span></label>
-                        <div class="relative">
-                            <select x-model="form.consultor_id" @change="cambiarMoneda(); validarDuplicado()" class="w-full pl-3 pr-8 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all appearance-none">
-                                <option value="">Seleccione...</option>
-                                <template x-for="c in cat.consultores" :key="c.id">
-                                    <option :value="c.id" x-text="c.nombre"></option>
-                                </template>
-                            </select>
-                            <div class="absolute right-3 top-3.5 pointer-events-none text-gray-400">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
-                            </div>
-                        </div>
+                        <input type="text"
+                               x-model="form.consultor_id"
+                               list="consultoresFormList"
+                               placeholder="Seleccione..."
+                               @change="cambiarMoneda(); validarDuplicado()"
+                               class="w-full px-3 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all">
+                        <datalist id="consultoresFormList">
+                            <template x-for="c in cat.consultores" :key="c.id">
+                                <option :value="c.id" x-text="c.nombre"></option>
+                            </template>
+                        </datalist>
                     </div>
 
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-xs font-bold text-gray-500 uppercase mb-1 ml-1">Módulo</label>
-                            <select x-model="form.modulo_id" @change="validarDuplicado" class="w-full px-3 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-indigo-500 outline-none">
-                                <option value="">Seleccione</option>
+                            <input type="text"
+                                   x-model="form.modulo_id"
+                                   list="modulosFormList"
+                                   placeholder="Seleccione"
+                                   @change="validarDuplicado"
+                                   class="w-full px-3 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-700 focus:outline-none focus:border-indigo-500">
+                            <datalist id="modulosFormList">
                                 <template x-for="m in cat.modulos" :key="m.id">
                                     <option :value="m.id" x-text="m.titulo"></option>
                                 </template>
-                            </select>
+                            </datalist>
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-gray-500 uppercase mb-1 ml-1">Tipo</label>
-                            <select x-model="form.tipo_asignacion_id" @change="validarDuplicado" class="w-full px-3 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-indigo-500 outline-none">
-                                <option value="">Seleccione...</option>
+                            <input type="text"
+                                   x-model="form.tipo_asignacion_id"
+                                   list="tiposFormList"
+                                   placeholder="Seleccione..."
+                                   @change="validarDuplicado"
+                                   class="w-full px-3 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-700 focus:outline-none focus:border-indigo-500">
+                            <datalist id="tiposFormList">
                                 <template x-for="t in cat.tipos" :key="t.id">
                                     <option :value="t.id" x-text="t.titulo"></option>
                                 </template>
-                            </select>
+                            </datalist>
                         </div>
                     </div>
 
@@ -114,21 +124,29 @@
                 <div class="p-5 border-b border-gray-100 bg-gray-50/50 flex flex-col md:flex-row gap-4">
                     <div class="flex-1">
                         <label class="text-xs font-bold text-gray-400 uppercase">Filtrar Cliente</label>
-                        <select x-model="filters.cliente" class="w-full mt-1 p-2 border border-gray-200 rounded-lg text-sm bg-white focus:border-indigo-500 outline-none">
-                            <option value="">Todos</option>
+                        <input type="text"
+                               x-model="filters.cliente"
+                               list="clientesList"
+                               placeholder="Todos"
+                               class="w-full mt-1 p-2 border border-gray-200 rounded-lg text-sm bg-white focus:border-indigo-500 outline-none">
+                        <datalist id="clientesList">
                             <template x-for="c in cat.clientes" :key="c.id">
                                 <option :value="c.titulo" x-text="c.titulo"></option>
                             </template>
-                        </select>
+                        </datalist>
                     </div>
                     <div class="flex-1">
                         <label class="text-xs font-bold text-gray-400 uppercase">Filtrar Consultor</label>
-                        <select x-model="filters.consultor" class="w-full mt-1 p-2 border border-gray-200 rounded-lg text-sm bg-white focus:border-indigo-500 outline-none">
-                            <option value="">Todos</option>
+                        <input type="text"
+                               x-model="filters.consultor"
+                               list="consultoresList"
+                               placeholder="Todos"
+                               class="w-full mt-1 p-2 border border-gray-200 rounded-lg text-sm bg-white focus:border-indigo-500 outline-none">
+                        <datalist id="consultoresList">
                             <template x-for="c in cat.consultores" :key="c.id">
                                 <option :value="c.nombre" x-text="c.nombre"></option>
                             </template>
-                        </select>
+                        </datalist>
                     </div>
                     <div class="flex items-end">
                         <button @click="cargarDatos" class="p-2.5 bg-white border border-gray-200 rounded-lg text-gray-500 hover:text-indigo-600 hover:border-indigo-300 transition-colors">

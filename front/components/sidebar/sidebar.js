@@ -10,14 +10,26 @@ function initSidebar() {
         toggleBtn.addEventListener("click", function () {
             sidebar.classList.toggle("collapsed");
             const isCollapsed = sidebar.classList.contains("collapsed");
-            localStorage.setItem("sidebarCollapsed", isCollapsed);
+            document.body.classList.toggle("sidebar-collapsed", isCollapsed);
+            try {
+                localStorage.setItem("sidebarCollapsed", isCollapsed);
+            } catch (e) {
+                // Storage might be blocked by tracking prevention.
+            }
         });
     }
 
-    const savedState = localStorage.getItem("sidebarCollapsed");
-    if (savedState === "true") {
-        sidebar.classList.add("collapsed");
+    try {
+        const savedState = localStorage.getItem("sidebarCollapsed");
+        if (savedState === "true") {
+            sidebar.classList.add("collapsed");
+        }
+    } catch (e) {
+        // Ignore storage access errors.
     }
+
+    const isCollapsed = sidebar.classList.contains("collapsed");
+    document.body.classList.toggle("sidebar-collapsed", isCollapsed);
 
     menuItems.forEach((item) => {
         const link = item.querySelector(".menu-link");

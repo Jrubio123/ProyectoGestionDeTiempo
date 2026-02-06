@@ -1,0 +1,35 @@
+/* Layout base responsive */
+:root {
+    --navbar-height: 70px;
+    --sidebar-width: 280px;
+    --sidebar-collapsed-width: 80px;
+    --page-gutter: 24px;
+}
+
+body {
+    margin: 0;
+}
+
+.app-main {
+    min-height: 100vh;
+    padding: var(--page-gutter);
+    padding-top: calc(var(--navbar-height) + var(--page-gutter));
+    padding-left: calc(var(--sidebar-width) + var(--page-gutter));
+    transition: padding-left 0.3s ease, padding-top 0.3s ease;
+}
+
+body.sidebar-collapsed .app-main {
+    padding-left: calc(var(--sidebar-collapsed-width) + var(--page-gutter));
+}
+
+@media (max-width: 1024px) {
+    .app-main {
+        padding-left: var(--page-gutter);
+    }
+}
+
+@media (max-width: 640px) {
+    :root {
+        --page-gutter: 16px;
+    }
+}

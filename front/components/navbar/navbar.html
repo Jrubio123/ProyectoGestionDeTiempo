@@ -27,9 +27,20 @@
     </div>
 
     <div class="navbar-user">
-        <div class="user-profile">
-            <img src="https://i.pravatar.cc/40" alt="Usuario" class="user-avatar">
-            <span class="user-name">Usuario</span>
+        <div class="user-menu">
+            <button id="userMenuToggle" class="user-profile" type="button">
+                <img src="https://i.pravatar.cc/40" alt="Usuario" class="user-avatar">
+                <div class="user-text">
+                    <span class="user-name">Usuario</span>
+                    <span class="user-role">Rol</span>
+                </div>
+            </button>
+            <div id="userMenu" class="user-dropdown">
+                <button class="dropdown-item" data-action="perfil">Editar perfil</button>
+                <button class="dropdown-item" data-action="contacto">Contáctanos</button>
+                <div class="dropdown-separator"></div>
+                <button class="dropdown-item dropdown-logout" data-action="logout">Cerrar sesión</button>
+            </div>
         </div>
     </div>
 </nav>

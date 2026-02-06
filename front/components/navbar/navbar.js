@@ -1,5 +1,9 @@
 function initNavbar() {
     const navLinks = document.querySelectorAll(".nav-link");
+    const userNameEl = document.querySelector(".user-name");
+    const userRoleEl = document.querySelector(".user-role");
+    const userMenu = document.getElementById("userMenu");
+    const userMenuToggle = document.getElementById("userMenuToggle");
 
     function setActiveByHash() {
         const hash = window.location.hash || "#inicio";
@@ -28,6 +32,38 @@ function initNavbar() {
             if (e.key === "Enter") {
                 performSearch(this.value);
             }
+        });
+    }
+
+    if (window.auth) {
+        const user = window.auth.getUser();
+        if (userNameEl && user) userNameEl.textContent = user.nombre_usuario || "Usuario";
+        if (userRoleEl && user) userRoleEl.textContent = user.rol || "Usuario";
+    }
+
+    if (userMenuToggle && userMenu) {
+        userMenuToggle.addEventListener("click", function () {
+            userMenu.classList.toggle("open");
+        });
+
+        document.addEventListener("click", function (e) {
+            if (!userMenu.contains(e.target) && !userMenuToggle.contains(e.target)) {
+                userMenu.classList.remove("open");
+            }
+        });
+
+        userMenu.addEventListener("click", function (e) {
+            const action = e.target?.getAttribute("data-action");
+            if (!action) return;
+            if (action === "logout") {
+                if (window.auth) window.auth.clearSession();
+                window.location.href = "/login.html";
+            } else if (action === "perfil") {
+                alert("Perfil: pendiente");
+            } else if (action === "contacto") {
+                alert("Contacto: pendiente");
+            }
+            userMenu.classList.remove("open");
         });
     }
 }

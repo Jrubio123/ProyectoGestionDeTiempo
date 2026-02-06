@@ -628,8 +628,7 @@ VALUES
     ('Administrador', 'Administrador del sistema con todos los permisos', true),
     ('Coordinador', 'Coordinador de proyectos', true),
     ('Consultor', 'Consultor externo o interno', true),
-    ('Consultor Principal', 'Consultor líder de equipo', true),
-    ('Mesa de Servicio', 'Soporte y mesa de servicio', true);
+    ('Consultor', 'Consultor', true);
 
 -- Insertar tipos de cuenta bancaria (actualizado según tu tabla)
 INSERT INTO tipo_cuenta_bancaria

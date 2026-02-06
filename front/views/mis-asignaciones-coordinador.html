@@ -103,10 +103,10 @@
 
             <!-- Lista de Asignaciones -->
             <div class="divide-y divide-gray-100 max-h-[600px] overflow-y-auto">
-                <template x-for="asignacion in asignacionesFiltradas" :key="asignacion.id">
+                <template x-for="asignacion in asignacionesFiltradas" :key="asignacion._key">
                     <div 
                         class="grid grid-cols-8 gap-4 px-6 py-4 hover:bg-blue-50 transition cursor-pointer"
-                        :class="{'bg-blue-50 ring-2 ring-blue-200': asignacionSeleccionada?.id === asignacion.id}"
+                        :class="{'bg-blue-50 ring-2 ring-blue-200': asignacionSeleccionada?._key === asignacion._key}"
                         @click="seleccionarAsignacion(asignacion)"
                     >
                         <div class="text-sm font-mono text-gray-600" x-text="asignacion.id"></div>

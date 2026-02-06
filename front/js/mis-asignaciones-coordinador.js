@@ -67,8 +67,9 @@ window.misAsignacionesApp = function () {
             this.cargando = true;
             try {
                 const res = await axios.get(`${API}/mis-asignaciones-coordinador`);
-                this.asignaciones = (res.data || []).map((a) => ({
+                this.asignaciones = (res.data || []).map((a, idx) => ({
                     ...a,
+                    _key: `${a.consultoria_id || "c"}-${a.id || "na"}-${idx}`,
                     valor_hora: Number(a.valor_hora || 0),
                     cantidad_dias: Number(a.cantidad_dias || 0)
                 }));

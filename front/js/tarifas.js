@@ -19,6 +19,12 @@ window.tarifasApp = function () {
             tipo_asignacion_id: "",
             valor: ""
         },
+        formDisplay: {
+            cliente: "",
+            consultor: "",
+            modulo: "",
+            tipo: ""
+        },
         errors: { duplicado: false },
         monedaSymbol: "$",
 
@@ -100,6 +106,43 @@ window.tarifasApp = function () {
             this.errors.duplicado = existe;
         },
 
+        setClienteId() {
+            const q = this.formDisplay.cliente.trim().toLowerCase();
+            const match = this.cat.clientes.find(
+                (c) => String(c.titulo || "").toLowerCase() === q
+            );
+            this.form.cliente_id = match ? match.id : "";
+            this.validarDuplicado();
+        },
+
+        setConsultorId() {
+            const q = this.formDisplay.consultor.trim().toLowerCase();
+            const match = this.cat.consultores.find(
+                (c) => String(c.nombre || "").toLowerCase() === q
+            );
+            this.form.consultor_id = match ? match.id : "";
+            this.cambiarMoneda();
+            this.validarDuplicado();
+        },
+
+        setModuloId() {
+            const q = this.formDisplay.modulo.trim().toLowerCase();
+            const match = this.cat.modulos.find(
+                (m) => String(m.titulo || "").toLowerCase() === q
+            );
+            this.form.modulo_id = match ? match.id : "";
+            this.validarDuplicado();
+        },
+
+        setTipoId() {
+            const q = this.formDisplay.tipo.trim().toLowerCase();
+            const match = this.cat.tipos.find(
+                (t) => String(t.titulo || "").toLowerCase() === q
+            );
+            this.form.tipo_asignacion_id = match ? match.id : "";
+            this.validarDuplicado();
+        },
+
         get formValido() {
             return (
                 this.form.cliente_id &&
@@ -135,6 +178,12 @@ window.tarifasApp = function () {
                 tipo_asignacion_id: "",
                 valor: ""
             };
+            this.formDisplay = {
+                cliente: "",
+                consultor: "",
+                modulo: "",
+                tipo: ""
+            };
             this.errors.duplicado = false;
             this.monedaSymbol = "$";
         },
@@ -147,6 +196,12 @@ window.tarifasApp = function () {
                 modulo_id: t.modulo_id,
                 tipo_asignacion_id: t.tipo_asignacion_id,
                 valor: t.valor
+            };
+            this.formDisplay = {
+                cliente: t.nombre_cliente || "",
+                consultor: t.nombre_consultor || "",
+                modulo: t.nombre_modulo || "",
+                tipo: t.tipo_asignacion || ""
             };
             this.cambiarMoneda();
             this.errors.duplicado = false;

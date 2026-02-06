@@ -1,12 +1,450 @@
-<div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-200">
-    <h1 class="text-3xl font-bold text-gray-800">Bienvenido al Sistema</h1>
-    <p class="text-gray-500 mt-2">Esta es tu pantalla de inicio, similar a tu Power App.</p>
+<div x-data="misAsignacionesApp()" class="max-w-7xl mx-auto space-y-6 animate-fade-in-up">
     
-    <div class="grid grid-cols-3 gap-4 mt-8">
-        <div class="p-4 bg-blue-50 rounded-xl border border-blue-100">
-            <span class="text-blue-600 font-bold text-xl">12</span>
-            <p class="text-blue-800 text-sm">Tareas Pendientes</p>
-        </div>
-        <!-- Más tarjetas aquí -->
+    <!-- Header -->
+    <div class="bg-white/90 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-blue-100">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h1 class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-900 to-indigo-600">
+                        Mis Asignaciones como Coordinador
+                    </h1>
+                    <p class="text-gray-500 text-sm mt-2">
+                        Revisa y aprueba las asignaciones pendientes de tu equipo
+                    </p>
+                </div>
+                <button 
+                    @click="cargarAsignaciones" 
+                    :disabled="cargando"
+                    class="p-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-full hover:shadow-lg transition-all duration-300 hover:scale-110 disabled:opacity-50"
+                    title="Recargar"
+                >
+                    <svg class="w-6 h-6" :class="{'animate-spin': cargando}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
+                </button>
+            </div>
     </div>
+
+    <!-- Filtros -->
+    <div class="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-blue-50 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-2">
+                    Cliente
+                </label>
+                <input
+                    type="text"
+                    x-model="filtros.cliente"
+                    list="coordMisClientesList"
+                    placeholder="Todos los clientes"
+                    class="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                >
+                <datalist id="coordMisClientesList">
+                    <template x-for="cliente in clientesUnicos" :key="cliente">
+                        <option :value="cliente"></option>
+                    </template>
+                </datalist>
+            </div>
+
+            <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-2">
+                    Consultor Responsable
+                </label>
+                <input
+                    type="text"
+                    x-model="filtros.consultor"
+                    list="coordMisConsultoresList"
+                    placeholder="Todos los consultores"
+                    class="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                >
+                <datalist id="coordMisConsultoresList">
+                    <template x-for="consultor in consultoresUnicos" :key="consultor">
+                        <option :value="consultor"></option>
+                    </template>
+                </datalist>
+            </div>
+        </div>
+    </div>
+
+        <!-- Separador con línea azul -->
+        <div class="h-2 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full mb-6 shadow-lg"></div>
+
+        <!-- Tabla de Asignaciones -->
+        <div class="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
+            
+            <!-- Headers -->
+            <div class="grid grid-cols-8 gap-4 px-6 py-4 bg-gradient-to-r from-gray-50 to-blue-50 border-b-2 border-blue-600 font-semibold text-sm text-gray-700">
+                <div>ID</div>
+                <div>Cliente</div>
+                <div>Consultor</div>
+                <div>Estado</div>
+                <div>Tipo Servicio</div>
+                <div>Módulo</div>
+                <div class="text-right">Tarifa</div>
+                <div class="text-center">Acciones</div>
+            </div>
+
+            <!-- Loading State -->
+            <div x-show="cargando" class="p-12 text-center" x-cloak>
+                <svg class="animate-spin h-10 w-10 mx-auto mb-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p class="text-gray-500">Cargando asignaciones...</p>
+            </div>
+
+            <!-- Empty State -->
+            <div x-show="!cargando && asignacionesFiltradas.length === 0" class="p-12 text-center" x-cloak>
+                <svg class="w-16 h-16 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                <p class="text-gray-500 font-medium">No hay asignaciones pendientes</p>
+                <p class="text-gray-400 text-sm mt-1">Las asignaciones aprobadas o rechazadas no se muestran aquí</p>
+            </div>
+
+            <!-- Lista de Asignaciones -->
+            <div class="divide-y divide-gray-100 max-h-[600px] overflow-y-auto">
+                <template x-for="asignacion in asignacionesFiltradas" :key="asignacion.id">
+                    <div 
+                        class="grid grid-cols-8 gap-4 px-6 py-4 hover:bg-blue-50 transition cursor-pointer"
+                        :class="{'bg-blue-50 ring-2 ring-blue-200': asignacionSeleccionada?.id === asignacion.id}"
+                        @click="seleccionarAsignacion(asignacion)"
+                    >
+                        <div class="text-sm font-mono text-gray-600" x-text="asignacion.id"></div>
+                <div class="text-sm font-medium text-gray-800" x-text="asignacion.cliente"></div>
+                        <div class="text-sm text-gray-600" x-text="asignacion.consultor_responsable"></div>
+                        <div>
+                            <span 
+                                class="inline-flex px-2 py-1 text-xs font-semibold rounded-full"
+                                :class="{
+                                    'bg-yellow-100 text-yellow-800': asignacion.estado === 'Pendiente',
+                                    'bg-green-100 text-green-800': asignacion.estado === 'Activo',
+                                    'bg-red-100 text-red-800': asignacion.estado === 'Reasignar' || asignacion.estado === 'Transferir',
+                                    'bg-gray-100 text-gray-800': !['Pendiente', 'Activo', 'Reasignar', 'Transferir'].includes(asignacion.estado)
+                                }"
+                                x-text="asignacion.estado"
+                            ></span>
+                        </div>
+                        <div class="text-sm text-gray-600" x-text="asignacion.tipo_servicio || '-'"></div>
+                        <div class="text-sm font-medium text-gray-700" x-text="asignacion.modulo || '-'"></div>
+                        <div class="text-sm font-bold text-right text-blue-900" x-text="'$' + (asignacion.valor_hora || 0).toLocaleString('es-CO', {minimumFractionDigits: 2})"></div>
+                        <div class="flex justify-center">
+                            <button 
+                                @click.stop="editarAsignacion(asignacion)"
+                                class="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition group"
+                                title="Editar asignación"
+                            >
+                                <svg class="w-5 h-5 group-hover:scale-110 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Modal de Edición -->
+    <div 
+        x-show="mostrarModal"
+        @click.self="cerrarModal"
+        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        x-transition
+        x-cloak
+    >
+        <div 
+            class="bg-white rounded-3xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto"
+            x-transition:enter="transition ease-out duration-300"
+            x-transition:enter-start="opacity-0 transform scale-95"
+            x-transition:enter-end="opacity-100 transform scale-100"
+        >
+            
+            <!-- Header del Modal -->
+            <div class="sticky top-0 bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-8 py-6 flex justify-between items-center rounded-t-3xl">
+                <div>
+                    <h2 class="text-2xl font-bold">Editar Asignación</h2>
+                    <p class="text-blue-100 text-sm mt-1">ID: <span x-text="form.id"></span></p>
+                </div>
+                <button 
+                    @click="cerrarModal"
+                    class="p-2 hover:bg-white/20 rounded-full transition"
+                >
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Información de Consultoría (Readonly) -->
+            <div class="px-8 py-6 bg-gray-50 border-b border-gray-200">
+                <h3 class="text-sm font-bold text-gray-500 uppercase mb-4">Información de Consultoría</h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-500 mb-1">Cliente</label>
+                        <div class="px-4 py-3 bg-gray-100 rounded-lg text-sm font-medium text-gray-700" x-text="consultoriaInfo.cliente"></div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-500 mb-1">Proyecto</label>
+                        <div class="px-4 py-3 bg-gray-100 rounded-lg text-sm font-medium text-gray-700" x-text="consultoriaInfo.proyecto"></div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-500 mb-1">Tipo Asignación</label>
+                        <div class="px-4 py-3 bg-gray-100 rounded-lg text-sm font-medium text-gray-700" x-text="consultoriaInfo.tipo_asignacion"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="h-2 bg-gradient-to-r from-blue-600 to-indigo-600"></div>
+
+            <!-- Formulario de Edición -->
+            <form @submit.prevent="guardarAsignacion" class="p-8 space-y-6">
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    <!-- Consultor Responsable -->
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">
+                            Consultor Responsable <span class="text-red-500">*</span>
+                        </label>
+                        <select 
+                            x-model="form.consultor_responsable_id"
+                            @change="validarTarifa"
+                            class="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            required
+                        >
+                            <option value="">Seleccione...</option>
+                            <template x-for="consultor in consultores" :key="consultor.id">
+                                <option :value="consultor.id" x-text="consultor.nombre"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <!-- Módulo -->
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">
+                            Módulo <span class="text-red-500">*</span>
+                        </label>
+                        <select 
+                            x-model="form.id_modulo"
+                            @change="validarTarifa"
+                            class="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            required
+                        >
+                            <option value="">Seleccione...</option>
+                            <template x-for="modulo in modulos" :key="modulo.id">
+                                <option :value="modulo.id" x-text="modulo.titulo"></option>
+                            </template>
+                        </select>
+                        
+                        <!-- Alerta de tarifa no encontrada -->
+                        <div x-show="!tarifaEncontrada && form.consultor_responsable_id && form.id_modulo" class="mt-2" x-cloak>
+                            <div class="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                                <svg class="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+                                </svg>
+                                <div class="flex-1">
+                                    <p class="text-sm font-semibold text-red-800">Consultor sin tarifa configurada</p>
+                                    <button 
+                                        type="button"
+                                        @click="enviarNotificacionTarifa"
+                                        class="mt-2 text-xs text-red-700 underline hover:text-red-900"
+                                    >
+                                        Enviar correo para crear tarifa
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fecha Inicio -->
+                    <div x-show="mostrarCamposPorTipo(['Full time', 'Tiempo y costo fijo'])" x-cloak>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">
+                            Fecha Inicio
+                        </label>
+                        <input 
+                            type="date" 
+                            x-model="form.fecha_inicio"
+                            @change="calcularDias"
+                            class="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                    </div>
+
+                    <!-- Fecha Fin -->
+                    <div x-show="mostrarCamposPorTipo(['Full time', 'Tiempo y costo fijo'])" x-cloak>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">
+                            Fecha Fin
+                        </label>
+                        <input 
+                            type="date" 
+                            x-model="form.fecha_fin"
+                            @change="calcularDias"
+                            class="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                    </div>
+
+                    <!-- Valor Hora (Readonly) -->
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">
+                            Valor Hora
+                        </label>
+                        <div class="px-4 py-3 bg-gray-100 rounded-xl text-sm font-mono font-bold text-gray-700">
+                            $<span x-text="form.valor_hora.toLocaleString('es-CO', {minimumFractionDigits: 2})"></span>
+                        </div>
+                    </div>
+
+                    <!-- Valor Día (Calculado) -->
+                    <div x-show="consultoriaInfo.tipo_asignacion === 'Full time'" x-cloak>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">
+                            Valor Día
+                        </label>
+                        <div class="px-4 py-3 bg-gray-100 rounded-xl text-sm font-mono font-bold text-gray-700">
+                            $<span x-text="(form.valor_hora / 20).toLocaleString('es-CO', {minimumFractionDigits: 2})"></span>
+                        </div>
+                    </div>
+
+                    <!-- Cantidad Días -->
+                    <div x-show="mostrarCamposPorTipo(['Full time', 'Tiempo y costo fijo'])" x-cloak>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">
+                            Cantidad Días
+                        </label>
+                        <input 
+                            type="number" 
+                            x-model.number="form.cantidad_dias"
+                            class="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                    </div>
+
+                    <!-- Total a Pagar (Calculado) -->
+                    <div x-show="mostrarCamposPorTipo(['Full time', 'Tiempo y costo fijo'])" x-cloak>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">
+                            Total a Pagar
+                        </label>
+                        <div class="px-4 py-3 bg-green-50 border border-green-200 rounded-xl text-lg font-mono font-bold text-green-700">
+                            $<span x-text="calcularTotalPagar().toLocaleString('es-CO', {minimumFractionDigits: 2})"></span>
+                        </div>
+                    </div>
+
+                    <!-- Nro Caso Interno (Solo para Mesa de servicio) -->
+                    <div x-show="consultoriaInfo.tipo_asignacion === 'Mesa de servicio'" x-cloak>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">
+                            Nro. Caso Interno
+                        </label>
+                        <input 
+                            type="text" 
+                            x-model="form.nro_caso_interno"
+                            class="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                    </div>
+
+                    <!-- Nro Caso Cliente -->
+                    <div x-show="consultoriaInfo.tipo_asignacion === 'Mesa de servicio'" x-cloak>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">
+                            Nro. Caso Cliente
+                        </label>
+                        <input 
+                            type="text" 
+                            x-model="form.nro_caso_cliente"
+                            class="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                    </div>
+
+                    <!-- Tipo Servicio -->
+                    <div x-show="consultoriaInfo.tipo_asignacion === 'Mesa de servicio'" x-cloak>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">
+                            Tipo Servicio
+                        </label>
+                        <select 
+                            x-model="form.tipo_servicio"
+                            class="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                            <option value="">Seleccione...</option>
+                            <option value="Servicio">Servicio</option>
+                            <option value="Requerimiento">Requerimiento</option>
+                            <option value="Soporte">Soporte</option>
+                            <option value="Consultoría">Consultoría</option>
+                        </select>
+                    </div>
+
+                    <!-- Estado -->
+                    <div x-show="mostrarCamposPorTipo(['Mesa de servicio', 'Horas por demanda'])" x-cloak>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">
+                            Estado
+                        </label>
+                        <select 
+                            x-model="form.estado"
+                            class="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                            <option value="Activo">Activo</option>
+                            <option value="Inactivo">Inactivo</option>
+                            <option value="Completado">Completado</option>
+                            <option value="Reasignar">Reasignar</option>
+                            <option value="Transferir">Transferir</option>
+                        </select>
+                    </div>
+
+                    <!-- Observación -->
+                    <div x-show="consultoriaInfo.tipo_asignacion === 'Mesa de servicio'" class="md:col-span-2" x-cloak>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">
+                            Observación
+                        </label>
+                        <textarea 
+                            x-model="form.observacion"
+                            rows="3"
+                            class="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                        ></textarea>
+                    </div>
+                </div>
+
+                <!-- Botones de Acción -->
+                <div class="flex justify-end gap-4 pt-6 border-t border-gray-200">
+                    <button 
+                        type="button"
+                        @click="cerrarModal"
+                        class="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition font-medium"
+                    >
+                        Cancelar
+                    </button>
+                    <button 
+                        type="submit"
+                        :disabled="guardando || !tarifaEncontrada"
+                        class="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:shadow-lg transition disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                    >
+                        <span x-show="!guardando">Guardar Cambios</span>
+                        <span x-show="guardando" x-cloak>Guardando...</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Toast de notificaciones -->
+    <div 
+        x-show="toast.visible"
+        x-transition
+        class="fixed bottom-4 right-4 px-6 py-4 rounded-xl shadow-2xl z-50 max-w-md"
+        :class="{
+            'bg-green-500 text-white': toast.tipo === 'success',
+            'bg-red-500 text-white': toast.tipo === 'error',
+            'bg-blue-500 text-white': toast.tipo === 'info'
+        }"
+        x-cloak
+    >
+        <div class="flex items-center gap-3">
+            <!-- Icon Success -->
+            <svg x-show="toast.tipo === 'success'" class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+            <!-- Icon Error -->
+            <svg x-show="toast.tipo === 'error'" class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+            </svg>
+            <!-- Icon Info -->
+            <svg x-show="toast.tipo === 'info'" class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+            </svg>
+            <span class="font-medium" x-text="toast.mensaje"></span>
+        </div>
+    </div>
+
 </div>

@@ -84,6 +84,10 @@ window.registroHorasApp = function () {
             this.modalOpen = true;
         },
 
+        esRechazado(item) {
+            return String(item.estado_reporte || "").toLowerCase() === "rechazado";
+        },
+
         async enviarReporte(item) {
             const tipo = item.nombre_tipo_asignacion;
             const unidad = tipo === "Full time" ? "Días" : "Horas";
@@ -107,8 +111,10 @@ window.registroHorasApp = function () {
                 await axios.post(`${API}/reportar-horas`, payload);
                 alert("Reporte enviado correctamente");
                 item.input_cantidad = 0;
+                await this.cargarAsignaciones();
             } catch (e) {
-                alert("Error al enviar reporte");
+                const msg = e?.response?.data?.error || "Error al enviar reporte";
+                alert(msg);
             }
         },
 

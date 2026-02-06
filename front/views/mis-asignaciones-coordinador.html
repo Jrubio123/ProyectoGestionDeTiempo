@@ -126,7 +126,7 @@
                         </div>
                         <div class="text-sm text-gray-600" x-text="asignacion.tipo_servicio || '-'"></div>
                         <div class="text-sm font-medium text-gray-700" x-text="asignacion.modulo || '-'"></div>
-                        <div class="text-sm font-bold text-right text-blue-900" x-text="'$' + (asignacion.valor_hora || 0).toLocaleString('es-CO', {minimumFractionDigits: 2})"></div>
+                        <div class="text-sm font-bold text-right text-blue-900" x-text="'$' + (tarifaMostrar(asignacion) || 0).toLocaleString('es-CO', {minimumFractionDigits: 2})"></div>
                         <div class="flex justify-center">
                             <button 
                                 @click.stop="editarAsignacion(asignacion)"
@@ -258,7 +258,7 @@
                     </div>
 
                     <!-- Fecha Inicio -->
-                    <div x-show="mostrarCamposPorTipo(['Full time', 'Tiempo y costo fijo'])" x-cloak>
+                    <div x-show="mostrarCamposPorTipo(['Full time', 'Part time', 'Part Time', 'Tiempo y costo fijo'])" x-cloak>
                         <label class="block text-sm font-semibold text-gray-700 mb-2">
                             Fecha Inicio
                         </label>
@@ -271,7 +271,7 @@
                     </div>
 
                     <!-- Fecha Fin -->
-                    <div x-show="mostrarCamposPorTipo(['Full time', 'Tiempo y costo fijo'])" x-cloak>
+                    <div x-show="mostrarCamposPorTipo(['Full time', 'Part time', 'Part Time', 'Tiempo y costo fijo'])" x-cloak>
                         <label class="block text-sm font-semibold text-gray-700 mb-2">
                             Fecha Fin
                         </label>
@@ -294,17 +294,17 @@
                     </div>
 
                     <!-- Valor Día (Calculado) -->
-                    <div x-show="consultoriaInfo.tipo_asignacion === 'Full time'" x-cloak>
+                    <div x-show="mostrarCamposPorTipo(['Full time', 'Part time', 'Part Time'])" x-cloak>
                         <label class="block text-sm font-semibold text-gray-700 mb-2">
                             Valor Día
                         </label>
                         <div class="px-4 py-3 bg-gray-100 rounded-xl text-sm font-mono font-bold text-gray-700">
-                            $<span x-text="(form.valor_hora / 20).toLocaleString('es-CO', {minimumFractionDigits: 2})"></span>
+                            $<span x-text="(form.valor_dia || (form.valor_hora / 20)).toLocaleString('es-CO', {minimumFractionDigits: 2})"></span>
                         </div>
                     </div>
 
                     <!-- Cantidad Días -->
-                    <div x-show="mostrarCamposPorTipo(['Full time', 'Tiempo y costo fijo'])" x-cloak>
+                    <div x-show="mostrarCamposPorTipo(['Full time', 'Part time', 'Part Time', 'Tiempo y costo fijo'])" x-cloak>
                         <label class="block text-sm font-semibold text-gray-700 mb-2">
                             Cantidad Días
                         </label>
@@ -316,7 +316,7 @@
                     </div>
 
                     <!-- Total a Pagar (Calculado) -->
-                    <div x-show="mostrarCamposPorTipo(['Full time', 'Tiempo y costo fijo'])" x-cloak>
+                    <div x-show="mostrarCamposPorTipo(['Full time', 'Part time', 'Part Time', 'Tiempo y costo fijo'])" x-cloak>
                         <label class="block text-sm font-semibold text-gray-700 mb-2">
                             Total a Pagar
                         </label>

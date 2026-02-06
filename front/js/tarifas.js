@@ -80,7 +80,8 @@ window.tarifasApp = function () {
             const tipo = this.cat.tipos.find(
                 (t) => t.id == this.form.tipo_asignacion_id
             );
-            return tipo && tipo.titulo === "Full time";
+            const titulo = String(tipo?.titulo || "").toLowerCase();
+            return titulo.includes("full") || titulo.includes("part");
         },
 
         validarDuplicado() {

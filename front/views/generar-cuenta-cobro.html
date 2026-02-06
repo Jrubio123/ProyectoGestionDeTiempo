@@ -1,12 +1,128 @@
-<div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-200">
-    <h1 class="text-3xl font-bold text-gray-800">Bienvenido al Sistema</h1>
-    <p class="text-gray-500 mt-2">Esta es tu pantalla de inicio, similar a tu Power App.</p>
-    
-    <div class="grid grid-cols-3 gap-4 mt-8">
-        <div class="p-4 bg-blue-50 rounded-xl border border-blue-100">
-            <span class="text-blue-600 font-bold text-xl">12</span>
-            <p class="text-blue-800 text-sm">Tareas Pendientes</p>
+<div x-data="cuentaCobroApp()" class="max-w-7xl mx-auto space-y-6 animate-fade-in-up">
+
+    <div class="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-emerald-50 flex justify-between items-center">
+        <div>
+            <h1 class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 to-teal-500">
+                Generar Cuenta de Cobro
+            </h1>
+            <p class="text-gray-500 text-sm mt-1">Selecciona los registros aprobados y genera tu cobro.</p>
         </div>
-        <!-- Más tarjetas aquí -->
+        
+        <div class="bg-emerald-50 px-6 py-3 rounded-2xl border border-emerald-100 text-right shadow-sm">
+            <p class="text-xs font-bold text-emerald-600 uppercase tracking-wider">Total Seleccionado</p>
+            <p class="text-2xl font-mono font-bold text-emerald-700" x-text="formatearDinero(totalSeleccionado)"></p>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <div class="lg:col-span-2 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden flex flex-col h-[700px]">
+            
+            <div class="p-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="font-bold text-gray-700 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Registros Aprobados
+                </h3>
+                <button @click="toggleAll" class="text-xs text-emerald-600 font-bold hover:underline">
+                    Seleccionar Todo
+                </button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-2 space-y-2">
+                <template x-for="r in registros" :key="r.id">
+                    <div class="flex items-center p-3 rounded-xl border border-gray-100 hover:border-emerald-200 hover:bg-emerald-50/30 transition-colors group cursor-pointer"
+                         @click="r.checked = !r.checked; actualizarPeriodo(); actualizarLetras()">
+                        
+                        <div class="mr-4">
+                            <input type="checkbox" x-model="r.checked" @change="actualizarPeriodo(); actualizarLetras()" class="w-5 h-5 text-emerald-600 rounded focus:ring-emerald-500 cursor-pointer">
+                        </div>
+
+                        <div class="flex-1">
+                            <div class="flex justify-between">
+                                <span class="font-bold text-gray-800 text-sm" x-text="r.cliente"></span>
+                                <span class="font-mono font-bold text-emerald-700" x-text="formatearDinero(r.total_cobrar)"></span>
+                            </div>
+                            <div class="flex justify-between mt-1 text-xs text-gray-500">
+                                <span x-text="formatDate(r.created_at)"></span>
+                                <span x-text="r.caso || 'Sin caso'"></span>
+                            </div>
+                            <div class="mt-1">
+                                <span class="px-2 py-0.5 rounded bg-gray-100 text-[10px] text-gray-600" 
+                                      x-text="r.cantidad_dias_reportados > 0 ? r.cantidad_dias_reportados + ' días' : r.horas_reportadas + ' horas'"></span>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+                
+                <div x-show="registros.length === 0" class="flex flex-col items-center justify-center h-64 text-gray-400">
+                    <p>No tienes registros aprobados pendientes de cobro.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="lg:col-span-1 bg-white rounded-2xl shadow-xl border border-gray-100 p-6 flex flex-col">
+            
+            <h3 class="font-bold text-gray-800 mb-6 border-b pb-2">Detalles de la Cuenta</h3>
+
+            <form @submit.prevent="generarCuenta" class="space-y-5 flex-1">
+                
+                <div>
+                    <label class="text-xs font-bold text-gray-500 uppercase">Periodo de Cobro</label>
+                    <div class="flex gap-2 mt-1">
+                        <input type="date" x-model="form.fecha_inicio" required class="w-full p-2 border rounded-lg text-sm bg-gray-50">
+                        <input type="date" x-model="form.fecha_fin" required class="w-full p-2 border rounded-lg text-sm bg-gray-50">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-xs font-bold text-gray-500 uppercase">Valor en Letras</label>
+                    <textarea x-model="form.total_letras" readonly required rows="3" placeholder="Se genera automáticamente" class="w-full mt-1 p-3 border rounded-lg text-sm bg-gray-100 resize-none focus:border-emerald-500 outline-none"></textarea>
+                </div>
+
+                <div>
+                    <label class="text-xs font-bold text-gray-500 uppercase">Ciudad de Cobro</label>
+                    <input type="text" x-model="form.ciudad_cobro" required placeholder="Ej: Medellín"
+                           class="w-full mt-1 p-2 border rounded-lg text-sm bg-gray-50 focus:border-emerald-500 outline-none">
+                </div>
+
+                <div class="border-t pt-4">
+                    <label class="text-xs font-bold text-gray-500 uppercase mb-2 block">Adjuntos Requeridos</label>
+                    
+                    <div class="space-y-3">
+                        <label class="flex items-center gap-3 p-3 border border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-emerald-50 hover:border-emerald-300 transition-colors">
+                            <div class="bg-emerald-100 p-2 rounded-lg text-emerald-600">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                            </div>
+                            <div class="flex-1">
+                                <p class="text-sm font-bold text-gray-700">Cuenta de Cobro (PDF)</p>
+                                <p class="text-xs text-gray-400" x-text="files.cuenta ? files.cuenta.name : 'Click para subir'"></p>
+                            </div>
+                            <input type="file" class="hidden" @change="files.cuenta = $event.target.files[0]">
+                        </label>
+
+                        <label class="flex items-center gap-3 p-3 border border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-emerald-50 hover:border-emerald-300 transition-colors">
+                            <div class="bg-blue-100 p-2 rounded-lg text-blue-600">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            </div>
+                            <div class="flex-1">
+                                <p class="text-sm font-bold text-gray-700">Seguridad Social (PDF)</p>
+                                <p class="text-xs text-gray-400" x-text="files.seguridad ? files.seguridad.name : 'Click para subir'"></p>
+                            </div>
+                            <input type="file" class="hidden" @change="files.seguridad = $event.target.files[0]">
+                        </label>
+                    </div>
+                </div>
+
+                <div class="pt-6 mt-auto">
+                    <button type="submit" 
+                        :disabled="!isValid"
+                        class="w-full py-4 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold rounded-xl shadow-lg hover:shadow-emerald-500/30 transition-all hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2">
+                        <span>Generar y Enviar</span>
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                    </button>
+                </div>
+            </form>
+
+        </div>
     </div>
 </div>

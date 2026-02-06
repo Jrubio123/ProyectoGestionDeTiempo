@@ -32,6 +32,7 @@ window.misAsignacionesApp = function () {
             fecha_fin: "",
             cantidad_dias: 0,
             valor_hora: 0,
+            valor_dia: 0,
             nro_caso_interno: "",
             nro_caso_cliente: "",
             tipo_servicio: "",
@@ -122,6 +123,7 @@ window.misAsignacionesApp = function () {
                 fecha_fin: asignacion.fecha_fin || "",
                 cantidad_dias: Number(asignacion.cantidad_dias || 0),
                 valor_hora: Number(asignacion.valor_hora || 0),
+                valor_dia: Number(asignacion.valor_dia || 0),
                 nro_caso_interno: asignacion.nro_caso_interno || "",
                 nro_caso_cliente: asignacion.nro_caso_cliente || "",
                 tipo_servicio: asignacion.tipo_servicio || "",
@@ -141,6 +143,7 @@ window.misAsignacionesApp = function () {
             if (!this.consultoriaInfo.cliente_id || !this.form.consultor_responsable_id || !this.form.id_modulo) {
                 this.tarifaEncontrada = true;
                 this.form.valor_hora = 0;
+                this.form.valor_dia = 0;
                 return;
             }
 
@@ -155,34 +158,89 @@ window.misAsignacionesApp = function () {
                 });
                 const valor = Number(res.data?.valor_tarifa || 0);
                 this.form.valor_hora = valor;
+                this.form.valor_dia = this.esMensualTipo() && valor ? (valor / 20) : 0;
                 this.tarifaEncontrada = valor > 0;
             } catch (e) {
                 this.form.valor_hora = 0;
+                this.form.valor_dia = 0;
                 this.tarifaEncontrada = false;
             }
         },
 
         mostrarCamposPorTipo(tipos) {
-            return tipos.includes(this.consultoriaInfo.tipo_asignacion);
+            const t = String(this.consultoriaInfo.tipo_asignacion || "").toLowerCase();
+            return tipos.some((x) => t === String(x).toLowerCase());
+        },
+
+        parseLocalDate(value) {
+            if (!value) return null;
+            const [y, m, d] = String(value).split("-").map(Number);
+            if (!y || !m || !d) return null;
+            return new Date(y, m - 1, d);
         },
 
         calcularDias() {
             if (!this.form.fecha_inicio || !this.form.fecha_fin) return;
-            const inicio = new Date(this.form.fecha_inicio);
-            const fin = new Date(this.form.fecha_fin);
+            if (this.esMensualTipo()) {
+                const dias = this.calcularDiasMensual(this.form.fecha_inicio, this.form.fecha_fin);
+                this.form.cantidad_dias = dias || 20;
+                return;
+            }
+            const inicio = this.parseLocalDate(this.form.fecha_inicio);
+            const fin = this.parseLocalDate(this.form.fecha_fin);
+            if (!inicio || !fin || fin < inicio) {
+                this.form.cantidad_dias = 0;
+                return;
+            }
             const diff = Math.ceil((fin - inicio) / (1000 * 60 * 60 * 24)) + 1;
             this.form.cantidad_dias = diff > 0 ? diff : 0;
         },
 
         calcularTotalPagar() {
             if (!this.form.valor_hora) return 0;
-            if (this.consultoriaInfo.tipo_asignacion === "Full time") {
-                return (this.form.valor_hora / 20) * (this.form.cantidad_dias || 0);
+            if (this.esMensualTipo()) {
+                const dias = this.calcularDiasMensual(this.form.fecha_inicio, this.form.fecha_fin) || this.form.cantidad_dias || 20;
+                const meses = dias / 20;
+                return this.form.valor_hora * (meses || 1);
             }
             if (this.consultoriaInfo.tipo_asignacion === "Tiempo y costo fijo") {
                 return this.form.valor_hora * (this.form.cantidad_dias || 0);
             }
             return this.form.valor_hora * (this.form.cantidad_dias || 0);
+        },
+
+        esMensualTipo() {
+            const t = String(this.consultoriaInfo.tipo_asignacion || "").toLowerCase();
+            return t.includes("full") || t.includes("part");
+        },
+
+        calcularDiasMensual(fechaInicio, fechaFin) {
+            if (!fechaInicio || !fechaFin) return 0;
+            const inicio = this.parseLocalDate(fechaInicio);
+            const fin = this.parseLocalDate(fechaFin);
+            if (!inicio || !fin || isNaN(inicio) || isNaN(fin) || fin < inicio) return 0;
+            if (
+                inicio.getFullYear() === fin.getFullYear() &&
+                inicio.getMonth() === fin.getMonth()
+            ) {
+                return 20;
+            }
+            const months =
+                (fin.getFullYear() - inicio.getFullYear()) * 12 +
+                (fin.getMonth() - inicio.getMonth()) +
+                1;
+            return months > 0 ? months * 20 : 0;
+        },
+
+        tarifaMostrar(asignacion) {
+            const tipo = String(asignacion?.tipo_asignacion || "").toLowerCase();
+            const esMensual = tipo.includes("full") || tipo.includes("part");
+            if (esMensual) {
+                const valorDia = Number(asignacion?.valor_dia || 0);
+                const tarifaMensual = valorDia ? valorDia * 20 : Number(asignacion?.valor_hora || 0);
+                return tarifaMensual;
+            }
+            return Number(asignacion?.valor_hora || 0);
         },
 
         async guardarAsignacion() {
@@ -196,6 +254,7 @@ window.misAsignacionesApp = function () {
                     fecha_fin: this.form.fecha_fin || null,
                     cantidad_dias: this.form.cantidad_dias || null,
                     valor_hora: this.form.valor_hora || null,
+                    valor_dia: this.form.valor_dia || null,
                     nro_caso_interno: this.form.nro_caso_interno || null,
                     nro_caso_cliente: this.form.nro_caso_cliente || null,
                     tipo_servicio: this.form.tipo_servicio || null,

@@ -80,7 +80,9 @@
                                         <p class="text-xs text-gray-500" x-text="item.nombre_cliente"></p>
                                         <div class="mt-1 flex gap-2">
                                             <span class="text-[10px] bg-gray-100 px-2 py-0.5 rounded text-gray-600 border border-gray-200" x-text="item.nombre_tipo_asignacion"></span>
+                                            <span x-show="esRechazado(item)" class="text-[10px] bg-red-100 px-2 py-0.5 rounded text-red-700 border border-red-200">Rechazado</span>
                                         </div>
+                                        <p x-show="esRechazado(item) && item.motivo_rechazo" class="text-[10px] text-red-600 mt-1" x-text="item.motivo_rechazo"></p>
                                     </div>
                                 </div>
                             </td>
@@ -164,6 +166,10 @@
                 <div class="col-span-2 p-3 bg-gray-50 rounded-lg">
                     <p class="text-xs font-bold text-gray-400 uppercase">Observación / Descripción</p>
                     <p class="text-gray-600" x-text="i.observacion || 'Sin observaciones'"></p>
+                </div>
+                <div x-show="esRechazado(i) && i.motivo_rechazo" class="col-span-2 p-3 bg-red-50 rounded-lg border border-red-100">
+                    <p class="text-xs font-bold text-red-500 uppercase">Motivo de Rechazo</p>
+                    <p class="text-red-700" x-text="i.motivo_rechazo"></p>
                 </div>
                 <div class="p-3 bg-blue-50 rounded-lg border border-blue-100">
                     <p class="text-xs font-bold text-blue-400 uppercase">Tarifa Hora</p>

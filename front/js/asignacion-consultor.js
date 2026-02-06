@@ -39,11 +39,26 @@ window.asignacionConsultorApp = function () {
 
         async cargarProyectos() {
             try {
-                const res = await axios.get(`${API}/mis-asignaciones-coordinador`);
-                this.proyectos = (res.data || []).map((p) => ({
-                    ...p,
-                    _key: `${p.consultoria_id || "c"}-${p.id || "na"}`
-                }));
+                const user = window.auth?.getUser?.();
+                const coordId = user?.id || null;
+                const url = coordId
+                    ? `${API}/consultorias?coordinador_id=${encodeURIComponent(coordId)}`
+                    : `${API}/consultorias`;
+                const res = await axios.get(url);
+                const items = res.data || [];
+                const uniq = new Map();
+                items.forEach((p) => {
+                    const key = p.id || p.consultoria_id;
+                    if (!uniq.has(key)) {
+                        uniq.set(key, {
+                            ...p,
+                            consultoria_id: p.id,
+                            cliente: p.nombre_cliente,
+                            _key: String(key)
+                        });
+                    }
+                });
+                this.proyectos = Array.from(uniq.values());
             } catch (e) {
                 this.proyectos = [];
             }
@@ -66,7 +81,7 @@ window.asignacionConsultorApp = function () {
             this.form.modulo_id = "";
             this.form.fecha_inicio = "";
             this.form.fecha_fin = "";
-            this.form.cantidad_dias = 0;
+            this.form.cantidad_dias = this.esMensual ? 20 : 0;
             this.form.horas_asignadas = 0;
         },
 
@@ -109,17 +124,61 @@ window.asignacionConsultorApp = function () {
             }
         },
 
+        parseLocalDate(value) {
+            if (!value) return null;
+            const [y, m, d] = String(value).split("-").map(Number);
+            if (!y || !m || !d) return null;
+            return new Date(y, m - 1, d);
+        },
+
         calcularDias() {
+            if (this.esMensual) {
+                const dias = this.calcularDiasMensual(
+                    this.form.fecha_inicio,
+                    this.form.fecha_fin
+                );
+                this.form.cantidad_dias = dias || 20;
+                return;
+            }
             if (this.form.fecha_inicio && this.form.fecha_fin) {
-                const diff = new Date(this.form.fecha_fin) - new Date(this.form.fecha_inicio);
+                const inicio = this.parseLocalDate(this.form.fecha_inicio);
+                const fin = this.parseLocalDate(this.form.fecha_fin);
+                if (!inicio || !fin || fin < inicio) {
+                    this.form.cantidad_dias = 0;
+                    return;
+                }
+                const diff = fin - inicio;
                 const days = Math.ceil(diff / (1000 * 60 * 60 * 24)) + 1;
                 this.form.cantidad_dias = days > 0 ? days : 0;
             }
         },
 
-        get esPorHora() {
+        get esMensual() {
             const tipo = this.proyectoSelected?.tipo_asignacion || "";
-            return ["Horas por demanda", "Bolsa de horas", "Tiempo y costo fijo"].includes(tipo);
+            const t = String(tipo).toLowerCase();
+            return t.includes("full") || t.includes("part");
+        },
+
+        calcularDiasMensual(fechaInicio, fechaFin) {
+            if (!fechaInicio || !fechaFin) return 0;
+            const inicio = this.parseLocalDate(fechaInicio);
+            const fin = this.parseLocalDate(fechaFin);
+            if (!inicio || !fin || isNaN(inicio) || isNaN(fin) || fin < inicio) return 0;
+            if (
+                inicio.getFullYear() === fin.getFullYear() &&
+                inicio.getMonth() === fin.getMonth()
+            ) {
+                return 20;
+            }
+            const months =
+                (fin.getFullYear() - inicio.getFullYear()) * 12 +
+                (fin.getMonth() - inicio.getMonth()) +
+                1;
+            return months > 0 ? months * 20 : 0;
+        },
+
+        get esPorHora() {
+            return !this.esMensual;
         },
 
         get esMesaServicio() {
@@ -128,31 +187,51 @@ window.asignacionConsultorApp = function () {
         },
 
         get formValido() {
-            return this.form.consultor_id && this.form.modulo_id && this.alertaTarifa.valor > 0;
+            if (!this.form.consultor_id || !this.form.modulo_id || !(this.alertaTarifa.valor > 0)) return false;
+            if (this.esPorHora) {
+                return (this.form.horas_asignadas || 0) > 0;
+            }
+            return true;
         },
 
         calcularTotal() {
             const tarifa = this.alertaTarifa.valor || 0;
             let total = 0;
-            if (this.esPorHora) {
-                total = tarifa * (this.form.horas_asignadas || 0);
+            if (this.esMensual) {
+                const dias = this.calcularDiasMensual(
+                    this.form.fecha_inicio,
+                    this.form.fecha_fin
+                );
+                const meses = dias ? dias / 20 : 1;
+                total = tarifa * meses;
             } else {
-                total = tarifa * (this.form.cantidad_dias || 0);
+                total = tarifa * (this.form.horas_asignadas || 0);
             }
             return this.formatearDinero(total);
         },
 
         async guardarAsignacion() {
             if (!this.proyectoSelected) return;
+            const tarifa = this.alertaTarifa.valor || 0;
+            const diasMensual = this.esMensual
+                ? this.calcularDiasMensual(this.form.fecha_inicio, this.form.fecha_fin) || 20
+                : 0;
+            const meses = this.esMensual ? (diasMensual / 20) : 0;
+            const total = this.esMensual
+                ? tarifa * (meses || 1)
+                : tarifa * (this.form.horas_asignadas || 0);
+            const valorDia = this.esMensual ? (tarifa / 20) : null;
             const payload = {
                 id_consultoria: this.proyectoSelected.consultoria_id || this.proyectoSelected.id,
                 id_modulo: this.form.modulo_id,
                 consultor_responsable_id: this.form.consultor_id,
                 fecha_inicio: this.form.fecha_inicio || null,
                 fecha_fin: this.form.fecha_fin || null,
-                cantidad_dias: this.form.cantidad_dias || null,
-                horas_asignadas: this.form.horas_asignadas || null,
-                valor_hora: this.alertaTarifa.valor || null
+                cantidad_dias: this.esMensual ? diasMensual : (this.form.cantidad_dias || null),
+                horas_asignadas: this.esMensual ? null : (this.form.horas_asignadas || null),
+                valor_hora: this.esMensual ? null : tarifa || null,
+                valor_dia: valorDia,
+                total_pagar: total
             };
 
             try {
@@ -161,7 +240,8 @@ window.asignacionConsultorApp = function () {
                 this.proyectoSelected = null;
                 await this.cargarProyectos();
             } catch (e) {
-                alert("Error al guardar");
+                const msg = e?.response?.data?.error || "Error al guardar";
+                alert(msg);
             }
         },
 

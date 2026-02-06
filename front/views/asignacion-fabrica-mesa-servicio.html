@@ -1,12 +1,199 @@
-<div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-200">
-    <h1 class="text-3xl font-bold text-gray-800">Bienvenido al Sistema</h1>
-    <p class="text-gray-500 mt-2">Esta es tu pantalla de inicio, similar a tu Power App.</p>
-    
-    <div class="grid grid-cols-3 gap-4 mt-8">
-        <div class="p-4 bg-blue-50 rounded-xl border border-blue-100">
-            <span class="text-blue-600 font-bold text-xl">12</span>
-            <p class="text-blue-800 text-sm">Tareas Pendientes</p>
+<div x-data="mesaFabricaApp" class="max-w-7xl mx-auto space-y-6 animate-fade-in-up">
+
+    <div class="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-purple-50 flex justify-between items-center">
+        <div>
+            <h1 class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-pink-500">
+                Mesa de Servicio & Fábrica
+            </h1>
+            <p class="text-gray-500 text-sm mt-1">Gestiona tus tickets e incidentes asignados.</p>
         </div>
-        <!-- Más tarjetas aquí -->
+        <button @click="init" class="p-2 bg-white border border-gray-200 rounded-full hover:rotate-180 transition-transform duration-500 text-purple-600 shadow-sm">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        </button>
     </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        
+        <template x-for="item in tickets" :key="item.id">
+            <div class="bg-white rounded-2xl shadow-md border border-gray-100 hover:shadow-xl transition-shadow duration-300 flex flex-col overflow-hidden relative group">
+                
+                <div class="h-1 w-full" :class="{
+                    'bg-green-500': item.estado === 'Abierto',
+                    'bg-yellow-500': item.estado === 'En Proceso',
+                    'bg-blue-500': item.estado === 'Transferido Silver',
+                    'bg-purple-500': item.estado === 'Transferido Corona'
+                }"></div>
+
+                <div class="p-5 flex-1 flex flex-col gap-3">
+                    
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400" x-text="item.tipo_asignacion"></span>
+                            <h3 class="font-bold text-gray-800 text-lg leading-tight" x-text="item.nombre_cliente"></h3>
+                            <p class="text-xs text-purple-600 font-medium" x-text="item.nombre_modulo"></p>
+                        </div>
+                        <button @click="editarTicket(item)" class="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                        </button>
+                    </div>
+
+                    <div class="bg-gray-50 rounded-xl p-3 space-y-2 text-sm">
+                        <div class="flex justify-between">
+                            <span class="text-gray-500 text-xs">Caso Cliente:</span>
+                            <span class="font-mono font-bold text-gray-700" x-text="item.nro_caso_cliente || '---'"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-500 text-xs">Caso Interno:</span>
+                            <span class="font-mono font-bold text-gray-700" x-text="item.nro_caso_interno || '---'"></span>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-between items-center text-xs text-gray-400 mt-2">
+                        <div class="flex items-center gap-1">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                            <span x-text="formatDate(item.fecha_inicio)"></span>
+                        </div>
+                        <span class="px-2 py-1 rounded-full bg-gray-100 text-gray-600 font-bold" x-text="item.estado"></span>
+                    </div>
+
+                </div>
+
+                <div class="bg-gray-50 p-3 border-t border-gray-100 flex justify-between items-center">
+                    <div class="text-xs text-gray-500">
+                        Coord: <span class="font-bold" x-text="item.nombre_coordinador"></span>
+                    </div>
+                    <button @click="cerrarTicket(item)" class="text-xs font-bold text-green-600 hover:text-green-800 flex items-center gap-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                        Cerrar Ticket
+                    </button>
+                </div>
+
+            </div>
+        </template>
+
+    </div>
+
+    <div x-show="modalOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 transform transition-all scale-100">
+            
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold text-gray-800">Editar Ticket</h3>
+                <button @click="modalOpen = false" class="text-gray-400 hover:text-gray-600"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+
+            <form @submit.prevent="guardarCambios" class="space-y-4">
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase">Caso Interno</label>
+                        <input type="text" x-model="form.nro_caso_interno" class="w-full mt-1 p-2 border rounded-lg text-sm">
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase">Caso Cliente</label>
+                        <input type="text" x-model="form.nro_caso_cliente" class="w-full mt-1 p-2 border rounded-lg text-sm">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase">Tipo Servicio</label>
+                        <select x-model="form.tipo_servicio" class="w-full mt-1 p-2 border rounded-lg text-sm bg-white">
+                            <option value="Incidente">Incidente</option>
+                            <option value="Requerimiento">Requerimiento</option>
+                            <option value="Servicio">Servicio</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase">Estado</label>
+                        <select x-model="form.estado" class="w-full mt-1 p-2 border rounded-lg text-sm bg-white">
+                            <option value="Abierto">Abierto</option>
+                            <option value="En Proceso">En Proceso</option>
+                            <option value="Transferido Silver">Transferido Silver</option>
+                            <option value="Transferido Corona">Transferido Corona</option>
+                            <option value="Cerrado">Cerrado</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-xs font-bold text-gray-500 uppercase">Observaciones</label>
+                    <textarea x-model="form.observacion" rows="3" class="w-full mt-1 p-2 border rounded-lg text-sm resize-none"></textarea>
+                </div>
+
+                <div class="pt-4 flex justify-end gap-3">
+                    <button type="button" @click="modalOpen = false" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">Cancelar</button>
+                    <button type="submit" class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-bold shadow-lg shadow-purple-500/30">Guardar Cambios</button>
+                </div>
+            </form>
+
+        </div>
+    </div>
+
 </div>
+
+<script>
+    document.addEventListener('alpine:init', () => {
+        Alpine.data('mesaFabricaApp', () => ({
+            API: "http://localhost:4000",
+            
+            usuario: { id: 3 }, // MOCKUP
+            tickets: [],
+            modalOpen: false,
+            
+            form: {
+                id: null,
+                nro_caso_interno: '',
+                nro_caso_cliente: '',
+                tipo_servicio: '',
+                estado: '',
+                observacion: '',
+                fecha_cierre: ''
+            },
+
+            async init() {
+                await this.cargarTickets();
+            },
+
+            async cargarTickets() {
+                try {
+                    const res = await axios.get(`${this.API}/mesa-fabrica/${this.usuario.id}`);
+                    this.tickets = res.data;
+                } catch(e) {
+                    // Mockup
+                    this.tickets = [
+                        {id: 1, tipo_asignacion: 'Mesa de servicio', nombre_cliente: 'Prebel S.A.', nombre_modulo: 'SAP FI', nro_caso_interno: 'INT-001', nro_caso_cliente: 'REQ-999', estado: 'Abierto', fecha_inicio: '2023-10-01', nombre_coordinador: 'Ana Coord'}
+                    ];
+                }
+            },
+
+            editarTicket(item) {
+                this.form = { ...item };
+                this.modalOpen = true;
+            },
+
+            async cerrarTicket(item) {
+                if(!confirm("¿Deseas cerrar este ticket? Se enviará a aprobación.")) return;
+                // Aquí podrías llamar al endpoint de cierre directo o abrir el modal pre-llenado
+                this.form = { ...item, estado: 'Cerrado', fecha_cierre: new Date().toISOString().split('T')[0] };
+                await this.guardarCambios();
+            },
+
+            async guardarCambios() {
+                try {
+                    await axios.put(`${this.API}/mesa-fabrica/${this.form.id}`, this.form);
+                    
+                    // Si se cerró, podrías disparar el proceso de reporte de horas aquí mismo
+                    // (Opcional, depende de tu flujo exacto)
+                    
+                    alert("Ticket actualizado ✅");
+                    this.modalOpen = false;
+                    await this.cargarTickets();
+                } catch(e) {
+                    alert("Error guardando");
+                }
+            },
+
+            formatDate(d) { return d ? d.split('T')[0] : '' }
+        }))
+    })
+</script>

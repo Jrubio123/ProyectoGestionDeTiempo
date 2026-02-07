@@ -6,8 +6,7 @@
     position: fixed;
     left: 0;
     top: 70px;
-    /*padding: 1.5rem;*/
-    margin: auto;
+    padding: 1.5rem;
     overflow-y: auto;
     transition: all 0.3s ease;
     box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
@@ -16,6 +15,7 @@
 
 .sidebar.collapsed {
     width: 80px;
+    padding: 1.5rem 0.5rem;
 }
 
 .sidebar-header {

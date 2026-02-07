@@ -20,7 +20,7 @@ services:
     container_name: gestion_tiempo_back
     restart: always
     env_file:
-      - .env
+      - ${ENV_FILE:-.env}
     depends_on:
       - db
     ports:
@@ -39,6 +39,14 @@ services:
       - ./front:/usr/share/nginx/html:ro
     depends_on:
       - back
+
+  maildev:
+    image: maildev/maildev
+    container_name: gestion_tiempo_maildev
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "1080:1080"
 
   pgadmin:
     image: dpage/pgadmin4

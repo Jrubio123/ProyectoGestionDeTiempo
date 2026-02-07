@@ -615,7 +615,7 @@ app.get("/mis-asignaciones-coordinador", async (req, res) => {
         JOIN clientes c ON con.id_cliente = c.id
         LEFT JOIN registro_asignaciones ra
           ON ra.id_consultoria = con.id
-          AND ra.estado = 'Activo'
+          AND ra.estado IN ('Abierto', 'Proceso')
         LEFT JOIN usuarios u ON ra.consultor_responsable_id = u.id
         LEFT JOIN usuarios coord ON con.coordinador_responsable_id = coord.id
         LEFT JOIN modulo m ON ra.id_modulo = m.id
@@ -671,13 +671,64 @@ app.get("/mis-asignaciones", async (req, res) => {
           LIMIT 1
         ) lr ON true
       WHERE ($1::int IS NULL OR ra.consultor_responsable_id = $1)
-        AND (lr.estado_reporte IS NULL OR lr.estado_reporte <> 'Pendiente')
+        AND lr.estado_reporte = 'Aprobado'
       ORDER BY ra.id DESC
     `, [userId || null]);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al obtener asignaciones" });
+  }
+});
+
+// Asignaciones disponibles para registro de horas (consultor)
+app.get("/registro-horas-asignaciones", async (req, res) => {
+  try {
+    const userId = req.user?.id || req.query.consultor_id;
+    const result = await pool.query(`
+      SELECT
+        ra.id,
+        con.id AS consultoria_id,
+        c.id AS cliente_id,
+        c.titulo AS nombre_cliente,
+        coord.nombre_usuario AS nombre_coordinador,
+        m.titulo AS nombre_modulo,
+        ta.titulo AS nombre_tipo_asignacion,
+        ra.horas_asignadas,
+        ra.cantidad_dias,
+        ra.valor_hora,
+        ra.valor_dia,
+        ra.total_pagar,
+        ra.estado,
+        ra.tipo_servicio,
+        ra.nro_caso_interno,
+        ra.nro_caso_cliente,
+        ra.fecha_fin,
+        ra.observacion,
+        lr.estado_reporte,
+        lr.motivo_rechazo
+      FROM registro_asignaciones ra
+        JOIN consultorias con ON ra.id_consultoria = con.id
+        JOIN clientes c ON con.id_cliente = c.id
+        LEFT JOIN usuarios coord ON con.coordinador_responsable_id = coord.id
+        LEFT JOIN modulo m ON ra.id_modulo = m.id
+        LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
+        LEFT JOIN LATERAL (
+          SELECT rh.estado_reporte, rh.motivo_rechazo
+          FROM reporte_horas rh
+          WHERE rh.id_registro_asignacion = ra.id
+          ORDER BY rh.created_at DESC
+          LIMIT 1
+        ) lr ON true
+      WHERE ($1::int IS NULL OR ra.consultor_responsable_id = $1)
+        AND (lr.estado_reporte IS NULL OR lr.estado_reporte = 'Rechazado')
+        AND ra.estado IN ('Abierto', 'Proceso')
+      ORDER BY ra.id DESC
+    `, [userId || null]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener asignaciones para registro" });
   }
 });
 
@@ -713,6 +764,7 @@ app.post("/reportar-horas", async (req, res) => {
       SELECT
         ra.id,
         ra.id_modulo,
+        ra.consultor_responsable_id,
         con.id_cliente,
         con.id_tipo_asignacion,
         con.coordinador_responsable_id
@@ -726,6 +778,7 @@ app.post("/reportar-horas", async (req, res) => {
     }
 
     const info = meta.rows[0];
+    const consultorId = info.consultor_responsable_id || req.user?.id || null;
     const result = await pool.query(
       `INSERT INTO reporte_horas
         (id_registro_asignacion, horas_reportadas, cantidad_dias_reportados, total_cobrar,
@@ -744,10 +797,18 @@ app.post("/reportar-horas", async (req, res) => {
         info.id_tipo_asignacion,
         info.id_modulo,
         info.coordinador_responsable_id,
-        req.user?.id,
-        req.user?.id
+        consultorId,
+        req.user?.id || consultorId
       ]
     );
+
+    await pool.query(
+      `UPDATE registro_asignaciones
+       SET estado = 'Proceso'
+       WHERE id = $1`,
+      [id_registro_asignacion]
+    );
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -894,6 +955,9 @@ app.post("/cuentas-cobro", async (req, res) => {
     );
     const moneda = monedaRes.rows[0]?.moneda_cobro || "COP";
     const totalLetrasFinal = buildTotalLetras(Number(info.total || 0), moneda);
+    const descripcionFinal =
+      (typeof req.body.descripcion === "string" && req.body.descripcion.trim()) ||
+      `Cuenta de cobro ${fecha_inicio} - ${fecha_fin}`;
 
     const insert = await client.query(
       `
@@ -903,7 +967,7 @@ app.post("/cuentas-cobro", async (req, res) => {
       RETURNING *
       `,
       [
-        "Cuenta de cobro generada",
+        descripcionFinal,
         fecha_inicio,
         fecha_fin,
         info.total,
@@ -922,6 +986,19 @@ app.post("/cuentas-cobro", async (req, res) => {
       WHERE id = ANY($2)
       `,
       [cuentaId, ids_reportes]
+    );
+
+    await client.query(
+      `
+      UPDATE registro_asignaciones
+      SET estado = 'Cerrado'
+      WHERE id IN (
+        SELECT id_registro_asignacion
+        FROM reporte_horas
+        WHERE id = ANY($1)
+      )
+      `,
+      [ids_reportes]
     );
 
     await client.query("COMMIT");
@@ -951,7 +1028,7 @@ app.get("/cuentas-cobro/historial/:userId", async (req, res) => {
       `
       SELECT
         cc.id,
-        cc.descripcion,
+        COALESCE(NULLIF(cc.descripcion, ''), 'Cuenta de cobro') AS descripcion,
         cc.fecha_correspondiente,
         cc.fecha_periodo_inicio AS fecha_inicio_periodo,
         cc.fecha_periodo_fin AS fecha_fin_periodo,
@@ -983,6 +1060,7 @@ app.get("/cuentas-cobro/detalle/:cuentaId", async (req, res) => {
         rh.id,
         c.titulo AS cliente,
         m.titulo AS modulo,
+        ta.titulo AS tipo_asignacion,
         rh.nro_caso_int_ext,
         rh.horas_reportadas,
         rh.cantidad_dias_reportados,
@@ -990,6 +1068,7 @@ app.get("/cuentas-cobro/detalle/:cuentaId", async (req, res) => {
       FROM reporte_horas rh
         LEFT JOIN clientes c ON rh.cliente_id = c.id
         LEFT JOIN modulo m ON rh.modulo_id = m.id
+        LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
       WHERE rh.id_cuenta_cobro = $1
       ORDER BY rh.id DESC
       `,
@@ -1058,17 +1137,25 @@ app.put("/aprobaciones/:id", async (req, res) => {
       return res.status(404).json({ error: "Reporte no encontrado" });
     }
 
-    // Actualizar aprobación en la asignación asociada
-    await pool.query(
-      `UPDATE registro_asignaciones
-       SET aprobar_coordinador = $1
-       WHERE id = (
-         SELECT id_registro_asignacion
-         FROM reporte_horas
-         WHERE id = $2
-       )`,
-      [estado, id]
-    );
+    const registroId = result.rows[0]?.id_registro_asignacion || null;
+    if (registroId) {
+      try {
+        // Actualizar aprobación y estado en la asignación asociada
+        await pool.query(
+          `UPDATE registro_asignaciones
+           SET aprobar_coordinador = $1,
+               estado = CASE
+                 WHEN $1 = 'Aprobado' THEN 'Proceso'
+                 WHEN $1 = 'Rechazado' THEN 'Abierto'
+                 ELSE estado
+               END
+           WHERE id = $2`,
+          [estado, registroId]
+        );
+      } catch (innerErr) {
+        console.error("Error actualizando registro_asignaciones:", innerErr);
+      }
+    }
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -1174,7 +1261,7 @@ app.post("/registro-asignaciones", async (req, res) => {
        WHERE ra.consultor_responsable_id = $1
          AND ra.id_modulo = $2
          AND con.id_cliente = $3
-         AND ra.estado = 'Activo'
+         AND ra.estado IN ('Abierto', 'Proceso')
        LIMIT 1`,
       [consultor_responsable_id, id_modulo, clienteId]
     );
@@ -1185,8 +1272,8 @@ app.post("/registro-asignaciones", async (req, res) => {
     const result = await pool.query(
       `INSERT INTO registro_asignaciones
         (id_consultoria, id_modulo, consultor_responsable_id, fecha_inicio, fecha_fin,
-         cantidad_dias, horas_asignadas, valor_hora, valor_dia, total_pagar)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         cantidad_dias, horas_asignadas, valor_hora, valor_dia, total_pagar, estado, aprobar_coordinador)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Abierto','Pendiente')
        RETURNING *`,
       [
         id_consultoria,

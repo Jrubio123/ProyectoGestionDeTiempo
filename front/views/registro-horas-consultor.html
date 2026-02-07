@@ -73,7 +73,7 @@
                             <td class="px-6 py-4 align-top w-1/4">
                                 <div class="flex items-start gap-3">
                                     <div class="mt-1.5 w-2 h-2 rounded-full" 
-                                         :class="item.estado === 'Activo' ? 'bg-green-500' : 'bg-yellow-500'"></div>
+                                         :class="item.estado === 'Abierto' ? 'bg-green-500' : 'bg-yellow-500'"></div>
                                     <div>
                                         <p class="font-bold text-gray-800 text-sm cursor-pointer hover:text-blue-600" 
                                            @click="verDetalle(item)" x-text="item.nombre_modulo || 'General'"></p>

@@ -38,7 +38,7 @@
                     <tr>
                         <th class="px-6 py-4">ID / Fecha Gen.</th>
                         <th class="px-6 py-4">Periodo Cobrado</th>
-                        <th class="px-6 py-4 text-center">Estado</th>
+                        <th class="px-6 py-4">Descripción</th>
                         <th class="px-6 py-4 text-right">Total</th>
                         <th class="px-6 py-4 text-center">Acciones</th>
                     </tr>
@@ -57,14 +57,8 @@
                                     <span x-text="formatDate(c.fecha_fin_periodo)"></span>
                                 </div>
                             </td>
-                            <td class="px-6 py-4 text-center">
-                                <span class="px-3 py-1 rounded-full text-xs font-bold"
-                                      :class="{
-                                          'bg-yellow-100 text-yellow-700': c.estado === 'Enviada',
-                                          'bg-green-100 text-green-700': c.estado === 'Pagada',
-                                          'bg-red-100 text-red-700': c.estado === 'Rechazada'
-                                      }"
-                                      x-text="c.estado"></span>
+                            <td class="px-6 py-4 text-gray-600">
+                                <span x-text="c.descripcion || '—'"></span>
                             </td>
                             <td class="px-6 py-4 text-right font-mono font-bold text-gray-700">
                                 <span x-text="formatearDinero(c.total_numeros)"></span>
@@ -106,6 +100,7 @@
                     <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
                         <tr>
                             <th class="p-3">Cliente / Módulo</th>
+                            <th class="p-3">Tipo Asignación</th>
                             <th class="p-3">Caso</th>
                             <th class="p-3 text-right">Cantidad</th>
                             <th class="p-3 text-right">Total</th>
@@ -118,6 +113,7 @@
                                     <p class="font-bold text-gray-800" x-text="d.cliente"></p>
                                     <p class="text-xs text-gray-500" x-text="d.modulo"></p>
                                 </td>
+                                <td class="p-3 text-gray-600" x-text="d.tipo_asignacion || '—'"></td>
                                 <td class="p-3 text-gray-600" x-text="d.nro_caso_int_ext || '---'"></td>
                                 <td class="p-3 text-right">
                                     <span x-text="d.cantidad_dias_reportados > 0 ? d.cantidad_dias_reportados + ' Días' : d.horas_reportadas + ' Hrs'"></span>

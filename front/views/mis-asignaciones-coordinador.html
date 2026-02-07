@@ -117,9 +117,9 @@
                                 class="inline-flex px-2 py-1 text-xs font-semibold rounded-full"
                                 :class="{
                                     'bg-yellow-100 text-yellow-800': asignacion.estado === 'Pendiente',
-                                    'bg-green-100 text-green-800': asignacion.estado === 'Activo',
+                                    'bg-green-100 text-green-800': asignacion.estado === 'Abierto',
                                     'bg-red-100 text-red-800': asignacion.estado === 'Reasignar' || asignacion.estado === 'Transferir',
-                                    'bg-gray-100 text-gray-800': !['Pendiente', 'Activo', 'Reasignar', 'Transferir'].includes(asignacion.estado)
+                                    'bg-gray-100 text-gray-800': !['Pendiente', 'Abierto', 'Proceso', 'Reasignar', 'Transferir'].includes(asignacion.estado)
                                 }"
                                 x-text="asignacion.estado"
                             ></span>
@@ -375,7 +375,9 @@
                             x-model="form.estado"
                             class="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         >
-                            <option value="Activo">Activo</option>
+                            <option value="Abierto">Abierto</option>
+                            <option value="Proceso">Proceso</option>
+                            <option value="Cerrado">Cerrado</option>
                             <option value="Inactivo">Inactivo</option>
                             <option value="Completado">Completado</option>
                             <option value="Reasignar">Reasignar</option>

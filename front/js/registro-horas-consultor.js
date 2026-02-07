@@ -25,7 +25,7 @@ window.registroHorasApp = function () {
         async cargarAsignaciones() {
             this.cargando = true;
             try {
-                const res = await axios.get(`${API}/mis-asignaciones`);
+                const res = await axios.get(`${API}/registro-horas-asignaciones`);
                 this.asignaciones = (res.data || []).map((a) => ({
                     ...a,
                     input_cantidad: 0
@@ -46,7 +46,7 @@ window.registroHorasApp = function () {
                     !f.estado ||
                     (f.estado === "Todos"
                         ? true
-                        : ["Activo", "En Proceso"].includes(a.estado));
+                        : ["Abierto", "Proceso"].includes(a.estado));
                 return matchCli && matchTipo && matchEstado;
             });
         },

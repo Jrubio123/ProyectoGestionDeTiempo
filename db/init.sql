@@ -26,10 +26,9 @@ CREATE TYPE tipo_aprobacion AS ENUM
 -- Estados de Asignación
 CREATE TYPE tipo_estado_asignacion AS ENUM
 (
-    'Activo',
-    'Inactivo',
-    'Completado',
-    'Cancelado'
+    'Abierto',
+    'Cerrado',
+    'Proceso'
 );
 
 -- Tipos de Servicio
@@ -86,8 +85,7 @@ CREATE TYPE tipo_moneda AS ENUM
 -- Tipos de Consultor
 CREATE TYPE tipo_consultor_enum AS ENUM
 (
-    'Interno',
-    'Externo',
+    'Principal',
     'Asociado'
 );
 
@@ -374,7 +372,7 @@ CREATE TABLE registro_asignaciones
 
     -- Aprobación y estado (antes Choice en SharePoint)
     aprobar_coordinador tipo_aprobacion DEFAULT 'Pendiente',
-    estado tipo_estado_asignacion DEFAULT 'Activo',
+    estado tipo_estado_asignacion DEFAULT 'Abierto',
 
     -- Fechas
     fecha_inicio DATE,
@@ -505,7 +503,7 @@ CREATE TABLE asignaciones_consultoria_mesa_fabrica
     consultor_responsable_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
 
     valor_hora DECIMAL(15, 2),
-    estado_asignacion tipo_estado_asignacion DEFAULT 'Activo',
+    estado_asignacion tipo_estado_asignacion DEFAULT 'Abierto',
     id_modulo INTEGER REFERENCES modulo(id) ON DELETE SET NULL,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -683,7 +681,7 @@ FROM registro_asignaciones ra
     LEFT JOIN usuarios coord ON con.coordinador_responsable_id = coord.id
     LEFT JOIN modulo m ON ra.id_modulo = m.id
     LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
-WHERE ra.estado = 'Activo';
+WHERE ra.estado IN ('Abierto', 'Proceso');
 
 COMMENT ON VIEW v_asignaciones_activas IS 'Vista de asignaciones activas con toda la información relacionada';
 

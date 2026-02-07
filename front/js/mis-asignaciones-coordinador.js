@@ -36,7 +36,7 @@ window.misAsignacionesApp = function () {
             nro_caso_interno: "",
             nro_caso_cliente: "",
             tipo_servicio: "",
-            estado: "Activo",
+            estado: "Abierto",
             observacion: ""
         },
 
@@ -127,7 +127,7 @@ window.misAsignacionesApp = function () {
                 nro_caso_interno: asignacion.nro_caso_interno || "",
                 nro_caso_cliente: asignacion.nro_caso_cliente || "",
                 tipo_servicio: asignacion.tipo_servicio || "",
-                estado: asignacion.estado || "Activo",
+                estado: asignacion.estado || "Abierto",
                 observacion: asignacion.observacion || ""
             };
 

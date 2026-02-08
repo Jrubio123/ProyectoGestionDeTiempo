@@ -15,8 +15,13 @@ const app = express();
 /* ===============================
    CONFIGURACIÓN
 =============================== */
+const extraOrigins = (process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin: ["http://localhost:3000", "http://localhost:4000"], // Permite frontend en ambos puertos
+  origin: ["http://localhost:3000", "http://localhost:4000", ...extraOrigins],
   credentials: true
 }));
 app.use(express.json());

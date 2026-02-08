@@ -1,6 +1,6 @@
 // js/registro-horas-consultor.js
 window.registroHorasApp = function () {
-    const API = "http://localhost:4000";
+    const API = window.API_BASE || "http://localhost:4000";
 
     return {
         usuario: { id: null, nombre: "", rol: "" },

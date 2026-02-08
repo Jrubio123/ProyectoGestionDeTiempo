@@ -1,6 +1,6 @@
 // js/mis-cuentas-cobros.js
 window.misCuentasApp = function () {
-    const API = "http://localhost:4000";
+    const API = window.API_BASE || "http://localhost:4000";
 
     return {
         usuario: { id: null },

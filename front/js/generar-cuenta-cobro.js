@@ -1,6 +1,6 @@
 // js/generar-cuenta-cobro.js
 window.cuentaCobroApp = function () {
-    const API = "http://localhost:4000";
+    const API = window.API_BASE || "http://localhost:4000";
 
     return {
         registros: [],

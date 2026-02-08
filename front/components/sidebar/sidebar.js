@@ -31,16 +31,48 @@ function initSidebar() {
     const isCollapsed = sidebar.classList.contains("collapsed");
     document.body.classList.toggle("sidebar-collapsed", isCollapsed);
 
-    const user = window.auth?.getUser?.();
-    const esAsociado = String(user?.tipo_consultor || "").toLowerCase() === "asociado";
-    if (esAsociado) {
-        const restrictedLinks = ["#mis-cuentas-cobros", "#generar-cuenta-cobro"];
-        restrictedLinks.forEach((href) => {
-            const link = sidebar.querySelector(`a.menu-link[href="${href}"]`);
-            const item = link ? link.closest(".menu-item") : null;
-            if (item) item.style.display = "none";
-        });
-    }
+    const roleKey = window.auth?.getRoleKey?.() || "other";
+    const roleRoutes = {
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "tarifas"],
+        coordinador: [
+            "inicio",
+            "asignacion-consultor",
+            "aprobar-rechazar-coordinador",
+            "mis-asignaciones-coordinador",
+            "asociar-subconsultores",
+            "tarifas"
+        ],
+        consultor_principal: [
+            "inicio",
+            "mis-asignaciones-consultor",
+            "registro-horas-consultor",
+            "asignacion-fabrica-mesa-servicio",
+            "generar-cuenta-cobro",
+            "mis-cuentas-cobros"
+        ],
+        consultor_asociado: [
+            "inicio",
+            "mis-asignaciones-consultor",
+            "registro-horas-consultor",
+            "asignacion-fabrica-mesa-servicio"
+        ]
+    };
+
+    const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
+    menuItems.forEach((item) => {
+        const link = item.querySelector(".menu-link");
+        if (!link) return;
+        const hash = (link.getAttribute("href") || "").replace("#", "");
+        item.style.display = allowed.has(hash) ? "" : "none";
+    });
+
+    const sections = sidebar.querySelectorAll(".menu-section");
+    sections.forEach((section) => {
+        const hasVisible = Array.from(section.querySelectorAll(".menu-item")).some(
+            (item) => item.style.display !== "none"
+        );
+        section.style.display = hasVisible ? "" : "none";
+    });
 
     menuItems.forEach((item) => {
         const link = item.querySelector(".menu-link");

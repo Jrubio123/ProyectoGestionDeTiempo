@@ -41,8 +41,23 @@ window.misCuentasApp = function () {
             }
         },
 
-        descargarPDF(cuenta) {
-            alert("Descargando PDF de cuenta #" + cuenta.id);
+        async descargarPDF(cuenta) {
+            try {
+                const res = await axios.get(`${API}/cuentas-cobro/${cuenta.id}/pdf`, {
+                    responseType: "blob"
+                });
+                const blob = new Blob([res.data], { type: "application/pdf" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `CuentaCobro_${cuenta.id}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                alert("No se pudo descargar el PDF");
+            }
         },
 
         limpiarFiltros() {

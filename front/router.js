@@ -32,7 +32,8 @@ const routes = {
     "registro-horas-consultor": "registro-horas-consultor",
     "aprobar-rechazar-coordinador": "aprobar-rechazar-coordinador",
     "mis-cuentas-cobros": "mis-cuentas-cobros",
-    "generar-cuenta-cobro": "generar-cuenta-cobro"
+    "generar-cuenta-cobro": "generar-cuenta-cobro",
+    "asignacion-fabrica-mesa-servicio": "asignacion-fabrica-mesa-servicio"
 };
 
 function router() {
@@ -43,8 +44,34 @@ function router() {
     const hash = location.hash.replace("#", "") || "inicio";
     const view = routes[hash];
 
-    const asociadoRestricted = new Set(["mis-cuentas-cobros", "generar-cuenta-cobro"]);
-    if (window.auth?.isAsociado?.() && asociadoRestricted.has(view)) {
+    const roleKey = window.auth?.getRoleKey?.() || "other";
+    const roleRoutes = {
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "tarifas"],
+        coordinador: [
+            "inicio",
+            "asignacion-consultor",
+            "aprobar-rechazar-coordinador",
+            "mis-asignaciones-coordinador",
+            "asociar-subconsultores",
+            "tarifas"
+        ],
+        consultor_principal: [
+            "inicio",
+            "mis-asignaciones-consultor",
+            "registro-horas-consultor",
+            "asignacion-fabrica-mesa-servicio",
+            "generar-cuenta-cobro",
+            "mis-cuentas-cobros"
+        ],
+        consultor_asociado: [
+            "inicio",
+            "mis-asignaciones-consultor",
+            "registro-horas-consultor",
+            "asignacion-fabrica-mesa-servicio"
+        ]
+    };
+    const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
+    if (view && !allowed.has(view)) {
         loadView("inicio");
         return;
     }

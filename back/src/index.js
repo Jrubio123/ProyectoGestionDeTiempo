@@ -7,6 +7,7 @@ const cors = require("cors");
 const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const PDFDocument = require("pdfkit");
 const { NumerosALetras } = require("numero-a-letras");
 
 
@@ -872,6 +873,94 @@ app.post("/reportar-horas", async (req, res) => {
     console.error(err);
     res.status(500).json({ error: "Error al reportar horas" });
   }
+  });
+
+/* ===============================
+   API - MESA/FÁBRICA
+=============================== */
+
+// Listar tickets mesa/fábrica del consultor
+app.get("/mesa-fabrica", async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const result = await pool.query(
+      `
+      SELECT
+        ra.id,
+        ra.nro_caso_interno,
+        ra.nro_caso_cliente,
+        ra.estado,
+        ra.tipo_servicio,
+        ra.observacion,
+        ra.fecha_inicio,
+        ra.fecha_fin,
+        c.id AS cliente_id,
+        c.titulo AS nombre_cliente,
+        m.id AS modulo_id,
+        m.titulo AS nombre_modulo,
+        ta.titulo AS tipo_asignacion,
+        coord.nombre_usuario AS nombre_coordinador
+      FROM registro_asignaciones ra
+        JOIN consultorias con ON ra.id_consultoria = con.id
+        JOIN clientes c ON con.id_cliente = c.id
+        LEFT JOIN usuarios coord ON con.coordinador_responsable_id = coord.id
+        LEFT JOIN modulo m ON ra.id_modulo = m.id
+        LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
+      WHERE ra.consultor_responsable_id = $1
+        AND ta.titulo IN ('Mesa de servicio', 'Fábrica')
+      ORDER BY ra.id DESC
+      `,
+      [userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener tickets" });
+  }
+});
+
+// Actualizar ticket mesa/fábrica
+app.put("/mesa-fabrica/:id", async (req, res) => {
+  const { id } = req.params;
+  const {
+    nro_caso_interno,
+    nro_caso_cliente,
+    tipo_servicio,
+    estado,
+    observacion,
+    fecha_cierre
+  } = req.body;
+
+  try {
+    const result = await pool.query(
+      `
+      UPDATE registro_asignaciones
+      SET nro_caso_interno = $1,
+          nro_caso_cliente = $2,
+          tipo_servicio = $3,
+          estado = $4,
+          observacion = $5,
+          fecha_fin = $6
+      WHERE id = $7
+        AND consultor_responsable_id = $8
+      RETURNING *
+      `,
+      [
+        nro_caso_interno || null,
+        nro_caso_cliente || null,
+        tipo_servicio || null,
+        estado || null,
+        observacion || null,
+        fecha_cierre || null,
+        id,
+        req.user?.id
+      ]
+    );
+    res.json(result.rows[0] || {});
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar ticket" });
+  }
 });
 
 /* ===============================
@@ -1138,6 +1227,172 @@ app.get("/cuentas-cobro/detalle/:cuentaId", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al obtener detalle de cuenta" });
+  }
+});
+
+// Descargar PDF de cuenta de cobro
+app.get("/cuentas-cobro/:id/pdf", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const cuentaRes = await pool.query(
+      `
+      SELECT
+        cc.*,
+        u.nombre_usuario,
+        u.cedula,
+        u.direccion,
+        u.telefono,
+        u.ciudad,
+        u.nro_cuenta_bancaria,
+        u.moneda_cobro,
+        b.titulo AS banco,
+        tcb.titulo AS tipo_cuenta,
+        di.titulo AS tipo_documento
+      FROM cuenta_cobro cc
+        JOIN usuarios u ON cc.created_by = u.id
+        LEFT JOIN bancos b ON u.banco_id = b.id
+        LEFT JOIN tipo_cuenta_bancaria tcb ON u.tipo_cuenta_id = tcb.id
+        LEFT JOIN documento_identidad di ON u.tipo_documento_id = di.id
+      WHERE cc.id = $1
+      `,
+      [id]
+    );
+
+    const cuenta = cuentaRes.rows[0];
+    if (!cuenta) {
+      return res.status(404).json({ error: "Cuenta no encontrada" });
+    }
+
+    const detallesRes = await pool.query(
+      `
+      SELECT
+        rh.id,
+        c.titulo AS cliente,
+        m.titulo AS modulo,
+        ta.titulo AS tipo_asignacion,
+        u.nombre_usuario AS consultor_responsable,
+        rh.nro_caso_int_ext,
+        rh.horas_reportadas,
+        rh.cantidad_dias_reportados,
+        rh.total_cobrar
+      FROM reporte_horas rh
+        LEFT JOIN clientes c ON rh.cliente_id = c.id
+        LEFT JOIN modulo m ON rh.modulo_id = m.id
+        LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
+        LEFT JOIN usuarios u ON rh.consultor_responsable_id = u.id
+      WHERE rh.id_cuenta_cobro = $1
+      ORDER BY rh.id DESC
+      `,
+      [id]
+    );
+
+    const detalles = detallesRes.rows || [];
+    const formatNumber = (val) =>
+      new Intl.NumberFormat("es-CO", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(Number(val || 0));
+
+    const formatDate = (d) => {
+      if (!d) return "";
+      const date = new Date(d);
+      if (Number.isNaN(date.getTime())) return "";
+      const months = [
+        "Enero",
+        "Febrero",
+        "Marzo",
+        "Abril",
+        "Mayo",
+        "Junio",
+        "Julio",
+        "Agosto",
+        "Septiembre",
+        "Octubre",
+        "Noviembre",
+        "Diciembre"
+      ];
+      return `${date.getDate()} de ${months[date.getMonth()]} de ${date.getFullYear()}`;
+    };
+
+    const totalNumeros = Number(cuenta.total_cuenta_cobro || 0);
+    const totalLetras = cuenta.total_letras || buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="CuentaCobro_${id}.pdf"`);
+
+    const doc = new PDFDocument({ margin: 40 });
+    doc.pipe(res);
+
+    doc.fontSize(12).text(`Cuenta de Cobro N° ${cuenta.id}`, { align: "right" });
+    doc.moveDown(1);
+    doc.fontSize(11).text(`${formatDate(cuenta.created_at)}, ${cuenta.ciudad_cobro || ""}`);
+    doc.moveDown(1.5);
+
+    doc.fontSize(12).font("Helvetica-Bold").text("SILVER CONSULTING S.A.S.", { align: "center" });
+    doc.text("NIT 901.149.190-0", { align: "center" });
+    doc.moveDown(1.5);
+
+    doc.font("Helvetica-Bold").text("DEBE A:", { align: "center" });
+    doc.font("Helvetica").text(cuenta.nombre_usuario || "", { align: "center" });
+    doc.text(`${cuenta.tipo_documento || "Documento"}: ${cuenta.cedula || ""}`, { align: "center" });
+    doc.moveDown(1);
+
+    doc.font("Helvetica-Bold").text("LA SUMA DE:", { align: "center" });
+    doc.font("Helvetica-Bold").text(`${formatNumber(totalNumeros)} (${totalLetras})`, { align: "center" });
+    doc.moveDown(1.5);
+
+    doc.font("Helvetica-Bold").text("Por concepto de:", { continued: true });
+    doc.font("Helvetica").text(
+      ` Honorarios de Consultorías: ${cuenta.descripcion || "Cuenta de cobro"} del ${cuenta.fecha_periodo_inicio || ""} al ${cuenta.fecha_periodo_fin || ""}`
+    );
+    doc.moveDown(1);
+
+    doc.font("Helvetica").text(`Dirección: ${cuenta.direccion || "—"}`);
+    doc.text(`Teléfono: ${cuenta.telefono || "—"}`);
+    doc.text(`No de Cuenta Bancaria: ${cuenta.nro_cuenta_bancaria || "—"}`);
+    doc.text(`Banco: ${cuenta.banco || "—"}`);
+    doc.text(`Tipo de Cuenta: ${cuenta.tipo_cuenta || "—"}`);
+    doc.text(`Titular: ${cuenta.nombre_usuario || "—"}`);
+    doc.text(`${cuenta.tipo_documento || "Documento"}: ${cuenta.cedula || "—"}`);
+    doc.moveDown(1.5);
+
+    doc.font("Helvetica-Bold").text("Detalle de Cuenta de Cobro");
+    doc.moveDown(0.5);
+
+    const tableStartY = doc.y;
+    const colX = { cliente: 40, consultor: 170, tipo: 300, caso: 400, cant: 470, total: 520 };
+    doc.fontSize(9).font("Helvetica-Bold");
+    doc.text("Cliente", colX.cliente, tableStartY);
+    doc.text("Consultor", colX.consultor, tableStartY);
+    doc.text("Tipo", colX.tipo, tableStartY);
+    doc.text("Caso", colX.caso, tableStartY);
+    doc.text("Cant.", colX.cant, tableStartY, { width: 40, align: "right" });
+    doc.text("Total", colX.total, tableStartY, { width: 60, align: "right" });
+    doc.moveDown(0.5);
+    doc.font("Helvetica").fontSize(9);
+
+    let y = doc.y + 2;
+    detalles.forEach((d) => {
+      doc.text(d.cliente || "—", colX.cliente, y, { width: 120 });
+      doc.text(d.consultor_responsable || "—", colX.consultor, y, { width: 120 });
+      doc.text(d.tipo_asignacion || "—", colX.tipo, y, { width: 90 });
+      doc.text(d.nro_caso_int_ext || "—", colX.caso, y, { width: 60 });
+      const cantidad = d.cantidad_dias_reportados > 0
+        ? `${d.cantidad_dias_reportados} D`
+        : `${Number(d.horas_reportadas || 0)} H`;
+      doc.text(cantidad, colX.cant, y, { width: 40, align: "right" });
+      doc.text(formatNumber(d.total_cobrar), colX.total, y, { width: 60, align: "right" });
+      y += 14;
+      if (y > doc.page.height - 60) {
+        doc.addPage();
+        y = 50;
+      }
+    });
+
+    doc.end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al generar PDF" });
   }
 });
 

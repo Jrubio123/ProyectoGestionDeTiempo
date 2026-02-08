@@ -66,6 +66,20 @@ window.auth = (function () {
         return String(user?.tipo_consultor || "").toLowerCase() === "asociado";
     }
 
+    function getRoleKey() {
+        const user = getUser();
+        const rol = String(user?.rol || "").toLowerCase().trim();
+        const tipoConsultor = String(user?.tipo_consultor || "").toLowerCase().trim();
+
+        if (rol === "administrador") return "admin";
+        if (rol === "coordinador") return "coordinador";
+        if (tipoConsultor === "asociado") return "consultor_asociado";
+        if (rol === "consultor principal" || rol === "consultor" || rol === "mesa de servicio") {
+            return "consultor_principal";
+        }
+        return "other";
+    }
+
     async function hydrateUser() {
         const token = getToken();
         if (!token || !window.axios) return null;
@@ -95,6 +109,7 @@ window.auth = (function () {
         getToken,
         getUser,
         isAsociado,
+        getRoleKey,
         setSession,
         clearSession,
         isAuthenticated,

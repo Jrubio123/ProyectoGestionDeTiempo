@@ -9,6 +9,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const PDFDocument = require("pdfkit");
 const { NumerosALetras } = require("numero-a-letras");
+const { sendEmail } = require("./email");
 
 
 const app = express();
@@ -57,6 +58,22 @@ function buildTotalLetras(numero, moneda = 'COP') {
     } else {
         return `${textoNumeros} ${nombreMoneda}`;
     }
+}
+
+async function sendEmailSafe({ to, subject, text, html }) {
+  try {
+    await sendEmail({ to, subject, text, html });
+  } catch (err) {
+    console.error("Error enviando correo:", err.message);
+  }
+}
+
+function buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total_cobrar }) {
+  const partes = [];
+  if (horas_reportadas) partes.push(`Horas: ${horas_reportadas}`);
+  if (cantidad_dias_reportados) partes.push(`Días: ${cantidad_dias_reportados}`);
+  if (total_cobrar) partes.push(`Total: ${total_cobrar}`);
+  return partes.length ? partes.join(" | ") : "Sin detalle numérico";
 }
 
 /* ===============================
@@ -539,7 +556,35 @@ app.post("/consultorias", async (req, res) => {
         descripcion_consultoria || null
       ]
     );
-    res.json(result.rows[0]);
+    const created = result.rows[0];
+
+    // Email al coordinador asignado
+    const mailInfo = await pool.query(
+      `SELECT
+         u.email AS coordinador_email,
+         u.nombre_usuario AS coordinador_nombre,
+         c.titulo AS cliente,
+         ta.titulo AS tipo_asignacion
+       FROM usuarios u
+         JOIN clientes c ON c.id = $1
+         JOIN tipo_asignacion ta ON ta.id = $2
+       WHERE u.id = $3`,
+      [cliente_id, tipo_asignacion_id, coordinador_id]
+    );
+    const row = mailInfo.rows[0];
+    if (row?.coordinador_email) {
+      await sendEmailSafe({
+        to: row.coordinador_email,
+        subject: `Nueva asignación como Coordinador - ${row.cliente}`,
+        text:
+          `Hola ${row.coordinador_nombre || ""},\n` +
+          `Se creó una consultoría para el cliente ${row.cliente}.\n` +
+          `Tipo de asignación: ${row.tipo_asignacion}.\n` +
+          `Descripción: ${descripcion_consultoria || "Sin descripción"}.\n`
+      });
+    }
+
+    res.json(created);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al guardar consultoría" });
@@ -868,6 +913,38 @@ app.post("/reportar-horas", async (req, res) => {
       [id_registro_asignacion]
     );
 
+    // Email al coordinador para aprobación
+    const correoInfo = await pool.query(
+      `SELECT
+         ucoord.email AS coordinador_email,
+         ucoord.nombre_usuario AS coordinador_nombre,
+         ucons.nombre_usuario AS consultor_nombre,
+         c.titulo AS cliente,
+         ta.titulo AS tipo_asignacion
+       FROM consultorias con
+         JOIN clientes c ON con.id_cliente = c.id
+         LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
+         LEFT JOIN usuarios ucoord ON ucoord.id = con.coordinador_responsable_id
+         LEFT JOIN usuarios ucons ON ucons.id = $2
+       WHERE con.id = (
+         SELECT id_consultoria FROM registro_asignaciones WHERE id = $1
+       )`,
+      [id_registro_asignacion, consultorId]
+    );
+    const correoRow = correoInfo.rows[0];
+    if (correoRow?.coordinador_email) {
+      await sendEmailSafe({
+        to: correoRow.coordinador_email,
+        subject: `Reporte de horas pendiente - ${correoRow.cliente}`,
+        text:
+          `Hola ${correoRow.coordinador_nombre || ""},\n` +
+          `El consultor ${correoRow.consultor_nombre || ""} reportó horas.\n` +
+          `Cliente: ${correoRow.cliente}\n` +
+          `Tipo: ${correoRow.tipo_asignacion || "N/A"}\n` +
+          `Detalle: ${buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total_cobrar })}\n`
+      });
+    }
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -1149,7 +1226,31 @@ app.post("/cuentas-cobro", async (req, res) => {
     );
 
     await client.query("COMMIT");
-    res.json({ ok: true, cuenta: insert.rows[0] });
+
+    // Email a contabilidad
+    const cuenta = insert.rows[0];
+    const contabilidadEmail = process.env.EMAIL_TO_CONTABILIDAD || "";
+    if (contabilidadEmail) {
+      const userInfo = await pool.query(
+        `SELECT nombre_usuario, email
+         FROM usuarios
+         WHERE id = $1`,
+        [consultor_id]
+      );
+      const consultor = userInfo.rows[0];
+      await sendEmailSafe({
+        to: contabilidadEmail,
+        subject: `Nueva cuenta de cobro #${cuenta.id}`,
+        text:
+          `Se generó una cuenta de cobro.\n` +
+          `Consultor: ${consultor?.nombre_usuario || ""} (${consultor?.email || ""})\n` +
+          `Periodo: ${cuenta.fecha_periodo_inicio} a ${cuenta.fecha_periodo_fin}\n` +
+          `Total: ${cuenta.total_cuenta_cobro}\n` +
+          `Descripción: ${cuenta.descripcion || ""}\n`
+      });
+    }
+
+    res.json({ ok: true, cuenta });
   } catch (err) {
     await client.query("ROLLBACK");
     console.error(err);
@@ -1472,6 +1573,44 @@ app.put("/aprobaciones/:id", async (req, res) => {
       }
     }
 
+    // Email al consultor con resultado de aprobación
+    const detalle = await pool.query(
+      `SELECT
+         u.email AS consultor_email,
+         u.nombre_usuario AS consultor_nombre,
+         c.titulo AS cliente,
+         ta.titulo AS tipo_asignacion,
+         rh.horas_reportadas,
+         rh.cantidad_dias_reportados,
+         rh.total_cobrar
+       FROM reporte_horas rh
+         LEFT JOIN usuarios u ON rh.consultor_responsable_id = u.id
+         LEFT JOIN clientes c ON rh.cliente_id = c.id
+         LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
+       WHERE rh.id = $1`,
+      [id]
+    );
+    const info = detalle.rows[0];
+    if (info?.consultor_email) {
+      const titulo =
+        estado === "Aprobado"
+          ? "Reporte aprobado"
+          : estado === "Rechazado"
+          ? "Reporte rechazado"
+          : "Actualización de reporte";
+      await sendEmailSafe({
+        to: info.consultor_email,
+        subject: `${titulo} - ${info.cliente || "Cliente"}`,
+        text:
+          `Hola ${info.consultor_nombre || ""},\n` +
+          `Tu reporte fue ${estado}.\n` +
+          `Cliente: ${info.cliente || "N/A"}\n` +
+          `Tipo: ${info.tipo_asignacion || "N/A"}\n` +
+          `Detalle: ${buildReporteResumen(info)}\n` +
+          (estado === "Rechazado" && motivo ? `Motivo: ${motivo}\n` : "")
+      });
+    }
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -1585,27 +1724,62 @@ app.post("/registro-asignaciones", async (req, res) => {
       return res.status(400).json({ error: "Ya existe asignación para este consultor, cliente y módulo" });
     }
 
-      const result = await pool.query(
-        `INSERT INTO registro_asignaciones
-          (id_consultoria, id_modulo, consultor_responsable_id, fecha_inicio, fecha_fin,
-           cantidad_dias, horas_asignadas, valor_hora, valor_dia, tipo_servicio, total_pagar, estado, aprobar_coordinador)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Abierto','Pendiente')
-         RETURNING *`,
-        [
-          id_consultoria,
-          id_modulo,
-          consultor_responsable_id,
-          fecha_inicio || null,
-          fecha_fin || null,
-          cantidad_dias || null,
-          horas_asignadas || null,
-          valor_hora || null,
-          valor_dia || null,
-          tipo_servicio || null,
-          total_pagar || null
-        ]
-      );
-    res.json(result.rows[0]);
+    const result = await pool.query(
+      `INSERT INTO registro_asignaciones
+        (id_consultoria, id_modulo, consultor_responsable_id, fecha_inicio, fecha_fin,
+         cantidad_dias, horas_asignadas, valor_hora, valor_dia, tipo_servicio, total_pagar, estado, aprobar_coordinador)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Abierto','Pendiente')
+       RETURNING *`,
+      [
+        id_consultoria,
+        id_modulo,
+        consultor_responsable_id,
+        fecha_inicio || null,
+        fecha_fin || null,
+        cantidad_dias || null,
+        horas_asignadas || null,
+        valor_hora || null,
+        valor_dia || null,
+        tipo_servicio || null,
+        total_pagar || null
+      ]
+    );
+    const created = result.rows[0];
+
+    // Email al consultor asignado
+    const mailInfo = await pool.query(
+      `SELECT
+         uc.email AS consultor_email,
+         uc.nombre_usuario AS consultor_nombre,
+         cli.titulo AS cliente,
+         ta.titulo AS tipo_asignacion,
+         m.titulo AS modulo,
+         ucoord.nombre_usuario AS coordinador_nombre
+       FROM consultorias con
+         JOIN clientes cli ON cli.id = con.id_cliente
+         LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
+         LEFT JOIN modulo m ON m.id = $2
+         LEFT JOIN usuarios ucoord ON ucoord.id = con.coordinador_responsable_id
+         JOIN usuarios uc ON uc.id = $1
+       WHERE con.id = $3`,
+      [consultor_responsable_id, id_modulo, id_consultoria]
+    );
+    const row = mailInfo.rows[0];
+    if (row?.consultor_email) {
+      await sendEmailSafe({
+        to: row.consultor_email,
+        subject: `Nueva asignación - ${row.cliente}`,
+        text:
+          `Hola ${row.consultor_nombre || ""},\n` +
+          `Tienes una nueva asignación.\n` +
+          `Cliente: ${row.cliente}\n` +
+          `Tipo: ${row.tipo_asignacion || "N/A"}\n` +
+          `Módulo: ${row.modulo || "N/A"}\n` +
+          `Coordinador: ${row.coordinador_nombre || "N/A"}\n`
+      });
+    }
+
+    res.json(created);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al crear asignación" });

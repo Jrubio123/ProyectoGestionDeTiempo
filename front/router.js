@@ -52,8 +52,7 @@ function router() {
             "asignacion-consultor",
             "aprobar-rechazar-coordinador",
             "mis-asignaciones-coordinador",
-            "asociar-subconsultores",
-            "tarifas"
+            "asociar-subconsultores"
         ],
         consultor_principal: [
             "inicio",

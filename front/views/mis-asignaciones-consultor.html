@@ -15,14 +15,14 @@
     </div>
 
     <div class="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
-        <div class="grid grid-cols-7 gap-4 px-6 py-4 bg-gray-50 border-b border-gray-100 font-semibold text-sm text-gray-700">
+        <div class="grid gap-4 px-6 py-4 bg-gray-50 border-b border-gray-100 font-semibold text-sm text-gray-700" :class="$data.esAsociado ? 'grid-cols-4' : 'grid-cols-7'">
             <div>Cliente</div>
             <div>Coordinador</div>
             <div>Tipo</div>
             <div>Módulo</div>
-            <div class="text-right">Tarifa</div>
-            <div class="text-right">Total</div>
-            <div class="text-center">Info</div>
+            <div class="text-right" x-show="!$data.esAsociado" x-cloak>Tarifa</div>
+            <div class="text-right" x-show="!$data.esAsociado" x-cloak>Total</div>
+            <div class="text-center" x-show="!$data.esAsociado" x-cloak>Info</div>
         </div>
 
         <div x-show="cargando" class="p-10 text-center text-gray-400" x-cloak>
@@ -35,14 +35,14 @@
 
         <div class="divide-y divide-gray-100 max-h-[600px] overflow-y-auto">
             <template x-for="a in asignaciones" :key="a.id">
-                <div class="grid grid-cols-7 gap-4 px-6 py-4 hover:bg-indigo-50/40 transition-colors">
+                <div class="grid gap-4 px-6 py-4 hover:bg-indigo-50/40 transition-colors" :class="$data.esAsociado ? 'grid-cols-4' : 'grid-cols-7'">
                     <div class="text-sm font-medium text-gray-800" x-text="a.nombre_cliente"></div>
                     <div class="text-sm text-gray-600" x-text="a.nombre_coordinador || '-'"></div>
                     <div class="text-sm text-gray-600" x-text="a.nombre_tipo_asignacion || '-'"></div>
                     <div class="text-sm text-gray-600" x-text="a.nombre_modulo || '-'"></div>
-                    <div class="text-sm font-semibold text-right text-indigo-700" x-text="formatearDinero(tarifaMostrar(a))"></div>
-                    <div class="text-sm font-semibold text-right text-green-700" x-text="formatearDinero(a.total_pagar || 0)"></div>
-                    <div class="flex justify-center">
+                    <div class="text-sm font-semibold text-right text-indigo-700" x-show="!$data.esAsociado" x-cloak x-text="formatearDinero(tarifaMostrar(a))"></div>
+                    <div class="text-sm font-semibold text-right text-green-700" x-show="!$data.esAsociado" x-cloak x-text="formatearDinero(a.total_pagar || 0)"></div>
+                    <div class="flex justify-center" x-show="!$data.esAsociado" x-cloak>
                         <button @click="verDetalle(a)" class="p-2 text-indigo-600 hover:bg-indigo-100 rounded-lg" title="Ver detalle">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 20a8 8 0 100-16 8 8 0 000 16z"></path>
@@ -90,11 +90,11 @@
                     <span class="text-gray-500">Días:</span>
                     <div class="font-medium" x-text="detalle.cantidad_dias || '-'"></div>
                 </div>
-                <div>
+                <div x-show="!$data.esAsociado" x-cloak>
                     <span class="text-gray-500">Tarifa:</span>
                     <div class="font-medium" x-text="formatearDinero(tarifaMostrar(detalle))"></div>
                 </div>
-                <div>
+                <div x-show="!$data.esAsociado" x-cloak>
                     <span class="text-gray-500">Total:</span>
                     <div class="font-medium" x-text="formatearDinero(detalle.total_pagar || 0)"></div>
                 </div>

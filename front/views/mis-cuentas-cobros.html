@@ -100,6 +100,7 @@
                     <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
                         <tr>
                             <th class="p-3">Cliente / Módulo</th>
+                            <th class="p-3">Consultor</th>
                             <th class="p-3">Tipo Asignación</th>
                             <th class="p-3">Caso</th>
                             <th class="p-3 text-right">Cantidad</th>
@@ -113,6 +114,7 @@
                                     <p class="font-bold text-gray-800" x-text="d.cliente"></p>
                                     <p class="text-xs text-gray-500" x-text="d.modulo"></p>
                                 </td>
+                                <td class="p-3 text-gray-600" x-text="d.consultor_responsable || '—'"></td>
                                 <td class="p-3 text-gray-600" x-text="d.tipo_asignacion || '—'"></td>
                                 <td class="p-3 text-gray-600" x-text="d.nro_caso_int_ext || '---'"></td>
                                 <td class="p-3 text-right">

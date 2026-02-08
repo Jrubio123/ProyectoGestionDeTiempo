@@ -61,6 +61,11 @@ window.auth = (function () {
         return !!getToken();
     }
 
+    function isAsociado() {
+        const user = getUser();
+        return String(user?.tipo_consultor || "").toLowerCase() === "asociado";
+    }
+
     async function hydrateUser() {
         const token = getToken();
         if (!token || !window.axios) return null;
@@ -89,6 +94,7 @@ window.auth = (function () {
     return {
         getToken,
         getUser,
+        isAsociado,
         setSession,
         clearSession,
         isAuthenticated,

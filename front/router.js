@@ -43,6 +43,12 @@ function router() {
     const hash = location.hash.replace("#", "") || "inicio";
     const view = routes[hash];
 
+    const asociadoRestricted = new Set(["mis-cuentas-cobros", "generar-cuenta-cobro"]);
+    if (window.auth?.isAsociado?.() && asociadoRestricted.has(view)) {
+        loadView("inicio");
+        return;
+    }
+
     if (view) {
         loadView(view);
     } else {

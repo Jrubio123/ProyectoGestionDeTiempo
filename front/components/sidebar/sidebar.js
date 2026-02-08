@@ -31,6 +31,17 @@ function initSidebar() {
     const isCollapsed = sidebar.classList.contains("collapsed");
     document.body.classList.toggle("sidebar-collapsed", isCollapsed);
 
+    const user = window.auth?.getUser?.();
+    const esAsociado = String(user?.tipo_consultor || "").toLowerCase() === "asociado";
+    if (esAsociado) {
+        const restrictedLinks = ["#mis-cuentas-cobros", "#generar-cuenta-cobro"];
+        restrictedLinks.forEach((href) => {
+            const link = sidebar.querySelector(`a.menu-link[href="${href}"]`);
+            const item = link ? link.closest(".menu-item") : null;
+            if (item) item.style.display = "none";
+        });
+    }
+
     menuItems.forEach((item) => {
         const link = item.querySelector(".menu-link");
         if (!link) return;

@@ -247,13 +247,13 @@ app.post("/auth/login", async (req, res) => {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
 
-    const result = await pool.query(
-      `SELECT u.id, u.nombre_usuario, u.email, u.password_hash, u.rol_usuario_id, r.titulo AS rol
-       FROM usuarios u
-       LEFT JOIN roles r ON u.rol_usuario_id = r.id
-       WHERE u.email = $1 AND u.activo = true`,
-      [email]
-    );
+      const result = await pool.query(
+        `SELECT u.id, u.nombre_usuario, u.email, u.password_hash, u.rol_usuario_id, u.tipo_consultor, r.titulo AS rol
+         FROM usuarios u
+         LEFT JOIN roles r ON u.rol_usuario_id = r.id
+         WHERE u.email = $1 AND u.activo = true`,
+        [email]
+      );
 
     if (result.rows.length === 0) {
       return res.status(401).json({ error: "Credenciales inválidas" });
@@ -265,13 +265,14 @@ app.post("/auth/login", async (req, res) => {
       return res.status(401).json({ error: "Credenciales inválidas" });
     }
 
-    const payload = {
-      id: user.id,
-      nombre_usuario: user.nombre_usuario,
-      email: user.email,
-      rol: user.rol || "",
-      rol_usuario_id: user.rol_usuario_id
-    };
+      const payload = {
+        id: user.id,
+        nombre_usuario: user.nombre_usuario,
+        email: user.email,
+        rol: user.rol || "",
+        rol_usuario_id: user.rol_usuario_id,
+        tipo_consultor: user.tipo_consultor || null
+      };
 
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "12h" });
     res.json({ token, user: payload });
@@ -287,13 +288,13 @@ app.get("/auth/me", async (req, res) => {
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
     if (!token) return res.status(401).json({ error: "No autorizado" });
     const decoded = jwt.verify(token, JWT_SECRET);
-    const result = await pool.query(
-      `SELECT u.id, u.nombre_usuario, u.email, u.rol_usuario_id, r.titulo AS rol
-       FROM usuarios u
-       LEFT JOIN roles r ON u.rol_usuario_id = r.id
-       WHERE u.id = $1 AND u.activo = true`,
-      [decoded.id]
-    );
+      const result = await pool.query(
+        `SELECT u.id, u.nombre_usuario, u.email, u.rol_usuario_id, u.tipo_consultor, r.titulo AS rol
+         FROM usuarios u
+         LEFT JOIN roles r ON u.rol_usuario_id = r.id
+         WHERE u.id = $1 AND u.activo = true`,
+        [decoded.id]
+      );
     if (result.rows.length === 0) {
       return res.status(401).json({ error: "Usuario no válido" });
     }
@@ -589,44 +590,42 @@ app.delete("/consultorias/:id", async (req, res) => {
 app.get("/mis-asignaciones-coordinador", async (req, res) => {
   try {
     const userId = req.user?.id || req.query.coordinador_id;
-    const result = await pool.query(`
-      SELECT
-        ra.id,
-        con.id AS consultoria_id,
-        c.id AS cliente_id,
-        c.titulo AS cliente,
-        u.nombre_usuario AS consultor_responsable,
-        coord.nombre_usuario AS coordinador,
-        m.titulo AS modulo,
-        ta.titulo AS tipo_asignacion,
-        con.id_tipo_asignacion AS tipo_asignacion_id,
-        con.descripcion_consultoria,
-        ra.consultor_responsable_id,
-        ra.id_modulo,
-        ra.estado,
-        ra.tipo_servicio,
-        ra.valor_hora,
-        ra.valor_dia,
-        ra.total_pagar,
-        ra.cantidad_dias,
-        ra.fecha_inicio,
-        ra.fecha_fin,
-        ra.nro_caso_interno,
-        ra.nro_caso_cliente,
-        ra.observacion
-      FROM consultorias con
-        JOIN clientes c ON con.id_cliente = c.id
-        LEFT JOIN registro_asignaciones ra
-          ON ra.id_consultoria = con.id
-          AND ra.estado IN ('Abierto', 'Proceso')
-        LEFT JOIN usuarios u ON ra.consultor_responsable_id = u.id
-        LEFT JOIN usuarios coord ON con.coordinador_responsable_id = coord.id
-        LEFT JOIN modulo m ON ra.id_modulo = m.id
-        LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
-      WHERE con.activo = true
-        AND ($1::int IS NULL OR con.coordinador_responsable_id = $1)
-      ORDER BY ra.id DESC
-    `, [userId || null]);
+      const result = await pool.query(`
+        SELECT
+          ra.id,
+          con.id AS consultoria_id,
+          c.id AS cliente_id,
+          c.titulo AS cliente,
+          u.nombre_usuario AS consultor_responsable,
+          coord.nombre_usuario AS coordinador,
+          m.titulo AS modulo,
+          ta.titulo AS tipo_asignacion,
+          con.id_tipo_asignacion AS tipo_asignacion_id,
+          con.descripcion_consultoria,
+          ra.consultor_responsable_id,
+          ra.id_modulo,
+          ra.estado,
+          ra.tipo_servicio,
+          ra.valor_hora,
+          ra.valor_dia,
+          ra.total_pagar,
+          ra.cantidad_dias,
+          ra.fecha_inicio,
+          ra.fecha_fin,
+          ra.nro_caso_interno,
+          ra.nro_caso_cliente,
+          ra.observacion
+        FROM registro_asignaciones ra
+          JOIN consultorias con ON ra.id_consultoria = con.id
+          JOIN clientes c ON con.id_cliente = c.id
+          LEFT JOIN usuarios u ON ra.consultor_responsable_id = u.id
+          LEFT JOIN usuarios coord ON con.coordinador_responsable_id = coord.id
+          LEFT JOIN modulo m ON ra.id_modulo = m.id
+          LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
+        WHERE con.activo = true
+          AND ($1::int IS NULL OR con.coordinador_responsable_id = $1)
+        ORDER BY ra.id DESC
+      `, [userId || null]);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -751,17 +750,19 @@ app.post("/reportar-horas", async (req, res) => {
       return res.status(400).json({ error: "Falta id_registro_asignacion" });
     }
 
-    const existente = await pool.query(
-      `SELECT id
-       FROM reporte_horas
-       WHERE id_registro_asignacion = $1
-         AND estado_reporte = 'Pendiente'
-       LIMIT 1`,
-      [id_registro_asignacion]
-    );
-    if (existente.rows.length > 0) {
-      return res.status(400).json({ error: "Ya hay un reporte pendiente para esta asignación" });
-    }
+      const existente = await pool.query(
+        `SELECT id, estado_reporte
+         FROM reporte_horas
+         WHERE id_registro_asignacion = $1
+           AND estado_reporte IN ('Pendiente', 'Rechazado')
+         ORDER BY updated_at DESC NULLS LAST, id DESC
+         LIMIT 1`,
+        [id_registro_asignacion]
+      );
+      const existenteRow = existente.rows[0];
+      if (existenteRow?.estado_reporte === "Pendiente") {
+        return res.status(400).json({ error: "Ya hay un reporte pendiente para esta asignación" });
+      }
 
     const meta = await pool.query(`
       SELECT
@@ -780,30 +781,79 @@ app.post("/reportar-horas", async (req, res) => {
       return res.status(404).json({ error: "Asignación no encontrada" });
     }
 
-    const info = meta.rows[0];
-    const consultorId = info.consultor_responsable_id || req.user?.id || null;
-    const result = await pool.query(
-      `INSERT INTO reporte_horas
-        (id_registro_asignacion, horas_reportadas, cantidad_dias_reportados, total_cobrar,
-         tipo_servicio, nro_caso_int_ext, cliente_id, tipo_asignacion_id, modulo_id,
-         coordinador_id, consultor_responsable_id, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-       RETURNING *`,
-      [
-        id_registro_asignacion,
-        horas_reportadas || null,
-        cantidad_dias_reportados || null,
-        total_cobrar || null,
-        tipo_servicio || null,
-        nro_caso_int_ext || null,
-        info.id_cliente,
-        info.id_tipo_asignacion,
-        info.id_modulo,
-        info.coordinador_responsable_id,
-        consultorId,
-        req.user?.id || consultorId
-      ]
-    );
+      const info = meta.rows[0];
+      const consultorId = info.consultor_responsable_id || req.user?.id || null;
+      let consultorPrincipalId = null;
+      if (consultorId) {
+        const principalRes = await pool.query(
+          "SELECT id_consultor_principal, tipo_consultor FROM usuarios WHERE id = $1",
+          [consultorId]
+        );
+        const principalRow = principalRes.rows[0];
+        if (principalRow?.id_consultor_principal) {
+          consultorPrincipalId = principalRow.id_consultor_principal;
+        }
+      }
+      let result;
+      if (existenteRow?.estado_reporte === "Rechazado") {
+        result = await pool.query(
+          `UPDATE reporte_horas
+           SET horas_reportadas = $1,
+               cantidad_dias_reportados = $2,
+               total_cobrar = $3,
+               tipo_servicio = $4,
+               nro_caso_int_ext = $5,
+               cliente_id = $6,
+               tipo_asignacion_id = $7,
+               modulo_id = $8,
+               coordinador_id = $9,
+               consultor_responsable_id = $10,
+               consultor_principal_id = $11,
+               estado_reporte = 'Pendiente',
+               motivo_rechazo = NULL,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $12
+           RETURNING *`,
+          [
+            horas_reportadas || null,
+            cantidad_dias_reportados || null,
+            total_cobrar || null,
+            tipo_servicio || null,
+            nro_caso_int_ext || null,
+            info.id_cliente,
+            info.id_tipo_asignacion,
+            info.id_modulo,
+            info.coordinador_responsable_id,
+            consultorId,
+            consultorPrincipalId,
+            existenteRow.id
+          ]
+        );
+      } else {
+        result = await pool.query(
+          `INSERT INTO reporte_horas
+            (id_registro_asignacion, horas_reportadas, cantidad_dias_reportados, total_cobrar,
+             tipo_servicio, nro_caso_int_ext, cliente_id, tipo_asignacion_id, modulo_id,
+             coordinador_id, consultor_responsable_id, consultor_principal_id, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+           RETURNING *`,
+          [
+            id_registro_asignacion,
+            horas_reportadas || null,
+            cantidad_dias_reportados || null,
+            total_cobrar || null,
+            tipo_servicio || null,
+            nro_caso_int_ext || null,
+            info.id_cliente,
+            info.id_tipo_asignacion,
+            info.id_modulo,
+            info.coordinador_responsable_id,
+            consultorId,
+            consultorPrincipalId,
+            req.user?.id || consultorId
+          ]
+        );
+      }
 
     await pool.query(
       `UPDATE registro_asignaciones
@@ -1059,19 +1109,21 @@ app.get("/cuentas-cobro/detalle/:cuentaId", async (req, res) => {
   try {
     const result = await pool.query(
       `
-      SELECT
-        rh.id,
-        c.titulo AS cliente,
-        m.titulo AS modulo,
-        ta.titulo AS tipo_asignacion,
-        rh.nro_caso_int_ext,
-        rh.horas_reportadas,
-        rh.cantidad_dias_reportados,
-        rh.total_cobrar
-      FROM reporte_horas rh
-        LEFT JOIN clientes c ON rh.cliente_id = c.id
-        LEFT JOIN modulo m ON rh.modulo_id = m.id
-        LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
+        SELECT
+          rh.id,
+          c.titulo AS cliente,
+          m.titulo AS modulo,
+          ta.titulo AS tipo_asignacion,
+          u.nombre_usuario AS consultor_responsable,
+          rh.nro_caso_int_ext,
+          rh.horas_reportadas,
+          rh.cantidad_dias_reportados,
+          rh.total_cobrar
+        FROM reporte_horas rh
+          LEFT JOIN clientes c ON rh.cliente_id = c.id
+          LEFT JOIN modulo m ON rh.modulo_id = m.id
+          LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
+          LEFT JOIN usuarios u ON rh.consultor_responsable_id = u.id
       WHERE rh.id_cuenta_cobro = $1
       ORDER BY rh.id DESC
       `,
@@ -1230,18 +1282,19 @@ app.put("/registro-asignaciones/:id", async (req, res) => {
 
 // Crear asignación (registro_asignaciones)
 app.post("/registro-asignaciones", async (req, res) => {
-  const {
-    id_consultoria,
-    id_modulo,
-    consultor_responsable_id,
-    fecha_inicio,
-    fecha_fin,
-    cantidad_dias,
-    horas_asignadas,
-    valor_hora,
-    valor_dia,
-    total_pagar
-  } = req.body;
+    const {
+      id_consultoria,
+      id_modulo,
+      consultor_responsable_id,
+      fecha_inicio,
+      fecha_fin,
+      cantidad_dias,
+      horas_asignadas,
+      valor_hora,
+      valor_dia,
+      tipo_servicio,
+      total_pagar
+    } = req.body;
 
   try {
     if (!id_consultoria || !consultor_responsable_id || !id_modulo) {
@@ -1272,25 +1325,26 @@ app.post("/registro-asignaciones", async (req, res) => {
       return res.status(400).json({ error: "Ya existe asignación para este consultor, cliente y módulo" });
     }
 
-    const result = await pool.query(
-      `INSERT INTO registro_asignaciones
-        (id_consultoria, id_modulo, consultor_responsable_id, fecha_inicio, fecha_fin,
-         cantidad_dias, horas_asignadas, valor_hora, valor_dia, total_pagar, estado, aprobar_coordinador)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Abierto','Pendiente')
-       RETURNING *`,
-      [
-        id_consultoria,
-        id_modulo,
-        consultor_responsable_id,
-        fecha_inicio || null,
-        fecha_fin || null,
-        cantidad_dias || null,
-        horas_asignadas || null,
-        valor_hora || null,
-        valor_dia || null,
-        total_pagar || null
-      ]
-    );
+      const result = await pool.query(
+        `INSERT INTO registro_asignaciones
+          (id_consultoria, id_modulo, consultor_responsable_id, fecha_inicio, fecha_fin,
+           cantidad_dias, horas_asignadas, valor_hora, valor_dia, tipo_servicio, total_pagar, estado, aprobar_coordinador)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Abierto','Pendiente')
+         RETURNING *`,
+        [
+          id_consultoria,
+          id_modulo,
+          consultor_responsable_id,
+          fecha_inicio || null,
+          fecha_fin || null,
+          cantidad_dias || null,
+          horas_asignadas || null,
+          valor_hora || null,
+          valor_dia || null,
+          tipo_servicio || null,
+          total_pagar || null
+        ]
+      );
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);

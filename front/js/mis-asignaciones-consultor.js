@@ -7,8 +7,10 @@ window.misAsignacionesConsultorApp = function () {
         asignaciones: [],
         modalOpen: false,
         detalle: {},
+        esAsociado: false,
 
         async init() {
+            this.esAsociado = window.auth?.isAsociado?.() || false;
             await this.cargarAsignaciones();
         },
 

@@ -4,6 +4,7 @@ const envFile =
 require("dotenv").config({ path: path.resolve(process.cwd(), envFile) });
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -17,6 +18,9 @@ const app = express();
 /* ===============================
    CONFIGURACIÓN
 =============================== */
+app.use(helmet({
+  contentSecurityPolicy: false
+}));
 const extraOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
   .map((s) => s.trim())
@@ -76,6 +80,28 @@ function buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total
   return partes.length ? partes.join(" | ") : "Sin detalle numérico";
 }
 
+const normalizeValue = (value) => String(value || "").toLowerCase().trim();
+
+const hasAccess = (req, { roles = [], tipos = [] }) => {
+  const userRole = normalizeValue(req.user?.rol);
+  const userTipo = normalizeValue(req.user?.tipo_consultor);
+  const allowedRoles = roles.map(normalizeValue);
+  const allowedTipos = tipos.map(normalizeValue);
+  return (
+    (allowedRoles.length > 0 && allowedRoles.includes(userRole)) ||
+    (allowedTipos.length > 0 && allowedTipos.includes(userTipo))
+  );
+};
+
+const requireAccess = ({ roles = [], tipos = [] } = {}) => (req, res, next) => {
+  if (!roles.length && !tipos.length) return next();
+  if (!req.user) return res.status(401).json({ error: "No autorizado" });
+  if (!hasAccess(req, { roles, tipos })) {
+    return res.status(403).json({ error: "Acceso denegado" });
+  }
+  return next();
+};
+
 /* ===============================
    SERVIR ARCHIVOS DEL FRONTEND
 =============================== */
@@ -92,7 +118,7 @@ function buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total
 =============================== */
 
 // 1. OBTENER TODOS
-app.get("/clientes", async (req, res) => {
+app.get("/clientes", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM clientes WHERE activo = true ORDER BY id DESC");
     res.json(result.rows);
@@ -103,7 +129,7 @@ app.get("/clientes", async (req, res) => {
 });
 
 // 2. CREAR CLIENTE
-app.post("/clientes", async (req, res) => {
+app.post("/clientes", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   const { titulo, nit, prefijo } = req.body;
 
   try {
@@ -130,7 +156,7 @@ app.post("/clientes", async (req, res) => {
 });
 
 // 3. EDITAR CLIENTE
-app.put("/clientes/:id", async (req, res) => {
+app.put("/clientes/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   const { id } = req.params;
   const { titulo, nit, prefijo } = req.body;
 
@@ -147,7 +173,7 @@ app.put("/clientes/:id", async (req, res) => {
 });
 
 // 4. ELIMINAR CLIENTE (Soft Delete)
-app.delete("/clientes/:id", async (req, res) => {
+app.delete("/clientes/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -168,7 +194,7 @@ app.delete("/clientes/:id", async (req, res) => {
 =============================== */
 
 // Consultores activos
-app.get("/consultores", async (req, res) => {
+app.get("/consultores", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT 
@@ -334,11 +360,6 @@ const authMiddleware = (req, res, next) => {
   const auth = req.headers.authorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
 
-  // En desarrollo, permitir flujo sin auth para acelerar pruebas
-  if (!token && process.env.BACK_ENV !== "production") {
-    return next();
-  }
-
   if (!token) return res.status(401).json({ error: "No autorizado" });
 
   try {
@@ -352,7 +373,7 @@ const authMiddleware = (req, res, next) => {
 app.use(authMiddleware);
 
 // Coordinadores activos
-app.get("/coordinadores", async (req, res) => {
+app.get("/coordinadores", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT 
@@ -375,7 +396,7 @@ app.get("/coordinadores", async (req, res) => {
 });
 
 // Tarifa vigente de un consultor
-app.get("/tarifa-consultor", async (req, res) => {
+app.get("/tarifa-consultor", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const { consultor_id, cliente_id, modulo_id, tipo_asignacion_id } = req.query;
   try {
     if (!consultor_id || !cliente_id) {
@@ -397,7 +418,7 @@ app.get("/tarifa-consultor", async (req, res) => {
 =============================== */
 
 // Obtener tarifas
-app.get("/tarifas", async (req, res) => {
+app.get("/tarifas", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT 
@@ -429,7 +450,7 @@ app.get("/tarifas", async (req, res) => {
 });
 
 // Crear tarifa
-app.post("/tarifas", async (req, res) => {
+app.post("/tarifas", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   const { cliente_id, consultor_id, modulo_id, tipo_asignacion_id, valor } = req.body;
 
   try {
@@ -458,7 +479,7 @@ app.post("/tarifas", async (req, res) => {
 });
 
 // Actualizar tarifa
-app.put("/tarifas/:id", async (req, res) => {
+app.put("/tarifas/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   const { id } = req.params;
   const { cliente_id, consultor_id, modulo_id, tipo_asignacion_id, valor } = req.body;
 
@@ -489,7 +510,7 @@ app.put("/tarifas/:id", async (req, res) => {
 });
 
 // Eliminar tarifa (soft delete)
-app.delete("/tarifas/:id", async (req, res) => {
+app.delete("/tarifas/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -506,7 +527,7 @@ app.delete("/tarifas/:id", async (req, res) => {
 =============================== */
 
 // Obtener consultorías
-app.get("/consultorias", async (req, res) => {
+app.get("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   try {
     const coordinadorId = req.query.coordinador_id || null;
     const result = await pool.query(`
@@ -536,7 +557,7 @@ app.get("/consultorias", async (req, res) => {
 });
 
 // Crear consultoría
-app.post("/consultorias", async (req, res) => {
+app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const { cliente_id, coordinador_id, tipo_asignacion_id, descripcion_consultoria } = req.body;
 
   try {
@@ -592,7 +613,7 @@ app.post("/consultorias", async (req, res) => {
 });
 
 // Actualizar consultoría
-app.put("/consultorias/:id", async (req, res) => {
+app.put("/consultorias/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const { id } = req.params;
   const { cliente_id, coordinador_id, tipo_asignacion_id, descripcion_consultoria } = req.body;
 
@@ -621,7 +642,7 @@ app.put("/consultorias/:id", async (req, res) => {
 });
 
 // Eliminar consultoría (soft delete)
-app.delete("/consultorias/:id", async (req, res) => {
+app.delete("/consultorias/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -638,7 +659,7 @@ app.delete("/consultorias/:id", async (req, res) => {
 =============================== */
 
 // Listar asignaciones activas para coordinador
-app.get("/mis-asignaciones-coordinador", async (req, res) => {
+app.get("/mis-asignaciones-coordinador", requireAccess({ roles: ["Coordinador"] }), async (req, res) => {
   try {
     const userId = req.user?.id || req.query.coordinador_id;
       const result = await pool.query(`
@@ -685,7 +706,7 @@ app.get("/mis-asignaciones-coordinador", async (req, res) => {
 });
 
 // Listar asignaciones activas para consultor
-app.get("/mis-asignaciones", async (req, res) => {
+app.get("/mis-asignaciones", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   try {
     const userId = req.user?.id || req.query.consultor_id;
     const result = await pool.query(`
@@ -735,7 +756,7 @@ app.get("/mis-asignaciones", async (req, res) => {
 });
 
 // Asignaciones disponibles para registro de horas (consultor)
-app.get("/registro-horas-asignaciones", async (req, res) => {
+app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   try {
     const userId = req.user?.id || req.query.consultor_id;
     const result = await pool.query(`
@@ -786,7 +807,7 @@ app.get("/registro-horas-asignaciones", async (req, res) => {
 });
 
 // Reportar horas
-app.post("/reportar-horas", async (req, res) => {
+app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   const {
     id_registro_asignacion,
     horas_reportadas,
@@ -957,7 +978,7 @@ app.post("/reportar-horas", async (req, res) => {
 =============================== */
 
 // Listar tickets mesa/fábrica del consultor
-app.get("/mesa-fabrica", async (req, res) => {
+app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   try {
     const userId = req.user?.id;
     const result = await pool.query(
@@ -997,7 +1018,7 @@ app.get("/mesa-fabrica", async (req, res) => {
 });
 
 // Actualizar ticket mesa/fábrica
-app.put("/mesa-fabrica/:id", async (req, res) => {
+app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   const { id } = req.params;
   const {
     nro_caso_interno,
@@ -1045,9 +1066,13 @@ app.put("/mesa-fabrica/:id", async (req, res) => {
 =============================== */
 
 // Registros aprobados por cobrar
-app.get("/horas-por-cobrar/:consultorId", async (req, res) => {
+app.get("/horas-por-cobrar/:consultorId", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
   const { consultorId } = req.params;
   try {
+    const role = normalizeValue(req.user?.rol);
+    if (!["administrador", "coordinador"].includes(role) && String(req.user?.id) !== String(consultorId)) {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
     if (!consultorId) return res.json([]);
     const result = await pool.query(
       `
@@ -1079,15 +1104,21 @@ app.get("/horas-por-cobrar/:consultorId", async (req, res) => {
 });
 
 // Vista previa de cuenta de cobro (total + letras)
-app.post("/cuentas-cobro/preview", async (req, res) => {
+app.post("/cuentas-cobro/preview", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   const { consultor_id, ids_reportes } = req.body;
   
   if (!consultor_id || !Array.isArray(ids_reportes) || ids_reportes.length === 0) {
     return res.status(400).json({ error: "Faltan datos para previsualizar" });
   }
 
-  try {
-    // 1. Obtener moneda del consultor
+    try {
+      if (normalizeValue(req.user?.tipo_consultor) === "asociado") {
+        return res.status(403).json({ error: "Acceso denegado" });
+      }
+      if (String(req.user?.id) !== String(consultor_id)) {
+        return res.status(403).json({ error: "Acceso denegado" });
+      }
+      // 1. Obtener moneda del consultor
     const monedaRes = await pool.query(
       "SELECT moneda_cobro FROM usuarios WHERE id = $1",
       [consultor_id]
@@ -1141,7 +1172,7 @@ app.post("/cuentas-cobro/preview", async (req, res) => {
 });
 
 // Crear cuenta de cobro
-app.post("/cuentas-cobro", async (req, res) => {
+app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   const { consultor_id, fecha_inicio, fecha_fin, total_letras, ciudad_cobro, total_numeros, ids_reportes } = req.body;
   if (!consultor_id || !fecha_inicio || !fecha_fin || !total_letras || !ciudad_cobro || !Array.isArray(ids_reportes) || ids_reportes.length === 0) {
     return res.status(400).json({ error: "Faltan datos para generar la cuenta" });
@@ -1149,6 +1180,12 @@ app.post("/cuentas-cobro", async (req, res) => {
 
   const client = await pool.connect();
   try {
+    if (normalizeValue(req.user?.tipo_consultor) === "asociado") {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+    if (String(req.user?.id) !== String(consultor_id)) {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
     await client.query("BEGIN");
 
     const meta = await client.query(
@@ -1171,6 +1208,16 @@ app.post("/cuentas-cobro", async (req, res) => {
     if (Number(info.count) !== ids_reportes.length) {
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "Algunos registros no son válidos para cobro" });
+    }
+
+    if (String(info.min_fecha || "") !== String(fecha_inicio) || String(info.max_fecha || "") !== String(fecha_fin)) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "El rango de fechas no coincide con los reportes aprobados" });
+    }
+
+    if (total_numeros !== undefined && Number(total_numeros) !== Number(info.total || 0)) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "El total no coincide con los reportes aprobados" });
     }
 
     const monedaRes = await client.query(
@@ -1261,10 +1308,14 @@ app.post("/cuentas-cobro", async (req, res) => {
 });
 
 // Historial de cuentas de cobro por usuario
-app.get("/cuentas-cobro/historial/:userId", async (req, res) => {
+app.get("/cuentas-cobro/historial/:userId", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
   const { userId } = req.params;
   const { fecha_inicio, fecha_fin } = req.query;
   try {
+    const role = normalizeValue(req.user?.rol);
+    if (!["administrador", "coordinador"].includes(role) && String(req.user?.id) !== String(userId)) {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
     if (!userId) return res.json([]);
     const params = [userId];
     let whereFecha = "";
@@ -1299,9 +1350,20 @@ app.get("/cuentas-cobro/historial/:userId", async (req, res) => {
 });
 
 // Detalle de cuenta de cobro
-app.get("/cuentas-cobro/detalle/:cuentaId", async (req, res) => {
+app.get("/cuentas-cobro/detalle/:cuentaId", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
   const { cuentaId } = req.params;
   try {
+    const role = normalizeValue(req.user?.rol);
+    if (!["administrador", "coordinador"].includes(role)) {
+      const owner = await pool.query(
+        "SELECT created_by FROM cuenta_cobro WHERE id = $1",
+        [cuentaId]
+      );
+      const createdBy = owner.rows[0]?.created_by;
+      if (!createdBy || String(createdBy) !== String(req.user?.id)) {
+        return res.status(403).json({ error: "Acceso denegado" });
+      }
+    }
     const result = await pool.query(
       `
         SELECT
@@ -1332,9 +1394,20 @@ app.get("/cuentas-cobro/detalle/:cuentaId", async (req, res) => {
 });
 
 // Descargar PDF de cuenta de cobro
-app.get("/cuentas-cobro/:id/pdf", async (req, res) => {
+app.get("/cuentas-cobro/:id/pdf", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
   const { id } = req.params;
   try {
+    const role = normalizeValue(req.user?.rol);
+    if (!["administrador", "coordinador"].includes(role)) {
+      const owner = await pool.query(
+        "SELECT created_by FROM cuenta_cobro WHERE id = $1",
+        [id]
+      );
+      const createdBy = owner.rows[0]?.created_by;
+      if (!createdBy || String(createdBy) !== String(req.user?.id)) {
+        return res.status(403).json({ error: "Acceso denegado" });
+      }
+    }
     const cuentaRes = await pool.query(
       `
       SELECT
@@ -1499,7 +1572,7 @@ app.get("/cuentas-cobro/:id/pdf", async (req, res) => {
 
 
 // Reportes pendientes para coordinador
-app.get("/aprobaciones/pendientes", async (req, res) => {
+app.get("/aprobaciones/pendientes", requireAccess({ roles: ["Coordinador"] }), async (req, res) => {
   try {
     const userId = req.user?.id;
     const result = await pool.query(`
@@ -1532,7 +1605,7 @@ app.get("/aprobaciones/pendientes", async (req, res) => {
 });
 
 // Aprobar / Rechazar reporte
-app.put("/aprobaciones/:id", async (req, res) => {
+app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (req, res) => {
   const { id } = req.params;
   const { estado, motivo } = req.body;
 
@@ -1619,7 +1692,7 @@ app.put("/aprobaciones/:id", async (req, res) => {
 });
 
 // Actualizar asignación (registro_asignaciones)
-app.put("/registro-asignaciones/:id", async (req, res) => {
+app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const { id } = req.params;
   const {
     consultor_responsable_id,
@@ -1680,7 +1753,7 @@ app.put("/registro-asignaciones/:id", async (req, res) => {
 });
 
 // Crear asignación (registro_asignaciones)
-app.post("/registro-asignaciones", async (req, res) => {
+app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
     const {
       id_consultoria,
       id_modulo,

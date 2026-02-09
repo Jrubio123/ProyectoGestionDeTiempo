@@ -3,6 +3,10 @@ window.tarifasApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
 
     return {
+        getAuthConfig() {
+            const token = window.auth?.getToken?.();
+            return token ? { headers: { Authorization: `Bearer ${token}` } } : null;
+        },
         cat: {
             clientes: [],
             consultores: [],
@@ -29,6 +33,10 @@ window.tarifasApp = function () {
         monedaSymbol: "$",
 
         async init() {
+            if (!this.getAuthConfig()) {
+                window.location.href = "/login.html";
+                return;
+            }
             await Promise.all([
                 this.cargarCatalogos(),
                 this.cargarDatos()
@@ -38,10 +46,10 @@ window.tarifasApp = function () {
         async cargarCatalogos() {
             try {
                 const [resClientes, resConsultores, resModulos, resTipos] = await Promise.all([
-                    axios.get(`${API}/clientes`),
-                    axios.get(`${API}/consultores`),
-                    axios.get(`${API}/modulos`),
-                    axios.get(`${API}/tipos-asignacion`)
+                    axios.get(`${API}/clientes`, this.getAuthConfig()),
+                    axios.get(`${API}/consultores`, this.getAuthConfig()),
+                    axios.get(`${API}/modulos`, this.getAuthConfig()),
+                    axios.get(`${API}/tipos-asignacion`, this.getAuthConfig())
                 ]);
 
                 this.cat.clientes = resClientes.data || [];
@@ -58,7 +66,7 @@ window.tarifasApp = function () {
 
         async cargarDatos() {
             try {
-                const res = await axios.get(`${API}/tarifas`);
+                const res = await axios.get(`${API}/tarifas`, this.getAuthConfig());
                 this.tarifas = res.data || [];
             } catch (e) {
                 this.tarifas = [];
@@ -227,7 +235,7 @@ window.tarifasApp = function () {
         async eliminar(id) {
             if (!confirm("¿Eliminar tarifa?")) return;
             try {
-                await axios.delete(`${API}/tarifas/${id}`);
+                await axios.delete(`${API}/tarifas/${id}`, this.getAuthConfig());
                 await this.cargarDatos();
             } catch (e) {
                 alert("Error eliminando");

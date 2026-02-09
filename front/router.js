@@ -46,13 +46,15 @@ function router() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "tarifas"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador","asociar-subconsultores", "tarifas"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
+            "cliente",
             "aprobar-rechazar-coordinador",
             "mis-asignaciones-coordinador",
-            "asociar-subconsultores"
+            "asociar-subconsultores",
+            "tarifas"
         ],
         consultor_principal: [
             "inicio",

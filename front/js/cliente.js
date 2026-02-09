@@ -3,6 +3,10 @@ window.clientesApp = function() {
     const API = window.API_BASE || "http://localhost:4000";
 
     return {
+        getAuthConfig() {
+            const token = window.auth?.getToken?.();
+            return token ? { headers: { Authorization: `Bearer ${token}` } } : null;
+        },
         clientes: [],
         filters: {
             query: ""
@@ -18,13 +22,17 @@ window.clientesApp = function() {
 
         async init() {
             console.log('Inicializando clientesApp');
+            if (!this.getAuthConfig()) {
+                window.location.href = "/login.html";
+                return;
+            }
             await this.cargarClientes();
         },
 
         async cargarClientes() {
             try {
                 console.log('Cargando clientes...');
-                const res = await axios.get(`${API}/clientes`);
+                const res = await axios.get(`${API}/clientes`, this.getAuthConfig());
                 this.clientes = res.data;
                 console.log('Clientes cargados:', this.clientes.length);
             } catch (error) {
@@ -44,14 +52,16 @@ window.clientesApp = function() {
                     // EDITAR
                     await axios.put(
                         `${API}/clientes/${this.form.id}`,
-                        this.form
+                        this.form,
+                        this.getAuthConfig()
                     );
                     alert('Cliente actualizado correctamente');
                 } else {
                     // CREAR
                     await axios.post(
                         `${API}/clientes`,
-                        this.form
+                        this.form,
+                        this.getAuthConfig()
                     );
                     alert('Cliente creado correctamente');
                 }
@@ -80,7 +90,7 @@ window.clientesApp = function() {
             if (!confirm("¿Está seguro de eliminar este cliente?")) return;
 
             try {
-                await axios.delete(`${API}/clientes/${id}`);
+                await axios.delete(`${API}/clientes/${id}`, this.getAuthConfig());
                 await this.cargarClientes();
                 alert('Cliente eliminado correctamente');
             } catch (error) {

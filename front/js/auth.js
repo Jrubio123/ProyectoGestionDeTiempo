@@ -2,6 +2,7 @@
 window.auth = (function () {
     const TOKEN_KEY = "token";
     const USER_KEY = "user";
+    const API_BASE = window.API_BASE || "http://localhost:4000";
 
     function safeGet(key) {
         try {
@@ -85,7 +86,7 @@ window.auth = (function () {
         if (!token || !window.axios) return null;
         window.axios.defaults.headers.common.Authorization = `Bearer ${token}`;
         try {
-            const res = await window.axios.get("http://localhost:4000/auth/me");
+            const res = await window.axios.get(`${API_BASE}/auth/me`);
             if (res?.data?.user) {
                 safeSet(USER_KEY, JSON.stringify(res.data.user));
                 return res.data.user;
@@ -117,6 +118,27 @@ window.auth = (function () {
         requireAuth
     };
 })();
+
+// Ensure axios always sends token when available.
+function setupAxiosAuth() {
+    if (!window.axios || window.__authAxiosReady) return;
+    window.__authAxiosReady = true;
+    const token = window.auth?.getToken?.();
+    if (token) {
+        window.axios.defaults.headers.common.Authorization = `Bearer ${token}`;
+    }
+    window.axios.interceptors.request.use((config) => {
+        const t = window.auth?.getToken?.();
+        if (t) {
+            config.headers = config.headers || {};
+            config.headers.Authorization = `Bearer ${t}`;
+        }
+        return config;
+    });
+}
+
+setupAxiosAuth();
+document.addEventListener("DOMContentLoaded", setupAxiosAuth);
 
 // Protect SPA routes by default.
 document.addEventListener("DOMContentLoaded", () => {

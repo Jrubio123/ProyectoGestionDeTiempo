@@ -1,4 +1,4 @@
-<div x-data="subConsultoresApp" class="max-w-7xl mx-auto space-y-6 animate-fade-in-up">
+<div x-data="subConsultoresApp()" class="max-w-7xl mx-auto space-y-6 animate-fade-in-up">
 
     <div class="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-orange-50 flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
@@ -9,134 +9,83 @@
         </div>
         <button @click="abrirModal()" class="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl shadow-lg shadow-orange-500/30 transition-all hover:-translate-y-0.5 flex items-center gap-2">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
-            Nuevo Asociado
+            Asociar Consultor
         </button>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        
-        <template x-for="c in consultores" :key="c.id">
-            <div class="bg-white rounded-2xl shadow-md border border-gray-100 hover:shadow-xl transition-all duration-300 overflow-hidden group">
-                
-                <div class="p-6 pb-4 flex items-center gap-4 border-b border-gray-50">
-                    <div class="w-12 h-12 rounded-full bg-gradient-to-br from-orange-400 to-red-500 flex items-center justify-center text-white font-bold text-lg shadow-md">
-                        <span x-text="c.nombre_usuario.charAt(0)"></span>
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <h3 class="font-bold text-gray-800 truncate" x-text="c.nombre_usuario"></h3>
-                        <p class="text-xs text-gray-500 truncate" x-text="c.email"></p>
-                    </div>
-                    <button @click="editar(c)" class="text-gray-400 hover:text-orange-500 transition-colors">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Consultores</h2>
+                <span class="text-xs text-gray-400" x-text="principales.length"></span>
+            </div>
+            <div class="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+                <template x-for="p in principales" :key="p.id">
+                    <button @click="seleccionarPrincipal(p)" class="w-full text-left px-4 py-3 rounded-xl border transition-all"
+                        :class="principalSeleccionado && principalSeleccionado.id === p.id ? 'border-orange-300 bg-orange-50 text-orange-700' : 'border-gray-100 hover:border-orange-200 hover:bg-orange-50/40'">
+                        <div class="font-semibold text-sm truncate" x-text="p.nombre_usuario"></div>
+                        <div class="text-xs text-gray-500 truncate" x-text="p.email"></div>
                     </button>
-                </div>
-
-                <div class="p-6 pt-4 space-y-3">
-                    <div class="flex items-center gap-3 text-sm text-gray-600">
-                        <span class="w-6 text-center">📞</span>
-                        <span x-text="c.telefono || 'Sin teléfono'"></span>
-                    </div>
-                    <div class="flex items-center gap-3 text-sm text-gray-600">
-                        <span class="w-6 text-center">💳</span>
-                        <span x-text="c.cedula || 'Sin ID'"></span>
-                    </div>
-                    
-                    <div class="mt-4 p-3 bg-orange-50 rounded-xl border border-orange-100">
-                        <p class="text-[10px] font-bold text-orange-400 uppercase tracking-wider mb-1">Información Bancaria</p>
-                        <p class="text-sm font-semibold text-gray-800 flex justify-between">
-                            <span x-text="c.banco || '---'"></span>
-                            <span class="font-mono" x-text="c.moneda_cobro"></span>
-                        </p>
-                        <p class="text-xs text-gray-500 font-mono mt-0.5" x-text="c.nro_cuenta_bancaria || '---'"></p>
-                    </div>
-                </div>
-
-                <div class="px-6 py-3 bg-gray-50 border-t border-gray-100 flex justify-between items-center">
-                    <span class="text-xs font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded-full">Activo</span>
-                    <button @click="eliminar(c)" class="text-xs text-red-400 hover:text-red-600 hover:underline">Desvincular</button>
+                </template>
+                <div x-show="principales.length === 0" class="text-sm text-gray-400 text-center py-8">
+                    No hay consultores disponibles.
                 </div>
             </div>
-        </template>
-
-        <div x-show="consultores.length === 0" class="col-span-full py-12 flex flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-200 rounded-2xl">
-            <svg class="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-            <p>No tienes consultores asociados.</p>
-            <button @click="abrirModal()" class="mt-4 text-orange-500 font-bold hover:underline">Agregar el primero</button>
         </div>
 
+        <div class="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h2 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Asociados</h2>
+                    <p class="text-xs text-gray-500" x-show="principalSeleccionado">
+                        Principal: <span class="font-semibold" x-text="principalSeleccionado?.nombre_usuario"></span>
+                    </p>
+                </div>
+                <span class="text-xs text-gray-400" x-text="asociados.length"></span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <template x-for="c in asociados" :key="c.id">
+                    <div class="border border-gray-100 rounded-xl p-4 flex items-center justify-between">
+                        <div class="min-w-0">
+                            <div class="font-semibold text-sm truncate" x-text="c.nombre_usuario"></div>
+                            <div class="text-xs text-gray-500 truncate" x-text="c.email"></div>
+                        </div>
+                        <button @click="eliminar(c)" class="text-xs text-red-400 hover:text-red-600 hover:underline">Desvincular</button>
+                    </div>
+                </template>
+
+                <div x-show="asociados.length === 0" class="col-span-full py-10 flex flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-200 rounded-2xl">
+                    <svg class="w-14 h-14 mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                    <p>No hay asociados para este consultor.</p>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div x-show="modal.open" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" style="display: none;">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-8 transform transition-all scale-100 overflow-y-auto max-h-[90vh]">
-            
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-8 transform transition-all scale-100">
             <div class="flex justify-between items-center mb-6 border-b border-gray-100 pb-4">
-                <h3 class="text-2xl font-bold text-gray-800" x-text="modal.isEdit ? 'Editar Consultor' : 'Nuevo Asociado'"></h3>
+                <h3 class="text-2xl font-bold text-gray-800">Asociar consultor</h3>
                 <button @click="modal.open = false" class="text-gray-400 hover:text-gray-600"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
 
-            <form @submit.prevent="guardar" class="space-y-4">
-                
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Nombre Completo</label>
-                        <input type="text" x-model="form.nombre_usuario" required class="w-full p-3 border border-gray-200 rounded-xl text-sm focus:border-orange-500 outline-none">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Email (Login)</label>
-                        <input type="email" x-model="form.email" :disabled="modal.isEdit" required class="w-full p-3 border border-gray-200 rounded-xl text-sm focus:border-orange-500 outline-none disabled:bg-gray-100 disabled:text-gray-500">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Teléfono</label>
-                        <input type="text" x-model="form.telefono" class="w-full p-3 border border-gray-200 rounded-xl text-sm focus:border-orange-500 outline-none">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Cédula / NIT</label>
-                        <input type="text" x-model="form.cedula" class="w-full p-3 border border-gray-200 rounded-xl text-sm focus:border-orange-500 outline-none">
-                    </div>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Consultor disponible</label>
+                    <select x-model="seleccionadoId" class="w-full p-3 bg-white border border-gray-200 rounded-xl text-sm focus:border-orange-500 outline-none">
+                        <option value="">Seleccione...</option>
+                        <template x-for="c in disponibles" :key="c.id">
+                            <option :value="c.id" x-text="`${c.nombre_usuario} - ${c.email}`"></option>
+                        </template>
+                    </select>
                 </div>
 
-                <div class="mt-6 pt-4 border-t border-gray-100">
-                    <h4 class="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
-                        <span class="bg-orange-100 p-1 rounded text-orange-600">🏦</span> Datos Financieros
-                    </h4>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Banco</label>
-                            <select x-model="form.banco" class="w-full p-3 bg-white border border-gray-200 rounded-xl text-sm focus:border-orange-500 outline-none">
-                                <option value="">Seleccione...</option>
-                                <option value="Bancolombia">Bancolombia</option>
-                                <option value="Davivienda">Davivienda</option>
-                                <option value="BBVA">BBVA</option>
-                                <option value="Banco de Bogotá">Banco de Bogotá</option>
-                                <option value="Nequi">Nequi</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Tipo Cuenta</label>
-                            <select x-model="form.tipo_cuenta" class="w-full p-3 bg-white border border-gray-200 rounded-xl text-sm focus:border-orange-500 outline-none">
-                                <option value="Ahorros">Ahorros</option>
-                                <option value="Corriente">Corriente</option>
-                            </select>
-                        </div>
-                        <div class="md:col-span-2">
-                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Número de Cuenta</label>
-                            <input type="text" x-model="form.nro_cuenta_bancaria" class="w-full p-3 border border-gray-200 rounded-xl text-sm font-mono focus:border-orange-500 outline-none">
-                        </div>
-                         <div>
-                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Moneda</label>
-                            <select x-model="form.moneda_cobro" class="w-full p-3 bg-white border border-gray-200 rounded-xl text-sm focus:border-orange-500 outline-none">
-                                <option value="COP">COP (Pesos)</option>
-                                <option value="USD">USD (Dólares)</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flex justify-end gap-3 mt-8">
+                <div class="flex justify-end gap-3 pt-2">
                     <button type="button" @click="modal.open = false" class="px-6 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Cancelar</button>
-                    <button type="submit" class="px-8 py-3 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold rounded-xl shadow-lg hover:shadow-orange-500/30 transition-transform hover:-translate-y-0.5">Guardar</button>
+                    <button type="button" @click="asociar" class="px-8 py-3 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold rounded-xl shadow-lg hover:shadow-orange-500/30 transition-transform hover:-translate-y-0.5">Asociar</button>
                 </div>
-            </form>
+            </div>
         </div>
     </div>
 

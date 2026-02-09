@@ -15,6 +15,8 @@ const { sendEmail } = require("./email");
 
 const app = express();
 
+console.log("[startup] DEBUG_AUTH:", process.env.DEBUG_AUTH);
+
 /* ===============================
    CONFIGURACIÓN
 =============================== */
@@ -28,9 +30,13 @@ const extraOrigins = (process.env.CORS_ORIGINS || "")
 
 app.use(cors({
   origin: ["http://localhost:3000", "http://localhost:4000", ...extraOrigins],
-  credentials: true
+  credentials: true,
+  allowedHeaders: ["Content-Type", "Authorization"],
+  exposedHeaders: ["Authorization"],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 }));
 app.use(express.json());
+app.options('*', cors());
 
 /* ===============================
    BASE DE DATOS
@@ -95,7 +101,16 @@ const hasAccess = (req, { roles = [], tipos = [] }) => {
 
 const requireAccess = ({ roles = [], tipos = [] } = {}) => (req, res, next) => {
   if (!roles.length && !tipos.length) return next();
-  if (!req.user) return res.status(401).json({ error: "No autorizado" });
+  if (!req.user) {
+    const auth = req.headers.authorization || "";
+    const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ error: "No autorizado" });
+    try {
+      req.user = jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ error: "Token inválido" });
+    }
+  }
   if (!hasAccess(req, { roles, tipos })) {
     return res.status(403).json({ error: "Acceso denegado" });
   }
@@ -118,7 +133,7 @@ const requireAccess = ({ roles = [], tipos = [] } = {}) => (req, res, next) => {
 =============================== */
 
 // 1. OBTENER TODOS
-app.get("/clientes", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+app.get("/clientes", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM clientes WHERE activo = true ORDER BY id DESC");
     res.json(result.rows);
@@ -211,6 +226,166 @@ app.get("/consultores", requireAccess({ roles: ["Administrador", "Coordinador"] 
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al obtener consultores" });
+  }
+});
+
+// Consultores principales disponibles (no asociados)
+app.get("/consultores/principales", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        u.id,
+        u.nombre_usuario,
+        u.email
+      FROM usuarios u
+      LEFT JOIN roles r ON u.rol_usuario_id = r.id
+      WHERE u.activo = true
+        AND (r.titulo IN ('Consultor', 'Consultor Principal', 'Mesa de Servicio'))
+        AND (u.tipo_consultor IS NULL OR LOWER(u.tipo_consultor::text) <> 'asociado')
+      ORDER BY u.nombre_usuario ASC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener consultores principales" });
+  }
+});
+
+// Consultores asociados por principal
+app.get("/sub-consultores/:principalId", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+  const { principalId } = req.params;
+  try {
+    if (!principalId) return res.json([]);
+    const result = await pool.query(
+      `
+      SELECT
+        u.id,
+        u.nombre_usuario,
+        u.email
+      FROM usuarios u
+      WHERE u.activo = true
+        AND u.id_consultor_principal = $1
+        AND LOWER(u.tipo_consultor::text) = 'asociado'
+      ORDER BY u.nombre_usuario ASC
+      `,
+      [principalId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener consultores asociados" });
+  }
+});
+
+// Consultores disponibles para asociar
+app.get("/sub-consultores/disponibles/:principalId", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+  const { principalId } = req.params;
+  try {
+    if (!principalId) return res.json([]);
+    const result = await pool.query(
+      `
+      SELECT
+        u.id,
+        u.nombre_usuario,
+        u.email
+      FROM usuarios u
+      LEFT JOIN roles r ON u.rol_usuario_id = r.id
+      WHERE u.activo = true
+        AND u.id <> $1
+        AND u.id_consultor_principal IS NULL
+        AND (r.titulo IN ('Consultor', 'Consultor Principal', 'Mesa de Servicio'))
+        AND (u.tipo_consultor IS NULL OR LOWER(u.tipo_consultor::text) <> 'asociado')
+      ORDER BY u.nombre_usuario ASC
+      `,
+      [principalId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener consultores disponibles" });
+  }
+});
+
+// Asociar consultor a principal
+app.post("/sub-consultores/asociar", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+  const { principal_id, asociado_id } = req.body;
+  try {
+    if (!principal_id || !asociado_id) {
+      return res.status(400).json({ error: "Faltan datos para asociar" });
+    }
+
+    const principal = await pool.query(
+      "SELECT id, tipo_consultor FROM usuarios WHERE id = $1 AND activo = true",
+      [principal_id]
+    );
+    if (principal.rows.length === 0) {
+      return res.status(404).json({ error: "Consultor principal no encontrado" });
+    }
+    const principalTipo = normalizeValue(principal.rows[0].tipo_consultor);
+    if (principalTipo === "asociado") {
+      return res.status(400).json({ error: "Un consultor asociado no puede tener asociados" });
+    }
+
+    const asociado = await pool.query(
+      "SELECT id, id_consultor_principal FROM usuarios WHERE id = $1 AND activo = true",
+      [asociado_id]
+    );
+    if (asociado.rows.length === 0) {
+      return res.status(404).json({ error: "Consultor asociado no encontrado" });
+    }
+    if (String(asociado.rows[0].id_consultor_principal || "") !== "") {
+      return res.status(400).json({ error: "El consultor ya está asociado a otro principal" });
+    }
+
+    await pool.query(
+      `UPDATE usuarios
+       SET id_consultor_principal = $1,
+           tipo_consultor = 'Asociado',
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2`,
+      [principal_id, asociado_id]
+    );
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al asociar consultor" });
+  }
+});
+
+// Desvincular consultor asociado
+app.delete("/sub-consultores/:asociadoId", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+  const { asociadoId } = req.params;
+  const { principal_id } = req.body || {};
+  try {
+    if (!asociadoId || !principal_id) {
+      return res.status(400).json({ error: "Faltan datos para desvincular" });
+    }
+
+    const asociado = await pool.query(
+      "SELECT id, id_consultor_principal FROM usuarios WHERE id = $1 AND activo = true",
+      [asociadoId]
+    );
+    if (asociado.rows.length === 0) {
+      return res.status(404).json({ error: "Consultor asociado no encontrado" });
+    }
+    if (String(asociado.rows[0].id_consultor_principal || "") !== String(principal_id)) {
+      return res.status(403).json({ error: "No autorizado para desvincular" });
+    }
+
+    await pool.query(
+      `UPDATE usuarios
+       SET id_consultor_principal = NULL,
+           tipo_consultor = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [asociadoId]
+    );
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al desvincular consultor" });
   }
 });
 
@@ -356,9 +531,17 @@ app.get("/auth/me", async (req, res) => {
 const authMiddleware = (req, res, next) => {
   const publicPaths = ["/", "/auth/login", "/auth/register", "/auth/me"];
   if (publicPaths.includes(req.path)) return next();
+  if (req.method === "OPTIONS") return next();
 
   const auth = req.headers.authorization || "";
+  if (req.path === "/clientes") {
+    console.log("[AUTH] path:", req.path, "origin:", req.headers.origin || "-", "auth:", auth ? "present" : "missing");
+  }
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
+
+  if (process.env.DEBUG_AUTH === "true") {
+    console.log("[AUTH] path:", req.path, "hasAuth:", Boolean(auth));
+  }
 
   if (!token) return res.status(401).json({ error: "No autorizado" });
 

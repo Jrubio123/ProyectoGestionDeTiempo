@@ -89,8 +89,39 @@ function performSearch(query) {
         { label: "Generar Cuenta Cobro", hash: "#generar-cuenta-cobro" }
     ];
 
-    const match = views.find(v => v.label.toLowerCase() === q) ||
-        views.find(v => v.label.toLowerCase().includes(q));
+    const roleKey = window.auth?.getRoleKey?.() || "other";
+    const roleRoutes = {
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas"],
+        coordinador: [
+            "inicio",
+            "asignacion-consultor",
+            "cliente",
+            "aprobar-rechazar-coordinador",
+            "mis-asignaciones-coordinador",
+            "asociar-subconsultores",
+            "tarifas"
+        ],
+        consultor_principal: [
+            "inicio",
+            "mis-asignaciones-consultor",
+            "registro-horas-consultor",
+            "asignacion-fabrica-mesa-servicio",
+            "generar-cuenta-cobro",
+            "mis-cuentas-cobros"
+        ],
+        consultor_asociado: [
+            "inicio",
+            "mis-asignaciones-consultor",
+            "registro-horas-consultor",
+            "asignacion-fabrica-mesa-servicio"
+        ]
+    };
+
+    const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
+    const allowedViews = views.filter((v) => allowed.has(v.hash.replace("#", "")));
+
+    const match = allowedViews.find(v => v.label.toLowerCase() === q) ||
+        allowedViews.find(v => v.label.toLowerCase().includes(q));
 
     if (match) {
         window.location.hash = match.hash;

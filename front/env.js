@@ -1,8 +1,9 @@
 (function () {
     const config = {
-        mode: "tunnel",
+        mode: "prod",
         api_local: "http://localhost:4000",
-        api_tunnel: "https://d053flnv-4000.use.devtunnels.ms"
+        api_tunnel: "https://d053flnv-4000.use.devtunnels.ms",
+        api_prod: "https://appgestion-dwdqd8hhbpfva5ea.brazilsouth-01.azurewebsites.net"
     };
 
     const getSafe = (key) => {
@@ -29,10 +30,9 @@
     const mode = modeParam || storedMode || config.mode;
     if (modeParam) setSafe("APP_MODE", modeParam);
 
-    const apiFromMode =
-        mode === "tunnel" && config.api_tunnel
-            ? config.api_tunnel
-            : config.api_local;
+    let apiFromMode = config.api_local;
+    if (mode === "tunnel" && config.api_tunnel) apiFromMode = config.api_tunnel;
+    if (mode === "prod" && config.api_prod) apiFromMode = config.api_prod;
 
     window.APP_MODE = mode;
     window.API_BASE = apiParam || apiFromMode;

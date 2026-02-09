@@ -601,7 +601,7 @@ app.get("/tarifa-consultor", requireAccess({ roles: ["Administrador", "Coordinad
 =============================== */
 
 // Obtener tarifas
-app.get("/tarifas", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+app.get("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT 

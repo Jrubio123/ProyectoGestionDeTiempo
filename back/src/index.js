@@ -633,7 +633,7 @@ app.get("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador"] }), 
 });
 
 // Crear tarifa
-app.post("/tarifas", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+app.post("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const { cliente_id, consultor_id, modulo_id, tipo_asignacion_id, valor } = req.body;
 
   try {
@@ -662,7 +662,7 @@ app.post("/tarifas", requireAccess({ roles: ["Administrador"] }), async (req, re
 });
 
 // Actualizar tarifa
-app.put("/tarifas/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+app.put("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const { id } = req.params;
   const { cliente_id, consultor_id, modulo_id, tipo_asignacion_id, valor } = req.body;
 
@@ -693,7 +693,7 @@ app.put("/tarifas/:id", requireAccess({ roles: ["Administrador"] }), async (req,
 });
 
 // Eliminar tarifa (soft delete)
-app.delete("/tarifas/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+app.delete("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const { id } = req.params;
 
   try {

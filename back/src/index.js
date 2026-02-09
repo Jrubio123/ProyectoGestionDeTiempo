@@ -2047,7 +2047,21 @@ app.get("/", (req, res) => {
   res.json({ ok: true, message: "API activo. Abre el frontend en http://localhost:3000" });
 });
 
-const PORT = process.env.BACK_PORT || 4000;
+/*const PORT = process.env.BACK_PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ Backend listo en http://localhost:${PORT}`);
+});
+*/
+
+/* ===============================
+   SERVIDOR (CAMBIO CRÍTICO PARA AZURE)
+=============================== */
+
+// 1. Usar process.env.PORT (Obligatorio para Azure)
+// 2. Mantener 4000 como fallback para tu entorno local
+const port = process.env.PORT || 4000; 
+
+// 3. Añadir "0.0.0.0" asegura que el contenedor acepte conexiones externas
+app.listen(port, "0.0.0.0", () => {
+  console.log(`✅ Server running on port ${port}`);
 });

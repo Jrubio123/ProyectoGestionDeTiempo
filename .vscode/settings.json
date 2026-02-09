@@ -1,0 +1,4 @@
+{
+    "appService.defaultWebAppToDeploy": "/subscriptions/8e7b0849-ace2-48a8-a750-92fb2ddb9b91/resourceGroups/appsvc_linux_brazilsouth/providers/Microsoft.Web/sites/gestion-tiempo-app",
+    "appService.deploySubpath": "."
+}

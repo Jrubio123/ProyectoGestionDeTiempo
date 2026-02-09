@@ -1,8 +1,8 @@
 (function () {
     const config = {
-        mode: "local",
+        mode: "tunnel",
         api_local: "http://localhost:4000",
-        api_tunnel: "https://fxlgp5hf-4000.use2.devtunnels.ms"
+        api_tunnel: "https://d053flnv-4000.use.devtunnels.ms"
     };
 
     const getSafe = (key) => {

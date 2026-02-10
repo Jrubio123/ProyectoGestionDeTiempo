@@ -5,13 +5,27 @@
     const tenantId = window.AZURE_TENANT_ID;
     const redirectUri = `${window.location.origin}${window.AZURE_REDIRECT_PATH || "/auth/callback"}`;
 
+    function setError(msg) {
+        const title = document.getElementById("auth-title");
+        const text = document.getElementById("auth-msg");
+        const err = document.getElementById("auth-error");
+        if (title) title.textContent = "No pudimos iniciar sesiÃ³n";
+        if (text) text.textContent = "Revisa el error y vuelve a intentarlo.";
+        if (err) {
+            err.textContent = msg;
+            err.classList.remove("hidden");
+        }
+    }
+
     async function run() {
         if (!window.msal || !window.msal.PublicClientApplication) {
             console.error("MSAL no estÃ¡ disponible");
+            setError("MSAL no estÃ¡ disponible");
             return;
         }
         if (!clientId || !tenantId) {
             console.error("Faltan variables de Azure en env.js");
+            setError("Faltan variables de Azure en env.js");
             return;
         }
 
@@ -31,7 +45,7 @@
             const response = await msalInstance.handleRedirectPromise();
             const account = response?.account || msalInstance.getAllAccounts()[0];
             if (!account) {
-                window.location.href = "/login.html";
+                setError("No se encontrÃ³ una cuenta activa en MSAL.");
                 return;
             }
 
@@ -53,8 +67,12 @@
             }
             window.location.href = "/index.html#inicio";
         } catch (err) {
+            const msg =
+                err?.response?.data?.error ||
+                err?.message ||
+                "Error desconocido";
             console.error("Error en callback:", err);
-            window.location.href = "/login.html?error=ms";
+            setError(msg);
         }
     }
 

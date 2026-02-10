@@ -30,7 +30,9 @@
     const apiParam = params.get("api");
 
     const storedMode = getSafe("APP_MODE");
-    const mode = modeParam || storedMode || config.mode;
+    const host = window.location.hostname || "";
+    const inferredMode = host.includes("azurestaticapps.net") ? "prod" : null;
+    const mode = modeParam || storedMode || inferredMode || config.mode;
     if (modeParam) setSafe("APP_MODE", modeParam);
 
     let apiFromMode = config.api_local;

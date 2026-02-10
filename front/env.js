@@ -1,6 +1,6 @@
 (function () {
     const config = {
-        mode: "local",
+        mode: "prod",
         api_local: "http://localhost:4000",
         api_tunnel: "https://d053flnv-4000.use.devtunnels.ms",
         api_prod: "https://appgestion-dwdqd8hhbpfva5ea.brazilsouth-01.azurewebsites.net",

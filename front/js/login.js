@@ -32,7 +32,8 @@ window.authApp = function () {
             auth: {
                 clientId,
                 authority: `https://login.microsoftonline.com/${tenantId}`,
-                redirectUri
+                redirectUri,
+                navigateToLoginRequestUrl: false
             },
             cache: {
                 cacheLocation: "localStorage",

@@ -8,6 +8,7 @@ const helmet = require("helmet");
 const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const https = require("https");
 const PDFDocument = require("pdfkit");
 const { NumerosALetras } = require("numero-a-letras");
 const { sendEmail } = require("./email");
@@ -87,6 +88,37 @@ function buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total
 }
 
 const normalizeValue = (value) => String(value || "").toLowerCase().trim();
+
+function graphGet(path, accessToken) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: "graph.microsoft.com",
+      path,
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json"
+      }
+    };
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          try {
+            resolve(JSON.parse(data || "{}"));
+          } catch (e) {
+            resolve({});
+          }
+        } else {
+          reject(new Error(`Graph error ${res.statusCode}: ${data}`));
+        }
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
 
 const hasAccess = (req, { roles = [], tipos = [] }) => {
   const userRole = normalizeValue(req.user?.rol);
@@ -421,6 +453,176 @@ app.get("/tipos-asignacion", async (req, res) => {
   }
 });
 
+
+/* ===============================
+   API - RRHH SOLICITUDES
+=============================== */
+
+// Listar solicitudes (coordinador ve las suyas, reclutador ve todas)
+app.get("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Reclutador"] }), async (req, res) => {
+  try {
+    const role = normalizeValue(req.user?.rol);
+    const params = [];
+    let where = "";
+    if (role === "coordinador") {
+      params.push(req.user?.id);
+      where = "WHERE s.coordinador_id = $1";
+    }
+    const result = await pool.query(
+      `
+      SELECT
+        s.id,
+        s.coordinador_id,
+        s.cliente_id,
+        s.modulo_id,
+        s.perfil,
+        s.nivel,
+        s.tiempo,
+        s.ubicacion,
+        s.modalidad,
+        s.fecha_inicio_esperada,
+        s.tipo_proyecto,
+        s.experiencia,
+        s.presupuesto,
+        s.descripcion,
+        s.informacion_adicional,
+        s.prioridad,
+        s.estado,
+        s.observaciones_rrhh,
+        s.created_at,
+        s.updated_at,
+        c.titulo AS cliente,
+        m.titulo AS modulo,
+        u.nombre_usuario AS solicitante
+      FROM solicitudes_rrhh s
+        LEFT JOIN clientes c ON s.cliente_id = c.id
+        LEFT JOIN modulo m ON s.modulo_id = m.id
+        LEFT JOIN usuarios u ON s.coordinador_id = u.id
+      ${where}
+      ORDER BY s.created_at DESC
+      `,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener solicitudes" });
+  }
+});
+
+// Crear solicitud (solo coordinador)
+app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador"] }), async (req, res) => {
+  const {
+    cliente_id,
+    modulo_id,
+    perfil,
+    nivel,
+    tiempo,
+    ubicacion,
+    modalidad,
+    fecha_inicio_esperada,
+    tipo_proyecto,
+    experiencia,
+    presupuesto,
+    descripcion,
+    informacion_adicional,
+    prioridad
+  } = req.body;
+  try {
+    if (!cliente_id || !modulo_id || !perfil || !nivel) {
+      return res.status(400).json({ error: "Faltan campos requeridos" });
+    }
+    const result = await pool.query(
+      `
+      INSERT INTO solicitudes_rrhh
+        (
+          coordinador_id,
+          cliente_id,
+          modulo_id,
+          perfil,
+          nivel,
+          tiempo,
+          ubicacion,
+          modalidad,
+          fecha_inicio_esperada,
+          tipo_proyecto,
+          experiencia,
+          presupuesto,
+          descripcion,
+          informacion_adicional,
+          prioridad
+        )
+      VALUES
+        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      RETURNING *
+      `,
+      [
+        req.user?.id,
+        cliente_id,
+        modulo_id,
+        perfil,
+        nivel,
+        tiempo || null,
+        ubicacion || "Remoto",
+        modalidad || "Full time",
+        fecha_inicio_esperada || null,
+        tipo_proyecto || null,
+        experiencia || null,
+        presupuesto || null,
+        descripcion || null,
+        informacion_adicional || null,
+        prioridad || "Media"
+      ]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al crear solicitud" });
+  }
+});
+
+// Actualizar estado y/o notas (solo reclutador)
+app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador"] }), async (req, res) => {
+  const { id } = req.params;
+  const { estado, observaciones_rrhh } = req.body || {};
+  try {
+    const fields = [];
+    const values = [];
+    let idx = 1;
+
+    if (estado) {
+      fields.push(`estado = $${idx++}`);
+      values.push(estado);
+    }
+    if (observaciones_rrhh !== undefined) {
+      fields.push(`observaciones_rrhh = $${idx++}`);
+      values.push(observaciones_rrhh);
+    }
+
+    if (fields.length === 0) {
+      return res.status(400).json({ error: "No hay cambios para actualizar" });
+    }
+
+    values.push(id);
+    const result = await pool.query(
+      `
+      UPDATE solicitudes_rrhh
+      SET ${fields.join(", ")}
+      WHERE id = $${idx}
+      RETURNING *
+      `,
+      values
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Solicitud no encontrada" });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar solicitud" });
+  }
+});
 /* ===============================
    AUTH
 =============================== */
@@ -428,6 +630,9 @@ app.get("/tipos-asignacion", async (req, res) => {
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
 
 app.post("/auth/register", async (req, res) => {
+  if (String(process.env.AUTH_MODE || "").toLowerCase() === "ms_only") {
+    return res.status(403).json({ error: "Registro deshabilitado. Usa Microsoft SSO." });
+  }
   const { nombre_usuario, email, password } = req.body;
 
   try {
@@ -464,6 +669,9 @@ app.post("/auth/register", async (req, res) => {
 });
 
 app.post("/auth/login", async (req, res) => {
+  if (String(process.env.AUTH_MODE || "").toLowerCase() === "ms_only") {
+    return res.status(403).json({ error: "Login deshabilitado. Usa Microsoft SSO." });
+  }
   const { email, password } = req.body;
 
   try {
@@ -528,8 +736,97 @@ app.get("/auth/me", async (req, res) => {
   }
 });
 
+app.post("/auth/microsoft", async (req, res) => {
+  const accessToken = req.body?.access_token;
+  if (!accessToken) {
+    return res.status(400).json({ error: "access_token requerido" });
+  }
+
+  try {
+    const me = await graphGet("/v1.0/me", accessToken);
+    const oid = me.id;
+    const email = me.mail || me.userPrincipalName;
+    const nombre = me.displayName || email;
+    const telefono = me.mobilePhone || null;
+
+    if (!oid || !email) {
+      return res.status(400).json({ error: "No se pudo obtener informaciÃ³n del usuario" });
+    }
+
+    const allowedGroups = (process.env.AZURE_ALLOWED_GROUPS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (allowedGroups.length > 0) {
+      const memberOf = await graphGet("/v1.0/me/memberOf?$select=id,displayName", accessToken);
+      const groups = (memberOf?.value || []).map((g) => ({
+        id: g.id,
+        name: g.displayName
+      }));
+      const allowed = groups.some(
+        (g) =>
+          allowedGroups.includes(g.id) ||
+          allowedGroups.includes(g.name)
+      );
+      if (!allowed) {
+        return res.status(403).json({ error: "Usuario sin acceso al grupo permitido" });
+      }
+    }
+
+    const roleRes = await pool.query(
+      "SELECT id, titulo FROM roles WHERE LOWER(titulo) = LOWER('Consultor') LIMIT 1"
+    );
+    const rolId = roleRes.rows[0]?.id || null;
+    const rolTitulo = roleRes.rows[0]?.titulo || "Consultor";
+
+    let userRes = await pool.query(
+      `SELECT u.id, u.nombre_usuario, u.email, u.rol_usuario_id, u.tipo_consultor, u.azure_oid, r.titulo AS rol
+       FROM usuarios u
+       LEFT JOIN roles r ON u.rol_usuario_id = r.id
+       WHERE (u.azure_oid = $1 OR u.email = $2) AND u.activo = true
+       LIMIT 1`,
+      [oid, email]
+    );
+
+    if (userRes.rows.length === 0) {
+      userRes = await pool.query(
+        `INSERT INTO usuarios
+          (nombre_usuario, email, rol_usuario_id, activo, telefono, created_by, azure_oid)
+         VALUES ($1, $2, $3, true, $4, 'ms_sso', $5)
+         RETURNING id, nombre_usuario, email, rol_usuario_id`,
+        [nombre, email, rolId, telefono, oid]
+      );
+    } else {
+      const user = userRes.rows[0];
+      if (!user.azure_oid) {
+        await pool.query(
+          "UPDATE usuarios SET azure_oid = $1 WHERE id = $2",
+          [oid, user.id]
+        );
+      }
+    }
+
+    const userRow = userRes.rows[0];
+    const payload = {
+      id: userRow.id,
+      nombre_usuario: userRow.nombre_usuario || nombre,
+      email: userRow.email || email,
+      rol: userRow.rol || rolTitulo,
+      rol_usuario_id: userRow.rol_usuario_id || rolId,
+      tipo_consultor: userRow.tipo_consultor || null
+    };
+
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "12h" });
+    res.json({ token, user: payload });
+  } catch (err) {
+    console.error("Error auth microsoft:", err.message);
+    res.status(401).json({ error: "Token Microsoft invÃ¡lido o sin permisos" });
+  }
+});
+
 const authMiddleware = (req, res, next) => {
-  const publicPaths = ["/", "/auth/login", "/auth/register", "/auth/me"];
+  const publicPaths = ["/", "/auth/login", "/auth/register", "/auth/me", "/auth/microsoft"];
   if (publicPaths.includes(req.path)) return next();
   if (req.method === "OPTIONS") return next();
 

@@ -6,7 +6,7 @@ window.authApp = function () {
         try {
             localStorage.setItem(key, value);
         } catch (e) {
-            // Storage might be blocked.
+            // ignore
         }
     }
 
@@ -23,58 +23,45 @@ window.authApp = function () {
         window.location.href = "/index.html#inicio";
     }
 
+    function buildMsalConfig() {
+        const clientId = window.AZURE_CLIENT_ID;
+        const tenantId = window.AZURE_TENANT_ID;
+        const redirectUri = `${window.location.origin}${window.AZURE_REDIRECT_PATH || "/auth/callback"}`;
+        if (!clientId || !tenantId) return null;
+        return {
+            auth: {
+                clientId,
+                authority: `https://login.microsoftonline.com/${tenantId}`,
+                redirectUri
+            },
+            cache: {
+                cacheLocation: "localStorage",
+                storeAuthStateInCookie: false
+            }
+        };
+    }
+
     return {
-        isLogin: true,
-        showPass: false,
         loading: false,
         error: "",
-        form: {
-            nombre: "",
-            email: "",
-            password: ""
-        },
 
-        toggleMode() {
-            this.isLogin = !this.isLogin;
-            this.error = "";
-            this.form = { nombre: "", email: "", password: "" };
-        },
-
-        async submit() {
+        async loginMicrosoft() {
             this.loading = true;
             this.error = "";
-
-            const endpoint = this.isLogin ? "/auth/login" : "/auth/register";
-            const payload = this.isLogin
-                ? { email: this.form.email, password: this.form.password }
-                : {
-                      nombre_usuario: this.form.nombre,
-                      email: this.form.email,
-                      password: this.form.password
-                  };
-
             try {
-                const res = await fetch(API + endpoint, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload)
-                });
-
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || "Error en la solicitud");
-
-                if (this.isLogin) {
-                    safeSet("token", data.token);
-                    safeSet("user", JSON.stringify(data.user));
-                    window.location.href = "/index.html#inicio";
-                } else {
-                    alert("Cuenta creada exitosamente. Por favor inicia sesión.");
-                    this.toggleMode();
-                    this.form.email = payload.email;
+                if (!window.msal || !window.msal.PublicClientApplication) {
+                    throw new Error("MSAL no estÃ¡ disponible");
                 }
+                const config = buildMsalConfig();
+                if (!config) {
+                    throw new Error("Faltan variables de Azure en env.js");
+                }
+                const msalInstance = new window.msal.PublicClientApplication(config);
+                await msalInstance.loginRedirect({
+                    scopes: ["User.Read"]
+                });
             } catch (e) {
-                this.error = e.message;
-            } finally {
+                this.error = e.message || "Error iniciando sesiÃ³n";
                 this.loading = false;
             }
         }

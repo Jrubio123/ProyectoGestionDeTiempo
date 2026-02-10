@@ -71,12 +71,17 @@ window.auth = (function () {
         const user = getUser();
         const rol = String(user?.rol || "").toLowerCase().trim();
         const tipoConsultor = String(user?.tipo_consultor || "").toLowerCase().trim();
-
+        
         if (rol === "administrador") return "admin";
         if (rol === "coordinador") return "coordinador";
-        if (tipoConsultor === "asociado") return "consultor_asociado";
-        if (rol === "consultor principal" || rol === "consultor" || rol === "mesa de servicio") {
-            return "consultor_principal";
+        if (rol === "reclutador") return "reclutador";
+        if (rol === "contabilidad") return "contabilidad";
+        if (rol === "consultor") {
+            // Si es consultor, podemos diferenciar por tipo_consultor si existe
+            if (tipoConsultor === "asociado") {
+                return "consultor_asociado";
+            }
+            return "consultor_principal"; // Por defecto para consultores
         }
         return "other";
     }

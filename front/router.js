@@ -33,7 +33,9 @@ const routes = {
     "aprobar-rechazar-coordinador": "aprobar-rechazar-coordinador",
     "mis-cuentas-cobros": "mis-cuentas-cobros",
     "generar-cuenta-cobro": "generar-cuenta-cobro",
-    "asignacion-fabrica-mesa-servicio": "asignacion-fabrica-mesa-servicio"
+    "asignacion-fabrica-mesa-servicio": "asignacion-fabrica-mesa-servicio",
+    solicitudesCoord: "solicitudesCoord",
+    solicitudesRecl: "solicitudesRecl"
 };
 
 function router() {
@@ -54,7 +56,8 @@ function router() {
             "aprobar-rechazar-coordinador",
             "mis-asignaciones-coordinador",
             "asociar-subconsultores",
-            "tarifas"
+            "tarifas",
+            "solicitudesCoord"
         ],
         consultor_principal: [
             "inicio",
@@ -69,6 +72,10 @@ function router() {
             "mis-asignaciones-consultor",
             "registro-horas-consultor",
             "asignacion-fabrica-mesa-servicio"
+        ],
+        reclutador: [
+            "inicio",
+            "solicitudesRecl"
         ]
     };
     const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);

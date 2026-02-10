@@ -41,7 +41,8 @@ function initSidebar() {
             "aprobar-rechazar-coordinador",
             "mis-asignaciones-coordinador",
             "asociar-subconsultores",
-            "tarifas"
+            "tarifas",
+            "solicitudesCoord"
         ],
         consultor_principal: [
             "inicio",
@@ -56,6 +57,10 @@ function initSidebar() {
             "mis-asignaciones-consultor",
             "registro-horas-consultor",
             "asignacion-fabrica-mesa-servicio"
+        ],
+        reclutador: [
+            "inicio",
+            "solicitudesRecl"
         ]
     };
 

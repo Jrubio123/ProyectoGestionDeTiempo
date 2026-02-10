@@ -244,6 +244,7 @@ CREATE TABLE usuarios
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash TEXT,
     sharepoint_user_id INTEGER,
+    azure_oid VARCHAR(64),
 
     -- Rol y estado
     rol_usuario_id INTEGER REFERENCES roles(id),
@@ -277,6 +278,8 @@ CREATE TABLE usuarios
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(255)
 );
+
+CREATE UNIQUE INDEX idx_usuarios_azure_oid ON usuarios(azure_oid);
 
 -- Índices para usuarios
 CREATE INDEX idx_usuarios_email ON usuarios(email);
@@ -516,12 +519,10 @@ CREATE INDEX idx_asig_mesa_estado ON asignaciones_consultoria_mesa_fabrica(estad
 
 COMMENT ON TABLE asignaciones_consultoria_mesa_fabrica IS 'Asignaciones específicas de mesa de fábrica';
 
--- Tabla: PermisosAdministrador
 CREATE TABLE permisos_administrador
 (
     id SERIAL PRIMARY KEY,
 
-    -- Coordinador (antes Person/Group, ahora FK a usuarios)
     coordinador_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
 
     tipo_servicio tipo_servicio,
@@ -535,6 +536,58 @@ CREATE INDEX idx_permisos_coordinador ON permisos_administrador(coordinador_id);
 CREATE INDEX idx_permisos_activo ON permisos_administrador(permiso_activo);
 
 COMMENT ON TABLE permisos_administrador IS 'Permisos de coordinadores para tipos de servicio';
+
+CREATE TABLE solicitudes_rrhh (
+    id SERIAL PRIMARY KEY,
+    
+    coordinador_id INT NOT NULL REFERENCES usuarios(id),
+    cliente_id INT NOT NULL REFERENCES clientes(id),
+    modulo_id INT NOT NULL REFERENCES modulo(id),
+    
+    perfil VARCHAR(100) NOT NULL, 
+    nivel VARCHAR(20) NOT NULL 
+        CHECK (nivel IN ('Junior', 'Semi-senior', 'Senior')),
+    
+    tiempo VARCHAR(100),
+    ubicacion VARCHAR(50) NOT NULL DEFAULT 'Remoto' 
+        CHECK (ubicacion IN ('En sitio', 'Remoto', 'Híbrido')),
+    modalidad VARCHAR(50) NOT NULL DEFAULT 'Full time'
+        CHECK (modalidad IN ('Full time', 'Medio tiempo', 'Por horas')),
+    
+    fecha_inicio_esperada DATE,
+    
+    tipo_proyecto VARCHAR(50)
+        CHECK (tipo_proyecto IN ('Soporte', 'Roll out', 'Implementación', 'Mantenimiento', 'Migración')),
+    
+    experiencia TEXT,
+    
+    presupuesto VARCHAR(150), 
+    
+    descripcion TEXT,
+    informacion_adicional TEXT,
+    observaciones_rrhh TEXT,
+    
+    prioridad VARCHAR(20) DEFAULT 'Media' NOT NULL
+        CHECK (prioridad IN ('Alta', 'Media', 'Baja')),
+        
+    estado VARCHAR(50) DEFAULT 'Pendiente' NOT NULL
+        CHECK (estado IN ('Pendiente', 'Reclutamiento', 'Entrevistas', 'Contratado', 'Cancelado')),
+    
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+COMMENT ON TABLE solicitudes_rrhh IS 'Gestión de solicitudes de vacantes';
+COMMENT ON COLUMN solicitudes_rrhh.presupuesto IS 'Rango salarial o presupuesto estimado (Texto libre)';
+
+CREATE INDEX idx_rrhh_estado ON solicitudes_rrhh(estado);
+CREATE INDEX idx_rrhh_coordinador ON solicitudes_rrhh(coordinador_id);
+CREATE INDEX idx_rrhh_cliente ON solicitudes_rrhh(cliente_id);
+
+CREATE TRIGGER update_solicitudes_rrhh_modtime
+    BEFORE UPDATE ON solicitudes_rrhh
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================================
 -- FUNCIONES Y TRIGGERS
@@ -626,7 +679,8 @@ VALUES
     ('Administrador', 'Administrador del sistema con todos los permisos', true),
     ('Coordinador', 'Coordinador de proyectos', true),
     ('Consultor', 'Consultor externo o interno', true),
-    ('Contabilidad', 'equipo contable', true);
+    ('Contabilidad', 'equipo contable', true),
+    ('Reclutador', 'Usuario encargado de reclutar y gestionar candidatos y consultores', true);
 
 -- Insertar tipos de cuenta bancaria (actualizado según tu tabla)
 INSERT INTO tipo_cuenta_bancaria
@@ -1069,3 +1123,5 @@ VALUES
     ('SSFF', 'Success Factor', 'SAP SuccessFactors especializado en áreas específicas', true),
     ('C4C', 'C4C', 'SAP Cloud for Customer: CRM en la nube para ventas y servicio', true),
     ('FRONTEND', 'FRONTEND', 'Desarrollo frontend para interfaces SAP: Fiori, WebDynpro, interfaces web', true);
+
+

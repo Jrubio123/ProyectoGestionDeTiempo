@@ -1,0 +1,12 @@
+{
+  "routes": [
+    {
+      "route": "/auth/callback",
+      "rewrite": "/auth/callback/index.html"
+    },
+    {
+      "route": "/*",
+      "rewrite": "/index.html"
+    }
+  ]
+}

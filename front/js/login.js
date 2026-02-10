@@ -1,6 +1,10 @@
 // js/login.js
 window.authApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
+    const isCallback =
+        window.location.pathname.includes("/auth/callback") ||
+        window.location.search.includes("code=") ||
+        window.location.hash.includes("code=");
 
     function safeSet(key, value) {
         try {
@@ -19,7 +23,7 @@ window.authApp = function () {
     }
 
     const existingToken = safeGet("token");
-    if (existingToken) {
+    if (existingToken && !isCallback) {
         window.location.href = "/index.html#inicio";
     }
 
@@ -56,6 +60,7 @@ window.authApp = function () {
         msalInstance: null,
 
         async init() {
+            if (isCallback) return;
             if (!window.msal || !window.msal.PublicClientApplication) return;
             const config = buildMsalConfig();
             if (!config) return;

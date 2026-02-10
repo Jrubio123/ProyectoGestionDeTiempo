@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -15,7 +15,7 @@
     <style>
         body { font-family: 'Inter', sans-serif; }
 
-        /* Animacin de fondo suave */
+        /* AnimaciÃ³n de fondo suave */
         @keyframes blob {
             0% { transform: translate(0px, 0px) scale(1); }
             33% { transform: translate(30px, -50px) scale(1.1); }
@@ -37,7 +37,7 @@
         <div class="absolute -bottom-8 left-20 w-72 h-72 bg-indigo-300 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-blob animation-delay-4000"></div>
     </div>
 
-    <div x-data="authApp()" class="relative z-10 w-full max-w-4xl h-[600px] bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/50 flex overflow-hidden">
+    <div x-data="authApp()" x-init="init()" class="relative z-10 w-full max-w-4xl h-[600px] bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/50 flex overflow-hidden">
         
         <div class="w-full md:w-1/2 p-8 md:p-12 flex flex-col justify-center relative transition-all duration-500">
             
@@ -48,7 +48,7 @@
 
             <div class="mb-8 mt-10">
                 <h2 class="text-3xl font-extrabold text-gray-900">Acceso Corporativo</h2>
-                <p class="text-gray-500 text-sm mt-2">Inicia sesi�n con tu cuenta Microsoft.</p>
+                <p class="text-gray-500 text-sm mt-2">Inicia sesiÃ³n con tu cuenta Microsoft.</p>
             </div>
 
             <div class="space-y-4">
@@ -66,7 +66,7 @@
 
         <div class="hidden md:block md:w-1/2 bg-cover bg-center relative" style="background-image: url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop');">
             <div class="absolute inset-0 bg-gradient-to-br from-blue-600/80 to-purple-800/80 backdrop-blur-[2px] flex flex-col items-center justify-center text-white p-12 text-center">
-                <h3 class="text-4xl font-bold mb-4 tracking-tight">Gesti�n Inteligente</h3>
+                <h3 class="text-4xl font-bold mb-4 tracking-tight">GestiÃ³n Inteligente</h3>
                 <p class="text-white/90 text-lg">Optimiza tiempos, coordina equipos y controla costos con Silver Consulting.</p>
                 
                 <div class="absolute top-10 right-10 w-20 h-20 bg-white/10 rounded-2xl backdrop-blur-md border border-white/20 animate-bounce" style="animation-duration: 3s;"></div>
@@ -78,4 +78,3 @@
 
 </body>
 </html>
-

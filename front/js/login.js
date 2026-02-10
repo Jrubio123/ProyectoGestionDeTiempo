@@ -41,9 +41,32 @@ window.authApp = function () {
         };
     }
 
+    function clearMsalInteraction() {
+        try {
+            sessionStorage.removeItem("msal.interaction.status");
+        } catch (e) {
+            // ignore
+        }
+    }
+
     return {
         loading: false,
         error: "",
+        msalInstance: null,
+
+        async init() {
+            if (!window.msal || !window.msal.PublicClientApplication) return;
+            const config = buildMsalConfig();
+            if (!config) return;
+            this.msalInstance = new window.msal.PublicClientApplication(config);
+            try {
+                await this.msalInstance.handleRedirectPromise();
+            } catch (e) {
+                if (String(e?.errorCode || "").includes("interaction_in_progress")) {
+                    clearMsalInteraction();
+                }
+            }
+        },
 
         async loginMicrosoft() {
             this.loading = true;
@@ -56,12 +79,19 @@ window.authApp = function () {
                 if (!config) {
                     throw new Error("Faltan variables de Azure en env.js");
                 }
-                const msalInstance = new window.msal.PublicClientApplication(config);
-                await msalInstance.loginRedirect({
+                if (!this.msalInstance) {
+                    this.msalInstance = new window.msal.PublicClientApplication(config);
+                }
+                clearMsalInteraction();
+                await this.msalInstance.loginRedirect({
                     scopes: ["User.Read"]
                 });
             } catch (e) {
-                this.error = e.message || "Error iniciando sesiÃ³n";
+                if (String(e?.errorCode || "").includes("interaction_in_progress")) {
+                    this.error = "Hay una sesiÃ³n en progreso. Recarga la pÃ¡gina e intenta de nuevo.";
+                } else {
+                    this.error = e.message || "Error iniciando sesiÃ³n";
+                }
                 this.loading = false;
             }
         }

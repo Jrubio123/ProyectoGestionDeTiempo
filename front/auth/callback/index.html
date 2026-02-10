@@ -5,18 +5,120 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Autenticando...</title>
     <link rel="icon" type="image/jpeg" href="/assets/images/favicon.jpg">
+    
     <script defer src="/env.js"></script>
     <script defer src="https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <script defer src="/js/auth.js"></script>
     <script defer src="/js/auth-callback.js"></script>
-    <link rel="stylesheet" href="/styles/app.css">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        @keyframes gradient-xy {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .animate-gradient {
+            background-size: 200% 200%;
+            animation: gradient-xy 6s ease infinite;
+        }
+        .glass {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .loader-ring {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4f46e5;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        .shimmer {
+            animation: shimmer 1.5s infinite linear;
+        }
+    </style>
 </head>
-<body class="bg-gray-100 flex items-center justify-center min-h-screen">
-    <div class="bg-white rounded-xl shadow-lg p-6 text-center max-w-md">
-        <h1 id="auth-title" class="text-xl font-bold text-gray-800">Validando sesiÃ³n...</h1>
-        <p id="auth-msg" class="text-gray-500 text-sm mt-2">Espera un momento, estamos iniciando tu sesiÃ³n.</p>
-        <p id="auth-error" class="text-red-600 text-xs mt-3 hidden"></p>
+
+<body class="bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 animate-gradient min-h-screen flex items-center justify-center p-4">
+
+    <div class="glass rounded-2xl shadow-2xl p-10 max-w-sm w-full text-center transform transition-all hover:scale-[1.01] duration-300">
+        
+        <div class="relative flex justify-center items-center mb-6">
+            <div id="loading-spinner" class="loader-ring"></div>
+            
+            <div class="absolute">
+                <svg class="w-5 h-5 text-indigo-600 opacity-0 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM10 15a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 15zM19.071 6.678a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0zM5.929 16.002a.75.75 0 010 1.06l-1.061 1.061a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.061 0zM21 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0121 10zM5.25 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 015.25 10zM17.071 18.071a.75.75 0 01-1.06 0l-1.061-1.06a.75.75 0 011.06-1.061l1.061 1.06a.75.75 0 010 1.061zM7.929 4.929a.75.75 0 01-1.061 0l-1.06-1.061a.75.75 0 111.06-1.06l1.061 1.06a.75.75 0 010 1.061z" />
+                </svg>
+            </div>
+        </div>
+
+        <h1 id="auth-title" class="text-2xl font-bold text-gray-800 tracking-tight">Validando credenciales</h1>
+        
+        <div class="mt-3 space-y-2">
+            <p id="auth-msg" class="text-gray-600 text-sm font-medium animate-pulse">
+                Conectando con Microsoft de forma segura...
+            </p>
+            
+            <div class="w-full bg-gray-200 rounded-full h-1.5 mt-4 overflow-hidden">
+                <div class="bg-indigo-600 h-1.5 rounded-full w-full shimmer"></div>
+            </div>
+        </div>
+
+        <div id="auth-error" class="hidden mt-6 bg-red-50 border border-red-200 rounded-lg p-3 text-left">
+            <div class="flex items-start gap-3">
+                <svg class="w-5 h-5 text-red-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <div>
+                    <h4 class="text-sm font-bold text-red-700">Error de Autenticación</h4>
+                    <p class="text-xs text-red-600 mt-1 error-text-content">No se pudo validar la sesión.</p>
+                    <a href="/" class="text-xs font-bold text-red-700 underline mt-2 block">Volver a intentar</a>
+                </div>
+            </div>
+        </div>
+
     </div>
+
+    <script>
+        const msgElement = document.getElementById('auth-msg');
+        const messages = [
+            "Conectando con Microsoft...",
+            "Verificando token de seguridad...",
+            "Preparando tu entorno...",
+            "¡Casi listo!"
+        ];
+        let i = 0;
+        
+        const interval = setInterval(() => {
+            if (i < messages.length) {
+                msgElement.innerText = messages[i];
+                i++;
+            }
+        }, 1500);
+
+        function showError(msg) {
+            clearInterval(interval);
+            document.getElementById('loading-spinner').style.display = 'none';
+            document.getElementById('auth-title').innerText = '¡Ups! Algo salió mal';
+            document.getElementById('auth-msg').style.display = 'none';
+            
+            const errorBox = document.getElementById('auth-error');
+            errorBox.classList.remove('hidden');
+            errorBox.querySelector('.error-text-content').innerText = msg || 'Ocurrió un error desconocido.';
+        }
+    </script>
 </body>
 </html>

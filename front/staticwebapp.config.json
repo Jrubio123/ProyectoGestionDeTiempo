@@ -1,12 +1,23 @@
 {
   "routes": [
-    {
-      "route": "/auth/callback",
-      "rewrite": "/auth/callback/index.html"
-    },
-    {
-      "route": "/*",
-      "rewrite": "/index.html"
-    }
-  ]
+    { "route": "/auth/callback", "rewrite": "/auth/callback/index.html" }
+  ],
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": [
+      "/js/*",
+      "/styles/*",
+      "/assets/*",
+      "/components/*",
+      "/auth/*",
+      "/*.css",
+      "/*.js",
+      "/*.ico",
+      "/*.png",
+      "/*.jpg",
+      "/*.jpeg",
+      "/*.svg",
+      "/*.map"
+    ]
+  }
 }

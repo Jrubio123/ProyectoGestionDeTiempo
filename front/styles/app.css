@@ -32,6 +32,165 @@ body {
     font-family: "Segoe UI", "Inter", "Roboto", sans-serif;
 }
 
+.rrhh-page {
+    background: #f8f9fa;
+    border-radius: 24px;
+}
+
+.rrhh-hero {
+    position: relative;
+    min-height: 200px;
+    padding: 2rem 2rem 5.5rem;
+    border-radius: 22px;
+    color: #ffffff;
+    overflow: hidden;
+    background:
+        linear-gradient(130deg, rgba(90, 24, 154, 0.95) 0%, rgba(28, 97, 171, 0.95) 100%);
+}
+
+.rrhh-hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+        radial-gradient(circle at 18% 22%, rgba(255, 255, 255, 0.06) 0, rgba(255, 255, 255, 0.06) 28px, transparent 29px),
+        radial-gradient(circle at 76% 42%, rgba(255, 255, 255, 0.05) 0, rgba(255, 255, 255, 0.05) 34px, transparent 35px),
+        linear-gradient(45deg, rgba(255, 255, 255, 0.04) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.04) 50%, rgba(255, 255, 255, 0.04) 75%, transparent 75%, transparent);
+    background-size: auto, auto, 36px 36px;
+    mix-blend-mode: screen;
+    pointer-events: none;
+}
+
+.rrhh-hero-content {
+    position: relative;
+    z-index: 1;
+}
+
+.rrhh-title {
+    margin: 0;
+    color: #ffffff;
+    font-size: clamp(1.5rem, 2.6vw, 2rem);
+    font-weight: 800;
+    letter-spacing: 0.2px;
+}
+
+.rrhh-subtitle {
+    margin-top: 0.45rem;
+    color: rgba(242, 247, 255, 0.92);
+    font-size: 0.94rem;
+}
+
+.rrhh-panel {
+    position: relative;
+    z-index: 2;
+    margin: -3.5rem 1rem 0;
+    border-radius: 18px;
+    background: #ffffff;
+    border: 1px solid #e8edf4;
+    box-shadow: 0 20px 40px rgba(108, 126, 150, 0.18);
+    padding: 1.25rem;
+}
+
+.rrhh-glass-card {
+    background: #ffffff;
+    border: 1px solid #e8edf4;
+    border-radius: 16px;
+    box-shadow: 0 12px 30px rgba(108, 126, 150, 0.13);
+    transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+
+.rrhh-glass-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 34px rgba(88, 112, 138, 0.2);
+}
+
+.rrhh-btn-primary {
+    background: linear-gradient(135deg, #189fa9 0%, #148a93 100%);
+    color: #ffffff;
+    border: 0;
+    border-radius: 12px;
+    font-weight: 700;
+    box-shadow: 0 10px 24px rgba(24, 159, 169, 0.28);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.rrhh-btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 26px rgba(24, 159, 169, 0.36);
+}
+
+.rrhh-btn-ghost {
+    border: 1px solid #dbe4ee;
+    border-radius: 12px;
+    background: #ffffff;
+    color: #5b6678;
+    font-weight: 600;
+}
+
+.rrhh-input {
+    width: 100%;
+    border: 1px solid #d7dfeb;
+    border-radius: 10px;
+    padding: 0.62rem 0.75rem;
+    background: #fbfcfe;
+    color: #20272f;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.rrhh-input:focus {
+    outline: none;
+    border-color: #189fa9;
+    box-shadow: 0 0 0 4px rgba(24, 159, 169, 0.15);
+    background: #ffffff;
+}
+
+.rrhh-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: 999px;
+    padding: 0.2rem 0.62rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1.25;
+    border: 1px solid transparent;
+}
+
+.rrhh-badge-attention {
+    color: #c24e00;
+    background: #fff3eb;
+    border-color: #ffd9c2;
+}
+
+.rrhh-badge-progress {
+    color: #0f6671;
+    background: #e9f8f9;
+    border-color: #bcecf0;
+}
+
+.rrhh-badge-structure {
+    color: #5a189a;
+    background: #f4ecfd;
+    border-color: #dfcaf5;
+}
+
+.rrhh-badge-neutral {
+    color: #5b6678;
+    background: #f3f5f8;
+    border-color: #dde3ea;
+}
+
+@media (max-width: 640px) {
+    .rrhh-hero {
+        padding: 1.5rem 1rem 5rem;
+    }
+
+    .rrhh-panel {
+        margin: -3rem 0.5rem 0;
+        padding: 1rem;
+    }
+}
+
 [x-cloak] {
     display: none !important;
 }

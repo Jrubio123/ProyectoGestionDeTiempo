@@ -757,6 +757,7 @@ app.post("/auth/microsoft", async (req, res) => {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
+    const allowedGroupsNormalized = new Set(allowedGroups.map(normalizeValue));
 
     if (allowedGroups.length > 0) {
       const memberOf = await graphGet("/v1.0/me/memberOf?$select=id,displayName", accessToken);
@@ -766,8 +767,8 @@ app.post("/auth/microsoft", async (req, res) => {
       }));
       const allowed = groups.some(
         (g) =>
-          allowedGroups.includes(g.id) ||
-          allowedGroups.includes(g.name)
+          allowedGroupsNormalized.has(normalizeValue(g.id)) ||
+          allowedGroupsNormalized.has(normalizeValue(g.name))
       );
       if (!allowed) {
         return res.status(403).json({ error: "Usuario sin acceso al grupo permitido" });

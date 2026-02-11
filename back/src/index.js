@@ -51,24 +51,24 @@ const pool = new Pool({
 });
 
 function buildTotalLetras(numero, moneda = 'COP') {
-    const parteEntera = Math.floor(numero);
-    const centavos = Math.round((numero - parteEntera) * 100);
-    
-    // Obtener texto y limpiar "00/100" si existe
-    let textoNumeros = NumerosALetras(parteEntera).toUpperCase();
-    
-    // Eliminar " 00/100" si está presente
-    textoNumeros = textoNumeros.replace(/\s*00\/100\s*/g, '');
-    // También eliminar "M.N." si existe
-    textoNumeros = textoNumeros.replace(/\s*M\.N\.\s*/g, '');
-    
-    const nombreMoneda = moneda === 'USD' ? 'DÓLARES' : 'PESOS';
-    
-    if (centavos > 0) {
-        return `${textoNumeros} CON ${centavos}/100 ${nombreMoneda}`;
-    } else {
-        return `${textoNumeros} ${nombreMoneda}`;
-    }
+  const parteEntera = Math.floor(numero);
+  const centavos = Math.round((numero - parteEntera) * 100);
+
+  // Obtener texto y limpiar "00/100" si existe
+  let textoNumeros = NumerosALetras(parteEntera).toUpperCase();
+
+  // Eliminar " 00/100" si está presente
+  textoNumeros = textoNumeros.replace(/\s*00\/100\s*/g, '');
+  // También eliminar "M.N." si existe
+  textoNumeros = textoNumeros.replace(/\s*M\.N\.\s*/g, '');
+
+  const nombreMoneda = moneda === 'USD' ? 'DÓLARES' : 'PESOS';
+
+  if (centavos > 0) {
+    return `${textoNumeros} CON ${centavos}/100 ${nombreMoneda}`;
+  } else {
+    return `${textoNumeros} ${nombreMoneda}`;
+  }
 }
 
 async function sendEmailSafe({ to, subject, text, html }) {
@@ -183,7 +183,7 @@ app.post("/clientes", requireAccess({ roles: ["Administrador"] }), async (req, r
     // Validar duplicados
     const check = await pool.query("SELECT id FROM clientes WHERE (nit = $1 OR titulo = $2) AND activo = true", [nit, titulo]);
     if (check.rows.length > 0) {
-        return res.status(400).json({ error: "El cliente o NIT ya existe en la base de datos" });
+      return res.status(400).json({ error: "El cliente o NIT ya existe en la base de datos" });
     }
 
     // Calcular siguiente correlativo (MAX + 1)
@@ -679,13 +679,13 @@ app.post("/auth/login", async (req, res) => {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
 
-      const result = await pool.query(
-        `SELECT u.id, u.nombre_usuario, u.email, u.password_hash, u.rol_usuario_id, u.tipo_consultor, r.titulo AS rol
+    const result = await pool.query(
+      `SELECT u.id, u.nombre_usuario, u.email, u.password_hash, u.rol_usuario_id, u.tipo_consultor, r.titulo AS rol
          FROM usuarios u
          LEFT JOIN roles r ON u.rol_usuario_id = r.id
          WHERE u.email = $1 AND u.activo = true`,
-        [email]
-      );
+      [email]
+    );
 
     if (result.rows.length === 0) {
       return res.status(401).json({ error: "Credenciales inválidas" });
@@ -697,14 +697,14 @@ app.post("/auth/login", async (req, res) => {
       return res.status(401).json({ error: "Credenciales inválidas" });
     }
 
-      const payload = {
-        id: user.id,
-        nombre_usuario: user.nombre_usuario,
-        email: user.email,
-        rol: user.rol || "",
-        rol_usuario_id: user.rol_usuario_id,
-        tipo_consultor: user.tipo_consultor || null
-      };
+    const payload = {
+      id: user.id,
+      nombre_usuario: user.nombre_usuario,
+      email: user.email,
+      rol: user.rol || "",
+      rol_usuario_id: user.rol_usuario_id,
+      tipo_consultor: user.tipo_consultor || null
+    };
 
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "12h" });
     res.json({ token, user: payload });
@@ -720,13 +720,13 @@ app.get("/auth/me", async (req, res) => {
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
     if (!token) return res.status(401).json({ error: "No autorizado" });
     const decoded = jwt.verify(token, JWT_SECRET);
-      const result = await pool.query(
-        `SELECT u.id, u.nombre_usuario, u.email, u.rol_usuario_id, u.tipo_consultor, r.titulo AS rol
+    const result = await pool.query(
+      `SELECT u.id, u.nombre_usuario, u.email, u.rol_usuario_id, u.tipo_consultor, r.titulo AS rol
          FROM usuarios u
          LEFT JOIN roles r ON u.rol_usuario_id = r.id
          WHERE u.id = $1 AND u.activo = true`,
-        [decoded.id]
-      );
+      [decoded.id]
+    );
     if (result.rows.length === 0) {
       return res.status(401).json({ error: "Usuario no válido" });
     }
@@ -821,7 +821,7 @@ app.post("/auth/microsoft", async (req, res) => {
     res.json({ token, user: payload });
   } catch (err) {
     console.error("Error auth microsoft:", err.message);
- res.status(401).json({ error: "Token Microsoft inválido o sin permisos" });
+    res.status(401).json({ error: "Token Microsoft inválido o sin permisos" });
   }
 });
 
@@ -1142,7 +1142,7 @@ app.delete("/consultorias/:id", requireAccess({ roles: ["Administrador", "Coordi
 app.get("/mis-asignaciones-coordinador", requireAccess({ roles: ["Coordinador"] }), async (req, res) => {
   try {
     const userId = req.user?.id || req.query.coordinador_id;
-      const result = await pool.query(`
+    const result = await pool.query(`
         SELECT
           ra.id,
           con.id AS consultoria_id,
@@ -1302,19 +1302,19 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
       return res.status(400).json({ error: "Falta id_registro_asignacion" });
     }
 
-      const existente = await pool.query(
-        `SELECT id, estado_reporte
+    const existente = await pool.query(
+      `SELECT id, estado_reporte
          FROM reporte_horas
          WHERE id_registro_asignacion = $1
            AND estado_reporte IN ('Pendiente', 'Rechazado')
          ORDER BY updated_at DESC NULLS LAST, id DESC
          LIMIT 1`,
-        [id_registro_asignacion]
-      );
-      const existenteRow = existente.rows[0];
-      if (existenteRow?.estado_reporte === "Pendiente") {
-        return res.status(400).json({ error: "Ya hay un reporte pendiente para esta asignación" });
-      }
+      [id_registro_asignacion]
+    );
+    const existenteRow = existente.rows[0];
+    if (existenteRow?.estado_reporte === "Pendiente") {
+      return res.status(400).json({ error: "Ya hay un reporte pendiente para esta asignación" });
+    }
 
     const meta = await pool.query(`
       SELECT
@@ -1333,23 +1333,23 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
       return res.status(404).json({ error: "Asignación no encontrada" });
     }
 
-      const info = meta.rows[0];
-      const consultorId = info.consultor_responsable_id || req.user?.id || null;
-      let consultorPrincipalId = null;
-      if (consultorId) {
-        const principalRes = await pool.query(
-          "SELECT id_consultor_principal, tipo_consultor FROM usuarios WHERE id = $1",
-          [consultorId]
-        );
-        const principalRow = principalRes.rows[0];
-        if (principalRow?.id_consultor_principal) {
-          consultorPrincipalId = principalRow.id_consultor_principal;
-        }
+    const info = meta.rows[0];
+    const consultorId = info.consultor_responsable_id || req.user?.id || null;
+    let consultorPrincipalId = null;
+    if (consultorId) {
+      const principalRes = await pool.query(
+        "SELECT id_consultor_principal, tipo_consultor FROM usuarios WHERE id = $1",
+        [consultorId]
+      );
+      const principalRow = principalRes.rows[0];
+      if (principalRow?.id_consultor_principal) {
+        consultorPrincipalId = principalRow.id_consultor_principal;
       }
-      let result;
-      if (existenteRow?.estado_reporte === "Rechazado") {
-        result = await pool.query(
-          `UPDATE reporte_horas
+    }
+    let result;
+    if (existenteRow?.estado_reporte === "Rechazado") {
+      result = await pool.query(
+        `UPDATE reporte_horas
            SET horas_reportadas = $1,
                cantidad_dias_reportados = $2,
                total_cobrar = $3,
@@ -1366,46 +1366,46 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
                updated_at = CURRENT_TIMESTAMP
            WHERE id = $12
            RETURNING *`,
-          [
-            horas_reportadas || null,
-            cantidad_dias_reportados || null,
-            total_cobrar || null,
-            tipo_servicio || null,
-            nro_caso_int_ext || null,
-            info.id_cliente,
-            info.id_tipo_asignacion,
-            info.id_modulo,
-            info.coordinador_responsable_id,
-            consultorId,
-            consultorPrincipalId,
-            existenteRow.id
-          ]
-        );
-      } else {
-        result = await pool.query(
-          `INSERT INTO reporte_horas
+        [
+          horas_reportadas || null,
+          cantidad_dias_reportados || null,
+          total_cobrar || null,
+          tipo_servicio || null,
+          nro_caso_int_ext || null,
+          info.id_cliente,
+          info.id_tipo_asignacion,
+          info.id_modulo,
+          info.coordinador_responsable_id,
+          consultorId,
+          consultorPrincipalId,
+          existenteRow.id
+        ]
+      );
+    } else {
+      result = await pool.query(
+        `INSERT INTO reporte_horas
             (id_registro_asignacion, horas_reportadas, cantidad_dias_reportados, total_cobrar,
              tipo_servicio, nro_caso_int_ext, cliente_id, tipo_asignacion_id, modulo_id,
              coordinador_id, consultor_responsable_id, consultor_principal_id, created_by)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
            RETURNING *`,
-          [
-            id_registro_asignacion,
-            horas_reportadas || null,
-            cantidad_dias_reportados || null,
-            total_cobrar || null,
-            tipo_servicio || null,
-            nro_caso_int_ext || null,
-            info.id_cliente,
-            info.id_tipo_asignacion,
-            info.id_modulo,
-            info.coordinador_responsable_id,
-            consultorId,
-            consultorPrincipalId,
-            req.user?.id || consultorId
-          ]
-        );
-      }
+        [
+          id_registro_asignacion,
+          horas_reportadas || null,
+          cantidad_dias_reportados || null,
+          total_cobrar || null,
+          tipo_servicio || null,
+          nro_caso_int_ext || null,
+          info.id_cliente,
+          info.id_tipo_asignacion,
+          info.id_modulo,
+          info.coordinador_responsable_id,
+          consultorId,
+          consultorPrincipalId,
+          req.user?.id || consultorId
+        ]
+      );
+    }
 
     await pool.query(
       `UPDATE registro_asignaciones
@@ -1451,7 +1451,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
     console.error(err);
     res.status(500).json({ error: "Error al reportar horas" });
   }
-  });
+});
 
 /* ===============================
    API - MESA/FÁBRICA
@@ -1586,19 +1586,19 @@ app.get("/horas-por-cobrar/:consultorId", requireAccess({ roles: ["Consultor", "
 // Vista previa de cuenta de cobro (total + letras)
 app.post("/cuentas-cobro/preview", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   const { consultor_id, ids_reportes } = req.body;
-  
+
   if (!consultor_id || !Array.isArray(ids_reportes) || ids_reportes.length === 0) {
     return res.status(400).json({ error: "Faltan datos para previsualizar" });
   }
 
-    try {
-      if (normalizeValue(req.user?.tipo_consultor) === "asociado") {
-        return res.status(403).json({ error: "Acceso denegado" });
-      }
-      if (String(req.user?.id) !== String(consultor_id)) {
-        return res.status(403).json({ error: "Acceso denegado" });
-      }
-      // 1. Obtener moneda del consultor
+  try {
+    if (normalizeValue(req.user?.tipo_consultor) === "asociado") {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+    if (String(req.user?.id) !== String(consultor_id)) {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+    // 1. Obtener moneda del consultor
     const monedaRes = await pool.query(
       "SELECT moneda_cobro FROM usuarios WHERE id = $1",
       [consultor_id]
@@ -1621,11 +1621,11 @@ app.post("/cuentas-cobro/preview", requireAccess({ roles: ["Consultor", "Consult
     );
 
     const info = meta.rows[0];
-    
+
     // 3. Validar que todos los registros sean válidos
     if (Number(info.count) !== ids_reportes.length) {
-      return res.status(400).json({ 
-        error: "Algunos registros no son válidos para cobro" 
+      return res.status(400).json({
+        error: "Algunos registros no son válidos para cobro"
       });
     }
 
@@ -1644,9 +1644,9 @@ app.post("/cuentas-cobro/preview", requireAccess({ roles: ["Consultor", "Consult
 
   } catch (error) {
     console.error('❌ Error en /cuentas-cobro/preview:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Error al calcular preview',
-      detalle: error.message 
+      detalle: error.message
     });
   }
 });
@@ -2149,8 +2149,8 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
         estado === "Aprobado"
           ? "Reporte aprobado"
           : estado === "Rechazado"
-          ? "Reporte rechazado"
-          : "Actualización de reporte";
+            ? "Reporte rechazado"
+            : "Actualización de reporte";
       await sendEmailSafe({
         to: info.consultor_email,
         subject: `${titulo} - ${info.cliente || "Cliente"}`,
@@ -2234,19 +2234,19 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
 
 // Crear asignación (registro_asignaciones)
 app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
-    const {
-      id_consultoria,
-      id_modulo,
-      consultor_responsable_id,
-      fecha_inicio,
-      fecha_fin,
-      cantidad_dias,
-      horas_asignadas,
-      valor_hora,
-      valor_dia,
-      tipo_servicio,
-      total_pagar
-    } = req.body;
+  const {
+    id_consultoria,
+    id_modulo,
+    consultor_responsable_id,
+    fecha_inicio,
+    fecha_fin,
+    cantidad_dias,
+    horas_asignadas,
+    valor_hora,
+    valor_dia,
+    tipo_servicio,
+    total_pagar
+  } = req.body;
 
   try {
     if (!id_consultoria || !consultor_responsable_id || !id_modulo) {
@@ -2356,7 +2356,7 @@ app.listen(PORT, () => {
 
 // 1. Usar process.env.PORT (Obligatorio para Azure)
 // 2. Mantener 4000 como fallback para tu entorno local
-const port = process.env.PORT || 4000; 
+const port = process.env.PORT || 4000;
 
 // 3. Añadir "0.0.0.0" asegura que el contenedor acepte conexiones externas
 app.listen(port, "0.0.0.0", () => {

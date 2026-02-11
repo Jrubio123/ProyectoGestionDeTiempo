@@ -1,15 +1,20 @@
 <div x-data="solicitudesCoordApp()" class="rrhh-page max-w-7xl mx-auto space-y-0">
-    <section class="rrhh-hero">
-        <div class="rrhh-hero-content flex items-start justify-between gap-4">
-            <div>
-                <h1 class="rrhh-title">Gestión de Talento</h1>
-                <p class="rrhh-subtitle">Solicitudes de personal para RRHH con seguimiento claro por prioridad y estado.</p>
-            </div>
-            <button @click="resetForm(); modalNueva = true" class="rrhh-btn-primary px-4 py-2 text-sm">
-                + Nueva Solicitud
-            </button>
+    <section class="relative overflow-hidden bg-white/40 backdrop-blur-xl border-b border-white/20 p-8 rounded-b-3xl shadow-sm">
+    <div class="absolute -top-24 -right-24 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl"></div>
+    
+    <div class="relative flex items-start justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Gestión de Talento</h1>
+            <p class="text-slate-600 mt-1 text-sm font-medium">
+                Solicitudes de personal para RRHH con seguimiento claro por prioridad y estado.
+            </p>
         </div>
-    </section>
+        <button @click="resetForm(); modalNueva = true" 
+                class="bg-indigo-600/90 hover:bg-indigo-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow-lg shadow-indigo-200 transition-all active:scale-95">
+            + Nueva Solicitud
+        </button>
+    </div>
+</section>
 
     <section class="rrhh-panel">
         <div class="rrhh-glass-card overflow-hidden">

@@ -88,6 +88,10 @@ function buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total
 }
 
 const normalizeValue = (value) => String(value || "").toLowerCase().trim();
+const isGuid = (value) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value || "").trim()
+  );
 
 function graphGet(path, accessToken) {
   return new Promise((resolve, reject) => {
@@ -118,6 +122,70 @@ function graphGet(path, accessToken) {
     req.on("error", reject);
     req.end();
   });
+}
+
+function graphPost(path, accessToken, body) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body || {});
+    const options = {
+      hostname: "graph.microsoft.com",
+      path,
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload)
+      }
+    };
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          try {
+            resolve(JSON.parse(data || "{}"));
+          } catch (e) {
+            resolve({});
+          }
+        } else {
+          reject(new Error(`Graph error ${res.statusCode}: ${data}`));
+        }
+      });
+    });
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+function resolveGraphPath(nextLink) {
+  if (!nextLink) return null;
+  if (nextLink.startsWith("https://graph.microsoft.com")) {
+    try {
+      const url = new URL(nextLink);
+      return `${url.pathname}${url.search}`;
+    } catch (err) {
+      return null;
+    }
+  }
+  return nextLink;
+}
+
+async function graphGetAll(path, accessToken, maxPages = 20) {
+  const values = [];
+  let nextPath = path;
+  let pages = 0;
+
+  while (nextPath && pages < maxPages) {
+    const data = await graphGet(nextPath, accessToken);
+    if (Array.isArray(data?.value)) {
+      values.push(...data.value);
+    }
+    nextPath = resolveGraphPath(data?.["@odata.nextLink"]);
+    pages += 1;
+  }
+
+  return values;
 }
 
 const hasAccess = (req, { roles = [], tipos = [] }) => {
@@ -743,7 +811,7 @@ app.post("/auth/microsoft", async (req, res) => {
   }
 
   try {
-    const me = await graphGet("/v1.0/me", accessToken);
+    const me = await graphGet("/v1.0/me?$select=id,mail,userPrincipalName,displayName,mobilePhone", accessToken);
     const oid = me.id;
     const email = me.mail || me.userPrincipalName;
     const nombre = me.displayName || email;
@@ -758,19 +826,72 @@ app.post("/auth/microsoft", async (req, res) => {
       .map((s) => s.trim())
       .filter(Boolean);
     const allowedGroupsNormalized = new Set(allowedGroups.map(normalizeValue));
+    const allowedGroupIds = allowedGroups.filter(isGuid);
+    const allowedGroupNames = allowedGroups.filter((g) => !isGuid(g));
 
     if (allowedGroups.length > 0) {
-      const memberOf = await graphGet("/v1.0/me/memberOf?$select=id,displayName", accessToken);
-      const groups = (memberOf?.value || []).map((g) => ({
-        id: g.id,
-        name: g.displayName
-      }));
-      const allowed = groups.some(
-        (g) =>
-          allowedGroupsNormalized.has(normalizeValue(g.id)) ||
-          allowedGroupsNormalized.has(normalizeValue(g.name))
-      );
+      let groups = [];
+      let matchedGroup = null;
+      let allowed = false;
+
+      if (allowedGroupIds.length > 0) {
+        const check = await graphPost("/v1.0/me/checkMemberGroups", accessToken, {
+          groupIds: allowedGroupIds
+        });
+        const matchedIds = Array.isArray(check?.value) ? check.value : [];
+        if (matchedIds.length > 0) {
+          matchedGroup = { id: matchedIds[0], name: null };
+          allowed = true;
+        }
+      }
+
+      if (!allowed && allowedGroupNames.length > 0) {
+        const memberOf = await graphGetAll("/v1.0/me/transitiveMemberOf?$select=id,displayName", accessToken);
+        groups = memberOf.map((g) => ({
+          id: g.id,
+          name: g.displayName
+        }));
+        matchedGroup = groups.find(
+          (g) =>
+            allowedGroupsNormalized.has(normalizeValue(g.id)) ||
+            allowedGroupsNormalized.has(normalizeValue(g.name))
+        ) || null;
+        allowed = Boolean(matchedGroup);
+      }
+
+      if (process.env.DEBUG_AUTH === "true") {
+        console.log(
+          "[ms_auth] user:",
+          email,
+          "oid:",
+          oid,
+          "allowedGroups:",
+          allowedGroups,
+          "allowedGroupIds:",
+          allowedGroupIds.length,
+          "allowedGroupNames:",
+          allowedGroupNames.length,
+          "memberGroupsFound:",
+          groups.length,
+          "allowed:",
+          allowed,
+          "matchedGroup:",
+          matchedGroup || null
+        );
+      }
       if (!allowed) {
+        if (process.env.DEBUG_AUTH === "true") {
+          return res.status(403).json({
+            error: "Usuario sin acceso al grupo permitido",
+            debug: {
+              email,
+              oid,
+              allowed_groups_config: allowedGroups,
+              member_groups_count: groups.length,
+              member_groups_sample: groups.slice(0, 20)
+            }
+          });
+        }
         return res.status(403).json({ error: "Usuario sin acceso al grupo permitido" });
       }
     }

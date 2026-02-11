@@ -50,13 +50,15 @@
                 return;
             }
 
-            const tokenResp = await msalInstance.acquireTokenSilent({
-                scopes: ["User.Read"],
-                account
-            });
+            const accessToken =
+                response?.accessToken ||
+                (await msalInstance.acquireTokenSilent({
+                    scopes: ["User.Read"],
+                    account
+                })).accessToken;
 
             const res = await axios.post(`${API}/auth/microsoft`, {
-                access_token: tokenResp.accessToken
+                access_token: accessToken
             });
 
             const data = res.data || {};

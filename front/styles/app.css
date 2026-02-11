@@ -8,6 +8,8 @@
     /* Silver Consulting brand palette */
     --silver-dark: #20272f;
     --silver-blue: #1c61ab;
+    --silver-blue-bright: #2f86e6;
+    --silver-blue-deep: #173a66;
     --silver-teal: #189fa9;
     --silver-gray: #c7c7c7;
     --silver-orange: #ff6000;
@@ -23,9 +25,9 @@
 body {
     margin: 0;
     background:
-        radial-gradient(1200px 520px at -12% -20%, rgba(28, 97, 171, 0.2), transparent 65%),
+        radial-gradient(1200px 520px at -12% -20%, rgba(47, 134, 230, 0.22), transparent 65%),
         radial-gradient(900px 420px at 115% -10%, rgba(24, 159, 169, 0.16), transparent 62%),
-        linear-gradient(180deg, #f7fafc 0%, #eef3f8 100%);
+        linear-gradient(180deg, #f8fbff 0%, #edf4fb 100%);
     color: var(--text-strong);
     font-family: "Segoe UI", "Inter", "Roboto", sans-serif;
 }

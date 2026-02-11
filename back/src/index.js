@@ -1889,11 +1889,6 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
       return res.status(400).json({ error: "Algunos registros no son vÃ¡lidos para cobro" });
     }
 
-    if (String(info.min_fecha || "") !== String(fecha_inicio) || String(info.max_fecha || "") !== String(fecha_fin)) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: "El rango de fechas no coincide con los reportes aprobados" });
-    }
-
     if (total_numeros !== undefined && Number(total_numeros) !== Number(info.total || 0)) {
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "El total no coincide con los reportes aprobados" });

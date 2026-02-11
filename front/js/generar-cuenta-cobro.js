@@ -1,4 +1,4 @@
-// js/generar-cuenta-cobro.js
+﻿// js/generar-cuenta-cobro.js
 window.cuentaCobroApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
 
@@ -60,6 +60,10 @@ window.cuentaCobroApp = function () {
             );
         },
 
+        toDateOnly(value) {
+            return String(value || "").split("T")[0];
+        },
+
         toggleAll() {
             const allChecked = this.registros.every((r) => r.checked);
             this.registros.forEach((r) => (r.checked = !allChecked));
@@ -76,43 +80,37 @@ window.cuentaCobroApp = function () {
                 this.totalBackend = 0;
                 return;
             }
-            const fechas = sel.map((r) => new Date(r.created_at)).filter((d) => !isNaN(d));
-            if (fechas.length === 0) return;
-            const min = new Date(Math.min(...fechas));
-            const max = new Date(Math.max(...fechas));
-            this.form.fecha_inicio = this.form.fecha_inicio || min.toISOString().split("T")[0];
-            this.form.fecha_fin = this.form.fecha_fin || max.toISOString().split("T")[0];
+            // El periodo se diligencia manualmente por el usuario.
         },
 
         async actualizarLetras() {
             const seleccionados = this.registros.filter((r) => r.checked).map((r) => r.id);
             if (seleccionados.length === 0 || !this.usuarioId) return;
+
             try {
                 const res = await axios.post(`${API}/cuentas-cobro/preview`, {
                     consultor_id: this.usuarioId,
                     ids_reportes: seleccionados
                 });
+
                 this.totalBackend = Number(res.data?.total || 0);
                 this.form.total_letras = res.data?.total_letras || "";
-                if (res.data?.fecha_inicio) this.form.fecha_inicio = res.data.fecha_inicio;
-                if (res.data?.fecha_fin) this.form.fecha_fin = res.data.fecha_fin;
                 this.monedaBackend = res.data?.moneda || "";
             } catch (e) {
-                // fallback: no bloquear si falla
                 this.totalBackend = 0;
             }
         },
 
         async generarCuenta() {
-            if (!confirm("¿Estás seguro de enviar esta cuenta de cobro?")) return;
+            if (!confirm("¿Estas seguro de enviar esta cuenta de cobro?")) return;
 
             const seleccionados = this.registros.filter((r) => r.checked).map((r) => r.id);
             if (seleccionados.length === 0) return;
 
             const payload = {
                 consultor_id: this.usuarioId,
-                fecha_inicio: this.form.fecha_inicio,
-                fecha_fin: this.form.fecha_fin,
+                fecha_inicio: this.toDateOnly(this.form.fecha_inicio),
+                fecha_fin: this.toDateOnly(this.form.fecha_fin),
                 total_letras: this.form.total_letras,
                 ciudad_cobro: this.form.ciudad_cobro,
                 total_numeros: this.totalSeleccionado,

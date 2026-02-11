@@ -7,11 +7,11 @@ const { Pool } = require('pg');
 // 1. CONFIGURACIÓN
 // ==========================================
 const pool = new Pool({
-  user: 'postgres',      // TU USUARIO
-  host: 'localhost',     // TU HOST (ej. localhost o endpoint de Azure)
-  database: 'midatabase', // TU BASE DE DATOS
-  password: 'admin',     // TU CONTRASEÑA
-  port: 5432,
+  user: 'postgres.gvshbqrbdniwcwlxdhfg',      // TU USUARIO
+  host: 'aws-1-us-east-1.pooler.supabase.com',     // TU HOST (ej. localhost o endpoint de Azure)
+  database: 'postgres', // TU BASE DE DATOS
+  password: 'Jrubio123\'s Project',
+  port: 6543
 });
 
 // Headers para parecer un navegador real (evita bloqueos en BanRep)

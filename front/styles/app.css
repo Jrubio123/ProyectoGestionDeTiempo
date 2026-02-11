@@ -4,10 +4,290 @@
     --sidebar-width: 280px;
     --sidebar-collapsed-width: 80px;
     --page-gutter: 24px;
+
+    /* Silver Consulting brand palette */
+    --silver-dark: #20272f;
+    --silver-blue: #1c61ab;
+    --silver-blue-bright: #2f86e6;
+    --silver-blue-deep: #173a66;
+    --silver-teal: #189fa9;
+    --silver-gray: #c7c7c7;
+    --silver-orange: #ff6000;
+    --silver-purple: #5a189a;
+
+    --surface-0: #f5f8fb;
+    --surface-1: #ffffff;
+    --text-strong: #1e293b;
+    --text-soft: #5b6678;
+    --line-soft: #d9e2ec;
 }
 
 body {
     margin: 0;
+    background:
+        radial-gradient(1200px 520px at -12% -20%, rgba(47, 134, 230, 0.22), transparent 65%),
+        radial-gradient(900px 420px at 115% -10%, rgba(24, 159, 169, 0.16), transparent 62%),
+        linear-gradient(180deg, #f8fbff 0%, #edf4fb 100%);
+    color: var(--text-strong);
+    font-family: "Segoe UI", "Inter", "Roboto", sans-serif;
+}
+
+/* Global app tone remap */
+.app-main {
+    background:
+        radial-gradient(900px 320px at 100% -12%, rgba(47, 134, 230, 0.09), transparent 65%),
+        radial-gradient(760px 280px at -8% 0%, rgba(24, 159, 169, 0.08), transparent 62%);
+    border-radius: 20px;
+}
+
+/* Tailwind utility overrides used broadly across views */
+.bg-blue-600 {
+    background-color: #1c61ab !important;
+}
+
+.hover\:bg-blue-700:hover {
+    background-color: #164d88 !important;
+}
+
+.text-blue-600 {
+    color: #1c61ab !important;
+}
+
+.text-blue-700 {
+    color: #154777 !important;
+}
+
+.text-blue-800 {
+    color: #113a63 !important;
+}
+
+.text-blue-900 {
+    color: #0f3152 !important;
+}
+
+.border-blue-500 {
+    border-color: #1c61ab !important;
+}
+
+.border-blue-100 {
+    border-color: #d7e8fb !important;
+}
+
+.border-blue-50 {
+    border-color: #eaf3ff !important;
+}
+
+.bg-blue-50 {
+    background-color: #eef6ff !important;
+}
+
+.bg-blue-100 {
+    background-color: #deedff !important;
+}
+
+.bg-blue-200 {
+    background-color: #c6dfff !important;
+}
+
+.ring-blue-500 {
+    --tw-ring-color: rgba(28, 97, 171, 0.36) !important;
+}
+
+.focus\:ring-blue-500:focus {
+    --tw-ring-color: rgba(28, 97, 171, 0.3) !important;
+}
+
+.focus\:border-blue-500:focus {
+    border-color: #1c61ab !important;
+}
+
+.from-blue-600 {
+    --tw-gradient-from: #2f86e6 var(--tw-gradient-from-position) !important;
+    --tw-gradient-to: rgb(47 134 230 / 0) var(--tw-gradient-to-position) !important;
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.to-blue-600 {
+    --tw-gradient-to: #1c61ab var(--tw-gradient-to-position) !important;
+}
+
+.to-cyan-500 {
+    --tw-gradient-to: #189fa9 var(--tw-gradient-to-position) !important;
+}
+
+.from-cyan-500 {
+    --tw-gradient-from: #1db0bb var(--tw-gradient-from-position) !important;
+    --tw-gradient-to: rgb(29 176 187 / 0) var(--tw-gradient-to-position) !important;
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.to-indigo-600 {
+    --tw-gradient-to: #1b4f88 var(--tw-gradient-to-position) !important;
+}
+
+.from-blue-900 {
+    --tw-gradient-from: #173a66 var(--tw-gradient-from-position) !important;
+    --tw-gradient-to: rgb(23 58 102 / 0) var(--tw-gradient-to-position) !important;
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.rrhh-page {
+    background: #f8f9fa;
+    border-radius: 24px;
+}
+
+.rrhh-hero {
+    position: relative;
+    min-height: 200px;
+    padding: 2rem 2rem 5.5rem;
+    border-radius: 22px;
+    color: #ffffff;
+    overflow: hidden;
+    background:
+        linear-gradient(130deg, rgba(90, 24, 154, 0.95) 0%, rgba(28, 97, 171, 0.95) 100%);
+}
+
+.rrhh-hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+        radial-gradient(circle at 18% 22%, rgba(255, 255, 255, 0.06) 0, rgba(255, 255, 255, 0.06) 28px, transparent 29px),
+        radial-gradient(circle at 76% 42%, rgba(255, 255, 255, 0.05) 0, rgba(255, 255, 255, 0.05) 34px, transparent 35px),
+        linear-gradient(45deg, rgba(255, 255, 255, 0.04) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.04) 50%, rgba(255, 255, 255, 0.04) 75%, transparent 75%, transparent);
+    background-size: auto, auto, 36px 36px;
+    mix-blend-mode: screen;
+    pointer-events: none;
+}
+
+.rrhh-hero-content {
+    position: relative;
+    z-index: 1;
+}
+
+.rrhh-title {
+    margin: 0;
+    color: #ffffff;
+    font-size: clamp(1.5rem, 2.6vw, 2rem);
+    font-weight: 800;
+    letter-spacing: 0.2px;
+}
+
+.rrhh-subtitle {
+    margin-top: 0.45rem;
+    color: rgba(242, 247, 255, 0.92);
+    font-size: 0.94rem;
+}
+
+.rrhh-panel {
+    position: relative;
+    z-index: 2;
+    margin: -3.5rem 1rem 0;
+    border-radius: 18px;
+    background: #ffffff;
+    border: 1px solid #e8edf4;
+    box-shadow: 0 20px 40px rgba(108, 126, 150, 0.18);
+    padding: 1.25rem;
+}
+
+.rrhh-glass-card {
+    background: #ffffff;
+    border: 1px solid #e8edf4;
+    border-radius: 16px;
+    box-shadow: 0 12px 30px rgba(108, 126, 150, 0.13);
+    transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+
+.rrhh-glass-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 34px rgba(88, 112, 138, 0.2);
+}
+
+.rrhh-btn-primary {
+    background: linear-gradient(135deg, #189fa9 0%, #148a93 100%);
+    color: #ffffff;
+    border: 0;
+    border-radius: 12px;
+    font-weight: 700;
+    box-shadow: 0 10px 24px rgba(24, 159, 169, 0.28);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.rrhh-btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 26px rgba(24, 159, 169, 0.36);
+}
+
+.rrhh-btn-ghost {
+    border: 1px solid #dbe4ee;
+    border-radius: 12px;
+    background: #ffffff;
+    color: #5b6678;
+    font-weight: 600;
+}
+
+.rrhh-input {
+    width: 100%;
+    border: 1px solid #d7dfeb;
+    border-radius: 10px;
+    padding: 0.62rem 0.75rem;
+    background: #fbfcfe;
+    color: #20272f;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.rrhh-input:focus {
+    outline: none;
+    border-color: #189fa9;
+    box-shadow: 0 0 0 4px rgba(24, 159, 169, 0.15);
+    background: #ffffff;
+}
+
+.rrhh-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: 999px;
+    padding: 0.2rem 0.62rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1.25;
+    border: 1px solid transparent;
+}
+
+.rrhh-badge-attention {
+    color: #c24e00;
+    background: #fff3eb;
+    border-color: #ffd9c2;
+}
+
+.rrhh-badge-progress {
+    color: #0f6671;
+    background: #e9f8f9;
+    border-color: #bcecf0;
+}
+
+.rrhh-badge-structure {
+    color: #5a189a;
+    background: #f4ecfd;
+    border-color: #dfcaf5;
+}
+
+.rrhh-badge-neutral {
+    color: #5b6678;
+    background: #f3f5f8;
+    border-color: #dde3ea;
+}
+
+@media (max-width: 640px) {
+    .rrhh-hero {
+        padding: 1.5rem 1rem 5rem;
+    }
+
+    .rrhh-panel {
+        margin: -3rem 0.5rem 0;
+        padding: 1rem;
+    }
 }
 
 [x-cloak] {

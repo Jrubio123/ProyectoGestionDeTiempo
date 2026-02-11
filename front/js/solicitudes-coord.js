@@ -113,14 +113,14 @@ window.solicitudesCoordApp = function () {
         get camposFaltantes() {
             const faltan = [];
             if (!this.form.cliente_id) faltan.push("Cliente");
-            if (!this.form.modulo_id) faltan.push("MÃ³dulo");
+            if (!this.form.modulo_id) faltan.push("Módulo");
             if (!this.form.perfil) faltan.push("Perfil");
             if (!this.form.nivel) faltan.push("Nivel");
             if (!this.form.tiempo) faltan.push("Tiempo");
-            if (!this.form.ubicacion) faltan.push("UbicaciÃ³n");
+            if (!this.form.ubicacion) faltan.push("Ubicación");
             if (!this.form.modalidad) faltan.push("Modalidad");
             if (!this.form.presupuesto) faltan.push("Presupuesto");
-            if (!this.form.descripcion) faltan.push("DescripciÃ³n");
+            if (!this.form.descripcion) faltan.push("Descripción");
             if (!this.form.prioridad) faltan.push("Prioridad");
             return faltan;
         },

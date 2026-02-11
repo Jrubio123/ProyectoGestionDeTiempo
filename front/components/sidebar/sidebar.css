@@ -1,6 +1,9 @@
 .sidebar {
     width: 280px;
-    background: linear-gradient(180deg, #2c3e50 0%, #1a2530 100%);
+    background:
+        radial-gradient(620px 220px at -10% -10%, rgba(255, 255, 255, 0.2), transparent 58%),
+        radial-gradient(440px 180px at 110% 8%, rgba(24, 159, 169, 0.12), transparent 55%),
+        linear-gradient(180deg, #6289ad 0%, #547a9f 42%, #476b8f 100%);
     color: white;
     height: calc(100vh - 70px);
     position: fixed;
@@ -9,7 +12,8 @@
     padding: 1.5rem;
     overflow-y: auto;
     transition: all 0.3s ease;
-    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+    border-right: 1px solid rgba(218, 230, 243, 0.3);
+    box-shadow: 8px 0 22px rgba(41, 71, 102, 0.18);
     z-index: 999;
 }
 
@@ -24,13 +28,15 @@
     align-items: center;
     margin-bottom: 2rem;
     padding-bottom: 1rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid rgba(221, 233, 246, 0.34);
 }
 
 .sidebar-title {
     margin: 0;
-    font-size: 1.3rem;
+    font-size: 1.1rem;
     font-weight: 600;
+    letter-spacing: 0.4px;
+    color: #f0f6fb;
     transition: opacity 0.3s ease;
 }
 
@@ -41,8 +47,8 @@
 }
 
 .sidebar-toggle {
-    background: rgba(255, 255, 255, 0.1);
-    border: none;
+    background: rgba(28, 52, 77, 0.2);
+    border: 1px solid rgba(225, 236, 248, 0.4);
     color: white;
     width: 36px;
     height: 36px;
@@ -55,7 +61,7 @@
 }
 
 .sidebar-toggle:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(28, 52, 77, 0.32);
     transform: rotate(90deg);
 }
 
@@ -71,7 +77,7 @@
     font-size: 0.85rem;
     text-transform: uppercase;
     letter-spacing: 1px;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(228, 238, 248, 0.88);
     margin-bottom: 1rem;
     transition: opacity 0.3s ease;
 }
@@ -98,23 +104,26 @@
     align-items: center;
     gap: 1rem;
     padding: 0.75rem 1rem;
-    color: rgba(255, 255, 255, 0.7);
+    color: rgba(237, 245, 252, 0.92);
     text-decoration: none;
-    border-radius: 8px;
+    border-radius: 10px;
     transition: all 0.3s ease;
     position: relative;
+    border: 1px solid transparent;
 }
 
 .menu-link:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(28, 52, 77, 0.22);
+    border-color: rgba(223, 235, 247, 0.54);
     color: white;
     transform: translateX(5px);
 }
 
 .menu-item.active .menu-link {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #355576 0%, #2b4866 100%);
     color: white;
-    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    border-color: rgba(255, 255, 255, 0.32);
+    box-shadow: 0 6px 16px rgba(36, 64, 92, 0.28);
 }
 
 .menu-icon {
@@ -136,7 +145,7 @@
 }
 
 .menu-badge {
-    background: #e74c3c;
+    background: var(--silver-orange);
     color: white;
     font-size: 0.75rem;
     padding: 0.2rem 0.5rem;
@@ -150,8 +159,8 @@
     left: 0;
     right: 0;
     padding: 1.5rem;
-    background: rgba(0, 0, 0, 0.2);
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(35, 60, 86, 0.44);
+    border-top: 1px solid rgba(223, 235, 247, 0.24);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -175,7 +184,7 @@
     height: 40px;
     border-radius: 50%;
     object-fit: cover;
-    border: 2px solid rgba(255, 255, 255, 0.3);
+    border: 2px solid rgba(223, 235, 247, 0.62);
 }
 
 .user-details h4 {
@@ -187,12 +196,12 @@
 .user-details p {
     margin: 0;
     font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(220, 232, 245, 0.86);
 }
 
 .logout-btn {
-    background: rgba(255, 255, 255, 0.1);
-    border: none;
+    background: rgba(255, 96, 0, 0.15);
+    border: 1px solid rgba(255, 96, 0, 0.42);
     color: white;
     width: 40px;
     height: 40px;
@@ -205,7 +214,7 @@
 }
 
 .logout-btn:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 96, 0, 0.26);
     transform: scale(1.1);
 }
 

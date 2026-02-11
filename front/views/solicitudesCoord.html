@@ -1,127 +1,142 @@
-<div x-data="solicitudesCoordApp()" class="max-w-6xl mx-auto space-y-6">
+<div x-data="solicitudesCoordApp()" class="rrhh-page max-w-7xl mx-auto space-y-0">
+    <section class="rrhh-hero">
+        <div class="rrhh-hero-content flex items-start justify-between gap-4">
+            <div>
+                <h1 class="rrhh-title">Gestión de Talento</h1>
+                <p class="rrhh-subtitle">Solicitudes de personal para RRHH con seguimiento claro por prioridad y estado.</p>
+            </div>
+            <button @click="resetForm(); modalNueva = true" class="rrhh-btn-primary px-4 py-2 text-sm">
+                + Nueva Solicitud
+            </button>
+        </div>
+    </section>
 
-    <div class="flex justify-between items-center">
-        <h1 class="text-2xl font-bold text-gray-800">Mis Solicitudes de Personal</h1>
-        <button @click="resetForm(); modalNueva = true" class="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold shadow hover:bg-blue-700">
-            + Nueva Solicitud
-        </button>
-    </div>
-
-    <div class="bg-white rounded-xl shadow border border-gray-100 overflow-hidden">
-        <table class="w-full text-left text-sm">
-            <thead class="bg-gray-50 text-gray-500 font-bold uppercase">
-                <tr>
-                    <th class="p-4">Fecha</th>
-                    <th class="p-4">Cliente / Proyecto</th>
-                    <th class="p-4">Perfil Solicitado</th>
-                    <th class="p-4">Prioridad</th>
-                    <th class="p-4 text-center">Estado (RRHH)</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-100">
-                <template x-for="s in misSolicitudes" :key="s.id">
-                    <tr class="hover:bg-gray-50">
-                        <td class="p-4" x-text="formatDate(s.created_at)"></td>
-                        <td class="p-4">
-                            <p class="font-bold text-gray-800" x-text="s.cliente"></p>
-                            <p class="text-xs text-gray-500" x-text="s.modulo"></p>
-                        </td>
-                        <td class="p-4" x-text="s.perfil"></td>
-                        <td class="p-4">
-                            <span class="px-2 py-1 rounded text-xs font-bold"
-                                :class="{
-                                    'bg-red-100 text-red-700': s.prioridad === 'Alta',
-                                    'bg-yellow-100 text-yellow-700': s.prioridad === 'Media',
-                                    'bg-green-100 text-green-700': s.prioridad === 'Baja'
-                                }" x-text="s.prioridad"></span>
-                        </td>
-                        <td class="p-4 text-center">
-                            <span class="px-3 py-1 rounded-full text-xs border font-bold bg-white"
-                                  :class="{'border-green-500 text-green-600': s.estado === 'Contratado'}"
-                                  x-text="s.estado">
-                            </span>
-                        </td>
+    <section class="rrhh-panel">
+        <div class="rrhh-glass-card overflow-hidden">
+            <table class="w-full text-left text-sm">
+                <thead class="bg-[#f7f9fc] text-[#5b6678] font-bold uppercase tracking-wide text-xs">
+                    <tr>
+                        <th class="p-4">Fecha</th>
+                        <th class="p-4">Cliente / Proyecto</th>
+                        <th class="p-4">Perfil Solicitado</th>
+                        <th class="p-4">Prioridad</th>
+                        <th class="p-4 text-center">Estado (RRHH)</th>
                     </tr>
-                </template>
-            </tbody>
-        </table>
-    </div>
+                </thead>
+                <tbody class="divide-y divide-[#eef2f7] text-[#20272f]">
+                    <template x-for="s in misSolicitudes" :key="s.id">
+                        <tr class="hover:bg-[#f9fbff] transition-colors">
+                            <td class="p-4" x-text="formatDate(s.created_at)"></td>
+                            <td class="p-4">
+                                <p class="font-bold text-[#20272f]" x-text="s.cliente"></p>
+                                <p class="text-xs text-[#6f7b8e]" x-text="s.modulo"></p>
+                            </td>
+                            <td class="p-4" x-text="s.perfil"></td>
+                            <td class="p-4">
+                                <span class="rrhh-badge"
+                                    :class="{
+                                        'rrhh-badge-attention': s.prioridad === 'Alta',
+                                        'rrhh-badge-structure': s.prioridad === 'Media',
+                                        'rrhh-badge-progress': s.prioridad === 'Baja'
+                                    }" x-text="s.prioridad"></span>
+                            </td>
+                            <td class="p-4 text-center">
+                                <span class="rrhh-badge"
+                                    :class="{
+                                        'rrhh-badge-attention': s.estado === 'Pendiente',
+                                        'rrhh-badge-progress': s.estado === 'Reclutamiento' || s.estado === 'Entrevistas' || s.estado === 'Contratado',
+                                        'rrhh-badge-neutral': s.estado === 'Cancelado',
+                                        'rrhh-badge-structure': !['Pendiente','Reclutamiento','Entrevistas','Contratado','Cancelado'].includes(s.estado)
+                                    }"
+                                    x-text="s.estado">
+                                </span>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </section>
 
-    <div x-show="modalNueva" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6">
-            <h2 class="text-xl font-bold mb-4">Requerir Nuevo Consultor</h2>
+    <div x-show="modalNueva" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-3">
+        <div class="rrhh-glass-card w-full max-w-3xl max-h-[88vh] overflow-y-auto p-6 md:p-7">
+            <div class="flex items-start justify-between gap-4 mb-4">
+                <div>
+                    <h2 class="text-xl font-bold text-[#20272f]">Requerir Nuevo Consultor</h2>
+                    <p class="text-sm text-[#6f7b8e] mt-1">Completa la solicitud para enviarla al flujo de Talento Humano.</p>
+                </div>
+                <button type="button" @click="modalNueva = false; resetForm()" class="rrhh-btn-ghost px-3 py-2 text-sm">Cerrar</button>
+            </div>
+
             <form @submit.prevent="enviarSolicitud">
-                <div x-show="touched && !formValido" class="mb-3 p-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded">
+                <div x-show="touched && !formValido" class="mb-4 p-3 text-xs text-[#c24e00] bg-[#fff3eb] border border-[#ffd9c2] rounded-xl">
                     Faltan campos obligatorios: <span class="font-semibold" x-text="camposFaltantes.join(', ')"></span>
                 </div>
+
                 <div class="space-y-3">
-    <select x-model="form.cliente_id" class="w-full border rounded p-2" :class="{\"border-red-400\": touched && !form.cliente_id}" required>
-        <option value="">Selecciona Cliente...</option>
-        <template x-for="c in clientes" :key="c.id"><option :value="c.id" x-text="c.titulo"></option></template>
-    </select>
-    
-    <select x-model="form.modulo_id" class="w-full border rounded p-2" :class="{\"border-red-400\": touched && !form.modulo_id}" required>
-        <option value="">Tecnología / Módulo...</option>
-        <template x-for="m in modulos" :key="m.id"><option :value="m.id" x-text="m.titulo"></option></template>
-    </select>
+                    <select x-model="form.cliente_id" class="rrhh-input" :class="{'border-red-400': touched && !form.cliente_id}" required>
+                        <option value="">Selecciona Cliente...</option>
+                        <template x-for="c in clientes" :key="c.id"><option :value="c.id" x-text="c.titulo"></option></template>
+                    </select>
 
-    <input type="text" x-model="form.perfil" placeholder="Perfil (Ej: ABAP)" class="w-full border rounded p-2" :class="{\"border-red-400\": touched && !form.perfil}" required>
+                    <select x-model="form.modulo_id" class="rrhh-input" :class="{'border-red-400': touched && !form.modulo_id}" required>
+                        <option value="">Tecnología / Módulo...</option>
+                        <template x-for="m in modulos" :key="m.id"><option :value="m.id" x-text="m.titulo"></option></template>
+                    </select>
 
-    <select x-model="form.nivel" class="w-full border rounded p-2" :class="{\"border-red-400\": touched && !form.nivel}" required>
-        <option value="Junior">Junior</option>
-        <option value="Semi-senior">Semi-senior</option>
-        <option value="Senior">Senior</option>
-    </select>
+                    <input type="text" x-model="form.perfil" placeholder="Perfil (Ej: ABAP)" class="rrhh-input" :class="{'border-red-400': touched && !form.perfil}" required>
 
-    <input type="text" x-model="form.tiempo" placeholder="Tiempo estimado (Ej: 3 meses)" class="w-full border rounded p-2" :class="{'border-red-400': touched && !form.tiempo}" required>
+                    <select x-model="form.nivel" class="rrhh-input" :class="{'border-red-400': touched && !form.nivel}" required>
+                        <option value="Junior">Junior</option>
+                        <option value="Semi-senior">Semi-senior</option>
+                        <option value="Senior">Senior</option>
+                    </select>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-        <select x-model="form.ubicacion" class="w-full border rounded p-2" :class="{\"border-red-400\": touched && !form.ubicacion}">
-            <option value="Remoto">Remoto</option>
-            <option value="En sitio">En sitio</option>
-            <option value="Híbrido">Híbrido</option>
-        </select>
-        <select x-model="form.modalidad" class="w-full border rounded p-2" :class="{\"border-red-400\": touched && !form.modalidad}">
-            <option value="Full time">Full time</option>
-            <option value="Medio tiempo">Medio tiempo</option>
-            <option value="Por horas">Por horas</option>
-        </select>
-    </div>
+                    <input type="text" x-model="form.tiempo" placeholder="Tiempo estimado (Ej: 3 meses)" class="rrhh-input" :class="{'border-red-400': touched && !form.tiempo}" required>
 
-    <input type="date" x-model="form.fecha_inicio_esperada" class="w-full border rounded p-2">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <select x-model="form.ubicacion" class="rrhh-input" :class="{'border-red-400': touched && !form.ubicacion}">
+                            <option value="Remoto">Remoto</option>
+                            <option value="En sitio">En sitio</option>
+                            <option value="Híbrido">Híbrido</option>
+                        </select>
+                        <select x-model="form.modalidad" class="rrhh-input" :class="{'border-red-400': touched && !form.modalidad}">
+                            <option value="Full time">Full time</option>
+                            <option value="Medio tiempo">Medio tiempo</option>
+                            <option value="Por horas">Por horas</option>
+                        </select>
+                    </div>
 
-    <select x-model="form.tipo_proyecto" class="w-full border rounded p-2">
-        <option value="">Tipo de proyecto...</option>
-        <option value="Soporte">Soporte</option>
-        <option value="Roll out">Roll out</option>
-        <option value="Implementación">Implementación</option>
-        <option value="Mantenimiento">Mantenimiento</option>
-        <option value="Migración">Migración</option>
-    </select>
+                    <input type="date" x-model="form.fecha_inicio_esperada" class="rrhh-input">
 
-    <textarea x-model="form.experiencia" rows="2" placeholder="Experiencia requerida" class="w-full border rounded p-2"></textarea>
+                    <select x-model="form.tipo_proyecto" class="rrhh-input">
+                        <option value="">Tipo de proyecto...</option>
+                        <option value="Soporte">Soporte</option>
+                        <option value="Roll out">Roll out</option>
+                        <option value="Implementación">Implementación</option>
+                        <option value="Mantenimiento">Mantenimiento</option>
+                        <option value="Migración">Migración</option>
+                    </select>
 
-    <input type="text" x-model="form.presupuesto" placeholder="Presupuesto o rango salarial" class="w-full border rounded p-2" :class="{'border-red-400': touched && !form.presupuesto}" required>
+                    <textarea x-model="form.experiencia" rows="2" placeholder="Experiencia requerida" class="rrhh-input"></textarea>
 
-    <select x-model="form.prioridad" class="w-full border rounded p-2" :class="{\"border-red-400\": touched && !form.prioridad}">
-        <option>Alta</option><option>Media</option><option>Baja</option>
-    </select>
+                    <input type="text" x-model="form.presupuesto" placeholder="Presupuesto o rango salarial" class="rrhh-input" :class="{'border-red-400': touched && !form.presupuesto}" required>
 
-    <textarea x-model="form.descripcion" rows="3" placeholder="Descripción de la solicitud" class="w-full border rounded p-2" :class="{'border-red-400': touched && !form.descripcion}" required></textarea>
-    <textarea x-model="form.informacion_adicional" rows="3" placeholder="Información adicional" class="w-full border rounded p-2"></textarea>
-</div>
+                    <select x-model="form.prioridad" class="rrhh-input" :class="{'border-red-400': touched && !form.prioridad}">
+                        <option>Alta</option>
+                        <option>Media</option>
+                        <option>Baja</option>
+                    </select>
 
-<div class="mt-6 flex justify-end gap-2">
-                    <button type="button" @click="modalNueva = false; resetForm()" class="px-4 py-2 text-gray-500">Cancelar</button>
-                    <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded font-bold">Enviar a RRHH</button>
+                    <textarea x-model="form.descripcion" rows="3" placeholder="Descripción de la solicitud" class="rrhh-input" :class="{'border-red-400': touched && !form.descripcion}" required></textarea>
+                    <textarea x-model="form.informacion_adicional" rows="3" placeholder="Información adicional" class="rrhh-input"></textarea>
+                </div>
+
+                <div class="mt-6 flex justify-end gap-2">
+                    <button type="button" @click="modalNueva = false; resetForm()" class="rrhh-btn-ghost px-4 py-2 text-sm">Cancelar</button>
+                    <button type="submit" class="rrhh-btn-primary px-4 py-2 text-sm">Enviar a RRHH</button>
                 </div>
             </form>
         </div>
     </div>
 </div>
-
-
-
-
-
-

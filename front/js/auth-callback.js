@@ -9,7 +9,7 @@
         const title = document.getElementById("auth-title");
         const text = document.getElementById("auth-msg");
         const err = document.getElementById("auth-error");
-        if (title) title.textContent = "No pudimos iniciar sesiÃ³n";
+        if (title) title.textContent = "No pudimos iniciar sesión";
         if (text) text.textContent = "Revisa el error y vuelve a intentarlo.";
         if (err) {
             err.textContent = msg;
@@ -19,8 +19,8 @@
 
     async function run() {
         if (!window.msal || !window.msal.PublicClientApplication) {
-            console.error("MSAL no estÃ¡ disponible");
-            setError("MSAL no estÃ¡ disponible");
+            console.error("MSAL no está disponible");
+            setError("MSAL no está disponible");
             return;
         }
         if (!clientId || !tenantId) {
@@ -46,17 +46,19 @@
             const response = await msalInstance.handleRedirectPromise();
             const account = response?.account || msalInstance.getAllAccounts()[0];
             if (!account) {
-                setError("No se encontrÃ³ una cuenta activa en MSAL.");
+                setError("No se encontró una cuenta activa en MSAL.");
                 return;
             }
 
-            const tokenResp = await msalInstance.acquireTokenSilent({
-                scopes: ["User.Read"],
-                account
-            });
+            const accessToken =
+                response?.accessToken ||
+                (await msalInstance.acquireTokenSilent({
+                    scopes: ["User.Read"],
+                    account
+                })).accessToken;
 
             const res = await axios.post(`${API}/auth/microsoft`, {
-                access_token: tokenResp.accessToken
+                access_token: accessToken
             });
 
             const data = res.data || {};

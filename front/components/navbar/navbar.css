@@ -2,11 +2,14 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background:
+        linear-gradient(115deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02)),
+        linear-gradient(132deg, #567fa7 0%, #486f95 52%, #3d6286 100%);
     color: white;
     padding: 0 2rem;
     height: 70px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    border-bottom: 1px solid rgba(220, 233, 245, 0.34);
+    box-shadow: 0 10px 22px rgba(39, 71, 102, 0.2);
     position: fixed;
     top: 0;
     left: 0;
@@ -20,13 +23,12 @@
 }
 
 .navbar-logo {
-    font-size: 1.8rem;
+    font-size: 1.5rem;
     font-weight: 700;
     margin: 0;
-    background: white;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    letter-spacing: 0.2px;
+    color: #f4f8fc;
+    text-shadow: 0 1px 0 rgba(26, 49, 72, 0.2);
 }
 
 .navbar-links {
@@ -40,7 +42,7 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    color: rgba(255, 255, 255, 0.8);
+    color: rgba(235, 243, 251, 0.88);
     text-decoration: none;
     padding: 0.5rem 1rem;
     border-radius: 8px;
@@ -49,13 +51,13 @@
 }
 
 .nav-link:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(28, 52, 77, 0.2);
     color: white;
     transform: translateY(-2px);
 }
 
 .nav-link.active {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(28, 52, 77, 0.28);
     color: white;
     font-weight: 500;
 }
@@ -71,7 +73,8 @@
 
 .search-container {
     position: relative;
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(223, 235, 247, 0.32);
     border-radius: 25px;
     padding: 0.5rem 1rem;
     display: flex;
@@ -80,7 +83,8 @@
 }
 
 .search-container:hover {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(227, 238, 249, 0.62);
 }
 
 .search-icon {
@@ -98,7 +102,7 @@
 }
 
 .search-input::placeholder {
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(232, 241, 250, 0.72);
 }
 
 .navbar-user {
@@ -118,7 +122,7 @@
 }
 
 .user-profile:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(28, 52, 77, 0.24);
 }
 
 .user-avatar {
@@ -126,7 +130,8 @@
     height: 40px;
     border-radius: 50%;
     object-fit: cover;
-    border: 2px solid rgba(255, 255, 255, 0.3);
+    border: 2px solid rgba(224, 236, 248, 0.7);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
 }
 
 .user-name {
@@ -157,7 +162,7 @@
     min-width: 180px;
     background: white;
     color: #111827;
-    border: 1px solid rgba(0, 0, 0, 0.08);
+    border: 1px solid rgba(28, 97, 171, 0.2);
     border-radius: 12px;
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12);
     padding: 6px;
@@ -183,7 +188,7 @@
 }
 
 .dropdown-item:hover {
-    background: #f3f4f6;
+    background: #eaf4ff;
 }
 
 .dropdown-separator {
@@ -193,5 +198,5 @@
 }
 
 .dropdown-logout {
-    color: #b91c1c;
+    color: #c2410c;
 }

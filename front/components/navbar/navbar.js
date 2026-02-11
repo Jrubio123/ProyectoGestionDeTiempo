@@ -2,8 +2,64 @@ function initNavbar() {
     const navLinks = document.querySelectorAll(".nav-link");
     const userNameEl = document.querySelector(".user-name");
     const userRoleEl = document.querySelector(".user-role");
+    const userAvatarEl = document.getElementById("navbarUserAvatar");
     const userMenu = document.getElementById("userMenu");
     const userMenuToggle = document.getElementById("userMenuToggle");
+    let avatarObjectUrl = null;
+
+    async function loadMicrosoftAvatar() {
+        if (!userAvatarEl) return;
+        if (!window.msal || !window.msal.PublicClientApplication) return;
+
+        const clientId = window.AZURE_CLIENT_ID;
+        const tenantId = window.AZURE_TENANT_ID;
+        const redirectUri = `${window.location.origin}${window.AZURE_REDIRECT_PATH || "/auth/callback"}`;
+        if (!clientId || !tenantId) return;
+
+        const msalInstance = new window.msal.PublicClientApplication({
+            auth: {
+                clientId,
+                authority: `https://login.microsoftonline.com/${tenantId}`,
+                redirectUri,
+                navigateToLoginRequestUrl: false
+            },
+            cache: {
+                cacheLocation: "localStorage",
+                storeAuthStateInCookie: false
+            }
+        });
+
+        try {
+            await msalInstance.handleRedirectPromise();
+        } catch (e) {
+            // Ignore callback-handling errors in app shell.
+        }
+
+        const account = msalInstance.getAllAccounts?.()[0];
+        if (!account) return;
+
+        try {
+            const tokenResponse = await msalInstance.acquireTokenSilent({
+                account,
+                scopes: ["User.Read"]
+            });
+            const response = await fetch("https://graph.microsoft.com/v1.0/me/photo/$value", {
+                headers: { Authorization: `Bearer ${tokenResponse.accessToken}` }
+            });
+            if (!response.ok) return;
+
+            const blob = await response.blob();
+            if (!blob || !blob.size) return;
+
+            if (avatarObjectUrl) {
+                URL.revokeObjectURL(avatarObjectUrl);
+            }
+            avatarObjectUrl = URL.createObjectURL(blob);
+            userAvatarEl.src = avatarObjectUrl;
+        } catch (e) {
+            // Keep fallback avatar when photo is unavailable.
+        }
+    }
 
     function setActiveByHash() {
         const hash = window.location.hash || "#inicio";
@@ -40,6 +96,12 @@ function initNavbar() {
         if (userNameEl && user) userNameEl.textContent = user.nombre_usuario || "Usuario";
         if (userRoleEl && user) userRoleEl.textContent = user.rol || "Usuario";
     }
+
+    loadMicrosoftAvatar();
+
+    window.addEventListener("beforeunload", () => {
+        if (avatarObjectUrl) URL.revokeObjectURL(avatarObjectUrl);
+    });
 
     if (userMenuToggle && userMenu) {
         userMenuToggle.addEventListener("click", function () {

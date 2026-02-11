@@ -9,7 +9,6 @@ const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const https = require("https");
-const { spawn } = require("child_process");
 const PDFDocument = require("pdfkit");
 const { NumerosALetras } = require("numero-a-letras");
 const { sendEmail } = require("./email");
@@ -546,7 +545,7 @@ app.get("/tipos-asignacion", async (req, res) => {
 =============================== */
 
 // Listar solicitudes (coordinador ve las suyas, reclutador ve todas)
-app.get("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Reclutador"] }), async (req, res) => {
+app.get("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Reclutador", "Administrador"] }), async (req, res) => {
   try {
     const role = normalizeValue(req.user?.rol);
     const params = [];
@@ -598,7 +597,7 @@ app.get("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Reclutador"
 });
 
 // Crear solicitud (solo coordinador)
-app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador"] }), async (req, res) => {
+app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administrador"] }), async (req, res) => {
   const {
     cliente_id,
     modulo_id,
@@ -669,7 +668,7 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador"] }), async (
 });
 
 // Actualizar estado y/o notas (solo reclutador)
-app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador"] }), async (req, res) => {
+app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administrador"] }), async (req, res) => {
   const { id } = req.params;
   const { estado, observaciones_rrhh } = req.body || {};
   try {
@@ -2540,59 +2539,6 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
 });
 
 
-// Ejecutar script TRM (temporal para pruebas)
-app.post("/scripts/trm/run", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
-  try {
-    const scriptPath = path.resolve(__dirname, "../scripts/trm.js");
-    const child = spawn(process.execPath, [scriptPath], {
-      cwd: path.resolve(__dirname, ".."),
-      env: process.env
-    });
-
-    let stdout = "";
-    let stderr = "";
-    let responded = false;
-    const MAX_OUTPUT = 15000;
-    const timeout = setTimeout(() => {
-      if (responded) return;
-      responded = true;
-      child.kill("SIGTERM");
-      return res.status(504).json({ error: "Timeout ejecutando trm.js" });
-    }, 120000);
-
-    child.stdout.on("data", (chunk) => {
-      stdout = (stdout + String(chunk)).slice(-MAX_OUTPUT);
-    });
-
-    child.stderr.on("data", (chunk) => {
-      stderr = (stderr + String(chunk)).slice(-MAX_OUTPUT);
-    });
-
-    child.on("error", (err) => {
-      if (responded) return;
-      responded = true;
-      clearTimeout(timeout);
-      return res.status(500).json({ error: `No se pudo iniciar trm.js: ${err.message}` });
-    });
-
-    child.on("close", (code) => {
-      if (responded) return;
-      responded = true;
-      clearTimeout(timeout);
-      if (code === 0) {
-        return res.json({ ok: true, code, stdout, stderr });
-      }
-      return res.status(500).json({
-        error: "trm.js terminó con error",
-        code,
-        stdout,
-        stderr
-      });
-    });
-  } catch (err) {
-    return res.status(500).json({ error: `Error ejecutando trm.js: ${err.message}` });
-  }
-});
 // Ruta Default para SPA (Siempre al final)
 app.get("/", (req, res) => {
   res.json({ ok: true, message: "API activo. Abre el frontend en http://localhost:3000" });

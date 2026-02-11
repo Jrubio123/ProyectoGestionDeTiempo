@@ -1,8 +1,8 @@
-<div class="flex flex-col items-center justify-center h-full min-h-[500px] text-center space-y-6">
+﻿<div class="flex flex-col items-center justify-center h-full min-h-[500px] text-center space-y-6">
 
     <div x-data="{
             text: 'Silver Consulting',
-            text2: 'Gestión de Tiempo Inteligente',
+            text2: 'GestiÃ³n de Tiempo Inteligente',
             displayed: '',
             showSubtitle: false,
             typeSpeed: 100, // Velocidad en ms
@@ -11,19 +11,19 @@
                 let i = 0;
                 this.displayed = '';
                 
-                // Función recursiva para escribir
+                // FunciÃ³n recursiva para escribir
                 const type = () => {
                     if (i < this.text.length) {
                         this.displayed += this.text.charAt(i);
                         i++;
                         setTimeout(type, this.typeSpeed);
                     } else {
-                        // Cuando termina de escribir el título, muestra el subtítulo
+                        // Cuando termina de escribir el tÃ­tulo, muestra el subtÃ­tulo
                         setTimeout(() => { this.showSubtitle = true }, 500);
                     }
                 };
                 
-                // Pequeña pausa antes de empezar
+                // PequeÃ±a pausa antes de empezar
                 setTimeout(type, 500);
             }
         }"
@@ -38,8 +38,14 @@
         <div class="transition-all duration-1000 ease-out transform"
              :class="showSubtitle ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'">
             <p class="text-xl text-gray-500 font-medium">
-                Bienvenido al sistema de gestión.
+                Bienvenido al sistema de gestiÃ³n.
             </p>
+            <button
+                id="btn-prueba-temporal"
+                type="button"
+                class="mt-5 inline-flex items-center rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow hover:bg-blue-700 transition-colors">
+                Prueba
+            </button>
 
         </div>
     </div>

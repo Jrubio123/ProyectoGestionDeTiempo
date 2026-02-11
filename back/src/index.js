@@ -173,6 +173,23 @@ function resolveGraphPath(nextLink) {
   return nextLink;
 }
 
+function decodeJwtPayload(token) {
+  try {
+    const parts = String(token || "").split(".");
+    if (parts.length < 2) return null;
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+    return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+  } catch (err) {
+    return null;
+  }
+}
+
+function parseGraphErrorStatus(message) {
+  const match = String(message || "").match(/Graph error (\d{3})/);
+  return match ? Number(match[1]) : null;
+}
+
 async function graphGetAll(path, accessToken, maxPages = 20) {
   const values = [];
   let nextPath = path;
@@ -812,6 +829,22 @@ app.post("/auth/microsoft", async (req, res) => {
     return res.status(400).json({ error: "access_token requerido" });
   }
 
+  const tokenPayload = decodeJwtPayload(accessToken);
+  const aud = tokenPayload?.aud || null;
+  const scope = tokenPayload?.scp || "";
+  const isGraphAud =
+    aud === "https://graph.microsoft.com" ||
+    aud === "00000003-0000-0000-c000-000000000000";
+
+  if (!isGraphAud) {
+    if (process.env.DEBUG_AUTH === "true") {
+      console.log("[ms_auth] token aud invalido:", aud, "scp:", scope || "-");
+    }
+    return res.status(401).json({
+      error: "El token recibido no es de Microsoft Graph. Solicita el scope User.Read en el frontend."
+    });
+  }
+
   try {
     const me = await graphGet("/v1.0/me?$select=id,mail,userPrincipalName,displayName,mobilePhone", accessToken);
     const oid = me.id;
@@ -944,14 +977,23 @@ app.post("/auth/microsoft", async (req, res) => {
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "12h" });
     res.json({ token, user: payload });
   } catch (err) {
-    console.error("Error auth microsoft:", err.message);
-    res.status(401).json({ error: "Token Microsoft invÃ¡lido o sin permisos" });
+    const status = parseGraphErrorStatus(err.message);
+    if (status === 401 || status === 403) {
+      if (process.env.DEBUG_AUTH === "true") {
+        console.error("Error auth microsoft (graph):", err.message);
+      }
+      return res.status(401).json({
+        error: "Token Microsoft inválido o sin permisos en Graph (revisa consentimiento de User.Read)."
+      });
+    }
+    console.error("Error auth microsoft (interno):", err.message);
+    return res.status(500).json({ error: "Error interno al procesar autenticación Microsoft" });
   }
 });
 
 const authMiddleware = (req, res, next) => {
   const publicPaths = ["/", "/auth/login", "/auth/register", "/auth/me", "/auth/microsoft"];
-  if (publicPaths.includes(req.path)) return next();
+  if (publicPaths.includes(req.path) || req.path.startsWith("/auth/")) return next();
   if (req.method === "OPTIONS") return next();
 
   const auth = req.headers.authorization || "";

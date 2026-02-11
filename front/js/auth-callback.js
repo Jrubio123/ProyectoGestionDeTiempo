@@ -4,6 +4,7 @@
     const clientId = window.AZURE_CLIENT_ID;
     const tenantId = window.AZURE_TENANT_ID;
     const redirectUri = `${window.location.origin}${window.AZURE_REDIRECT_PATH || "/auth/callback"}`;
+    const graphScopes = ["openid", "profile", "email", "User.Read"];
 
     function setError(msg) {
         const title = document.getElementById("auth-title");
@@ -53,9 +54,13 @@
             const accessToken =
                 response?.accessToken ||
                 (await msalInstance.acquireTokenSilent({
-                    scopes: ["User.Read"],
+                    scopes: graphScopes,
                     account
                 })).accessToken;
+
+            if (!accessToken) {
+                throw new Error("No se pudo obtener access_token de Microsoft");
+            }
 
             const res = await axios.post(`${API}/auth/microsoft`, {
                 access_token: accessToken
@@ -74,7 +79,11 @@
                 err?.response?.data?.error ||
                 err?.message ||
                 "Error desconocido";
-            console.error("Error en callback:", err);
+            console.error("Error en callback:", {
+                status: err?.response?.status,
+                data: err?.response?.data,
+                message: err?.message
+            });
             setError(msg);
         }
     }

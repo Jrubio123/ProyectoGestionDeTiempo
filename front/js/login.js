@@ -1,6 +1,7 @@
 // js/login.js
 window.authApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
+    const graphScopes = ["openid", "profile", "email", "User.Read"];
     const isCallback =
         window.location.pathname.includes("/auth/callback") ||
         window.location.search.includes("code=") ||
@@ -90,7 +91,7 @@ window.authApp = function () {
                 }
                 clearMsalInteraction();
                 await this.msalInstance.loginRedirect({
-                    scopes: ["User.Read"]
+                    scopes: graphScopes
                 });
             } catch (e) {
                 if (String(e?.errorCode || "").includes("interaction_in_progress")) {

@@ -2,50 +2,73 @@
 
     <div x-data="{
             text: 'Silver Consulting',
-            text2: 'GestiÃ³n de Tiempo Inteligente',
+            text2: 'Gestión de Tiempo Inteligente',
             displayed: '',
             showSubtitle: false,
-            typeSpeed: 100, // Velocidad en ms
-            
+            typeSpeed: 100,
+            runningPrueba: false,
+            pruebaMsg: '',
+
+            async runPrueba() {
+                if (this.runningPrueba) return;
+                this.runningPrueba = true;
+                this.pruebaMsg = 'Ejecutando script TRM...';
+                try {
+                    const API = window.API_BASE || 'http://localhost:4000';
+                    const token = window.auth?.getToken?.();
+                    const config = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
+                    const res = await axios.post(`${API}/scripts/trm/run`, {}, config);
+                    this.pruebaMsg = res?.data?.ok
+                        ? 'TRM ejecutado correctamente.'
+                        : 'TRM ejecutado (revisar respuesta).';
+                    console.log('[TRM] respuesta:', res.data);
+                } catch (error) {
+                    const msg = error?.response?.data?.error || error?.message || 'Error ejecutando TRM';
+                    this.pruebaMsg = `Error: ${msg}`;
+                    console.error('[TRM] error:', error?.response?.data || error);
+                } finally {
+                    this.runningPrueba = false;
+                }
+            },
             init() {
                 let i = 0;
                 this.displayed = '';
-                
-                // FunciÃ³n recursiva para escribir
+
                 const type = () => {
                     if (i < this.text.length) {
                         this.displayed += this.text.charAt(i);
                         i++;
                         setTimeout(type, this.typeSpeed);
                     } else {
-                        // Cuando termina de escribir el tÃ­tulo, muestra el subtÃ­tulo
                         setTimeout(() => { this.showSubtitle = true }, 500);
                     }
                 };
-                
-                // PequeÃ±a pausa antes de empezar
+
                 setTimeout(type, 500);
             }
         }"
     >
         <h1 class="text-5xl md:text-7xl font-extrabold tracking-tight mb-4">
-            <span class="text-transparent bg-clip-text bg-gradient-to-r from-[#667eea] to-[#764ba2]" 
+            <span class="text-transparent bg-clip-text bg-gradient-to-r from-[#667eea] to-[#764ba2]"
                   x-text="displayed"></span>
-            
+
             <span class="animate-pulse text-gray-400">|</span>
         </h1>
 
         <div class="transition-all duration-1000 ease-out transform"
              :class="showSubtitle ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'">
             <p class="text-xl text-gray-500 font-medium">
-                Bienvenido al sistema de gestiÃ³n.
+                Bienvenido al sistema de gestión.
             </p>
             <button
                 id="btn-prueba-temporal"
                 type="button"
-                class="mt-5 inline-flex items-center rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow hover:bg-blue-700 transition-colors">
-                Prueba
+                @click="runPrueba"
+                :disabled="runningPrueba"
+                class="mt-5 inline-flex items-center rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
+                <span x-text="runningPrueba ? 'Probando...' : 'Prueba'"></span>
             </button>
+            <p x-show="pruebaMsg" x-text="pruebaMsg" class="mt-2 text-sm text-gray-600"></p>
 
         </div>
     </div>

@@ -79,7 +79,7 @@ window.authApp = function () {
             this.error = "";
             try {
                 if (!window.msal || !window.msal.PublicClientApplication) {
-                    throw new Error("MSAL no estÃ¡ disponible");
+                    throw new Error("MSAL no está disponible");
                 }
                 const config = buildMsalConfig();
                 if (!config) {
@@ -94,9 +94,9 @@ window.authApp = function () {
                 });
             } catch (e) {
                 if (String(e?.errorCode || "").includes("interaction_in_progress")) {
-                    this.error = "Hay una sesiÃ³n en progreso. Recarga la pÃ¡gina e intenta de nuevo.";
+                    this.error = "Hay una sesión en progreso. Recarga la página e intenta de nuevo.";
                 } else {
-                    this.error = e.message || "Error iniciando sesiÃ³n";
+                    this.error = e.message || "Error iniciando sesión";
                 }
                 this.loading = false;
             }

@@ -750,7 +750,7 @@ app.post("/auth/microsoft", async (req, res) => {
     const telefono = me.mobilePhone || null;
 
     if (!oid || !email) {
-      return res.status(400).json({ error: "No se pudo obtener informaciÃ³n del usuario" });
+      return res.status(400).json({ error: "No se pudo obtener información del usuario" });
     }
 
     const allowedGroups = (process.env.AZURE_ALLOWED_GROUPS || "")
@@ -821,7 +821,7 @@ app.post("/auth/microsoft", async (req, res) => {
     res.json({ token, user: payload });
   } catch (err) {
     console.error("Error auth microsoft:", err.message);
-    res.status(401).json({ error: "Token Microsoft invÃ¡lido o sin permisos" });
+ res.status(401).json({ error: "Token Microsoft inválido o sin permisos" });
   }
 });
 

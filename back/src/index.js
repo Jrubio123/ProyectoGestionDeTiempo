@@ -936,6 +936,9 @@ app.post("/auth/microsoft", async (req, res) => {
     );
     const rolId = roleRes.rows[0]?.id || null;
     const rolTitulo = roleRes.rows[0]?.titulo || "Consultor";
+    if (!rolId) {
+      return res.status(500).json({ error: "No existe el rol 'Consultor' en la tabla roles" });
+    }
 
     let userRes = await pool.query(
       `SELECT u.id, u.nombre_usuario, u.email, u.rol_usuario_id, u.tipo_consultor, u.azure_oid, r.titulo AS rol
@@ -965,6 +968,9 @@ app.post("/auth/microsoft", async (req, res) => {
     }
 
     const userRow = userRes.rows[0];
+    if (!userRow?.id) {
+      return res.status(500).json({ error: "No se pudo crear o recuperar el usuario de Microsoft en BD" });
+    }
     const payload = {
       id: userRow.id,
       nombre_usuario: userRow.nombre_usuario || nombre,
@@ -986,7 +992,35 @@ app.post("/auth/microsoft", async (req, res) => {
         error: "Token Microsoft inválido o sin permisos en Graph (revisa consentimiento de User.Read)."
       });
     }
-    console.error("Error auth microsoft (interno):", err.message);
+    if (process.env.DEBUG_AUTH === "true") {
+      console.error("Error auth microsoft (interno):", {
+        message: err.message,
+        code: err.code || null,
+        detail: err.detail || null,
+        constraint: err.constraint || null
+      });
+    } else {
+      console.error("Error auth microsoft (interno):", err.message);
+    }
+
+    if (err.code === "28P01") {
+      return res.status(500).json({ error: "Credenciales de base de datos inválidas (DB_USER/DB_PASSWORD)" });
+    }
+    if (err.code === "3D000") {
+      return res.status(500).json({ error: "Base de datos no existe (DB_NAME)" });
+    }
+    if (err.code === "ENOTFOUND" || err.code === "ECONNREFUSED") {
+      return res.status(500).json({ error: "No se pudo conectar a la base de datos (DB_HOST/DB_PORT)" });
+    }
+    if (err.code === "42703") {
+      return res.status(500).json({ error: "Falta una columna requerida en la tabla usuarios (revisa migraciones)" });
+    }
+    if (err.code === "23505") {
+      return res.status(500).json({ error: "Conflicto de datos al crear usuario (email/azure_oid duplicado)" });
+    }
+    if (err.code === "23502") {
+      return res.status(500).json({ error: "Campo obligatorio nulo al crear usuario en BD" });
+    }
     return res.status(500).json({ error: "Error interno al procesar autenticación Microsoft" });
   }
 });

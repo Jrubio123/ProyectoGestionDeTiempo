@@ -1879,7 +1879,10 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
       WHERE ($1::int IS NULL OR ra.consultor_responsable_id = $1)
         AND (lr.estado_reporte IS NULL OR lr.estado_reporte = 'Rechazado')
         AND ra.estado IN ($2::tipo_estado_asignacion, $3::tipo_estado_asignacion)
-        AND COALESCE(con.id_tipo_asignacion, 0) NOT IN (5, 6)
+        AND NOT (
+          COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) IN ('mesa de servicio', 'fabrica', 'fábrica')
+        )
       ORDER BY ra.id DESC
     `, [userId || null, estados.abierto, estados.proceso]);
     res.json(result.rows);
@@ -1940,7 +1943,15 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
 
     const info = meta.rows[0];
     const tipoAsignacionId = Number(info.id_tipo_asignacion || 0);
-    if ([5, 6].includes(tipoAsignacionId)) {
+    const tipoAsignacionTitulo = String(info.tipo_asignacion_titulo || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+    const esMesaOFabrica =
+      [5, 6].includes(tipoAsignacionId) ||
+      ["mesa de servicio", "fabrica"].includes(tipoAsignacionTitulo);
+    if (esMesaOFabrica) {
       return res.status(400).json({
         error: "Las asignaciones de Mesa/Fábrica se registran en el módulo de Mesa/Fábrica, no en Registro Horas."
       });
@@ -2112,7 +2123,10 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         LEFT JOIN modulo m ON ra.id_modulo = m.id
         LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
       WHERE ra.consultor_responsable_id = $1
-        AND COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
+        AND (
+          COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) IN ('mesa de servicio', 'fabrica', 'fábrica')
+        )
       ORDER BY ra.id DESC
       `,
       [userId]
@@ -2139,16 +2153,25 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
   try {
     const tipoValido = await pool.query(
       `
-      SELECT con.id_tipo_asignacion
+      SELECT con.id_tipo_asignacion, ta.titulo AS tipo_asignacion_titulo
       FROM registro_asignaciones ra
         JOIN consultorias con ON con.id = ra.id_consultoria
+        LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
       WHERE ra.id = $1
         AND ra.consultor_responsable_id = $2
       `,
       [id, req.user?.id]
     );
     const tipoAsignacionId = Number(tipoValido.rows[0]?.id_tipo_asignacion || 0);
-    if (![5, 6].includes(tipoAsignacionId)) {
+    const tipoAsignacionTitulo = String(tipoValido.rows[0]?.tipo_asignacion_titulo || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+    const esMesaOFabrica =
+      [5, 6].includes(tipoAsignacionId) ||
+      ["mesa de servicio", "fabrica"].includes(tipoAsignacionTitulo);
+    if (!esMesaOFabrica) {
       return res.status(400).json({ error: "Solo se permite actualizar tickets de Mesa/Fábrica en este módulo." });
     }
 

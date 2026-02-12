@@ -56,17 +56,14 @@
 
                     <div>
                         <label class="block text-xs font-bold text-gray-500 uppercase mb-1 ml-1">Tipo de Asignación <span class="text-red-500">*</span></label>
-                        <input type="text"
-                               x-model="formDisplay.tipo"
-                               list="coordTiposFormList"
-                               placeholder="Seleccione Tipo..."
-                               @change="setTipoId"
-                               class="w-full px-3 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-700 focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all">
-                        <datalist id="coordTiposFormList">
+                        <select x-model="form.tipo_asignacion_id"
+                                @change="validarDuplicado"
+                                class="w-full px-3 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-700 focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all">
+                            <option value="">Seleccione Tipo...</option>
                             <template x-for="t in cat.tipos" :key="t.id">
-                                <option :value="t.titulo"></option>
+                                <option :value="String(t.id)" x-text="t.titulo"></option>
                             </template>
-                        </datalist>
+                        </select>
                     </div>
 
                     <div>

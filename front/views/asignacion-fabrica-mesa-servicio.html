@@ -1,4 +1,4 @@
-<div x-data="mesaFabricaApp" class="max-w-7xl mx-auto space-y-6 animate-fade-in-up">
+<div x-data="mesaFabricaApp()" x-init="init()" class="max-w-7xl mx-auto space-y-6 animate-fade-in-up">
 
     <div class="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-purple-50 flex justify-between items-center">
         <div>
@@ -7,7 +7,7 @@
             </h1>
             <p class="text-gray-500 text-sm mt-1">Gestiona tus tickets e incidentes asignados.</p>
         </div>
-        <button @click="init" class="p-2 bg-white border border-gray-200 rounded-full hover:rotate-180 transition-transform duration-500 text-purple-600 shadow-sm">
+        <button @click="init()" class="p-2 bg-white border border-gray-200 rounded-full hover:rotate-180 transition-transform duration-500 text-purple-600 shadow-sm">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
         </button>
     </div>

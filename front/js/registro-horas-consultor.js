@@ -28,10 +28,19 @@ window.registroHorasApp = function () {
             this.cargando = true;
             try {
                 const res = await axios.get(`${API}/registro-horas-asignaciones`);
-                this.asignaciones = (res.data || []).map((a) => ({
-                    ...a,
-                    input_cantidad: 0
-                }));
+                this.asignaciones = (res.data || [])
+                    .filter((a) => {
+                        const tipo = String(a?.nombre_tipo_asignacion || "")
+                            .normalize("NFD")
+                            .replace(/[\u0300-\u036f]/g, "")
+                            .toLowerCase()
+                            .trim();
+                        return !["mesa de servicio", "fabrica"].includes(tipo);
+                    })
+                    .map((a) => ({
+                        ...a,
+                        input_cantidad: 0
+                    }));
             } catch (e) {
                 this.asignaciones = [];
             } finally {

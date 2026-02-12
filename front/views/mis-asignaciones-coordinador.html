@@ -116,10 +116,10 @@
                             <span 
                                 class="inline-flex px-2 py-1 text-xs font-semibold rounded-full"
                                 :class="{
-                                    'bg-yellow-100 text-yellow-800': asignacion.estado === 'Pendiente',
                                     'bg-green-100 text-green-800': asignacion.estado === 'Abierto',
-                                    'bg-red-100 text-red-800': asignacion.estado === 'Reasignar' || asignacion.estado === 'Transferir',
-                                    'bg-gray-100 text-gray-800': !['Pendiente', 'Abierto', 'Proceso', 'Reasignar', 'Transferir'].includes(asignacion.estado)
+                                    'bg-yellow-100 text-yellow-800': asignacion.estado === 'Proceso',
+                                    'bg-gray-100 text-gray-800': asignacion.estado === 'Cerrado',
+                                    'bg-slate-100 text-slate-700': !['Abierto', 'Proceso', 'Cerrado'].includes(asignacion.estado)
                                 }"
                                 x-text="asignacion.estado"
                             ></span>
@@ -358,8 +358,8 @@
                         >
                             <option value="">Seleccione...</option>
                             <option value="Servicio">Servicio</option>
-                            <option value="Requerimiento">Incidente</option>
-                            <option value="Soporte">Requerimiento</option>
+                            <option value="Incidente">Incidente</option>
+                            <option value="Requerimiento">Requerimiento</option>
                         </select>
                     </div>
 
@@ -375,10 +375,6 @@
                             <option value="Abierto">Abierto</option>
                             <option value="Proceso">Proceso</option>
                             <option value="Cerrado">Cerrado</option>
-                            <option value="Inactivo">Inactivo</option>
-                            <option value="Completado">Completado</option>
-                            <option value="Reasignar">Reasignar</option>
-                            <option value="Transferir">Transferir</option>
                         </select>
                     </div>
 

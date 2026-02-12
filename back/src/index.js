@@ -65,6 +65,97 @@ if (shouldUseSsl) {
 }
 
 const pool = new Pool(poolConfig);
+let estadoAsignacionCache = null;
+
+function normalizeEnumLabel(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+async function getEstadoAsignacionValues() {
+  if (estadoAsignacionCache) return estadoAsignacionCache;
+  try {
+    const result = await pool.query(
+      `
+      SELECT e.enumlabel
+      FROM pg_type t
+        JOIN pg_enum e ON t.oid = e.enumtypid
+      WHERE t.typname = 'tipo_estado_asignacion'
+      ORDER BY e.enumsortorder
+      `
+    );
+    const labels = (result.rows || []).map((r) => String(r.enumlabel || "").trim()).filter(Boolean);
+    const byNorm = new Map(labels.map((label) => [normalizeEnumLabel(label), label]));
+    const pick = (...candidates) => {
+      for (const candidate of candidates) {
+        const found = byNorm.get(normalizeEnumLabel(candidate));
+        if (found) return found;
+      }
+      return null;
+    };
+
+    estadoAsignacionCache = {
+      labels,
+      abierto: pick("Abierto", "Abierta", "Activo") || labels[0] || "Abierto",
+      proceso: pick("Proceso", "En Proceso", "Abierto", "Activo") || labels[0] || "Proceso",
+      cerrado: pick("Cerrado", "Cerrada", "Completado") || labels[0] || "Cerrado",
+      inactivo: pick("Inactivo", "Inactiva"),
+      cancelado: pick("Cancelado", "Cancelada")
+    };
+    return estadoAsignacionCache;
+  } catch (err) {
+    console.error("No se pudieron resolver valores de tipo_estado_asignacion:", err.message);
+    estadoAsignacionCache = {
+      labels: ["Abierto", "Cerrado", "Proceso"],
+      abierto: "Abierto",
+      proceso: "Proceso",
+      cerrado: "Cerrado",
+      inactivo: null,
+      cancelado: null
+    };
+    return estadoAsignacionCache;
+  }
+}
+
+function resolveEstadoAsignacionInput(value, estados) {
+  if (value === undefined || value === null || value === "") return null;
+  const raw = String(value).trim();
+  const norm = normalizeEnumLabel(raw);
+  const labels = Array.isArray(estados?.labels) ? estados.labels : [];
+  const direct = labels.find((label) => normalizeEnumLabel(label) === norm);
+  if (direct) return direct;
+
+  const aliasMap = new Map([
+    ["abierto", estados?.abierto],
+    ["activo", estados?.abierto],
+    ["proceso", estados?.proceso],
+    ["enproceso", estados?.proceso],
+    ["cerrado", estados?.cerrado],
+    ["completado", estados?.cerrado],
+    ["inactivo", estados?.inactivo],
+    ["cancelado", estados?.cancelado]
+  ]);
+  return aliasMap.get(norm) || null;
+}
+
+function normalizeTipoServicioInput(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const norm = normalizeEnumLabel(raw);
+  const map = new Map([
+    ["servicio", "Servicio"],
+    ["requerimiento", "Requerimiento"],
+    ["incidente", "Incidente"],
+    // Compatibilidad por datos viejos en UI
+    ["soporte", "Requerimiento"],
+    ["consultoria", "Servicio"]
+  ]);
+  return map.get(norm) || null;
+}
 
 function buildTotalLetras(numero, moneda = 'COP') {
   const parteEntera = Math.floor(numero);
@@ -1748,6 +1839,7 @@ app.get("/mis-asignaciones", requireAccess({ roles: ["Consultor", "Consultor Pri
 // Asignaciones disponibles para registro de horas (consultor)
 app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   try {
+    const estados = await getEstadoAsignacionValues();
     const userId = req.user?.id || req.query.consultor_id;
     const result = await pool.query(`
       SELECT
@@ -1786,9 +1878,9 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
         ) lr ON true
       WHERE ($1::int IS NULL OR ra.consultor_responsable_id = $1)
         AND (lr.estado_reporte IS NULL OR lr.estado_reporte = 'Rechazado')
-        AND ra.estado IN ('Abierto', 'Proceso')
+        AND ra.estado IN ($2::tipo_estado_asignacion, $3::tipo_estado_asignacion)
       ORDER BY ra.id DESC
-    `, [userId || null]);
+    `, [userId || null, estados.abierto, estados.proceso]);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -1917,11 +2009,12 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
       );
     }
 
+    const estados = await getEstadoAsignacionValues();
     await pool.query(
       `UPDATE registro_asignaciones
-       SET estado = 'Proceso'
+       SET estado = $2::tipo_estado_asignacion
        WHERE id = $1`,
-      [id_registro_asignacion]
+      [id_registro_asignacion, estados.proceso]
     );
 
     // Email al coordinador para aprobación
@@ -2034,6 +2127,16 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
   } = req.body;
 
   try {
+    const estados = await getEstadoAsignacionValues();
+    const estadoNormalizado = resolveEstadoAsignacionInput(estado, estados);
+    if (estado && !estadoNormalizado) {
+      return res.status(400).json({ error: "Estado de ticket inválido" });
+    }
+    const tipoServicioNormalizado = normalizeTipoServicioInput(tipo_servicio);
+    if (tipo_servicio && !tipoServicioNormalizado) {
+      return res.status(400).json({ error: "Tipo de servicio inválido" });
+    }
+
     const result = await pool.query(
       `
       UPDATE registro_asignaciones
@@ -2050,8 +2153,8 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
       [
         nro_caso_interno || null,
         nro_caso_cliente || null,
-        tipo_servicio || null,
-        estado || null,
+        tipoServicioNormalizado,
+        estadoNormalizado,
         observacion || null,
         fecha_cierre || null,
         id,
@@ -2258,17 +2361,18 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
       [cuentaId, ids_reportes]
     );
 
+    const estados = await getEstadoAsignacionValues();
     await client.query(
       `
       UPDATE registro_asignaciones
-      SET estado = 'Cerrado'
+      SET estado = $2::tipo_estado_asignacion
       WHERE id IN (
         SELECT id_registro_asignacion
         FROM reporte_horas
         WHERE id = ANY($1)
       )
       `,
-      [ids_reportes]
+      [ids_reportes, estados.cerrado]
     );
 
     await client.query("COMMIT");
@@ -2629,17 +2733,18 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
     const registroId = result.rows[0]?.id_registro_asignacion || null;
     if (registroId) {
       try {
+        const estados = await getEstadoAsignacionValues();
         // Actualizar aprobación y estado en la asignación asociada
         await pool.query(
           `UPDATE registro_asignaciones
            SET aprobar_coordinador = $1::tipo_aprobacion,
                estado = CASE
-                 WHEN $1::tipo_aprobacion = 'Aprobado'::tipo_aprobacion THEN 'Proceso'
-                 WHEN $1::tipo_aprobacion = 'Rechazado'::tipo_aprobacion THEN 'Abierto'
+                 WHEN $1::tipo_aprobacion = 'Aprobado'::tipo_aprobacion THEN $3::tipo_estado_asignacion
+                 WHEN $1::tipo_aprobacion = 'Rechazado'::tipo_aprobacion THEN $4::tipo_estado_asignacion
                  ELSE estado
                END
            WHERE id = $2`,
-          [estado, registroId]
+          [estado, registroId, estados.proceso, estados.abierto]
         );
       } catch (innerErr) {
         console.error("Error actualizando registro_asignaciones:", innerErr);
@@ -2731,6 +2836,15 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
   } = req.body;
 
   try {
+    const estados = await getEstadoAsignacionValues();
+    const estadoNormalizado = resolveEstadoAsignacionInput(estado, estados);
+    if (estado && !estadoNormalizado) {
+      return res.status(400).json({ error: "Estado de asignación inválido" });
+    }
+    const tipoServicioNormalizado = normalizeTipoServicioInput(tipo_servicio);
+    if (tipo_servicio && !tipoServicioNormalizado) {
+      return res.status(400).json({ error: "Tipo de servicio inválido" });
+    }
     const result = await pool.query(
       `UPDATE registro_asignaciones
        SET consultor_responsable_id = $1,
@@ -2758,8 +2872,8 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
         valor_dia || null,
         nro_caso_interno || null,
         nro_caso_cliente || null,
-        tipo_servicio || null,
-        estado || null,
+        tipoServicioNormalizado,
+        estadoNormalizado,
         observacion || null,
         total_pagar || null,
         id
@@ -2789,8 +2903,13 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
   } = req.body;
 
   try {
+    const estados = await getEstadoAsignacionValues();
     if (!id_consultoria || !consultor_responsable_id || !id_modulo) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
+    }
+    const tipoServicioNormalizado = normalizeTipoServicioInput(tipo_servicio || "Servicio");
+    if (!tipoServicioNormalizado) {
+      return res.status(400).json({ error: "Tipo de servicio inválido" });
     }
 
     const meta = await pool.query(
@@ -2811,9 +2930,9 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
           AND ra.id_modulo = $2
           AND con.id_cliente = $3
           AND con.id_tipo_asignacion = $4
-          AND ra.estado IN ('Abierto', 'Proceso')
+          AND ra.estado IN ($5::tipo_estado_asignacion, $6::tipo_estado_asignacion)
         LIMIT 1`,
-      [consultor_responsable_id, id_modulo, clienteId, tipoAsignacionId]
+      [consultor_responsable_id, id_modulo, clienteId, tipoAsignacionId, estados.abierto, estados.proceso]
     );
     if (dup.rows.length > 0) {
       return res.status(400).json({ error: "Ya existe asignación para este consultor, cliente y módulo" });
@@ -2823,7 +2942,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
       `INSERT INTO registro_asignaciones
         (id_consultoria, id_modulo, consultor_responsable_id, fecha_inicio, fecha_fin,
          cantidad_dias, horas_asignadas, valor_hora, valor_dia, tipo_servicio, total_pagar, estado, aprobar_coordinador)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Abierto','Pendiente')
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::tipo_estado_asignacion,'Pendiente')
        RETURNING *`,
       [
         id_consultoria,
@@ -2835,8 +2954,9 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
         horas_asignadas || null,
         valor_hora || null,
         valor_dia || null,
-        tipo_servicio || null,
-        total_pagar || null
+        tipoServicioNormalizado,
+        total_pagar || null,
+        estados.abierto
       ]
     );
     const created = result.rows[0];

@@ -15,7 +15,7 @@ window.asignacionConsultorApp = function () {
             fecha_fin: "",
             cantidad_dias: 0,
             horas_asignadas: 0,
-            tipo_servicio: "Consultoría",
+            tipo_servicio: "Servicio",
             estado_mesa: "Abierto",
             fecha_cierre: ""
         },
@@ -84,7 +84,7 @@ window.asignacionConsultorApp = function () {
             this.form.fecha_fin = "";
             this.form.cantidad_dias = this.esMensual ? 20 : 0;
             this.form.horas_asignadas = 0;
-            this.form.tipo_servicio = "Consultoría";
+            this.form.tipo_servicio = "Servicio";
         },
 
         async buscarTarifa() {
@@ -234,7 +234,7 @@ window.asignacionConsultorApp = function () {
                 valor_hora: this.esMensual ? null : tarifa || null,
                 valor_dia: valorDia,
                 total_pagar: total,
-                tipo_servicio: this.form.tipo_servicio || "Consultoría"
+                tipo_servicio: this.form.tipo_servicio || "Servicio"
             };
 
             try {

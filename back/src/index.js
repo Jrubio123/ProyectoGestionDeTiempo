@@ -101,6 +101,40 @@ function buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total
   return partes.length ? partes.join(" | ") : "Sin detalle numÃ©rico";
 }
 
+const FRONT_PORTAL_BASE =
+  process.env.FRONT_PORTAL_BASE ||
+  "https://zealous-mud-057b4ca0f.1.azurestaticapps.net/index.html";
+
+function buildPortalUrl(hashRoute = "inicio") {
+  const base = String(FRONT_PORTAL_BASE || "").trim();
+  if (!base) return "#";
+  const safeHash = String(hashRoute || "inicio").replace(/^#/, "");
+  return `${base}#${safeHash}`;
+}
+
+function buildEmailLayout({ title, intro, blocks = [], ctaLabel, ctaUrl, closing }) {
+  const blockHtml = blocks
+    .filter((b) => b?.label)
+    .map((b) => `<p style="margin: 0 0 6px;"><strong>${b.label}:</strong> ${b.value || "N/A"}</p>`)
+    .join("");
+
+  const ctaHtml = ctaLabel && ctaUrl
+    ? `<a href="${ctaUrl}" style="display:inline-block;margin-top:12px;background:#189fa9;color:#ffffff;text-decoration:none;font-weight:700;padding:10px 16px;border-radius:10px;">${ctaLabel}</a>`
+    : "";
+
+  return `
+    <div style="font-family:Segoe UI,Arial,sans-serif;color:#20272f;line-height:1.5;">
+      <h2 style="margin:0 0 10px;color:#1f2a37;">${title}</h2>
+      <p style="margin:0 0 14px;">${intro}</p>
+      <div style="background:#f6f8fb;border:1px solid #e6ebf2;border-radius:12px;padding:14px 16px;">
+        ${blockHtml}
+      </div>
+      ${ctaHtml}
+      <p style="margin:16px 0 0;color:#5b6678;">${closing || "Atentamente, Silver Consulting."}</p>
+    </div>
+  `;
+}
+
 const normalizeValue = (value) => String(value || "").toLowerCase().trim();
 const isGuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -1286,14 +1320,27 @@ app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"
     );
     const row = mailInfo.rows[0];
     if (row?.coordinador_email) {
+      const portalUrl = buildPortalUrl("mis-asignaciones-coordinador");
       await sendEmailSafe({
         to: row.coordinador_email,
-        subject: `Nueva asignación como Coordinador - ${row.cliente}`,
+        subject: `Nueva consultoría asignada - ${row.cliente}`,
         text:
           `Hola ${row.coordinador_nombre || ""},\n` +
           `Se creó una consultoría para el cliente ${row.cliente}.\n` +
           `Tipo de asignación: ${row.tipo_asignacion}.\n` +
-          `Descripción: ${descripcion_consultoria || "Sin descripción"}.\n`
+          `Descripción: ${descripcion_consultoria || "Sin descripción"}.\n` +
+          `Revisa en: ${portalUrl}\n`,
+        html: buildEmailLayout({
+          title: "Nueva consultoría asignada",
+          intro: `Hola <strong>${row.coordinador_nombre || "Coordinador"}</strong>, se creó una consultoría para que inicies gestión operativa.`,
+          blocks: [
+            { label: "Cliente", value: row.cliente },
+            { label: "Tipo de asignación", value: row.tipo_asignacion || "N/A" },
+            { label: "Descripción", value: descripcion_consultoria || "Sin descripción" }
+          ],
+          ctaLabel: "Ver consultoría en el portal",
+          ctaUrl: portalUrl
+        })
       });
     }
 
@@ -1646,15 +1693,28 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
     );
     const correoRow = correoInfo.rows[0];
     if (correoRow?.coordinador_email) {
+      const portalUrl = buildPortalUrl("aprobar-rechazar-coordinador");
       await sendEmailSafe({
         to: correoRow.coordinador_email,
-        subject: `Reporte de horas pendiente - ${correoRow.cliente}`,
+        subject: `⏳ Aprobación pendiente: reporte de ${correoRow.consultor_nombre || "consultor"}`,
         text:
           `Hola ${correoRow.coordinador_nombre || ""},\n` +
           `El consultor ${correoRow.consultor_nombre || ""} reportó horas.\n` +
           `Cliente: ${correoRow.cliente}\n` +
           `Tipo: ${correoRow.tipo_asignacion || "N/A"}\n` +
-          `Detalle: ${buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total_cobrar })}\n`
+          `Detalle: ${buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total_cobrar })}\n` +
+          `Revisar: ${portalUrl}\n`,
+        html: buildEmailLayout({
+          title: "Aprobación pendiente de reporte",
+          intro: `Hola <strong>${correoRow.coordinador_nombre || "Coordinador"}</strong>, el consultor <strong>${correoRow.consultor_nombre || "N/A"}</strong> registró horas y requiere validación.`,
+          blocks: [
+            { label: "Cliente", value: correoRow.cliente || "N/A" },
+            { label: "Tipo de asignación", value: correoRow.tipo_asignacion || "N/A" },
+            { label: "Resumen", value: buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total_cobrar }) }
+          ],
+          ctaLabel: "Revisar y aprobar",
+          ctaUrl: portalUrl
+        })
       });
     }
 
@@ -2352,12 +2412,13 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
     );
     const info = detalle.rows[0];
     if (info?.consultor_email) {
-      const titulo =
-        estado === "Aprobado"
-          ? "Reporte aprobado"
-          : estado === "Rechazado"
-            ? "Reporte rechazado"
-            : "Actualización de reporte";
+      const esAprobado = estado === "Aprobado";
+      const portalUrl = buildPortalUrl("registro-horas-consultor");
+      const titulo = esAprobado
+        ? "✅ Horas aprobadas"
+        : estado === "Rechazado"
+          ? "⚠️ Acción requerida: corrección de reporte"
+          : "Actualización de reporte";
       await sendEmailSafe({
         to: info.consultor_email,
         subject: `${titulo} - ${info.cliente || "Cliente"}`,
@@ -2367,7 +2428,25 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
           `Cliente: ${info.cliente || "N/A"}\n` +
           `Tipo: ${info.tipo_asignacion || "N/A"}\n` +
           `Detalle: ${buildReporteResumen(info)}\n` +
-          (estado === "Rechazado" && motivo ? `Motivo: ${motivo}\n` : "")
+          (estado === "Rechazado" && motivo ? `Motivo: ${motivo}\n` : "") +
+          `Portal: ${portalUrl}\n`,
+        html: buildEmailLayout({
+          title: esAprobado ? "Reporte aprobado exitosamente" : "Reporte con corrección requerida",
+          intro: esAprobado
+            ? `Hola <strong>${info.consultor_nombre || "Consultor"}</strong>, tu reporte fue validado y aprobado.`
+            : `Hola <strong>${info.consultor_nombre || "Consultor"}</strong>, tu reporte requiere ajustes antes de procesarse.`,
+          blocks: [
+            { label: "Cliente", value: info.cliente || "N/A" },
+            { label: "Tipo de asignación", value: info.tipo_asignacion || "N/A" },
+            { label: "Resumen", value: buildReporteResumen(info) },
+            ...(estado === "Rechazado" ? [{ label: "Motivo", value: motivo || "Sin detalle" }] : [])
+          ],
+          ctaLabel: esAprobado ? "Ver reporte" : "Corregir reporte",
+          ctaUrl: portalUrl,
+          closing: esAprobado
+            ? "Gracias por tu gestión. Atentamente, Coordinación de Operaciones."
+            : "Por favor realiza la corrección y envía nuevamente a aprobación."
+        })
       });
     }
 
@@ -2526,16 +2605,30 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     );
     const row = mailInfo.rows[0];
     if (row?.consultor_email) {
+      const portalUrl = buildPortalUrl("mis-asignaciones-consultor");
       await sendEmailSafe({
         to: row.consultor_email,
-        subject: `Nueva asignación - ${row.cliente}`,
+        subject: `🚀 Nueva asignación: ${row.modulo || "Proyecto"} - ${row.cliente}`,
         text:
           `Hola ${row.consultor_nombre || ""},\n` +
           `Tienes una nueva asignación.\n` +
           `Cliente: ${row.cliente}\n` +
           `Tipo: ${row.tipo_asignacion || "N/A"}\n` +
           `Módulo: ${row.modulo || "N/A"}\n` +
-          `Coordinador: ${row.coordinador_nombre || "N/A"}\n`
+          `Coordinador: ${row.coordinador_nombre || "N/A"}\n` +
+          `Ingresa al portal: ${portalUrl}\n`,
+        html: buildEmailLayout({
+          title: "Nueva asignación de actividad",
+          intro: `Hola <strong>${row.consultor_nombre || "Consultor"}</strong>, has sido asignado a una nueva actividad de consultoría.`,
+          blocks: [
+            { label: "Cliente", value: row.cliente },
+            { label: "Módulo/Tecnología", value: row.modulo || "N/A" },
+            { label: "Tipo de asignación", value: row.tipo_asignacion || "N/A" },
+            { label: "Coordinador", value: row.coordinador_nombre || "N/A" }
+          ],
+          ctaLabel: "Ver asignación en el portal",
+          ctaUrl: portalUrl
+        })
       });
     }
 
@@ -2568,6 +2661,6 @@ const port = process.env.PORT || 4000;
 
 // 3. AÃ±adir "0.0.0.0" asegura que el contenedor acepte conexiones externas
 app.listen(port, "0.0.0.0", () => {
-  console.log(`prueba… Server running on port ${port}`);
+  console.log(`Server running on port ${port}`);
 });
 

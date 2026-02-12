@@ -1,3 +1,66 @@
+﻿function getRoleRoutes() {
+    return {
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "solicitudesRecl"],
+        coordinador: [
+            "inicio",
+            "asignacion-consultor",
+            "cliente",
+            "aprobar-rechazar-coordinador",
+            "mis-asignaciones-coordinador",
+            "asociar-subconsultores",
+            "tarifas",
+            "solicitudesCoord"
+        ],
+        consultor_principal: [
+            "inicio",
+            "mis-asignaciones-consultor",
+            "registro-horas-consultor",
+            "asignacion-fabrica-mesa-servicio",
+            "generar-cuenta-cobro",
+            "mis-cuentas-cobros"
+        ],
+        consultor_asociado: [
+            "inicio",
+            "mis-asignaciones-consultor",
+            "registro-horas-consultor",
+            "asignacion-fabrica-mesa-servicio"
+        ],
+        reclutador: [
+            "inicio",
+            "solicitudesRecl"
+        ]
+    };
+}
+
+function getAllSearchViews() {
+    return [
+        { label: "Inicio", hash: "#inicio" },
+        { label: "Clientes", hash: "#cliente" },
+        { label: "Tarifas", hash: "#tarifas" },
+        { label: "Asignacion Coordinador", hash: "#asignacion-coordinador" },
+        { label: "Permisos Coordinador", hash: "#permisos-coordinador" },
+        { label: "Asociar Subconsultores", hash: "#asociar-subconsultores" },
+        { label: "Asignacion Consultor", hash: "#asignacion-consultor" },
+        { label: "Mis Asignaciones Coordinador", hash: "#mis-asignaciones-coordinador" },
+        { label: "Mis Asignaciones Consultor", hash: "#mis-asignaciones-consultor" },
+        { label: "Asignacion Fabrica Mesa Servicio", hash: "#asignacion-fabrica-mesa-servicio" },
+        { label: "Registro Horas Consultor", hash: "#registro-horas-consultor" },
+        { label: "Aprobar/Rechazar Coordinador", hash: "#aprobar-rechazar-coordinador" },
+        { label: "Mis Cuentas Cobros", hash: "#mis-cuentas-cobros" },
+        { label: "Generar Cuenta Cobro", hash: "#generar-cuenta-cobro" },
+        { label: "Solicitudes RRHH", hash: "#solicitudesCoord" },
+        { label: "Pool de Solicitudes", hash: "#solicitudesRecl" }
+    ];
+}
+
+function getAllowedViewsForCurrentRole() {
+    const views = getAllSearchViews();
+    const roleKey = window.auth?.getRoleKey?.() || "other";
+    const roleRoutes = getRoleRoutes();
+    const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
+    return views.filter((v) => allowed.has(v.hash.replace("#", "")));
+}
+
 function initNavbar() {
     const navLinks = document.querySelectorAll(".nav-link");
     const userNameEl = document.querySelector(".user-name");
@@ -5,6 +68,8 @@ function initNavbar() {
     const userAvatarEl = document.getElementById("navbarUserAvatar");
     const userMenu = document.getElementById("userMenu");
     const userMenuToggle = document.getElementById("userMenuToggle");
+    const searchInput = document.querySelector(".search-input");
+    const viewsList = document.getElementById("views-list");
     let avatarObjectUrl = null;
 
     async function loadMicrosoftAvatar() {
@@ -82,7 +147,16 @@ function initNavbar() {
         });
     });
 
-    const searchInput = document.querySelector(".search-input");
+    if (viewsList) {
+        const allowedViews = getAllowedViewsForCurrentRole();
+        viewsList.innerHTML = "";
+        allowedViews.forEach((view) => {
+            const option = document.createElement("option");
+            option.value = view.label;
+            viewsList.appendChild(option);
+        });
+    }
+
     if (searchInput) {
         searchInput.addEventListener("keypress", function (e) {
             if (e.key === "Enter") {
@@ -134,61 +208,15 @@ function performSearch(query) {
     const q = query.trim().toLowerCase();
     if (!q) return;
 
-    const views = [
-        { label: "Inicio", hash: "#inicio" },
-        { label: "Clientes", hash: "#cliente" },
-        { label: "Tarifas", hash: "#tarifas" },
-        { label: "Asignación Coordinador", hash: "#asignacion-coordinador" },
-        { label: "Permisos Coordinador", hash: "#permisos-coordinador" },
-        { label: "Asociar Subconsultores", hash: "#asociar-subconsultores" },
-        { label: "Asignación Consultor", hash: "#asignacion-consultor" },
-        { label: "Mis Asignaciones Coordinador", hash: "#mis-asignaciones-coordinador" },
-        { label: "Mis Asignaciones Consultor", hash: "#mis-asignaciones-consultor" },
-        { label: "Asignación Fábrica Mesa Servicio", hash: "#asignacion-fabrica-mesa-servicio" },
-        { label: "Registro Horas Consultor", hash: "#registro-horas-consultor" },
-        { label: "Aprobar/Rechazar Coordinador", hash: "#aprobar-rechazar-coordinador" },
-        { label: "Mis Cuentas Cobros", hash: "#mis-cuentas-cobros" },
-        { label: "Generar Cuenta Cobro", hash: "#generar-cuenta-cobro" }
-    ];
+    const allowedViews = getAllowedViewsForCurrentRole();
 
-    const roleKey = window.auth?.getRoleKey?.() || "other";
-    const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas"],
-        coordinador: [
-            "inicio",
-            "asignacion-consultor",
-            "cliente",
-            "aprobar-rechazar-coordinador",
-            "mis-asignaciones-coordinador",
-            "asociar-subconsultores",
-            "tarifas"
-        ],
-        consultor_principal: [
-            "inicio",
-            "mis-asignaciones-consultor",
-            "registro-horas-consultor",
-            "asignacion-fabrica-mesa-servicio",
-            "generar-cuenta-cobro",
-            "mis-cuentas-cobros"
-        ],
-        consultor_asociado: [
-            "inicio",
-            "mis-asignaciones-consultor",
-            "registro-horas-consultor",
-            "asignacion-fabrica-mesa-servicio"
-        ]
-    };
-
-    const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
-    const allowedViews = views.filter((v) => allowed.has(v.hash.replace("#", "")));
-
-    const match = allowedViews.find(v => v.label.toLowerCase() === q) ||
-        allowedViews.find(v => v.label.toLowerCase().includes(q));
+    const match = allowedViews.find((v) => v.label.toLowerCase() === q) ||
+        allowedViews.find((v) => v.label.toLowerCase().includes(q));
 
     if (match) {
         window.location.hash = match.hash;
     } else {
-        alert("No se encontró esa vista");
+        alert("No se encontro esa vista");
     }
 }
 

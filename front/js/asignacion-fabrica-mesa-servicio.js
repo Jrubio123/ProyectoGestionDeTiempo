@@ -1,6 +1,6 @@
-// js/asignacion-fabrica-mesa-servicio.js
-document.addEventListener("alpine:init", () => {
-    Alpine.data("mesaFabricaApp", () => ({
+﻿// js/asignacion-fabrica-mesa-servicio.js
+window.mesaFabricaApp = function () {
+    return {
         API: window.API_BASE || "http://localhost:4000",
         tickets: [],
         modalOpen: false,
@@ -57,5 +57,5 @@ document.addEventListener("alpine:init", () => {
         formatDate(d) {
             return d ? String(d).split("T")[0] : "";
         }
-    }));
-});
+    };
+};

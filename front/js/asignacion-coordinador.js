@@ -139,7 +139,7 @@ window.asignacionCoordApp = function () {
                 id: item.id,
                 cliente_id: item.cliente_id,
                 coordinador_id: item.coordinador_id,
-                tipo_asignacion_id: item.tipo_asignacion_id,
+                tipo_asignacion_id: String(item.tipo_asignacion_id || ""),
                 descripcion_consultoria: item.descripcion_consultoria || ""
             };
             this.formDisplay = {

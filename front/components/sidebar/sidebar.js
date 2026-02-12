@@ -89,6 +89,34 @@ function initSidebar() {
         });
     });
 
+    function syncActiveWithHash() {
+        const currentHash = (window.location.hash || "#inicio").replace("#", "");
+        let matched = false;
+        menuItems.forEach((item) => {
+            const link = item.querySelector(".menu-link");
+            if (!link) return;
+            const target = (link.getAttribute("href") || "").replace("#", "");
+            const isActive = target === currentHash;
+            item.classList.toggle("active", isActive);
+            if (isActive) matched = true;
+        });
+
+        if (!matched) {
+            menuItems.forEach((item) => {
+                const link = item.querySelector(".menu-link");
+                if (!link) return;
+                const target = (link.getAttribute("href") || "").replace("#", "");
+                item.classList.toggle("active", target === "inicio");
+            });
+        }
+    }
+
+    syncActiveWithHash();
+    if (!window.__sidebarHashSyncReady) {
+        window.addEventListener("hashchange", syncActiveWithHash);
+        window.__sidebarHashSyncReady = true;
+    }
+
     if (logoutBtn) {
         logoutBtn.addEventListener("click", function () {
             if (confirm("¿Estás seguro de que quieres cerrar sesión?")) {

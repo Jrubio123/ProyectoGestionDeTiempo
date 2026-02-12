@@ -1,10 +1,10 @@
-<div x-data="solicitudesCoordApp()" class="rrhh-page max-w-7xl mx-auto space-y-6">
+﻿<div x-data="solicitudesCoordApp()" class="rrhh-page max-w-7xl mx-auto space-y-6">
     <section class="relative overflow-hidden bg-white/40 backdrop-blur-xl border-b border-white/20 p-8 rounded-b-3xl shadow-sm">
         <div class="absolute -top-24 -right-24 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl"></div>
         
         <div class="relative flex items-start justify-between gap-4">
             <div>
-                <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Gestión de Talento</h1>
+                <h1 class="text-2xl font-bold text-slate-800 tracking-tight">GestiÃ³n de Talento</h1>
                 <p class="text-slate-600 mt-1 text-sm font-medium">
                     Solicitudes de personal para RRHH con seguimiento claro por prioridad y estado.
                 </p>
@@ -87,7 +87,7 @@
                     </select>
 
                     <select x-model="form.modulo_id" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
-                        <option value="">Tecnología / Módulo...</option>
+                        <option value="">TecnologÃ­a / MÃ³dulo...</option>
                         <template x-for="m in modulos" :key="m.id"><option :value="m.id" x-text="m.titulo"></option></template>
                     </select>
                 </div>
@@ -101,6 +101,51 @@
                     </select>
                 </div>
 
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input type="text" x-model="form.tiempo" placeholder="Tiempo estimado (Ej: 6 meses)" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                    <select x-model="form.modalidad" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                        <option value="Full time">Full time</option>
+                        <option value="Medio tiempo">Medio tiempo</option>
+                        <option value="Por horas">Por horas</option>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <select x-model="form.ubicacion" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                        <option value="Remoto">Remoto</option>
+                        <option value="Híbrido">Híbrido</option>
+                        <option value="En sitio">En sitio</option>
+                    </select>
+                    <input type="date" x-model="form.fecha_inicio_esperada" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <select x-model="form.tipo_proyecto" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                        <option value="">Tipo de proyecto (opcional)</option>
+                        <option value="Soporte">Soporte</option>
+                        <option value="Roll out">Roll out</option>
+                        <option value="Implementación">Implementación</option>
+                        <option value="Mantenimiento">Mantenimiento</option>
+                        <option value="Migración">Migración</option>
+                    </select>
+                    <select x-model="form.prioridad" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                        <option value="Alta">Alta</option>
+                        <option value="Media">Media</option>
+                        <option value="Baja">Baja</option>
+                    </select>
+                </div>
+
+                <input type="text" x-model="form.presupuesto" placeholder="Presupuesto (Ej: 9M - 12M COP)" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+
+                <textarea x-model="form.experiencia" rows="3" placeholder="Experiencia requerida" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"></textarea>
+                <textarea x-model="form.descripcion" rows="4" placeholder="DescripciÃ³n de la solicitud" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"></textarea>
+                <textarea x-model="form.informacion_adicional" rows="3" placeholder="InformaciÃ³n adicional (opcional)" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"></textarea>
+
+                <div x-show="touched && !formValido" class="rounded-2xl border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-700">
+                    <span class="font-semibold">Campos faltantes:</span>
+                    <span x-text="camposFaltantes.join(', ')"></span>
+                </div>
+
                 <div class="mt-8 flex justify-end gap-3">
                     <button type="button" @click="modalNueva = false; resetForm()" class="px-6 py-2.5 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100 transition-all">Cancelar</button>
                     <button type="submit" class="bg-indigo-600 text-white px-8 py-2.5 rounded-xl text-sm font-semibold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all">Enviar a RRHH</button>
@@ -109,3 +154,6 @@
         </div>
     </div>
 </div>
+
+
+

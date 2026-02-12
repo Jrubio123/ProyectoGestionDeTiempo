@@ -2553,24 +2553,26 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     }
 
     const meta = await pool.query(
-      "SELECT id_cliente FROM consultorias WHERE id = $1 AND activo = true",
+      "SELECT id_cliente, id_tipo_asignacion FROM consultorias WHERE id = $1 AND activo = true",
       [id_consultoria]
     );
     if (meta.rows.length === 0) {
       return res.status(400).json({ error: "Consultoría no válida" });
     }
     const clienteId = meta.rows[0].id_cliente;
+    const tipoAsignacionId = meta.rows[0].id_tipo_asignacion;
 
     const dup = await pool.query(
       `SELECT ra.id
        FROM registro_asignaciones ra
        JOIN consultorias con ON ra.id_consultoria = con.id
-       WHERE ra.consultor_responsable_id = $1
-         AND ra.id_modulo = $2
-         AND con.id_cliente = $3
-         AND ra.estado IN ('Abierto', 'Proceso')
-       LIMIT 1`,
-      [consultor_responsable_id, id_modulo, clienteId]
+        WHERE ra.consultor_responsable_id = $1
+          AND ra.id_modulo = $2
+          AND con.id_cliente = $3
+          AND con.id_tipo_asignacion = $4
+          AND ra.estado IN ('Abierto', 'Proceso')
+        LIMIT 1`,
+      [consultor_responsable_id, id_modulo, clienteId, tipoAsignacionId]
     );
     if (dup.rows.length > 0) {
       return res.status(400).json({ error: "Ya existe asignación para este consultor, cliente y módulo" });

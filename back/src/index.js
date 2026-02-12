@@ -29,15 +29,17 @@ const extraOrigins = (process.env.CORS_ORIGINS || "")
   .map((s) => s.trim())
   .filter(Boolean);
 
-app.use(cors({
+const corsOptions = {
   origin: ["http://localhost:3000", "http://localhost:4000", ...extraOrigins],
   credentials: true,
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Graph-Access-Token"],
   exposedHeaders: ["Authorization"],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-}));
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
-app.options('*', cors());
+app.options('*', cors(corsOptions));
 
 /* ===============================
    BASE DE DATOS

@@ -42,14 +42,27 @@ app.options('*', cors());
 /* ===============================
    BASE DE DATOS
 =============================== */
-const pool = new Pool({
+const dbHost = String(process.env.DB_HOST || "").toLowerCase().trim();
+const dbSslEnv = String(process.env.DB_SSL || "").toLowerCase().trim();
+const localDbHosts = new Set(["localhost", "127.0.0.1", "db"]);
+const shouldUseSsl =
+  dbSslEnv
+    ? ["1", "true", "yes", "require"].includes(dbSslEnv)
+    : !localDbHosts.has(dbHost);
+
+const poolConfig = {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  ssl: { rejectUnauthorized: false }
-});
+  port: process.env.DB_PORT
+};
+
+if (shouldUseSsl) {
+  poolConfig.ssl = { rejectUnauthorized: false };
+}
+
+const pool = new Pool(poolConfig);
 
 function buildTotalLetras(numero, moneda = 'COP') {
   const parteEntera = Math.floor(numero);
@@ -507,7 +520,7 @@ app.delete("/sub-consultores/:asociadoId", requireAccess({ roles: ["Administrado
   }
 });
 
-// MÃ³dulos activos
+// Módulos activos
 app.get("/modulos", async (req, res) => {
   try {
     const result = await pool.query(`
@@ -519,11 +532,11 @@ app.get("/modulos", async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Error al obtener mÃ³dulos" });
+    res.status(500).json({ error: "Error al obtener módulos" });
   }
 });
 
-// Tipos de asignaciÃ³n activos
+// Tipos de asignación activos
 app.get("/tipos-asignacion", async (req, res) => {
   try {
     const result = await pool.query(`
@@ -535,7 +548,7 @@ app.get("/tipos-asignacion", async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Error al obtener tipos de asignaciÃ³n" });
+    res.status(500).json({ error: "Error al obtener tipos de asignación" });
   }
 });
 
@@ -796,7 +809,7 @@ app.post("/auth/login", async (req, res) => {
     res.json({ token, user: payload });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Error al iniciar sesiÃ³n" });
+    res.status(500).json({ error: "Error al iniciar sesión" });
   }
 });
 
@@ -852,7 +865,7 @@ app.post("/auth/microsoft", async (req, res) => {
     const telefono = me.mobilePhone || null;
 
     if (!oid || !email) {
-      return res.status(400).json({ error: "No se pudo obtener informaciÃ³n del usuario" });
+      return res.status(400).json({ error: "No se pudo obtener información del usuario" });
     }
 
     const allowedGroups = (process.env.AZURE_ALLOWED_GROUPS || "")
@@ -1275,12 +1288,12 @@ app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"
     if (row?.coordinador_email) {
       await sendEmailSafe({
         to: row.coordinador_email,
-        subject: `Nueva asignaciÃ³n como Coordinador - ${row.cliente}`,
+        subject: `Nueva asignación como Coordinador - ${row.cliente}`,
         text:
           `Hola ${row.coordinador_nombre || ""},\n` +
-          `Se creÃ³ una consultorÃ­a para el cliente ${row.cliente}.\n` +
-          `Tipo de asignaciÃ³n: ${row.tipo_asignacion}.\n` +
-          `DescripciÃ³n: ${descripcion_consultoria || "Sin descripciÃ³n"}.\n`
+          `Se creó una consultoría para el cliente ${row.cliente}.\n` +
+          `Tipo de asignación: ${row.tipo_asignacion}.\n` +
+          `Descripción: ${descripcion_consultoria || "Sin descripción"}.\n`
       });
     }
 
@@ -1512,7 +1525,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
     );
     const existenteRow = existente.rows[0];
     if (existenteRow?.estado_reporte === "Pendiente") {
-      return res.status(400).json({ error: "Ya hay un reporte pendiente para esta asignaciÃ³n" });
+      return res.status(400).json({ error: "Ya hay un reporte pendiente para esta asignación" });
     }
 
     const meta = await pool.query(`
@@ -1529,7 +1542,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
     `, [id_registro_asignacion]);
 
     if (meta.rows.length === 0) {
-      return res.status(404).json({ error: "AsignaciÃ³n no encontrada" });
+      return res.status(404).json({ error: "Asignación no encontrada" });
     }
 
     const info = meta.rows[0];
@@ -1613,7 +1626,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
       [id_registro_asignacion]
     );
 
-    // Email al coordinador para aprobaciÃ³n
+    // Email al coordinador para aprobación
     const correoInfo = await pool.query(
       `SELECT
          ucoord.email AS coordinador_email,
@@ -1638,7 +1651,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
         subject: `Reporte de horas pendiente - ${correoRow.cliente}`,
         text:
           `Hola ${correoRow.coordinador_nombre || ""},\n` +
-          `El consultor ${correoRow.consultor_nombre || ""} reportÃ³ horas.\n` +
+          `El consultor ${correoRow.consultor_nombre || ""} reportó horas.\n` +
           `Cliente: ${correoRow.cliente}\n` +
           `Tipo: ${correoRow.tipo_asignacion || "N/A"}\n` +
           `Detalle: ${buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total_cobrar })}\n`
@@ -1963,11 +1976,11 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
         to: contabilidadEmail,
         subject: `Nueva cuenta de cobro #${cuenta.id}`,
         text:
-          `Se generÃ³ una cuenta de cobro.\n` +
+          `Se generó una cuenta de cobro.\n` +
           `Consultor: ${consultor?.nombre_usuario || ""} (${consultor?.email || ""})\n` +
           `Periodo: ${cuenta.fecha_periodo_inicio} a ${cuenta.fecha_periodo_fin}\n` +
           `Total: ${cuenta.total_cuenta_cobro}\n` +
-          `DescripciÃ³n: ${cuenta.descripcion || ""}\n`
+          `Descripción: ${cuenta.descripcion || ""}\n`
       });
     }
 
@@ -2195,7 +2208,7 @@ app.get("/cuentas-cobro/:id/pdf", requireAccess({ roles: ["Consultor", "Consulto
     );
     doc.moveDown(1);
 
-    doc.font("Helvetica").text(`DirecciÃ³n: ${cuenta.direccion || "â€”"}`);
+    doc.font("Helvetica").text(`Dirección: ${cuenta.direccion || "—"}`);
     doc.text(`TelÃ©fono: ${cuenta.telefono || "â€”"}`);
     doc.text(`No de Cuenta Bancaria: ${cuenta.nro_cuenta_bancaria || "â€”"}`);
     doc.text(`Banco: ${cuenta.banco || "â€”"}`);
@@ -2303,7 +2316,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
     const registroId = result.rows[0]?.id_registro_asignacion || null;
     if (registroId) {
       try {
-        // Actualizar aprobaciÃ³n y estado en la asignaciÃ³n asociada
+        // Actualizar aprobación y estado en la asignación asociada
         await pool.query(
           `UPDATE registro_asignaciones
            SET aprobar_coordinador = $1,
@@ -2320,7 +2333,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
       }
     }
 
-    // Email al consultor con resultado de aprobaciÃ³n
+    // Email al consultor con resultado de aprobación
     const detalle = await pool.query(
       `SELECT
          u.email AS consultor_email,
@@ -2344,7 +2357,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
           ? "Reporte aprobado"
           : estado === "Rechazado"
             ? "Reporte rechazado"
-            : "ActualizaciÃ³n de reporte";
+            : "Actualización de reporte";
       await sendEmailSafe({
         to: info.consultor_email,
         subject: `${titulo} - ${info.cliente || "Cliente"}`,
@@ -2365,7 +2378,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
   }
 });
 
-// Actualizar asignaciÃ³n (registro_asignaciones)
+// Actualizar asignación (registro_asignaciones)
 app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const { id } = req.params;
   const {
@@ -2422,11 +2435,11 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Error al actualizar asignaciÃ³n" });
+    res.status(500).json({ error: "Error al actualizar asignación" });
   }
 });
 
-// Crear asignaciÃ³n (registro_asignaciones)
+// Crear asignación (registro_asignaciones)
 app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const {
     id_consultoria,
@@ -2468,7 +2481,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
       [consultor_responsable_id, id_modulo, clienteId]
     );
     if (dup.rows.length > 0) {
-      return res.status(400).json({ error: "Ya existe asignaciÃ³n para este consultor, cliente y mÃ³dulo" });
+      return res.status(400).json({ error: "Ya existe asignación para este consultor, cliente y módulo" });
     }
 
     const result = await pool.query(
@@ -2515,13 +2528,13 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     if (row?.consultor_email) {
       await sendEmailSafe({
         to: row.consultor_email,
-        subject: `Nueva asignaciÃ³n - ${row.cliente}`,
+        subject: `Nueva asignación - ${row.cliente}`,
         text:
           `Hola ${row.consultor_nombre || ""},\n` +
-          `Tienes una nueva asignaciÃ³n.\n` +
+          `Tienes una nueva asignación.\n` +
           `Cliente: ${row.cliente}\n` +
           `Tipo: ${row.tipo_asignacion || "N/A"}\n` +
-          `MÃ³dulo: ${row.modulo || "N/A"}\n` +
+          `Módulo: ${row.modulo || "N/A"}\n` +
           `Coordinador: ${row.coordinador_nombre || "N/A"}\n`
       });
     }
@@ -2529,7 +2542,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     res.json(created);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Error al crear asignaciÃ³n" });
+    res.status(500).json({ error: "Error al crear asignación" });
   }
 });
 
@@ -2555,6 +2568,6 @@ const port = process.env.PORT || 4000;
 
 // 3. AÃ±adir "0.0.0.0" asegura que el contenedor acepte conexiones externas
 app.listen(port, "0.0.0.0", () => {
-  console.log(`âœ… Server running on port ${port}`);
+  console.log(`prueba… Server running on port ${port}`);
 });
 

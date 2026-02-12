@@ -147,6 +147,25 @@ body {
         linear-gradient(130deg, rgba(90, 24, 154, 0.95) 0%, rgba(28, 97, 171, 0.95) 100%);
 }
 
+.rrhh-hero.recl-hero-clear {
+    min-height: auto;
+    padding: 2rem;
+    color: inherit;
+    background: rgba(255, 255, 255, 0.4);
+}
+
+.rrhh-hero.recl-hero-clear::before {
+    display: none;
+}
+
+.rrhh-hero.recl-hero-clear .rrhh-title {
+    color: #1f2937;
+}
+
+.rrhh-hero.recl-hero-clear .rrhh-subtitle {
+    color: #475569;
+}
+
 .rrhh-hero::before {
     content: "";
     position: absolute;

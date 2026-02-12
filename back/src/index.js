@@ -105,9 +105,9 @@ function getGraphContext(req) {
 function buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total_cobrar }) {
   const partes = [];
   if (horas_reportadas) partes.push(`Horas: ${horas_reportadas}`);
-  if (cantidad_dias_reportados) partes.push(`DÃ­as: ${cantidad_dias_reportados}`);
+  if (cantidad_dias_reportados) partes.push(`Días: ${cantidad_dias_reportados}`);
   if (total_cobrar) partes.push(`Total: ${total_cobrar}`);
-  return partes.length ? partes.join(" | ") : "Sin detalle numÃ©rico";
+  return partes.length ? partes.join(" | ") : "Sin detalle numérico";
 }
 
 const FRONT_PORTAL_BASE =
@@ -300,10 +300,10 @@ const requireAccess = ({ roles = [], tipos = [] } = {}) => (req, res, next) => {
 /* ===============================
    RUTAS DE VISTAS (SPA)
 =============================== */
-// (sin rutas de vistas aquÃ­)
+// (sin rutas de vistas aquí)
 
 /* ===============================
-   API - CLIENTES (AQUÃ ESTABA EL FALTANTE)
+   API - CLIENTES (AQUÍ ESTABA EL FALTANTE)
 =============================== */
 
 // 1. OBTENER TODOS
@@ -1261,7 +1261,7 @@ app.delete("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador
    API - CONSULTORÃAS (ASIGNACIÃ“N COORDINADORES)
 =============================== */
 
-// Obtener consultorÃ­as
+// Obtener consultorías
 app.get("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   try {
     const coordinadorId = req.query.coordinador_id || null;
@@ -1287,11 +1287,11 @@ app.get("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"]
     res.json(result.rows);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Error al obtener consultorÃ­as" });
+    res.status(500).json({ error: "Error al obtener consultorías" });
   }
 });
 
-// Crear consultorÃ­a
+// Crear consultoría
 app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const { cliente_id, coordinador_id, tipo_asignacion_id, descripcion_consultoria } = req.body;
 
@@ -1357,11 +1357,11 @@ app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"
     res.json(created);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Error al guardar consultorÃ­a" });
+    res.status(500).json({ error: "Error al guardar consultoría" });
   }
 });
 
-// Actualizar consultorÃ­a
+// Actualizar consultoría
 app.put("/consultorias/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const { id } = req.params;
   const { cliente_id, coordinador_id, tipo_asignacion_id, descripcion_consultoria } = req.body;
@@ -1386,11 +1386,11 @@ app.put("/consultorias/:id", requireAccess({ roles: ["Administrador", "Coordinad
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Error al actualizar consultorÃ­a" });
+    res.status(500).json({ error: "Error al actualizar consultoría" });
   }
 });
 
-// Eliminar consultorÃ­a (soft delete)
+// Eliminar consultoría (soft delete)
 app.delete("/consultorias/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const { id } = req.params;
 
@@ -1399,7 +1399,7 @@ app.delete("/consultorias/:id", requireAccess({ roles: ["Administrador", "Coordi
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Error al eliminar consultorÃ­a" });
+    res.status(500).json({ error: "Error al eliminar consultoría" });
   }
 });
 
@@ -2276,17 +2276,17 @@ app.get("/cuentas-cobro/:id/pdf", requireAccess({ roles: ["Consultor", "Consulto
 
     doc.font("Helvetica-Bold").text("Por concepto de:", { continued: true });
     doc.font("Helvetica").text(
-      ` Honorarios de ConsultorÃ­as: ${cuenta.descripcion || "Cuenta de cobro"} del ${cuenta.fecha_periodo_inicio || ""} al ${cuenta.fecha_periodo_fin || ""}`
+      ` Honorarios de Consultorías: ${cuenta.descripcion || "Cuenta de cobro"} del ${cuenta.fecha_periodo_inicio || ""} al ${cuenta.fecha_periodo_fin || ""}`
     );
     doc.moveDown(1);
 
     doc.font("Helvetica").text(`Dirección: ${cuenta.direccion || "—"}`);
-    doc.text(`TelÃ©fono: ${cuenta.telefono || "â€”"}`);
-    doc.text(`No de Cuenta Bancaria: ${cuenta.nro_cuenta_bancaria || "â€”"}`);
-    doc.text(`Banco: ${cuenta.banco || "â€”"}`);
-    doc.text(`Tipo de Cuenta: ${cuenta.tipo_cuenta || "â€”"}`);
-    doc.text(`Titular: ${cuenta.nombre_usuario || "â€”"}`);
-    doc.text(`${cuenta.tipo_documento || "Documento"}: ${cuenta.cedula || "â€”"}`);
+    doc.text(`Teléfono: ${cuenta.telefono || "—"}`);
+    doc.text(`No de Cuenta Bancaria: ${cuenta.nro_cuenta_bancaria || "—"}`);
+    doc.text(`Banco: ${cuenta.banco || "—"}`);
+    doc.text(`Tipo de Cuenta: ${cuenta.tipo_cuenta || "—"}`);
+    doc.text(`Titular: ${cuenta.nombre_usuario || "—"}`);
+    doc.text(`${cuenta.tipo_documento || "Documento"}: ${cuenta.cedula || "—"}`);
     doc.moveDown(1.5);
 
     doc.font("Helvetica-Bold").text("Detalle de Cuenta de Cobro");
@@ -2557,7 +2557,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
       [id_consultoria]
     );
     if (meta.rows.length === 0) {
-      return res.status(400).json({ error: "ConsultorÃ­a no vÃ¡lida" });
+      return res.status(400).json({ error: "Consultoría no válida" });
     }
     const clienteId = meta.rows[0].id_cliente;
 

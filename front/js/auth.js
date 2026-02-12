@@ -55,14 +55,6 @@ window.auth = (function () {
         if (window.axios && token) {
             window.axios.defaults.headers.common.Authorization = `Bearer ${token}`;
         }
-        if (window.axios) {
-            const g = getGraphToken();
-            if (g) {
-                window.axios.defaults.headers.common["X-Graph-Access-Token"] = g;
-            } else {
-                delete window.axios.defaults.headers.common["X-Graph-Access-Token"];
-            }
-        }
     }
 
     function clearSession() {
@@ -71,7 +63,6 @@ window.auth = (function () {
         safeRemove(GRAPH_TOKEN_KEY);
         if (window.axios) {
             delete window.axios.defaults.headers.common.Authorization;
-            delete window.axios.defaults.headers.common["X-Graph-Access-Token"];
         }
     }
 
@@ -147,12 +138,8 @@ function setupAxiosAuth() {
     if (!window.axios || window.__authAxiosReady) return;
     window.__authAxiosReady = true;
     const token = window.auth?.getToken?.();
-    const graphToken = window.auth?.getGraphToken?.();
     if (token) {
         window.axios.defaults.headers.common.Authorization = `Bearer ${token}`;
-    }
-    if (graphToken) {
-        window.axios.defaults.headers.common["X-Graph-Access-Token"] = graphToken;
     }
     window.axios.interceptors.request.use((config) => {
         const t = window.auth?.getToken?.();
@@ -161,7 +148,14 @@ function setupAxiosAuth() {
             config.headers = config.headers || {};
             config.headers.Authorization = `Bearer ${t}`;
         }
-        if (gt) {
+        const method = String(config.method || "get").toLowerCase();
+        const url = String(config.url || "");
+        const shouldAttachGraphToken =
+            !!gt &&
+            ["post", "put", "patch", "delete"].includes(method) &&
+            !url.includes("/auth/me");
+
+        if (shouldAttachGraphToken) {
             config.headers = config.headers || {};
             config.headers["X-Graph-Access-Token"] = gt;
         }

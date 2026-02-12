@@ -60,10 +60,16 @@
                 <div class="bg-gray-50 p-3 border-t border-gray-100 flex justify-between items-center">
                     <div class="text-xs text-gray-500">
                         Coord: <span class="font-bold" x-text="item.nombre_coordinador"></span>
+                        <span class="ml-2 px-2 py-0.5 rounded-full bg-white border text-[10px] font-bold" x-text="estadoAprobacionLabel(item)"></span>
                     </div>
-                    <button @click="cerrarTicket(item)" class="text-xs font-bold text-green-600 hover:text-green-800 flex items-center gap-1">
+                    <button
+                        @click="enviarTicket(item)"
+                        :disabled="item.estado_reporte === 'Pendiente'"
+                        class="text-xs font-bold flex items-center gap-1"
+                        :class="item.estado_reporte === 'Pendiente' ? 'text-gray-400 cursor-not-allowed' : 'text-green-600 hover:text-green-800'"
+                    >
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                        Cerrar Ticket
+                        Enviar Ticket
                     </button>
                 </div>
 

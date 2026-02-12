@@ -34,13 +34,30 @@ window.mesaFabricaApp = function () {
         },
 
         async cerrarTicket(item) {
-            if (!confirm("¿Deseas cerrar este ticket? Se enviará a aprobación.")) return;
-            this.form = {
-                ...item,
-                estado: "Cerrado",
-                fecha_cierre: new Date().toISOString().split("T")[0]
-            };
-            await this.guardarCambios();
+            return this.enviarTicket(item);
+        },
+
+        async enviarTicket(item) {
+            if (item?.estado_reporte === "Pendiente") {
+                alert("Este ticket ya está en aprobación.");
+                return;
+            }
+            if (!confirm("¿Enviar ticket a aprobación del coordinador?")) return;
+            try {
+                await axios.post(`${this.API}/mesa-fabrica/${item.id}/enviar-aprobacion`, {
+                    tipo_servicio: item.tipo_servicio || null,
+                    nro_caso_int_ext: item.nro_caso_cliente || item.nro_caso_interno || null,
+                    observacion_mesa_fabrica: item.observacion || null,
+                    fecha_cierre_mesa_fab: item.fecha_fin || null,
+                    total_cobrar: item.total_cobrar || null,
+                    horas_reportadas: item.horas_reportadas || null
+                });
+                alert("Ticket enviado a aprobación.");
+                await this.cargarTickets();
+            } catch (e) {
+                const msg = e?.response?.data?.error || "Error al enviar ticket";
+                alert(msg);
+            }
         },
 
         async guardarCambios() {
@@ -56,6 +73,13 @@ window.mesaFabricaApp = function () {
 
         formatDate(d) {
             return d ? String(d).split("T")[0] : "";
+        },
+
+        estadoAprobacionLabel(item) {
+            if (item?.estado_reporte === "Pendiente") return "En revisión";
+            if (item?.estado_reporte === "Rechazado") return "Rechazado";
+            if (item?.estado_reporte === "Aprobado") return "Aprobado";
+            return "Borrador";
         }
     };
 };

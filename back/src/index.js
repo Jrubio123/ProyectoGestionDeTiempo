@@ -2106,6 +2106,7 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         ra.nro_caso_interno,
         ra.nro_caso_cliente,
         ra.estado,
+        ra.aprobar_coordinador,
         ra.tipo_servicio,
         ra.observacion,
         ra.fecha_inicio,
@@ -2115,13 +2116,25 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         m.id AS modulo_id,
         m.titulo AS nombre_modulo,
         ta.titulo AS tipo_asignacion,
-        coord.nombre_usuario AS nombre_coordinador
+        coord.nombre_usuario AS nombre_coordinador,
+        lr.estado_reporte AS estado_reporte,
+        lr.motivo_rechazo,
+        lr.total_cobrar,
+        lr.horas_reportadas,
+        lr.nro_caso_int_ext
       FROM registro_asignaciones ra
         JOIN consultorias con ON ra.id_consultoria = con.id
         JOIN clientes c ON con.id_cliente = c.id
         LEFT JOIN usuarios coord ON con.coordinador_responsable_id = coord.id
         LEFT JOIN modulo m ON ra.id_modulo = m.id
         LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
+        LEFT JOIN LATERAL (
+          SELECT rh.estado_reporte, rh.motivo_rechazo, rh.total_cobrar, rh.horas_reportadas, rh.nro_caso_int_ext
+          FROM reporte_horas rh
+          WHERE rh.id_registro_asignacion = ra.id
+          ORDER BY rh.updated_at DESC NULLS LAST, rh.id DESC
+          LIMIT 1
+        ) lr ON true
       WHERE ra.consultor_responsable_id = $1
         AND (
           COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
@@ -2135,6 +2148,218 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al obtener tickets" });
+  }
+});
+
+// Enviar ticket mesa/fábrica a aprobación de coordinador
+app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
+  const { id } = req.params;
+  const {
+    horas_reportadas,
+    total_cobrar,
+    tipo_servicio,
+    nro_caso_int_ext,
+    observacion_mesa_fabrica,
+    fecha_cierre_mesa_fab,
+    estado_mesa_servicio,
+    estado_fabrica,
+    requerimiento
+  } = req.body || {};
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const meta = await client.query(
+      `
+      SELECT
+        ra.id,
+        ra.id_modulo,
+        ra.id_consultoria,
+        ra.nro_caso_cliente,
+        ra.nro_caso_interno,
+        ra.tipo_servicio AS ra_tipo_servicio,
+        ra.observacion AS ra_observacion,
+        ra.fecha_fin,
+        ra.total_pagar,
+        ra.consultor_responsable_id,
+        con.id_cliente,
+        con.id_tipo_asignacion,
+        con.coordinador_responsable_id,
+        ta.titulo AS tipo_asignacion_titulo
+      FROM registro_asignaciones ra
+        JOIN consultorias con ON ra.id_consultoria = con.id
+        LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
+      WHERE ra.id = $1
+        AND ra.consultor_responsable_id = $2
+      `,
+      [id, req.user?.id]
+    );
+    if (!meta.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Ticket no encontrado" });
+    }
+
+    const info = meta.rows[0];
+    const tipoAsignacionId = Number(info.id_tipo_asignacion || 0);
+    const tipoAsignacionTitulo = String(info.tipo_asignacion_titulo || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+    const esMesaOFabrica =
+      [5, 6].includes(tipoAsignacionId) ||
+      ["mesa de servicio", "fabrica"].includes(tipoAsignacionTitulo);
+    if (!esMesaOFabrica) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Solo Mesa/Fábrica se envía desde este módulo." });
+    }
+
+    const last = await client.query(
+      `SELECT id, estado_reporte
+       FROM reporte_horas
+       WHERE id_registro_asignacion = $1
+       ORDER BY updated_at DESC NULLS LAST, id DESC
+       LIMIT 1`,
+      [id]
+    );
+    const lastRow = last.rows[0];
+    if (lastRow?.estado_reporte === "Pendiente") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Este ticket ya está pendiente de aprobación." });
+    }
+
+    const finalTipoServicio = normalizeTipoServicioInput(tipo_servicio || info.ra_tipo_servicio || "Servicio") || null;
+    const finalNroCaso = (nro_caso_int_ext || info.nro_caso_cliente || info.nro_caso_interno || "").toString().trim() || null;
+    const finalObservacion = (observacion_mesa_fabrica || info.ra_observacion || "").toString().trim() || null;
+    const finalFechaCierre = fecha_cierre_mesa_fab || info.fecha_fin || null;
+    const finalHoras = horas_reportadas ?? null;
+    const finalTotal = total_cobrar ?? info.total_pagar ?? null;
+
+    let saved;
+    if (lastRow) {
+      saved = await client.query(
+        `UPDATE reporte_horas
+         SET horas_reportadas = COALESCE($1, horas_reportadas),
+             total_cobrar = COALESCE($2, total_cobrar),
+             tipo_servicio = COALESCE($3, tipo_servicio),
+             nro_caso_int_ext = COALESCE($4, nro_caso_int_ext),
+             observacion_mesa_fabrica = COALESCE($5, observacion_mesa_fabrica),
+             fecha_cierre_mesa_fab = COALESCE($6, fecha_cierre_mesa_fab),
+             estado_mesa_servicio = COALESCE($7, estado_mesa_servicio),
+             estado_fabrica = COALESCE($8, estado_fabrica),
+             requerimiento = COALESCE($9, requerimiento),
+             cliente_id = COALESCE(cliente_id, $10),
+             tipo_asignacion_id = COALESCE(tipo_asignacion_id, $11),
+             modulo_id = COALESCE(modulo_id, $12),
+             coordinador_id = COALESCE(coordinador_id, $13),
+             consultor_responsable_id = COALESCE(consultor_responsable_id, $14),
+             consultor_principal_id = COALESCE(consultor_principal_id, $15),
+             estado_reporte = 'Pendiente',
+             motivo_rechazo = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $16
+         RETURNING *`,
+        [
+          finalHoras,
+          finalTotal,
+          finalTipoServicio,
+          finalNroCaso,
+          finalObservacion,
+          finalFechaCierre,
+          estado_mesa_servicio || null,
+          estado_fabrica || null,
+          requerimiento || null,
+          info.id_cliente,
+          info.id_tipo_asignacion,
+          info.id_modulo,
+          info.coordinador_responsable_id,
+          info.consultor_responsable_id,
+          info.consultor_responsable_id,
+          lastRow.id
+        ]
+      );
+    } else {
+      saved = await client.query(
+        `INSERT INTO reporte_horas
+          (id_registro_asignacion, horas_reportadas, total_cobrar, tipo_servicio, nro_caso_int_ext,
+           observacion_mesa_fabrica, fecha_cierre_mesa_fab, estado_mesa_servicio, estado_fabrica,
+           requerimiento, cliente_id, tipo_asignacion_id, modulo_id, coordinador_id,
+           consultor_responsable_id, consultor_principal_id, created_by, estado_reporte)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'Pendiente')
+         RETURNING *`,
+        [
+          id,
+          finalHoras,
+          finalTotal,
+          finalTipoServicio,
+          finalNroCaso,
+          finalObservacion,
+          finalFechaCierre,
+          estado_mesa_servicio || null,
+          estado_fabrica || null,
+          requerimiento || null,
+          info.id_cliente,
+          info.id_tipo_asignacion,
+          info.id_modulo,
+          info.coordinador_responsable_id,
+          info.consultor_responsable_id,
+          info.consultor_responsable_id,
+          req.user?.id || info.consultor_responsable_id
+        ]
+      );
+    }
+
+    const estados = await getEstadoAsignacionValues();
+    await client.query(
+      `UPDATE registro_asignaciones
+       SET aprobar_coordinador = 'Pendiente'::tipo_aprobacion,
+           estado = $2::tipo_estado_asignacion
+       WHERE id = $1`,
+      [id, estados.proceso]
+    );
+
+    await client.query("COMMIT");
+
+    // Notificar coordinador
+    const correoInfo = await pool.query(
+      `SELECT
+         ucoord.email AS coordinador_email,
+         ucoord.nombre_usuario AS coordinador_nombre,
+         ucons.nombre_usuario AS consultor_nombre,
+         c.titulo AS cliente,
+         ta.titulo AS tipo_asignacion
+       FROM consultorias con
+         JOIN clientes c ON con.id_cliente = c.id
+         LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
+         LEFT JOIN usuarios ucoord ON ucoord.id = con.coordinador_responsable_id
+         LEFT JOIN usuarios ucons ON ucons.id = $2
+       WHERE con.id = $1`,
+      [info.id_consultoria, info.consultor_responsable_id]
+    );
+    const correoRow = correoInfo.rows[0];
+    if (correoRow?.coordinador_email) {
+      const portalUrl = buildPortalUrl("aprobar-rechazar-coordinador");
+      await sendEmailSafe({
+        ...getGraphContext(req),
+        to: correoRow.coordinador_email,
+        subject: `⏳ Ticket enviado a aprobación: ${correoRow.consultor_nombre || "consultor"}`,
+        text:
+          `Hola ${correoRow.coordinador_nombre || ""},\n` +
+          `El consultor ${correoRow.consultor_nombre || ""} envió un ticket de Mesa/Fábrica.\n` +
+          `Cliente: ${correoRow.cliente}\n` +
+          `Tipo: ${correoRow.tipo_asignacion || "N/A"}\n` +
+          `Detalle: ${buildReporteResumen(saved.rows[0] || {})}\n` +
+          `Revisar: ${portalUrl}\n`
+      });
+    }
+
+    res.json(saved.rows[0] || {});
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    res.status(500).json({ error: "Error al enviar ticket a aprobación" });
+  } finally {
+    client.release();
   }
 });
 
@@ -2819,7 +3044,13 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
     const info = detalle.rows[0];
     if (info?.consultor_email) {
       const esAprobado = estado === "Aprobado";
-      const portalUrl = buildPortalUrl("registro-horas-consultor");
+      const tipoNorm = String(info.tipo_asignacion || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim();
+      const esMesaOFabrica = ["mesa de servicio", "fabrica"].includes(tipoNorm);
+      const portalUrl = buildPortalUrl(esMesaOFabrica ? "asignacion-fabrica-mesa-servicio" : "registro-horas-consultor");
       const titulo = esAprobado
         ? "✅ Horas aprobadas"
         : estado === "Rechazado"

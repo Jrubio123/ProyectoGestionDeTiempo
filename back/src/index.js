@@ -144,6 +144,123 @@ function buildEmailLayout({ title, intro, blocks = [], ctaLabel, ctaUrl, closing
   `;
 }
 
+function isRrhhEstadoNotificable(estado) {
+  return ["Reclutamiento", "Entrevistas", "Contratado", "Cancelado"].includes(String(estado || "").trim());
+}
+
+function buildRrhhEstadoEmailContent({
+  estado,
+  perfil,
+  cliente,
+  modulo,
+  coordinadorNombre,
+  observaciones,
+  portalUrl
+}) {
+  const base = {
+    toName: coordinadorNombre || "Coordinador",
+    perfil: perfil || "Perfil",
+    cliente: cliente || "N/A",
+    modulo: modulo || "N/A",
+    nota: observaciones || "Sin nota registrada",
+    url: portalUrl || buildPortalUrl("solicitudesCoord")
+  };
+
+  if (estado === "Reclutamiento") {
+    return {
+      subject: `🔍 Actualización: Tu solicitud para ${base.perfil} ya está en Reclutamiento`,
+      text:
+        `Hola ${base.toName},\n\n` +
+        `Te informamos que hemos iniciado la búsqueda activa de candidatos para tu solicitud de ${base.perfil} para el cliente ${base.cliente}.\n` +
+        `Estamos filtrando hojas de vida que cumplan con los requisitos del módulo ${base.modulo}.\n\n` +
+        `Ver solicitud en el sistema: ${base.url}\n`,
+      html: buildEmailLayout({
+        title: "Solicitud en fase de reclutamiento",
+        intro: `Hola <strong>${base.toName}</strong>, iniciamos la búsqueda activa de candidatos.`,
+        blocks: [
+          { label: "Perfil", value: base.perfil },
+          { label: "Cliente", value: base.cliente },
+          { label: "Módulo", value: base.modulo },
+          { label: "Estado", value: "Reclutamiento" }
+        ],
+        ctaLabel: "Ver solicitud en el sistema",
+        ctaUrl: base.url
+      })
+    };
+  }
+
+  if (estado === "Entrevistas") {
+    return {
+      subject: `🤝 Actualización: Iniciamos fase de entrevistas para ${base.perfil}`,
+      text:
+        `Hola ${base.toName},\n\n` +
+        `¡Buenas noticias! Ya tenemos candidatos pre-seleccionados para la vacante de ${base.perfil}.\n` +
+        `En los próximos días estaremos coordinando las agendas para las entrevistas técnicas/administrativas.\n\n` +
+        `Ver solicitud en el sistema: ${base.url}\n`,
+      html: buildEmailLayout({
+        title: "Solicitud en fase de entrevistas",
+        intro: `Hola <strong>${base.toName}</strong>, ya contamos con candidatos pre-seleccionados.`,
+        blocks: [
+          { label: "Perfil", value: base.perfil },
+          { label: "Cliente", value: base.cliente },
+          { label: "Estado", value: "Entrevistas" }
+        ],
+        ctaLabel: "Ver solicitud en el sistema",
+        ctaUrl: base.url
+      })
+    };
+  }
+
+  if (estado === "Contratado") {
+    return {
+      subject: `✅ ¡Misión Cumplida! Vacante cubierta para ${base.perfil}`,
+      text:
+        `Hola ${base.toName},\n\n` +
+        `Nos alegra informarte que el proceso para ${base.perfil} ha finalizado con éxito.\n` +
+        `El candidato ha sido seleccionado y el proceso de contratación está en marcha.\n` +
+        `La solicitud se marca como completada.\n\n` +
+        `Ver solicitud en el sistema: ${base.url}\n`,
+      html: buildEmailLayout({
+        title: "Solicitud completada",
+        intro: `Hola <strong>${base.toName}</strong>, la vacante fue cubierta exitosamente.`,
+        blocks: [
+          { label: "Perfil", value: base.perfil },
+          { label: "Cliente", value: base.cliente },
+          { label: "Estado", value: "Contratado" }
+        ],
+        ctaLabel: "Ver solicitud en el sistema",
+        ctaUrl: base.url
+      })
+    };
+  }
+
+  if (estado === "Cancelado") {
+    return {
+      subject: `🚫 Notificación: Solicitud Cancelada - ${base.perfil}`,
+      text:
+        `Hola ${base.toName},\n\n` +
+        `Se ha registrado la cancelación de la solicitud para ${base.perfil}.\n` +
+        `Motivo/Nota: ${base.nota}\n\n` +
+        `Por favor, revisa los detalles y comienza el proceso correspondiente.\n\n` +
+        `Ver solicitud en el sistema: ${base.url}\n`,
+      html: buildEmailLayout({
+        title: "Solicitud cancelada",
+        intro: `Hola <strong>${base.toName}</strong>, se registró la cancelación de la solicitud.`,
+        blocks: [
+          { label: "Perfil", value: base.perfil },
+          { label: "Cliente", value: base.cliente },
+          { label: "Estado", value: "Cancelado" },
+          { label: "Motivo/Nota", value: base.nota }
+        ],
+        ctaLabel: "Ver solicitud en el sistema",
+        ctaUrl: base.url
+      })
+    };
+  }
+
+  return null;
+}
+
 const normalizeValue = (value) => String(value || "").toLowerCase().trim();
 const isGuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -716,7 +833,81 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
         prioridad || "Media"
       ]
     );
-    res.json(result.rows[0]);
+    const created = result.rows[0];
+
+    try {
+      const [detalleSolicitud, reclutadores] = await Promise.all([
+        pool.query(
+          `
+          SELECT
+            s.id,
+            s.perfil,
+            s.nivel,
+            s.prioridad,
+            s.estado,
+            c.titulo AS cliente,
+            m.titulo AS modulo,
+            u.nombre_usuario AS coordinador_nombre
+          FROM solicitudes_rrhh s
+            LEFT JOIN clientes c ON c.id = s.cliente_id
+            LEFT JOIN modulo m ON m.id = s.modulo_id
+            LEFT JOIN usuarios u ON u.id = s.coordinador_id
+          WHERE s.id = $1
+          `,
+          [created.id]
+        ),
+        pool.query(
+          `
+          SELECT u.email
+          FROM usuarios u
+            JOIN roles r ON r.id = u.rol_usuario_id
+          WHERE u.activo = true
+            AND u.email IS NOT NULL
+            AND LOWER(r.titulo) = LOWER('Reclutador')
+          `
+        )
+      ]);
+
+      const info = detalleSolicitud.rows[0];
+      const destinatarios = reclutadores.rows.map((r) => r.email).filter(Boolean);
+      if (info && destinatarios.length) {
+        const portalUrl = buildPortalUrl("solicitudesRecl");
+        await sendEmailSafe({
+          ...getGraphContext(req),
+          to: destinatarios,
+          subject: `Nueva Solicitud de Reclutamiento - ${info.perfil || "Perfil"}`,
+          text:
+            `Hola Equipo de Reclutamiento,\n\n` +
+            `Se ha creado una nueva solicitud de reclutamiento en el sistema.\n\n` +
+            `Perfil: ${info.perfil || "N/A"}\n` +
+            `Cliente: ${info.cliente || "N/A"}\n` +
+            `Módulo: ${info.modulo || "N/A"}\n` +
+            `Nivel: ${info.nivel || "N/A"}\n` +
+            `Prioridad: ${info.prioridad || "N/A"}\n` +
+            `Coordinador solicitante: ${info.coordinador_nombre || "N/A"}\n\n` +
+            `Por favor, revisa los detalles y comienza el proceso correspondiente.\n\n` +
+            `Ver Solicitud en el Sistema: ${portalUrl}\n`,
+          html: buildEmailLayout({
+            title: "Nueva Solicitud de Reclutamiento",
+            intro: "Hola Equipo de Reclutamiento, se creó una nueva solicitud de reclutamiento en el sistema.",
+            blocks: [
+              { label: "Perfil", value: info.perfil || "N/A" },
+              { label: "Cliente", value: info.cliente || "N/A" },
+              { label: "Módulo", value: info.modulo || "N/A" },
+              { label: "Nivel", value: info.nivel || "N/A" },
+              { label: "Prioridad", value: info.prioridad || "N/A" },
+              { label: "Solicitante", value: info.coordinador_nombre || "N/A" }
+            ],
+            ctaLabel: "Ver Solicitud en el Sistema",
+            ctaUrl: portalUrl
+          })
+        });
+      }
+    } catch (mailErr) {
+      console.error("Error preparando notificación de nueva solicitud RRHH:", mailErr);
+    }
+
+    res.json(created);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al crear solicitud" });
@@ -728,6 +919,31 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
   const { id } = req.params;
   const { estado, observaciones_rrhh } = req.body || {};
   try {
+    const solicitudInfo = await pool.query(
+      `
+      SELECT
+        s.id,
+        s.estado AS estado_actual,
+        s.perfil,
+        s.observaciones_rrhh,
+        c.titulo AS cliente,
+        m.titulo AS modulo,
+        u.email AS coordinador_email,
+        u.nombre_usuario AS coordinador_nombre
+      FROM solicitudes_rrhh s
+        LEFT JOIN clientes c ON c.id = s.cliente_id
+        LEFT JOIN modulo m ON m.id = s.modulo_id
+        LEFT JOIN usuarios u ON u.id = s.coordinador_id
+      WHERE s.id = $1
+      `,
+      [id]
+    );
+
+    if (solicitudInfo.rows.length === 0) {
+      return res.status(404).json({ error: "Solicitud no encontrada" });
+    }
+
+    const before = solicitudInfo.rows[0];
     const fields = [];
     const values = [];
     let idx = 1;
@@ -759,7 +975,32 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "Solicitud no encontrada" });
     }
-    res.json(result.rows[0]);
+    const updated = result.rows[0];
+
+    const estadoFinal = updated.estado;
+    const cambioEstado = Boolean(estado) && String(before.estado_actual || "") !== String(estadoFinal || "");
+    if (cambioEstado && isRrhhEstadoNotificable(estadoFinal) && before.coordinador_email) {
+      const contenido = buildRrhhEstadoEmailContent({
+        estado: estadoFinal,
+        perfil: updated.perfil || before.perfil,
+        cliente: before.cliente,
+        modulo: before.modulo,
+        coordinadorNombre: before.coordinador_nombre,
+        observaciones: updated.observaciones_rrhh,
+        portalUrl: buildPortalUrl("solicitudesCoord")
+      });
+      if (contenido) {
+        await sendEmailSafe({
+          ...getGraphContext(req),
+          to: before.coordinador_email,
+          subject: contenido.subject,
+          text: contenido.text,
+          html: contenido.html
+        });
+      }
+    }
+
+    res.json(updated);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al actualizar solicitud" });

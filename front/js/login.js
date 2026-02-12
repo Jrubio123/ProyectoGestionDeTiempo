@@ -2,6 +2,11 @@
 window.authApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
     const graphScopes = ["openid", "profile", "email", "User.Read"];
+    const SAVED_USERS_KEY = "LOCAL_LOGIN_USERS";
+    const isLocalMode = String(window.APP_MODE || "").toLowerCase() === "local";
+    const forceSwitch =
+        window.location.search.includes("switch=1") ||
+        window.location.search.includes("forceLogin=1");
     const isCallback =
         window.location.pathname.includes("/auth/callback") ||
         window.location.search.includes("code=") ||
@@ -23,8 +28,41 @@ window.authApp = function () {
         }
     }
 
+    function getSavedUsers() {
+        try {
+            const raw = localStorage.getItem(SAVED_USERS_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            if (!Array.isArray(parsed)) return [];
+            return parsed
+                .map((email) => String(email || "").trim().toLowerCase())
+                .filter(Boolean)
+                .slice(0, 8);
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function saveUserEmail(email) {
+        const normalized = String(email || "").trim().toLowerCase();
+        if (!normalized) return;
+        const users = getSavedUsers().filter((u) => u !== normalized);
+        users.unshift(normalized);
+        safeSet(SAVED_USERS_KEY, JSON.stringify(users.slice(0, 8)));
+    }
+
+    function removeUserEmail(email) {
+        const normalized = String(email || "").trim().toLowerCase();
+        if (!normalized) return getSavedUsers();
+        const users = getSavedUsers().filter((u) => u !== normalized);
+        safeSet(SAVED_USERS_KEY, JSON.stringify(users));
+        return users;
+    }
+
     const existingToken = safeGet("token");
-    if (existingToken && !isCallback) {
+    if (forceSwitch && window.auth?.clearSession) {
+        window.auth.clearSession();
+    }
+    if (existingToken && !isCallback && !forceSwitch) {
         window.location.href = "/index.html#inicio";
     }
 
@@ -58,10 +96,16 @@ window.authApp = function () {
     return {
         loading: false,
         error: "",
+        email: "",
+        password: "",
+        isLocalMode,
+        savedUsers: [],
         msalInstance: null,
 
         async init() {
             if (isCallback) return;
+            this.savedUsers = getSavedUsers();
+
             if (!window.msal || !window.msal.PublicClientApplication) return;
             const config = buildMsalConfig();
             if (!config) return;
@@ -99,6 +143,49 @@ window.authApp = function () {
                 } else {
                     this.error = e.message || "Error iniciando sesión";
                 }
+                this.loading = false;
+            }
+        },
+
+        usarUsuarioGuardado(email) {
+            this.email = email || "";
+            this.error = "";
+        },
+
+        eliminarUsuarioGuardado(email) {
+            this.savedUsers = removeUserEmail(email);
+            if (this.email === email) this.email = "";
+        },
+
+        async loginLocal() {
+            this.loading = true;
+            this.error = "";
+            try {
+                const email = String(this.email || "").trim().toLowerCase();
+                const password = String(this.password || "");
+                if (!email || !password) {
+                    throw new Error("Correo y contraseña son obligatorios");
+                }
+
+                const res = await axios.post(`${API}/auth/login`, { email, password });
+                const data = res.data || {};
+                if (!data.token || !data.user) {
+                    throw new Error("Respuesta de autenticación inválida");
+                }
+
+                if (window.auth?.setSession) {
+                    window.auth.setSession(data.token, data.user);
+                } else {
+                    safeSet("token", data.token);
+                    safeSet("user", JSON.stringify(data.user || {}));
+                }
+
+                saveUserEmail(email);
+                this.savedUsers = getSavedUsers();
+                this.password = "";
+                window.location.href = "/index.html#inicio";
+            } catch (e) {
+                this.error = e?.response?.data?.error || e?.message || "Error iniciando sesión";
                 this.loading = false;
             }
         }

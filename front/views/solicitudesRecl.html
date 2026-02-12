@@ -64,7 +64,7 @@
         </div>
     </section>
 
-    <div x-show="modalDetalle" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/20 backdrop-blur-sm px-3">
+    <div x-show="modalDetalle" class="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/20 backdrop-blur-sm px-3 pt-16 pb-4">
         <div
             class="bg-white/80 backdrop-blur-2xl border border-white/40 w-full max-w-4xl lg:max-w-5xl max-h-[90vh] overflow-y-auto no-scrollbar p-5 md:p-8 rounded-[2.5rem] shadow-2xl transform transition-all duration-300"
             x-transition:enter="ease-out duration-300"
@@ -142,8 +142,8 @@
         </div>
     </div>
 
-    <div x-show="modalNotas" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-3">
-        <div class="rrhh-glass-card w-full max-w-lg p-6 overflow-y-auto no-scrollbar">
+    <div x-show="modalNotas" class="fixed inset-0 z-50 flex items-start justify-center bg-black/50 px-3 pt-16 pb-4">
+        <div class="rrhh-glass-card w-full max-w-lg p-8 overflow-y-auto no-scrollbar">
             <h3 class="font-bold text-lg mb-2 text-[#20272f]">Notas de Seguimiento</h3>
             <p class="text-sm text-[#5b6678] mb-4 bg-[#f8fafd] border border-[#edf1f6] p-3 rounded-xl" x-text="itemActivo.descripcion"></p>
 

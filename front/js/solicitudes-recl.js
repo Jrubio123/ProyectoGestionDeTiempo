@@ -79,6 +79,32 @@ window.solicitudesReclApp = function () {
                 const msg = e?.response?.data?.error || "Error guardando notas";
                 alert(msg);
             }
+        },
+
+        formatFecha(fecha) {
+            if (!fecha) return "-";
+
+            const valor = String(fecha).trim();
+            if (!valor) return "-";
+
+            const soloFecha = valor.match(/^(\d{4})-(\d{2})-(\d{2})/);
+            let dateObj;
+
+            if (soloFecha) {
+                const [, year, month, day] = soloFecha;
+                dateObj = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+            } else {
+                dateObj = new Date(valor);
+            }
+
+            if (Number.isNaN(dateObj.getTime())) return valor;
+
+            return dateObj.toLocaleDateString("es-CO", {
+                day: "2-digit",
+                month: "long",
+                year: "numeric",
+                timeZone: "UTC"
+            });
         }
     };
 };

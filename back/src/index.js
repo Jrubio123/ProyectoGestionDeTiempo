@@ -85,12 +85,19 @@ function buildTotalLetras(numero, moneda = 'COP') {
   }
 }
 
-async function sendEmailSafe({ to, subject, text, html }) {
+async function sendEmailSafe({ to, subject, text, html, cc, bcc, graphAccessToken, graphUserEmail }) {
   try {
-    await sendEmail({ to, subject, text, html });
+    await sendEmail({ to, subject, text, html, cc, bcc, graphAccessToken, graphUserEmail });
   } catch (err) {
     console.error("Error enviando correo:", err.message);
   }
+}
+
+function getGraphContext(req) {
+  return {
+    graphAccessToken: req?.headers?.["x-graph-access-token"] || null,
+    graphUserEmail: req?.user?.email || null
+  };
 }
 
 function buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total_cobrar }) {
@@ -1322,6 +1329,7 @@ app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"
     if (row?.coordinador_email) {
       const portalUrl = buildPortalUrl("mis-asignaciones-coordinador");
       await sendEmailSafe({
+        ...getGraphContext(req),
         to: row.coordinador_email,
         subject: `Nueva consultoría asignada - ${row.cliente}`,
         text:
@@ -1695,6 +1703,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
     if (correoRow?.coordinador_email) {
       const portalUrl = buildPortalUrl("aprobar-rechazar-coordinador");
       await sendEmailSafe({
+        ...getGraphContext(req),
         to: correoRow.coordinador_email,
         subject: `⏳ Aprobación pendiente: reporte de ${correoRow.consultor_nombre || "consultor"}`,
         text:
@@ -2033,6 +2042,7 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
       );
       const consultor = userInfo.rows[0];
       await sendEmailSafe({
+        ...getGraphContext(req),
         to: contabilidadEmail,
         subject: `Nueva cuenta de cobro #${cuenta.id}`,
         text:
@@ -2379,10 +2389,10 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
         // Actualizar aprobación y estado en la asignación asociada
         await pool.query(
           `UPDATE registro_asignaciones
-           SET aprobar_coordinador = $1,
+           SET aprobar_coordinador = $1::tipo_aprobacion,
                estado = CASE
-                 WHEN $1 = 'Aprobado' THEN 'Proceso'
-                 WHEN $1 = 'Rechazado' THEN 'Abierto'
+                 WHEN $1::tipo_aprobacion = 'Aprobado'::tipo_aprobacion THEN 'Proceso'
+                 WHEN $1::tipo_aprobacion = 'Rechazado'::tipo_aprobacion THEN 'Abierto'
                  ELSE estado
                END
            WHERE id = $2`,
@@ -2420,6 +2430,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
           ? "⚠️ Acción requerida: corrección de reporte"
           : "Actualización de reporte";
       await sendEmailSafe({
+        ...getGraphContext(req),
         to: info.consultor_email,
         subject: `${titulo} - ${info.cliente || "Cliente"}`,
         text:
@@ -2607,6 +2618,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     if (row?.consultor_email) {
       const portalUrl = buildPortalUrl("mis-asignaciones-consultor");
       await sendEmailSafe({
+        ...getGraphContext(req),
         to: row.consultor_email,
         subject: `🚀 Nueva asignación: ${row.modulo || "Proyecto"} - ${row.cliente}`,
         text:

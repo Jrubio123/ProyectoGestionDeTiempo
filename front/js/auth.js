@@ -2,6 +2,7 @@
 window.auth = (function () {
     const TOKEN_KEY = "token";
     const USER_KEY = "user";
+    const GRAPH_TOKEN_KEY = "graph_access_token";
     const API_BASE = window.API_BASE || "http://localhost:4000";
 
     function safeGet(key) {
@@ -42,19 +43,35 @@ window.auth = (function () {
         }
     }
 
-    function setSession(token, user) {
+    function getGraphToken() {
+        return safeGet(GRAPH_TOKEN_KEY);
+    }
+
+    function setSession(token, user, graphToken) {
         if (token) safeSet(TOKEN_KEY, token);
         if (user) safeSet(USER_KEY, JSON.stringify(user));
+        if (graphToken) safeSet(GRAPH_TOKEN_KEY, graphToken);
+        if (graphToken === null) safeRemove(GRAPH_TOKEN_KEY);
         if (window.axios && token) {
             window.axios.defaults.headers.common.Authorization = `Bearer ${token}`;
+        }
+        if (window.axios) {
+            const g = getGraphToken();
+            if (g) {
+                window.axios.defaults.headers.common["X-Graph-Access-Token"] = g;
+            } else {
+                delete window.axios.defaults.headers.common["X-Graph-Access-Token"];
+            }
         }
     }
 
     function clearSession() {
         safeRemove(TOKEN_KEY);
         safeRemove(USER_KEY);
+        safeRemove(GRAPH_TOKEN_KEY);
         if (window.axios) {
             delete window.axios.defaults.headers.common.Authorization;
+            delete window.axios.defaults.headers.common["X-Graph-Access-Token"];
         }
     }
 
@@ -117,6 +134,7 @@ window.auth = (function () {
         isAsociado,
         getRoleKey,
         setSession,
+        getGraphToken,
         clearSession,
         isAuthenticated,
         hydrateUser,
@@ -129,14 +147,23 @@ function setupAxiosAuth() {
     if (!window.axios || window.__authAxiosReady) return;
     window.__authAxiosReady = true;
     const token = window.auth?.getToken?.();
+    const graphToken = window.auth?.getGraphToken?.();
     if (token) {
         window.axios.defaults.headers.common.Authorization = `Bearer ${token}`;
     }
+    if (graphToken) {
+        window.axios.defaults.headers.common["X-Graph-Access-Token"] = graphToken;
+    }
     window.axios.interceptors.request.use((config) => {
         const t = window.auth?.getToken?.();
+        const gt = window.auth?.getGraphToken?.();
         if (t) {
             config.headers = config.headers || {};
             config.headers.Authorization = `Bearer ${t}`;
+        }
+        if (gt) {
+            config.headers = config.headers || {};
+            config.headers["X-Graph-Access-Token"] = gt;
         }
         return config;
     });

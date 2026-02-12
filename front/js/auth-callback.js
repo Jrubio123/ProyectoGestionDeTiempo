@@ -4,7 +4,7 @@
     const clientId = window.AZURE_CLIENT_ID;
     const tenantId = window.AZURE_TENANT_ID;
     const redirectUri = `${window.location.origin}${window.AZURE_REDIRECT_PATH || "/auth/callback"}`;
-    const graphScopes = ["openid", "profile", "email", "User.Read"];
+    const graphScopes = ["openid", "profile", "email", "User.Read", "Mail.Send"];
 
     function setError(msg) {
         const title = document.getElementById("auth-title");
@@ -68,10 +68,11 @@
 
             const data = res.data || {};
             if (data.token && data.user && window.auth?.setSession) {
-                window.auth.setSession(data.token, data.user);
+                window.auth.setSession(data.token, data.user, accessToken);
             } else {
                 localStorage.setItem("token", data.token);
                 localStorage.setItem("user", JSON.stringify(data.user || {}));
+                localStorage.setItem("graph_access_token", accessToken);
             }
             window.location.href = "/index.html#inicio";
         } catch (err) {

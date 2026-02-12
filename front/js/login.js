@@ -1,7 +1,7 @@
 // js/login.js
 window.authApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
-    const graphScopes = ["openid", "profile", "email", "User.Read"];
+    const graphScopes = ["openid", "profile", "email", "User.Read", "Mail.Send"];
     const SAVED_USERS_KEY = "LOCAL_LOGIN_USERS";
     const isLocalMode = String(window.APP_MODE || "").toLowerCase() === "local";
     const forceSwitch =
@@ -174,7 +174,7 @@ window.authApp = function () {
                 }
 
                 if (window.auth?.setSession) {
-                    window.auth.setSession(data.token, data.user);
+                    window.auth.setSession(data.token, data.user, null);
                 } else {
                     safeSet("token", data.token);
                     safeSet("user", JSON.stringify(data.user || {}));

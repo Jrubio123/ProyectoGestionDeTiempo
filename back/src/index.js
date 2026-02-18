@@ -15,8 +15,14 @@ const { sendEmail, getGraphAccessToken } = require("./email");
 
 
 const app = express();
+const JWT_SECRET =
+  process.env.JWT_SECRET ||
+  (process.env.NODE_ENV === "production" ? "" : "dev_secret");
 
 console.log("[startup] DEBUG_AUTH:", process.env.DEBUG_AUTH);
+if (process.env.NODE_ENV === "production" && !JWT_SECRET) {
+  throw new Error("JWT_SECRET no está configurado en producción.");
+}
 
 /* ===============================
    CONFIGURACIÃ“N
@@ -606,6 +612,19 @@ const requireAccess = ({ roles = [], tipos = [] } = {}) => (req, res, next) => {
   return next();
 };
 
+const requireAuthenticated = (req, res, next) => {
+  if (req.user?.id) return next();
+  const auth = req.headers.authorization || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
+  if (!token) return res.status(401).json({ error: "No autorizado" });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    return next();
+  } catch (err) {
+    return res.status(401).json({ error: "Token inválido" });
+  }
+};
+
 /* ===============================
    SERVIR ARCHIVOS DEL FRONTEND
 =============================== */
@@ -879,7 +898,7 @@ app.delete("/sub-consultores/:asociadoId", requireAccess({ roles: ["Administrado
 });
 
 // Módulos activos
-app.get("/modulos", async (req, res) => {
+app.get("/modulos", requireAuthenticated, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT id, titulo
@@ -895,7 +914,7 @@ app.get("/modulos", async (req, res) => {
 });
 
 // Tipos de asignación activos
-app.get("/tipos-asignacion", async (req, res) => {
+app.get("/tipos-asignacion", requireAuthenticated, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT id, titulo
@@ -1208,8 +1227,6 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
    AUTH
 =============================== */
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
-
 app.post("/auth/register", async (req, res) => {
   if (String(process.env.AUTH_MODE || "").toLowerCase() === "ms_only") {
     return res.status(403).json({ error: "Registro deshabilitado. Usa Microsoft SSO." });
@@ -1516,6 +1533,15 @@ app.post("/auth/microsoft", async (req, res) => {
       return res.status(500).json({ error: "Campo obligatorio nulo al crear usuario en BD" });
     }
     return res.status(500).json({ error: "Error interno al procesar autenticación Microsoft" });
+  }
+});
+
+app.get("/health", async (req, res) => {
+  try {
+    await pool.query("SELECT 1");
+    res.json({ status: "healthy", timestamp: new Date().toISOString() });
+  } catch (err) {
+    res.status(503).json({ status: "unhealthy" });
   }
 });
 
@@ -2651,10 +2677,7 @@ app.post("/cuentas-cobro/preview", requireAccess({ roles: ["Consultor", "Consult
 
   } catch (error) {
     console.error('âŒ Error en /cuentas-cobro/preview:', error);
-    res.status(500).json({
-      error: 'Error al calcular preview',
-      detalle: error.message
-    });
+    res.status(500).json({ error: "Error al calcular preview" });
   }
 });
 

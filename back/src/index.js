@@ -2958,12 +2958,26 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
     }
 
     let token = null;
+    let tokenSource = "app";
     try {
       token = await getGraphAccessToken();
     } catch (tokenErr) {
       const delegated = String(req?.headers?.["x-graph-access-token"] || "").trim();
       if (!delegated) throw tokenErr;
       token = delegated;
+      tokenSource = "delegated";
+    }
+
+    if (process.env.DEBUG_AUTH === "true") {
+      const tokenPayload = decodeJwtPayload(token);
+      const roles = Array.isArray(tokenPayload?.roles) ? tokenPayload.roles : [];
+      console.log("DEBUG upload cuenta adjuntos token:", {
+        tokenSource,
+        aud: tokenPayload?.aud || null,
+        scp: tokenPayload?.scp || null,
+        rolesCount: roles.length,
+        rolesSample: roles.slice(0, 6)
+      });
     }
     const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
     graphStage = "graph-drive-check";

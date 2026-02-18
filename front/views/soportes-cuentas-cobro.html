@@ -1,0 +1,79 @@
+<div x-data="soportesCuentasCobroApp()" x-init="init()" class="max-w-7xl mx-auto space-y-6 animate-fade-in-up">
+    <div class="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-cyan-50">
+        <h1 class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-600 to-blue-600">
+            Soportes de Cuentas de Cobro
+        </h1>
+        <p class="text-gray-500 text-sm mt-1">Vista de consulta para Administrador y Coordinador.</p>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
+        <div class="p-4 border-b border-gray-100 bg-gray-50/50 flex flex-wrap gap-4 items-end">
+            <div>
+                <label class="text-xs font-bold text-gray-500 uppercase">Consultor</label>
+                <select x-model="filtros.consultor_id" class="block w-72 p-2 border rounded-lg text-sm">
+                    <option value="">Todos</option>
+                    <template x-for="c in consultores" :key="c.id">
+                        <option :value="c.id" x-text="c.nombre"></option>
+                    </template>
+                </select>
+            </div>
+
+            <button @click="cargarSoportes" class="px-4 py-2 bg-cyan-600 text-white rounded-lg font-bold shadow hover:bg-cyan-700 transition-colors">
+                Filtrar
+            </button>
+            <button @click="limpiarFiltros" class="px-4 py-2 text-gray-500 hover:text-gray-700 font-medium">
+                Limpiar
+            </button>
+        </div>
+
+        <div class="overflow-auto">
+            <table class="w-full text-left border-collapse">
+                <thead class="bg-gray-50 sticky top-0 z-10 text-xs font-bold text-gray-400 uppercase">
+                    <tr>
+                        <th class="px-6 py-4">Cuenta</th>
+                        <th class="px-6 py-4">Consultor</th>
+                        <th class="px-6 py-4">Periodo</th>
+                        <th class="px-6 py-4 text-right">Total</th>
+                        <th class="px-6 py-4 text-center">Soportes</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-50 text-sm">
+                    <template x-for="item in soportes" :key="item.id">
+                        <tr class="hover:bg-cyan-50/20 transition-colors">
+                            <td class="px-6 py-4">
+                                <p class="font-bold text-gray-800">#<span x-text="item.id"></span></p>
+                                <p class="text-xs text-gray-400" x-text="formatDate(item.created_at)"></p>
+                            </td>
+                            <td class="px-6 py-4">
+                                <p class="font-medium text-gray-700" x-text="item.consultor_nombre || 'N/A'"></p>
+                                <p class="text-xs text-gray-400" x-text="item.consultor_email || ''"></p>
+                            </td>
+                            <td class="px-6 py-4 text-gray-600">
+                                <span x-text="formatDate(item.fecha_inicio_periodo)"></span>
+                                <span> → </span>
+                                <span x-text="formatDate(item.fecha_fin_periodo)"></span>
+                            </td>
+                            <td class="px-6 py-4 text-right font-mono font-bold text-gray-700" x-text="formatearDinero(item.total_numeros)"></td>
+                            <td class="px-6 py-4 text-center">
+                                <div class="flex justify-center gap-2">
+                                    <button @click="abrirSoporte(item, 'cuenta')" class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700">
+                                        Cuenta firmada
+                                    </button>
+                                    <button @click="abrirSoporte(item, 'seguridad')" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700">
+                                        Seguridad social
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    </template>
+                    <tr x-show="!loading && soportes.length === 0">
+                        <td colspan="5" class="py-10 text-center text-gray-400">No se encontraron soportes.</td>
+                    </tr>
+                    <tr x-show="loading">
+                        <td colspan="5" class="py-10 text-center text-gray-400">Cargando...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>

@@ -1,6 +1,6 @@
 ﻿function getRoleRoutes() {
     return {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "solicitudesRecl"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "solicitudesRecl", "soportes-cuentas-cobro"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -9,7 +9,8 @@
             "mis-asignaciones-coordinador",
             "asociar-subconsultores",
             "tarifas",
-            "solicitudesCoord"
+            "solicitudesCoord",
+            "soportes-cuentas-cobro"
         ],
         consultor_principal: [
             "inicio",
@@ -47,6 +48,7 @@ function getAllSearchViews() {
         { label: "Registro Horas Consultor", hash: "#registro-horas-consultor" },
         { label: "Aprobar/Rechazar Coordinador", hash: "#aprobar-rechazar-coordinador" },
         { label: "Mis Cuentas Cobros", hash: "#mis-cuentas-cobros" },
+        { label: "Soportes Cuentas Cobro", hash: "#soportes-cuentas-cobro" },
         { label: "Generar Cuenta Cobro", hash: "#generar-cuenta-cobro" },
         { label: "Solicitudes RRHH", hash: "#solicitudesCoord" },
         { label: "Pool de Solicitudes", hash: "#solicitudesRecl" }
@@ -72,9 +74,33 @@ function initNavbar() {
     const viewsList = document.getElementById("views-list");
     let avatarObjectUrl = null;
 
+    async function loadAvatarFromToken(accessToken) {
+        if (!accessToken || !userAvatarEl) return false;
+        try {
+            const response = await fetch("https://graph.microsoft.com/v1.0/me/photo/$value", {
+                headers: { Authorization: `Bearer ${accessToken}` }
+            });
+            if (!response.ok) return false;
+            const blob = await response.blob();
+            if (!blob || !blob.size) return false;
+
+            if (avatarObjectUrl) URL.revokeObjectURL(avatarObjectUrl);
+            avatarObjectUrl = URL.createObjectURL(blob);
+            userAvatarEl.src = avatarObjectUrl;
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
     async function loadMicrosoftAvatar() {
         if (!userAvatarEl) return;
         if (window.LOAD_GRAPH_AVATAR !== true) return;
+
+        const storedGraphToken = window.auth?.getGraphToken?.() || null;
+        const loadedFromStoredToken = await loadAvatarFromToken(storedGraphToken);
+        if (loadedFromStoredToken) return;
+
         if (!window.msal || !window.msal.PublicClientApplication) return;
 
         const clientId = window.AZURE_CLIENT_ID;
@@ -109,19 +135,7 @@ function initNavbar() {
                 account,
                 scopes: ["User.Read"]
             });
-            const response = await fetch("https://graph.microsoft.com/v1.0/me/photo/$value", {
-                headers: { Authorization: `Bearer ${tokenResponse.accessToken}` }
-            });
-            if (!response.ok) return;
-
-            const blob = await response.blob();
-            if (!blob || !blob.size) return;
-
-            if (avatarObjectUrl) {
-                URL.revokeObjectURL(avatarObjectUrl);
-            }
-            avatarObjectUrl = URL.createObjectURL(blob);
-            userAvatarEl.src = avatarObjectUrl;
+            await loadAvatarFromToken(tokenResponse.accessToken);
         } catch (e) {
             // Keep fallback avatar when photo is unavailable.
         }

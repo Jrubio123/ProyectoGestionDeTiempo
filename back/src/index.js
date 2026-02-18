@@ -19,7 +19,6 @@ const JWT_SECRET =
   process.env.JWT_SECRET ||
   (process.env.NODE_ENV === "production" ? "" : "dev_secret");
 
-console.log("[startup] DEBUG_AUTH:", process.env.DEBUG_AUTH);
 if (process.env.NODE_ENV === "production" && !JWT_SECRET) {
   throw new Error("JWT_SECRET no está configurado en producción.");
 }
@@ -174,13 +173,23 @@ function buildTotalLetras(numero, moneda = 'COP') {
   textoNumeros = textoNumeros.replace(/\s*00\/100\s*/g, '');
   // TambiÃ©n eliminar "M.N." si existe
   textoNumeros = textoNumeros.replace(/\s*M\.N\.\s*/g, '');
+  // Quitar moneda embebida para evitar duplicados (PESOS PESOS / DOLARES PESOS)
+  textoNumeros = textoNumeros.replace(/\b(PESO|PESOS|DOLAR|DOLARES|DÓLAR|DÓLARES)\b/g, '');
+  // Corregir casos como "UN MILLON DE QUINIENTOS MIL" -> "UN MILLON QUINIENTOS MIL"
+  textoNumeros = textoNumeros.replace(
+    /\b(MILLON|MILLÓN|MILLONES)\s+DE\s+(?=(UN|UNA|DOS|TRES|CUATRO|CINCO|SEIS|SIETE|OCHO|NUEVE|DIEZ|ONCE|DOCE|TRECE|CATORCE|QUINCE|VEINTE|TREINTA|CUARENTA|CINCUENTA|SESENTA|SETENTA|OCHENTA|NOVENTA|CIEN|CIENTO|DOSCIENTOS|TRESCIENTOS|CUATROCIENTOS|QUINIENTOS|SEISCIENTOS|SETECIENTOS|OCHOCIENTOS|NOVECIENTOS|MIL)\b)/g,
+    '$1 '
+  );
+  textoNumeros = textoNumeros.replace(/\s+/g, ' ').trim();
 
-  const nombreMoneda = moneda === 'USD' ? 'DÃ“LARES' : 'PESOS';
+  const monedaNorm = String(moneda || 'COP').toUpperCase().trim();
+  const nombreMoneda = monedaNorm === 'USD' ? 'DOLARES' : 'PESOS';
+  const centavosTxt = String(Math.abs(centavos)).padStart(2, '0');
 
   if (centavos > 0) {
-    return `${textoNumeros} CON ${centavos}/100 ${nombreMoneda}`;
+    return `${textoNumeros} CON ${centavosTxt}/100 ${nombreMoneda}`.replace(/\s+/g, ' ').trim();
   } else {
-    return `${textoNumeros} ${nombreMoneda}`;
+    return `${textoNumeros} ${nombreMoneda}`.replace(/\s+/g, ' ').trim();
   }
 }
 
@@ -559,11 +568,6 @@ function decodeJwtPayload(token) {
 function parseGraphErrorStatus(message) {
   const match = String(message || "").match(/Graph error (\d{3})/);
   return match ? Number(match[1]) : null;
-}
-
-function parseGraphErrorCode(message) {
-  const match = String(message || "").match(/"code"\s*:\s*"([^"]+)"/);
-  return match ? String(match[1]) : null;
 }
 
 async function graphGetAll(path, accessToken, maxPages = 20) {
@@ -1348,9 +1352,6 @@ app.post("/auth/microsoft", async (req, res) => {
     aud === "00000003-0000-0000-c000-000000000000";
 
   if (!isGraphAud) {
-    if (process.env.DEBUG_AUTH === "true") {
-      console.log("[ms_auth] token aud invalido:", aud, "scp:", scope || "-");
-    }
     return res.status(401).json({
       error: "El token recibido no es de Microsoft Graph. Solicita el scope User.Read en el frontend."
     });
@@ -1405,39 +1406,7 @@ app.post("/auth/microsoft", async (req, res) => {
         allowed = Boolean(matchedGroup);
       }
 
-      if (process.env.DEBUG_AUTH === "true") {
-        console.log(
-          "[ms_auth] user:",
-          email,
-          "oid:",
-          oid,
-          "allowedGroups:",
-          allowedGroups,
-          "allowedGroupIds:",
-          allowedGroupIds.length,
-          "allowedGroupNames:",
-          allowedGroupNames.length,
-          "memberGroupsFound:",
-          groups.length,
-          "allowed:",
-          allowed,
-          "matchedGroup:",
-          matchedGroup || null
-        );
-      }
       if (!allowed) {
-        if (process.env.DEBUG_AUTH === "true") {
-          return res.status(403).json({
-            error: "Usuario sin acceso al grupo permitido",
-            debug: {
-              email,
-              oid,
-              allowed_groups_config: allowedGroups,
-              member_groups_count: groups.length,
-              member_groups_sample: groups.slice(0, 20)
-            }
-          });
-        }
         return res.status(403).json({ error: "Usuario sin acceso al grupo permitido" });
       }
     }
@@ -1496,23 +1465,11 @@ app.post("/auth/microsoft", async (req, res) => {
   } catch (err) {
     const status = parseGraphErrorStatus(err.message);
     if (status === 401 || status === 403) {
-      if (process.env.DEBUG_AUTH === "true") {
-        console.error("Error auth microsoft (graph):", err.message);
-      }
       return res.status(401).json({
         error: "Token Microsoft inválido o sin permisos en Graph (revisa consentimiento de User.Read)."
       });
     }
-    if (process.env.DEBUG_AUTH === "true") {
-      console.error("Error auth microsoft (interno):", {
-        message: err.message,
-        code: err.code || null,
-        detail: err.detail || null,
-        constraint: err.constraint || null
-      });
-    } else {
-      console.error("Error auth microsoft (interno):", err.message);
-    }
+    console.error("Error auth microsoft (interno):", err.message);
 
     if (err.code === "28P01") {
       return res.status(500).json({ error: "Credenciales de base de datos inválidas (DB_USER/DB_PASSWORD)" });
@@ -1551,14 +1508,7 @@ const authMiddleware = (req, res, next) => {
   if (req.method === "OPTIONS") return next();
 
   const auth = req.headers.authorization || "";
-  if (req.path === "/clientes") {
-    console.log("[AUTH] path:", req.path, "origin:", req.headers.origin || "-", "auth:", auth ? "present" : "missing");
-  }
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
-
-  if (process.env.DEBUG_AUTH === "true") {
-    console.log("[AUTH] path:", req.path, "hasAuth:", Boolean(auth));
-  }
 
   if (!token) return res.status(401).json({ error: "No autorizado" });
 
@@ -2857,6 +2807,39 @@ app.get("/cuentas-cobro/historial/:userId", requireAccess({ roles: ["Consultor",
   }
 });
 
+// Soportes cargados de cuentas de cobro (solo admin/coordinador)
+app.get("/cuentas-cobro/soportes", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+  const { consultor_id } = req.query || {};
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        cc.id,
+        cc.created_at,
+        cc.fecha_periodo_inicio AS fecha_inicio_periodo,
+        cc.fecha_periodo_fin AS fecha_fin_periodo,
+        cc.descripcion,
+        cc.total_cuenta_cobro AS total_numeros,
+        u.id AS consultor_id,
+        u.nombre_usuario AS consultor_nombre,
+        u.email AS consultor_email,
+        cc.datos_adjuntos
+      FROM cuenta_cobro cc
+        JOIN usuarios u ON u.id = cc.created_by
+      WHERE cc.datos_adjuntos IS NOT NULL
+        AND cc.datos_adjuntos ? 'soportes'
+        AND ($1::int IS NULL OR cc.created_by = $1)
+      ORDER BY cc.id DESC
+      `,
+      [consultor_id || null]
+    );
+    res.json(result.rows || []);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener soportes de cuentas de cobro" });
+  }
+});
+
 // Detalle de cuenta de cobro
 app.get("/cuentas-cobro/detalle/:cuentaId", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
   const { cuentaId } = req.params;
@@ -2958,26 +2941,12 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
     }
 
     let token = null;
-    let tokenSource = "app";
     try {
       token = await getGraphAccessToken();
     } catch (tokenErr) {
       const delegated = String(req?.headers?.["x-graph-access-token"] || "").trim();
       if (!delegated) throw tokenErr;
       token = delegated;
-      tokenSource = "delegated";
-    }
-
-    if (process.env.DEBUG_AUTH === "true") {
-      const tokenPayload = decodeJwtPayload(token);
-      const roles = Array.isArray(tokenPayload?.roles) ? tokenPayload.roles : [];
-      console.log("DEBUG upload cuenta adjuntos token:", {
-        tokenSource,
-        aud: tokenPayload?.aud || null,
-        scp: tokenPayload?.scp || null,
-        rolesCount: roles.length,
-        rolesSample: roles.slice(0, 6)
-      });
     }
     const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
     graphStage = "graph-drive-check";
@@ -3052,15 +3021,7 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
     });
   } catch (err) {
     const status = parseGraphErrorStatus(err.message);
-    const code = parseGraphErrorCode(err.message);
-    console.error("DEBUG upload cuenta adjuntos:", {
-      message: err.message,
-      status,
-      code,
-      stage: graphStage,
-      targetUser: ONEDRIVE_TARGET_USER,
-      rootFolder: ONEDRIVE_ROOT_FOLDER
-    });
+    console.error("Error cargando adjuntos de cuenta:", err.message, "stage:", graphStage);
 
     if (status === 401 || status === 403) {
       return res.status(502).json({
@@ -3493,69 +3454,27 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     tipo_servicio,
     total_pagar
   } = req.body;
-  const debugAsignaciones = process.env.DEBUG_AUTH === "true";
-  let debugStage = "init";
 
   try {
-    if (debugAsignaciones) {
-      console.log("[DEBUG registro-asignaciones] payload", {
-        userId: req.user?.id || null,
-        id_consultoria,
-        id_modulo,
-        consultor_responsable_id,
-        fecha_inicio: fecha_inicio || null,
-        fecha_fin: fecha_fin || null,
-        cantidad_dias: cantidad_dias ?? null,
-        horas_asignadas: horas_asignadas ?? null,
-        valor_hora: valor_hora ?? null,
-        valor_dia: valor_dia ?? null,
-        tipo_servicio: tipo_servicio || null,
-        total_pagar: total_pagar ?? null
-      });
-    }
-
-    debugStage = "validaciones-basicas";
     const estados = await getEstadoAsignacionValues();
     if (!id_consultoria || !consultor_responsable_id || !id_modulo) {
-      if (debugAsignaciones) {
-        console.log("[DEBUG registro-asignaciones] faltan-campos", {
-          id_consultoria: Boolean(id_consultoria),
-          consultor_responsable_id: Boolean(consultor_responsable_id),
-          id_modulo: Boolean(id_modulo)
-        });
-      }
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
     const tipoServicioNormalizado = normalizeTipoServicioInput(tipo_servicio || "Servicio");
     if (!tipoServicioNormalizado) {
-      if (debugAsignaciones) {
-        console.log("[DEBUG registro-asignaciones] tipo-servicio-invalido", {
-          recibido: tipo_servicio
-        });
-      }
       return res.status(400).json({ error: "Tipo de servicio inválido" });
     }
 
-    debugStage = "consultoria-meta";
     const meta = await pool.query(
       "SELECT id_cliente, id_tipo_asignacion FROM consultorias WHERE id = $1 AND activo = true",
       [id_consultoria]
     );
-    if (debugAsignaciones) {
-      console.log("[DEBUG registro-asignaciones] consultoria-meta", {
-        id_consultoria,
-        found: meta.rows.length > 0,
-        id_cliente: meta.rows[0]?.id_cliente || null,
-        id_tipo_asignacion: meta.rows[0]?.id_tipo_asignacion || null
-      });
-    }
     if (meta.rows.length === 0) {
       return res.status(400).json({ error: "Consultoría no válida" });
     }
     const clienteId = meta.rows[0].id_cliente;
     const tipoAsignacionId = meta.rows[0].id_tipo_asignacion;
 
-    debugStage = "validacion-duplicado";
     const dup = await pool.query(
       `SELECT ra.id
        FROM registro_asignaciones ra
@@ -3568,22 +3487,10 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
         LIMIT 1`,
       [consultor_responsable_id, id_modulo, clienteId, tipoAsignacionId, estados.abierto, estados.proceso]
     );
-    if (debugAsignaciones) {
-      console.log("[DEBUG registro-asignaciones] validacion-duplicado", {
-        consultor_responsable_id,
-        id_modulo,
-        clienteId,
-        tipoAsignacionId,
-        estado_abierto: estados.abierto,
-        estado_proceso: estados.proceso,
-        duplicado: dup.rows[0]?.id || null
-      });
-    }
     if (dup.rows.length > 0) {
       return res.status(400).json({ error: "Ya existe asignación para este consultor, cliente y módulo" });
     }
 
-    debugStage = "insert-registro";
     const result = await pool.query(
       `INSERT INTO registro_asignaciones
         (id_consultoria, id_modulo, consultor_responsable_id, fecha_inicio, fecha_fin,
@@ -3606,17 +3513,8 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
       ]
     );
     const created = result.rows[0];
-    if (debugAsignaciones) {
-      console.log("[DEBUG registro-asignaciones] insert-ok", {
-        id_asignacion: created?.id || null,
-        id_consultoria: created?.id_consultoria || null,
-        id_modulo: created?.id_modulo || null,
-        consultor_responsable_id: created?.consultor_responsable_id || null
-      });
-    }
 
     // Email al consultor asignado
-    debugStage = "notificacion-email";
     const mailInfo = await pool.query(
       `SELECT
          uc.email AS consultor_email,
@@ -3666,15 +3564,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
 
     res.json(created);
   } catch (err) {
-    if (debugAsignaciones) {
-      console.error("[DEBUG registro-asignaciones] error", {
-        stage: debugStage,
-        message: err.message,
-        code: err.code || null
-      });
-    } else {
-      console.error(err);
-    }
+    console.error(err);
     res.status(500).json({ error: "Error al crear asignación" });
   }
 });

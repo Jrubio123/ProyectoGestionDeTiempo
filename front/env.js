@@ -71,7 +71,7 @@
     window.AZURE_TENANT_ID = config.azure_tenant_id;
     window.AZURE_CLIENT_ID = config.azure_client_id;
     window.AZURE_REDIRECT_PATH = config.azure_redirect_path;
-    window.LOAD_GRAPH_AVATAR = false;
+    window.LOAD_GRAPH_AVATAR = true;
 
     window.setApiBase = function (apiBase) {
         if (!apiBase) return;

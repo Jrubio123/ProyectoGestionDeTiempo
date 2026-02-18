@@ -32,6 +32,7 @@ const routes = {
     "registro-horas-consultor": "registro-horas-consultor",
     "aprobar-rechazar-coordinador": "aprobar-rechazar-coordinador",
     "mis-cuentas-cobros": "mis-cuentas-cobros",
+    "soportes-cuentas-cobro": "soportes-cuentas-cobro",
     "generar-cuenta-cobro": "generar-cuenta-cobro",
     "asignacion-fabrica-mesa-servicio": "asignacion-fabrica-mesa-servicio",
     solicitudesCoord: "solicitudesCoord",
@@ -48,7 +49,7 @@ function router() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador","asociar-subconsultores", "tarifas", "solicitudesCoord", "solicitudesRecl"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador","asociar-subconsultores", "tarifas", "solicitudesCoord", "solicitudesRecl", "soportes-cuentas-cobro"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -57,7 +58,8 @@ function router() {
             "mis-asignaciones-coordinador",
             "asociar-subconsultores",
             "tarifas",
-            "solicitudesCoord"
+            "solicitudesCoord",
+            "soportes-cuentas-cobro"
         ],
         consultor_principal: [
             "inicio",

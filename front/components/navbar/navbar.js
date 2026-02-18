@@ -74,6 +74,7 @@ function initNavbar() {
 
     async function loadMicrosoftAvatar() {
         if (!userAvatarEl) return;
+        if (window.LOAD_GRAPH_AVATAR !== true) return;
         if (!window.msal || !window.msal.PublicClientApplication) return;
 
         const clientId = window.AZURE_CLIENT_ID;

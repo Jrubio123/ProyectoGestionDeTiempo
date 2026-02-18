@@ -485,10 +485,10 @@ function sanitizePdfFileName(value, fallback = "documento.pdf") {
 
 function parsePdfDataUrl(dataUrl) {
   const raw = String(dataUrl || "");
-  const match = raw.match(/^data:application\/pdf;base64,([A-Za-z0-9+/=]+)$/);
+  const match = raw.match(/^data:(application\/pdf|application\/octet-stream);base64,([A-Za-z0-9+/=]+)$/);
   if (!match) return null;
   try {
-    return Buffer.from(match[1], "base64");
+    return Buffer.from(match[2], "base64");
   } catch (err) {
     return null;
   }
@@ -513,7 +513,11 @@ async function ensureGraphFolder(accessToken, userEmail, parentPath, folderName)
       "@microsoft.graph.conflictBehavior": "fail"
     });
   } catch (err) {
-    if (!String(err.message || "").includes("nameAlreadyExists")) {
+    const errorText = String(err.message || "");
+    const alreadyExists =
+      errorText.includes("nameAlreadyExists") ||
+      errorText.includes("itemAlreadyExists");
+    if (!alreadyExists) {
       throw err;
     }
   }
@@ -549,6 +553,11 @@ function decodeJwtPayload(token) {
 function parseGraphErrorStatus(message) {
   const match = String(message || "").match(/Graph error (\d{3})/);
   return match ? Number(match[1]) : null;
+}
+
+function parseGraphErrorCode(message) {
+  const match = String(message || "").match(/"code"\s*:\s*"([^"]+)"/);
+  return match ? String(match[1]) : null;
 }
 
 async function graphGetAll(path, accessToken, maxPages = 20) {
@@ -2924,7 +2933,14 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
       return res.status(400).json({ error: "Cada archivo debe pesar máximo 8MB." });
     }
 
-    const token = await getGraphAccessToken();
+    let token = null;
+    try {
+      token = await getGraphAccessToken();
+    } catch (tokenErr) {
+      const delegated = String(req?.headers?.["x-graph-access-token"] || "").trim();
+      if (!delegated) throw tokenErr;
+      token = delegated;
+    }
     const fechaBase = String(cuenta.fecha_correspondiente || cuenta.created_at || new Date().toISOString()).slice(0, 10);
     const consultorFolder = sanitizePathSegment(cuenta.nombre_usuario || `Consultor_${cuenta.created_by}`, `Consultor_${cuenta.created_by}`);
     const cuentaFolderName = `CuentaCobro_${cuenta.id}_${fechaBase}`;
@@ -2991,7 +3007,28 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
       soportes: adjuntos.soportes
     });
   } catch (err) {
-    console.error("DEBUG upload cuenta adjuntos:", err.message);
+    const status = parseGraphErrorStatus(err.message);
+    const code = parseGraphErrorCode(err.message);
+    console.error("DEBUG upload cuenta adjuntos:", {
+      message: err.message,
+      status,
+      code
+    });
+
+    if (status === 401 || status === 403) {
+      return res.status(502).json({
+        ok: false,
+        error: "Servicio de almacenamiento no autorizado. Contacte a soporte."
+      });
+    }
+
+    if (status === 404) {
+      return res.status(502).json({
+        ok: false,
+        error: "No se encontró el repositorio de archivos configurado. Contacte a soporte."
+      });
+    }
+
     res.status(500).json({
       ok: false,
       error: "Error al cargar el archivo. Por favor verifique su conexión o intente más tarde."

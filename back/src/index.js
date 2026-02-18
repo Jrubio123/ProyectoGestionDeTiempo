@@ -206,7 +206,7 @@ const FRONT_PORTAL_BASE =
   "https://zealous-mud-057b4ca0f.1.azurestaticapps.net/index.html";
 const ONEDRIVE_ENABLED = String(process.env.ONEDRIVE_ENABLED || "true").toLowerCase() === "true";
 const ONEDRIVE_TARGET_USER = process.env.ONEDRIVE_TARGET_USER || "admin.apps@silverconsulting.com.co";
-const ONEDRIVE_ROOT_FOLDER = process.env.ONEDRIVE_ROOT_FOLDER || "CuentasCobro";
+const ONEDRIVE_ROOT_FOLDER = process.env.ONEDRIVE_ROOT_FOLDER || "AdjuntosCuentasCobro";
 
 function buildPortalUrl(hashRoute = "inicio") {
   const base = String(FRONT_PORTAL_BASE || "").trim();
@@ -2945,7 +2945,7 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
     const consultorFolder = sanitizePathSegment(cuenta.nombre_usuario || `Consultor_${cuenta.created_by}`, `Consultor_${cuenta.created_by}`);
     const cuentaFolderName = `CuentaCobro_${cuenta.id}_${fechaBase}`;
 
-    let targetPath = sanitizePathSegment(ONEDRIVE_ROOT_FOLDER, "CuentasCobro");
+    let targetPath = sanitizePathSegment(ONEDRIVE_ROOT_FOLDER, "AdjuntosCuentasCobro");
     targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
     targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, consultorFolder);
     targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, cuentaFolderName);

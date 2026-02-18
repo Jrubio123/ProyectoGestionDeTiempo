@@ -2919,6 +2919,7 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
     return res.status(503).json({ error: "Servicio de carga no disponible temporalmente." });
   }
 
+  let graphStage = "init";
   try {
     const ownerResult = await pool.query(
       `
@@ -2964,16 +2965,21 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
       if (!delegated) throw tokenErr;
       token = delegated;
     }
+    const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
+    graphStage = "graph-drive-check";
+    await graphGet(`/v1.0/users/${encodedUser}/drive`, token);
+
     const fechaBase = String(cuenta.fecha_correspondiente || cuenta.created_at || new Date().toISOString()).slice(0, 10);
     const consultorFolder = sanitizePathSegment(cuenta.nombre_usuario || `Consultor_${cuenta.created_by}`, `Consultor_${cuenta.created_by}`);
     const cuentaFolderName = `CuentaCobro_${cuenta.id}_${fechaBase}`;
 
     let targetPath = sanitizePathSegment(ONEDRIVE_ROOT_FOLDER, "AdjuntosCuentasCobro");
+    graphStage = "ensure-root-folder";
     targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
+    graphStage = "ensure-consultor-folder";
     targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, consultorFolder);
+    graphStage = "ensure-cuenta-folder";
     targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, cuentaFolderName);
-
-    const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
 
     const cuentaFileName = sanitizePdfFileName(
       cuenta_pdf_nombre || `CuentaCobroFirmada_${cuenta.id}.pdf`,
@@ -2987,6 +2993,7 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
     const cuentaPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${cuentaFileName}`)}:/content`;
     const seguridadPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${seguridadFileName}`)}:/content`;
 
+    graphStage = "upload-files";
     const [cuentaUpload, seguridadUpload] = await Promise.all([
       graphPutBinary(cuentaPath, token, cuentaPdfBuffer, "application/pdf"),
       graphPutBinary(seguridadPath, token, seguridadPdfBuffer, "application/pdf")
@@ -3035,7 +3042,10 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
     console.error("DEBUG upload cuenta adjuntos:", {
       message: err.message,
       status,
-      code
+      code,
+      stage: graphStage,
+      targetUser: ONEDRIVE_TARGET_USER,
+      rootFolder: ONEDRIVE_ROOT_FOLDER
     });
 
     if (status === 401 || status === 403) {

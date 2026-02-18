@@ -3479,27 +3479,69 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     tipo_servicio,
     total_pagar
   } = req.body;
+  const debugAsignaciones = process.env.DEBUG_AUTH === "true";
+  let debugStage = "init";
 
   try {
+    if (debugAsignaciones) {
+      console.log("[DEBUG registro-asignaciones] payload", {
+        userId: req.user?.id || null,
+        id_consultoria,
+        id_modulo,
+        consultor_responsable_id,
+        fecha_inicio: fecha_inicio || null,
+        fecha_fin: fecha_fin || null,
+        cantidad_dias: cantidad_dias ?? null,
+        horas_asignadas: horas_asignadas ?? null,
+        valor_hora: valor_hora ?? null,
+        valor_dia: valor_dia ?? null,
+        tipo_servicio: tipo_servicio || null,
+        total_pagar: total_pagar ?? null
+      });
+    }
+
+    debugStage = "validaciones-basicas";
     const estados = await getEstadoAsignacionValues();
     if (!id_consultoria || !consultor_responsable_id || !id_modulo) {
+      if (debugAsignaciones) {
+        console.log("[DEBUG registro-asignaciones] faltan-campos", {
+          id_consultoria: Boolean(id_consultoria),
+          consultor_responsable_id: Boolean(consultor_responsable_id),
+          id_modulo: Boolean(id_modulo)
+        });
+      }
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
     const tipoServicioNormalizado = normalizeTipoServicioInput(tipo_servicio || "Servicio");
     if (!tipoServicioNormalizado) {
+      if (debugAsignaciones) {
+        console.log("[DEBUG registro-asignaciones] tipo-servicio-invalido", {
+          recibido: tipo_servicio
+        });
+      }
       return res.status(400).json({ error: "Tipo de servicio inválido" });
     }
 
+    debugStage = "consultoria-meta";
     const meta = await pool.query(
       "SELECT id_cliente, id_tipo_asignacion FROM consultorias WHERE id = $1 AND activo = true",
       [id_consultoria]
     );
+    if (debugAsignaciones) {
+      console.log("[DEBUG registro-asignaciones] consultoria-meta", {
+        id_consultoria,
+        found: meta.rows.length > 0,
+        id_cliente: meta.rows[0]?.id_cliente || null,
+        id_tipo_asignacion: meta.rows[0]?.id_tipo_asignacion || null
+      });
+    }
     if (meta.rows.length === 0) {
       return res.status(400).json({ error: "Consultoría no válida" });
     }
     const clienteId = meta.rows[0].id_cliente;
     const tipoAsignacionId = meta.rows[0].id_tipo_asignacion;
 
+    debugStage = "validacion-duplicado";
     const dup = await pool.query(
       `SELECT ra.id
        FROM registro_asignaciones ra
@@ -3512,10 +3554,22 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
         LIMIT 1`,
       [consultor_responsable_id, id_modulo, clienteId, tipoAsignacionId, estados.abierto, estados.proceso]
     );
+    if (debugAsignaciones) {
+      console.log("[DEBUG registro-asignaciones] validacion-duplicado", {
+        consultor_responsable_id,
+        id_modulo,
+        clienteId,
+        tipoAsignacionId,
+        estado_abierto: estados.abierto,
+        estado_proceso: estados.proceso,
+        duplicado: dup.rows[0]?.id || null
+      });
+    }
     if (dup.rows.length > 0) {
       return res.status(400).json({ error: "Ya existe asignación para este consultor, cliente y módulo" });
     }
 
+    debugStage = "insert-registro";
     const result = await pool.query(
       `INSERT INTO registro_asignaciones
         (id_consultoria, id_modulo, consultor_responsable_id, fecha_inicio, fecha_fin,
@@ -3538,8 +3592,17 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
       ]
     );
     const created = result.rows[0];
+    if (debugAsignaciones) {
+      console.log("[DEBUG registro-asignaciones] insert-ok", {
+        id_asignacion: created?.id || null,
+        id_consultoria: created?.id_consultoria || null,
+        id_modulo: created?.id_modulo || null,
+        consultor_responsable_id: created?.consultor_responsable_id || null
+      });
+    }
 
     // Email al consultor asignado
+    debugStage = "notificacion-email";
     const mailInfo = await pool.query(
       `SELECT
          uc.email AS consultor_email,
@@ -3589,7 +3652,15 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
 
     res.json(created);
   } catch (err) {
-    console.error(err);
+    if (debugAsignaciones) {
+      console.error("[DEBUG registro-asignaciones] error", {
+        stage: debugStage,
+        message: err.message,
+        code: err.code || null
+      });
+    } else {
+      console.error(err);
+    }
     res.status(500).json({ error: "Error al crear asignación" });
   }
 });

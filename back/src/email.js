@@ -251,5 +251,5 @@ async function sendEmail({ to, subject, html, text, cc, bcc, graphAccessToken })
   await sendEmailViaSmtp({ to, subject, html, text, cc, bcc });
 }
 
-module.exports = { sendEmail };
+module.exports = { sendEmail, getGraphAccessToken };
 

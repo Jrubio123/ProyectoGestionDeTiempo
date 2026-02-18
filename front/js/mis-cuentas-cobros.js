@@ -7,6 +7,12 @@ window.misCuentasApp = function () {
         cuentas: [],
         filtros: { inicio: "", fin: "" },
         modal: { open: false, data: null, detalles: [] },
+        modalAdjuntos: {
+            open: false,
+            cuenta: null,
+            files: { cuenta: null, seguridad: null },
+            loading: false
+        },
 
         async init() {
             if (window.auth) {
@@ -57,6 +63,71 @@ window.misCuentasApp = function () {
                 URL.revokeObjectURL(url);
             } catch (e) {
                 alert("No se pudo descargar el PDF");
+            }
+        },
+
+        abrirModalAdjuntos(cuenta) {
+            this.modalAdjuntos.open = true;
+            this.modalAdjuntos.cuenta = cuenta;
+            this.modalAdjuntos.files = { cuenta: null, seguridad: null };
+            this.modalAdjuntos.loading = false;
+        },
+
+        cerrarModalAdjuntos() {
+            this.modalAdjuntos.open = false;
+            this.modalAdjuntos.cuenta = null;
+            this.modalAdjuntos.files = { cuenta: null, seguridad: null };
+            this.modalAdjuntos.loading = false;
+        },
+
+        fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result || ""));
+                reader.onerror = () => reject(new Error("No se pudo leer el archivo"));
+                reader.readAsDataURL(file);
+            });
+        },
+
+        validarPdf(file, etiqueta) {
+            if (!file) return `${etiqueta} es obligatorio`;
+            if (file.type !== "application/pdf") return `${etiqueta} debe estar en PDF`;
+            const maxBytes = 8 * 1024 * 1024;
+            if (file.size > maxBytes) return `${etiqueta} supera el máximo de 8MB`;
+            return null;
+        },
+
+        async subirAdjuntos() {
+            const cuentaId = this.modalAdjuntos.cuenta?.id;
+            const fileCuenta = this.modalAdjuntos.files.cuenta;
+            const fileSeguridad = this.modalAdjuntos.files.seguridad;
+
+            const errCuenta = this.validarPdf(fileCuenta, "Cuenta de cobro firmada");
+            if (errCuenta) return alert(errCuenta);
+            const errSeguridad = this.validarPdf(fileSeguridad, "Seguridad social");
+            if (errSeguridad) return alert(errSeguridad);
+            if (!cuentaId) return alert("No se encontró la cuenta de cobro");
+
+            this.modalAdjuntos.loading = true;
+            try {
+                const cuentaBase64 = await this.fileToBase64(fileCuenta);
+                const seguridadBase64 = await this.fileToBase64(fileSeguridad);
+
+                await axios.post(`${API}/cuentas-cobro/${cuentaId}/adjuntos`, {
+                    cuenta_pdf_nombre: fileCuenta.name,
+                    cuenta_pdf_base64: cuentaBase64,
+                    seguridad_social_nombre: fileSeguridad.name,
+                    seguridad_social_base64: seguridadBase64
+                });
+
+                alert("Soportes cargados exitosamente");
+                this.cerrarModalAdjuntos();
+                await this.cargarHistorial();
+            } catch (e) {
+                const msg = e?.response?.data?.error || "Error al cargar el archivo. Por favor verifique su conexión o intente más tarde.";
+                alert(msg);
+            } finally {
+                this.modalAdjuntos.loading = false;
             }
         },
 

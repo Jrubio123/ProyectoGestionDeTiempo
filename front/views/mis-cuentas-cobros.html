@@ -70,6 +70,9 @@
                                 <button @click="descargarPDF(c)" class="p-2 text-red-600 hover:bg-red-50 rounded-lg tooltip" title="Descargar PDF">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
                                 </button>
+                                <button @click="abrirModalAdjuntos(c)" class="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg tooltip" title="Subir soportes">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16l5-5m0 0l5 5m-5-5v10M5 21h14"></path></svg>
+                                </button>
                             </td>
                         </tr>
                     </template>
@@ -131,6 +134,49 @@
                 <button @click="modal.open = false" class="px-6 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 font-bold">Cerrar</button>
             </div>
 
+        </div>
+    </div>
+
+    <div x-show="modalAdjuntos.open" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-6 flex flex-col">
+            <div class="flex justify-between items-start mb-4 pb-4 border-b border-gray-100">
+                <div>
+                    <h3 class="text-xl font-bold text-gray-800">Subir Soportes #<span x-text="modalAdjuntos.cuenta?.id"></span></h3>
+                    <p class="text-sm text-gray-500">Carga cuenta de cobro firmada y seguridad social en PDF.</p>
+                </div>
+                <button @click="cerrarModalAdjuntos()" class="text-gray-400 hover:text-gray-600"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+
+            <div class="space-y-3">
+                <label class="flex items-center gap-3 p-3 border border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-emerald-50 hover:border-emerald-300 transition-colors">
+                    <div class="bg-emerald-100 p-2 rounded-lg text-emerald-600">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16l5-5m0 0l5 5m-5-5v10M5 21h14"></path></svg>
+                    </div>
+                    <div class="flex-1">
+                        <p class="text-sm font-bold text-gray-700">Cuenta de Cobro Firmada (PDF)</p>
+                        <p class="text-xs text-gray-400" x-text="modalAdjuntos.files.cuenta ? modalAdjuntos.files.cuenta.name : 'Click para subir'"></p>
+                    </div>
+                    <input type="file" accept="application/pdf" class="hidden" @change="modalAdjuntos.files.cuenta = $event.target.files[0]">
+                </label>
+
+                <label class="flex items-center gap-3 p-3 border border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-emerald-50 hover:border-emerald-300 transition-colors">
+                    <div class="bg-blue-100 p-2 rounded-lg text-blue-600">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16l5-5m0 0l5 5m-5-5v10M5 21h14"></path></svg>
+                    </div>
+                    <div class="flex-1">
+                        <p class="text-sm font-bold text-gray-700">Seguridad Social (PDF)</p>
+                        <p class="text-xs text-gray-400" x-text="modalAdjuntos.files.seguridad ? modalAdjuntos.files.seguridad.name : 'Click para subir'"></p>
+                    </div>
+                    <input type="file" accept="application/pdf" class="hidden" @change="modalAdjuntos.files.seguridad = $event.target.files[0]">
+                </label>
+            </div>
+
+            <div class="mt-4 pt-4 border-t border-gray-100 flex justify-end gap-2">
+                <button @click="cerrarModalAdjuntos()" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">Cancelar</button>
+                <button @click="subirAdjuntos()" :disabled="modalAdjuntos.loading" class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+                    <span x-text="modalAdjuntos.loading ? 'Subiendo...' : 'Guardar soportes'"></span>
+                </button>
+            </div>
         </div>
     </div>
 

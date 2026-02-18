@@ -11,7 +11,7 @@ const jwt = require("jsonwebtoken");
 const https = require("https");
 const PDFDocument = require("pdfkit");
 const { NumerosALetras } = require("numero-a-letras");
-const { sendEmail } = require("./email");
+const { sendEmail, getGraphAccessToken } = require("./email");
 
 
 const app = express();
@@ -38,7 +38,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: "35mb" }));
 app.options('*', cors(corsOptions));
 
 /* ===============================
@@ -204,6 +204,9 @@ function buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total
 const FRONT_PORTAL_BASE =
   process.env.FRONT_PORTAL_BASE ||
   "https://zealous-mud-057b4ca0f.1.azurestaticapps.net/index.html";
+const ONEDRIVE_ENABLED = String(process.env.ONEDRIVE_ENABLED || "true").toLowerCase() === "true";
+const ONEDRIVE_TARGET_USER = process.env.ONEDRIVE_TARGET_USER || "admin.apps@silverconsulting.com.co";
+const ONEDRIVE_ROOT_FOLDER = process.env.ONEDRIVE_ROOT_FOLDER || "CuentasCobro";
 
 function buildPortalUrl(hashRoute = "inicio") {
   const base = String(FRONT_PORTAL_BASE || "").trim();
@@ -421,6 +424,101 @@ function graphPost(path, accessToken, body) {
     req.write(payload);
     req.end();
   });
+}
+
+function graphPutBinary(path, accessToken, buffer, contentType = "application/octet-stream") {
+  return new Promise((resolve, reject) => {
+    const payload = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || "");
+    const options = {
+      hostname: "graph.microsoft.com",
+      path,
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": contentType,
+        "Content-Length": payload.length
+      }
+    };
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          try {
+            resolve(JSON.parse(data || "{}"));
+          } catch (e) {
+            resolve({});
+          }
+        } else {
+          reject(new Error(`Graph error ${res.statusCode}: ${data}`));
+        }
+      });
+    });
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+function encodeGraphPath(pathValue) {
+  return String(pathValue || "")
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+function sanitizePathSegment(value, fallback = "sin-valor") {
+  const normalized = String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[<>:"/\\|?*#%{}~]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized || fallback;
+}
+
+function sanitizePdfFileName(value, fallback = "documento.pdf") {
+  const safe = sanitizePathSegment(value || fallback, fallback).replace(/\.+/g, ".");
+  if (!safe.toLowerCase().endsWith(".pdf")) return `${safe}.pdf`;
+  return safe;
+}
+
+function parsePdfDataUrl(dataUrl) {
+  const raw = String(dataUrl || "");
+  const match = raw.match(/^data:application\/pdf;base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return null;
+  try {
+    return Buffer.from(match[1], "base64");
+  } catch (err) {
+    return null;
+  }
+}
+
+function isPdfBuffer(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return false;
+  return buffer.slice(0, 4).toString("utf8") === "%PDF";
+}
+
+async function ensureGraphFolder(accessToken, userEmail, parentPath, folderName) {
+  const encodedUser = encodeURIComponent(userEmail);
+  const safeFolderName = sanitizePathSegment(folderName, "carpeta");
+  const requestPath = parentPath
+    ? `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(parentPath)}:/children`
+    : `/v1.0/users/${encodedUser}/drive/root/children`;
+
+  try {
+    await graphPost(requestPath, accessToken, {
+      name: safeFolderName,
+      folder: {},
+      "@microsoft.graph.conflictBehavior": "fail"
+    });
+  } catch (err) {
+    if (!String(err.message || "").includes("nameAlreadyExists")) {
+      throw err;
+    }
+  }
+
+  return parentPath ? `${parentPath}/${safeFolderName}` : safeFolderName;
 }
 
 function resolveGraphPath(nextLink) {
@@ -2711,6 +2809,7 @@ app.get("/cuentas-cobro/historial/:userId", requireAccess({ roles: ["Consultor",
         cc.total_cuenta_cobro AS total_numeros,
         cc.total_letras,
         cc.estado,
+        cc.datos_adjuntos,
         cc.created_at
       FROM cuenta_cobro cc
       WHERE cc.created_by = $1
@@ -2767,6 +2866,136 @@ app.get("/cuentas-cobro/detalle/:cuentaId", requireAccess({ roles: ["Consultor",
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al obtener detalle de cuenta" });
+  }
+});
+
+// Subir adjuntos (cuenta firmada + seguridad social)
+app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
+  const { id } = req.params;
+  const {
+    cuenta_pdf_nombre,
+    cuenta_pdf_base64,
+    seguridad_social_nombre,
+    seguridad_social_base64
+  } = req.body || {};
+
+  if (!cuenta_pdf_base64 || !seguridad_social_base64) {
+    return res.status(400).json({ error: "Debe adjuntar ambos archivos en PDF." });
+  }
+
+  if (!ONEDRIVE_ENABLED) {
+    return res.status(503).json({ error: "Servicio de carga no disponible temporalmente." });
+  }
+
+  try {
+    const ownerResult = await pool.query(
+      `
+      SELECT
+        cc.id,
+        cc.created_by,
+        cc.fecha_correspondiente,
+        cc.created_at,
+        cc.datos_adjuntos,
+        u.nombre_usuario
+      FROM cuenta_cobro cc
+      JOIN usuarios u ON u.id = cc.created_by
+      WHERE cc.id = $1
+      `,
+      [id]
+    );
+
+    const cuenta = ownerResult.rows[0];
+    if (!cuenta) return res.status(404).json({ error: "Cuenta de cobro no encontrada." });
+
+    const role = normalizeValue(req.user?.rol);
+    if (!["administrador", "coordinador"].includes(role) && String(cuenta.created_by) !== String(req.user?.id)) {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+
+    const cuentaPdfBuffer = parsePdfDataUrl(cuenta_pdf_base64);
+    const seguridadPdfBuffer = parsePdfDataUrl(seguridad_social_base64);
+
+    if (!isPdfBuffer(cuentaPdfBuffer) || !isPdfBuffer(seguridadPdfBuffer)) {
+      return res.status(400).json({ error: "Los archivos adjuntos deben estar en formato PDF válido." });
+    }
+
+    const maxSize = 8 * 1024 * 1024;
+    if (cuentaPdfBuffer.length > maxSize || seguridadPdfBuffer.length > maxSize) {
+      return res.status(400).json({ error: "Cada archivo debe pesar máximo 8MB." });
+    }
+
+    const token = await getGraphAccessToken();
+    const fechaBase = String(cuenta.fecha_correspondiente || cuenta.created_at || new Date().toISOString()).slice(0, 10);
+    const consultorFolder = sanitizePathSegment(cuenta.nombre_usuario || `Consultor_${cuenta.created_by}`, `Consultor_${cuenta.created_by}`);
+    const cuentaFolderName = `CuentaCobro_${cuenta.id}_${fechaBase}`;
+
+    let targetPath = sanitizePathSegment(ONEDRIVE_ROOT_FOLDER, "CuentasCobro");
+    targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
+    targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, consultorFolder);
+    targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, cuentaFolderName);
+
+    const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
+
+    const cuentaFileName = sanitizePdfFileName(
+      cuenta_pdf_nombre || `CuentaCobroFirmada_${cuenta.id}.pdf`,
+      `CuentaCobroFirmada_${cuenta.id}.pdf`
+    );
+    const seguridadFileName = sanitizePdfFileName(
+      seguridad_social_nombre || `SeguridadSocial_${cuenta.id}.pdf`,
+      `SeguridadSocial_${cuenta.id}.pdf`
+    );
+
+    const cuentaPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${cuentaFileName}`)}:/content`;
+    const seguridadPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${seguridadFileName}`)}:/content`;
+
+    const [cuentaUpload, seguridadUpload] = await Promise.all([
+      graphPutBinary(cuentaPath, token, cuentaPdfBuffer, "application/pdf"),
+      graphPutBinary(seguridadPath, token, seguridadPdfBuffer, "application/pdf")
+    ]);
+
+    const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object"
+      ? cuenta.datos_adjuntos
+      : {};
+
+    const adjuntos = {
+      ...prevAdjuntos,
+      soportes: {
+        carpeta: targetPath,
+        actualizado_en: new Date().toISOString(),
+        cuenta_cobro: {
+          id: cuentaUpload.id,
+          nombre: cuentaUpload.name,
+          url: cuentaUpload.webUrl
+        },
+        seguridad_social: {
+          id: seguridadUpload.id,
+          nombre: seguridadUpload.name,
+          url: seguridadUpload.webUrl
+        }
+      }
+    };
+
+    await pool.query(
+      `
+      UPDATE cuenta_cobro
+      SET datos_adjuntos = $1::jsonb,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      `,
+      [JSON.stringify(adjuntos), id]
+    );
+
+    res.json({
+      ok: true,
+      mensaje: "Soportes cargados exitosamente",
+      soportes: adjuntos.soportes
+    });
+  } catch (err) {
+    console.error("DEBUG upload cuenta adjuntos:", err.message);
+    res.status(500).json({
+      ok: false,
+      error: "Error al cargar el archivo. Por favor verifique su conexión o intente más tarde."
+    });
   }
 });
 

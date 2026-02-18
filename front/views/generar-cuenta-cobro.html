@@ -85,34 +85,6 @@
                            class="w-full mt-1 p-2 border rounded-lg text-sm bg-gray-50 focus:border-emerald-500 outline-none">
                 </div>
 
-                <div class="border-t pt-4">
-                    <label class="text-xs font-bold text-gray-500 uppercase mb-2 block">Adjuntos Requeridos</label>
-                    
-                    <div class="space-y-3">
-                        <label class="flex items-center gap-3 p-3 border border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-emerald-50 hover:border-emerald-300 transition-colors">
-                            <div class="bg-emerald-100 p-2 rounded-lg text-emerald-600">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                            </div>
-                            <div class="flex-1">
-                                <p class="text-sm font-bold text-gray-700">Cuenta de Cobro (PDF)</p>
-                                <p class="text-xs text-gray-400" x-text="files.cuenta ? files.cuenta.name : 'Click para subir'"></p>
-                            </div>
-                            <input type="file" class="hidden" @change="files.cuenta = $event.target.files[0]">
-                        </label>
-
-                        <label class="flex items-center gap-3 p-3 border border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-emerald-50 hover:border-emerald-300 transition-colors">
-                            <div class="bg-blue-100 p-2 rounded-lg text-blue-600">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            </div>
-                            <div class="flex-1">
-                                <p class="text-sm font-bold text-gray-700">Seguridad Social (PDF)</p>
-                                <p class="text-xs text-gray-400" x-text="files.seguridad ? files.seguridad.name : 'Click para subir'"></p>
-                            </div>
-                            <input type="file" class="hidden" @change="files.seguridad = $event.target.files[0]">
-                        </label>
-                    </div>
-                </div>
-
                 <div class="pt-6 mt-auto">
                     <button type="submit" 
                         :disabled="!isValid"

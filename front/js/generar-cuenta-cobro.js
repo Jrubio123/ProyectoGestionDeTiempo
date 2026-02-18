@@ -15,11 +15,6 @@ window.cuentaCobroApp = function () {
             ciudad_cobro: ""
         },
 
-        files: {
-            cuenta: null,
-            seguridad: null
-        },
-
         async init() {
             if (window.auth) {
                 const u = window.auth.getUser();
@@ -122,7 +117,6 @@ window.cuentaCobroApp = function () {
                 alert("Cuenta de Cobro enviada exitosamente");
 
                 this.form = { fecha_inicio: "", fecha_fin: "", total_letras: "", ciudad_cobro: "" };
-                this.files = { cuenta: null, seguridad: null };
                 await this.cargarRegistros();
             } catch (e) {
                 const msg = e?.response?.data?.error || "Error al generar la cuenta";

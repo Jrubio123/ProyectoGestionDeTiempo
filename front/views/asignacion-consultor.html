@@ -96,7 +96,7 @@
                     </div>
 
                     <div class="p-5 bg-gray-50 rounded-xl border border-gray-100 space-y-4">
-                        <div class="grid grid-cols-2 gap-4">
+                        <div x-show="!esMesaServicio" class="grid grid-cols-2 gap-4">
                             <div>
                                 <label class="text-xs font-bold text-gray-500 uppercase">Fecha Inicio</label>
                                 <input type="date" x-model="form.fecha_inicio" @change="calcularDias" class="w-full mt-1 p-2 border rounded-lg text-sm">
@@ -124,22 +124,6 @@
                                      x-text="calcularTotal()"></div>
                             </div>
                         </div>
-                    </div>
-
-                    <div x-show="esMesaServicio">
-                         <div class="grid grid-cols-2 gap-4">
-                             <div>
-                                 <label class="text-xs font-bold text-gray-500 uppercase">Estado</label>
-                                 <select x-model="form.estado_mesa" class="w-full mt-1 p-2 border rounded-lg text-sm">
-                                     <option value="Abierto">Abierto</option>
-                                     <option value="Cerrado">Cerrado</option>
-                                 </select>
-                             </div>
-                             <div>
-                                 <label class="text-xs font-bold text-gray-500 uppercase">Fecha Cierre</label>
-                                 <input type="date" x-model="form.fecha_cierre" class="w-full mt-1 p-2 border rounded-lg text-sm">
-                             </div>
-                         </div>
                     </div>
 
                     <div class="pt-4 flex justify-end gap-3">

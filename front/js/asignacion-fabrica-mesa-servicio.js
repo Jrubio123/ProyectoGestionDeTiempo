@@ -16,6 +16,7 @@ window.mesaFabricaApp = function () {
             estado_mesa_servicio: "",
             estado_fabrica: "",
             observacion: "",
+            fecha_inicio: "",
             fecha_cierre: "",
             horas_reportadas: null,
             total_cobrar: null,
@@ -41,6 +42,7 @@ window.mesaFabricaApp = function () {
                 ...item,
                 estado_ticket: estadoTicket,
                 tipo_asignacion: item?.tipo_asignacion || "",
+                fecha_inicio: item?.fecha_inicio || "",
                 fecha_cierre: item?.fecha_cierre_mesa_fab || item?.fecha_fin || "",
                 observacion: item?.observacion_mesa_fabrica || item?.observacion || "",
                 horas_reportadas: item?.horas_reportadas ?? null,
@@ -86,6 +88,7 @@ window.mesaFabricaApp = function () {
             try {
                 const payload = {
                     ...this.form,
+                    fecha_inicio: this.form.fecha_inicio || null,
                     fecha_cierre: this.form.fecha_cierre || null
                 };
                 await axios.put(`${this.API}/mesa-fabrica/${this.form.id}`, payload);

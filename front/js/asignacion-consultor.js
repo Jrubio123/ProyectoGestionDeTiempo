@@ -14,9 +14,7 @@ window.asignacionConsultorApp = function () {
             fecha_inicio: "",
             fecha_fin: "",
             cantidad_dias: 0,
-            horas_asignadas: 0,
-            estado_mesa: "Abierto",
-            fecha_cierre: ""
+            horas_asignadas: 0
         },
 
         async init() {
@@ -229,8 +227,8 @@ window.asignacionConsultorApp = function () {
                 id_consultoria: this.proyectoSelected.consultoria_id || this.proyectoSelected.id,
                 id_modulo: this.form.modulo_id,
                 consultor_responsable_id: this.form.consultor_id,
-                fecha_inicio: this.form.fecha_inicio || null,
-                fecha_fin: this.form.fecha_fin || null,
+                fecha_inicio: esMesaOFabrica ? null : (this.form.fecha_inicio || null),
+                fecha_fin: esMesaOFabrica ? null : (this.form.fecha_fin || null),
                 cantidad_dias: esMesaOFabrica ? null : (this.esMensual ? diasMensual : (this.form.cantidad_dias || null)),
                 horas_asignadas: esMesaOFabrica ? null : (this.esMensual ? null : (this.form.horas_asignadas || null)),
                 valor_hora: esMesaOFabrica ? tarifa || null : (this.esMensual ? null : tarifa || null),

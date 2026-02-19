@@ -2522,6 +2522,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     estado_mesa_servicio,
     estado_fabrica,
     observacion,
+    fecha_inicio,
     fecha_cierre,
     horas_reportadas,
     total_cobrar
@@ -2589,9 +2590,10 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
           tipo_servicio = $3,
           estado = $4,
           observacion = $5,
-          fecha_fin = $6
-      WHERE id = $7
-        AND consultor_responsable_id = $8
+          fecha_inicio = $6,
+          fecha_fin = $7
+      WHERE id = $8
+        AND consultor_responsable_id = $9
       RETURNING *
       `,
       [
@@ -2600,6 +2602,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
         tipoServicioNormalizado,
         estadoNormalizado,
         observacion || null,
+        fecha_inicio || null,
         fecha_cierre || null,
         id,
         req.user?.id

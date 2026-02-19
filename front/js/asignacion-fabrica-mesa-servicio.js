@@ -4,6 +4,7 @@ window.mesaFabricaApp = function () {
         API: window.API_BASE || "http://localhost:4000",
         tickets: [],
         modalOpen: false,
+        solicitudesOpen: false,
 
         form: {
             id: null,
@@ -50,6 +51,7 @@ window.mesaFabricaApp = function () {
                 valor_hora: item?.valor_hora ?? null
             };
             this.recalcularTotalForm();
+            this.solicitudesOpen = false;
             this.modalOpen = true;
         },
 
@@ -58,8 +60,8 @@ window.mesaFabricaApp = function () {
         },
 
         async enviarTicket(item) {
-            if (item?.estado_reporte === "Pendiente") {
-                alert("Este ticket ya está en aprobación.");
+            if (item?.estado_reporte === "Pendiente" || item?.estado_reporte === "Aprobado") {
+                alert("Este ticket no se puede reenviar en este estado.");
                 return;
             }
             if (!confirm("¿Enviar ticket a aprobación del coordinador?")) return;
@@ -82,6 +84,11 @@ window.mesaFabricaApp = function () {
                 const msg = e?.response?.data?.error || "Error al enviar ticket";
                 alert(msg);
             }
+        },
+
+        async abrirSolicitudes() {
+            await this.cargarTickets();
+            this.solicitudesOpen = true;
         },
 
         async guardarCambios() {
@@ -155,6 +162,35 @@ window.mesaFabricaApp = function () {
             if (item?.estado_reporte === "Rechazado") return "Rechazado";
             if (item?.estado_reporte === "Aprobado") return "Aprobado";
             return "Borrador";
+        },
+
+        estadoBadgeClass(item) {
+            const estado = String(item?.estado_reporte || "").toLowerCase();
+            if (estado === "pendiente") return "bg-amber-100 text-amber-700 border-amber-200";
+            if (estado === "rechazado") return "bg-red-100 text-red-700 border-red-200";
+            if (estado === "aprobado") return "bg-emerald-100 text-emerald-700 border-emerald-200";
+            return "bg-slate-100 text-slate-700 border-slate-200";
+        },
+
+        get solicitudesPorEnviar() {
+            return (this.tickets || []).filter((t) => {
+                const estado = String(t?.estado_reporte || "").toLowerCase();
+                return !estado || estado === "rechazado" || estado === "revisión" || estado === "revision";
+            });
+        },
+
+        get solicitudesEnviadas() {
+            return (this.tickets || []).filter((t) => String(t?.estado_reporte || "").toLowerCase() === "pendiente");
+        },
+
+        canEdit(item) {
+            const estado = String(item?.estado_reporte || "").toLowerCase();
+            return !estado || estado === "rechazado" || estado === "revisión" || estado === "revision";
+        },
+
+        canSend(item) {
+            const estado = String(item?.estado_reporte || "").toLowerCase();
+            return !estado || estado === "rechazado" || estado === "revisión" || estado === "revision";
         }
     };
 };

@@ -7,9 +7,14 @@
             </h1>
             <p class="text-gray-500 text-sm mt-1">Gestiona tus tickets e incidentes asignados.</p>
         </div>
-        <button @click="init()" class="p-2 bg-white border border-gray-200 rounded-full hover:rotate-180 transition-transform duration-500 text-purple-600 shadow-sm">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-        </button>
+        <div class="flex items-center gap-2">
+            <button @click="abrirSolicitudes()" class="px-4 py-2 bg-purple-600 text-white rounded-xl text-sm font-bold hover:bg-purple-700 transition-colors">
+                Solicitudes
+            </button>
+            <button @click="init()" class="p-2 bg-white border border-gray-200 rounded-full hover:rotate-180 transition-transform duration-500 text-purple-600 shadow-sm">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            </button>
+        </div>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -31,7 +36,7 @@
                             <h3 class="font-bold text-gray-800 text-lg leading-tight" x-text="item.nombre_cliente"></h3>
                             <p class="text-xs text-purple-600 font-medium" x-text="item.nombre_modulo"></p>
                         </div>
-                        <button @click="editarTicket(item)" class="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors">
+                        <button @click="editarTicket(item)" :disabled="!canEdit(item)" class="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-40">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
                         </button>
                     </div>
@@ -64,9 +69,9 @@
                     </div>
                     <button
                         @click="enviarTicket(item)"
-                        :disabled="item.estado_reporte === 'Pendiente'"
+                        :disabled="!canSend(item)"
                         class="text-xs font-bold flex items-center gap-1"
-                        :class="item.estado_reporte === 'Pendiente' ? 'text-gray-400 cursor-not-allowed' : 'text-green-600 hover:text-green-800'"
+                        :class="canSend(item) ? 'text-green-600 hover:text-green-800' : 'text-gray-400 cursor-not-allowed'"
                     >
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
                         Enviar Ticket
@@ -76,6 +81,64 @@
             </div>
         </template>
 
+    </div>
+
+    <div x-show="solicitudesOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl p-6 max-h-[85vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h3 class="text-xl font-bold text-gray-800">Solicitudes</h3>
+                    <p class="text-sm text-gray-500">Pool de tickets por enviar y tickets enviados a coordinación.</p>
+                </div>
+                <button @click="solicitudesOpen = false" class="text-gray-400 hover:text-gray-600">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="border rounded-xl p-4">
+                    <h4 class="font-bold text-gray-800 mb-3">Por enviar / Devueltas</h4>
+                    <div class="space-y-3" x-show="solicitudesPorEnviar.length">
+                        <template x-for="item in solicitudesPorEnviar" :key="`send-${item.id}`">
+                            <div class="border rounded-lg p-3">
+                                <div class="flex justify-between items-start gap-3">
+                                    <div>
+                                        <p class="font-semibold text-gray-800" x-text="`${item.nombre_cliente} - ${item.nombre_modulo || 'Sin módulo'}`"></p>
+                                        <p class="text-xs text-gray-500" x-text="`Caso: ${item.nro_caso_cliente || item.nro_caso_interno || '---'}`"></p>
+                                        <p class="text-xs text-gray-500" x-text="`Coord: ${item.nombre_coordinador || 'N/A'}`"></p>
+                                    </div>
+                                    <span class="px-2 py-1 rounded-full border text-xs font-bold" :class="estadoBadgeClass(item)" x-text="estadoAprobacionLabel(item)"></span>
+                                </div>
+                                <div class="mt-3 flex justify-end gap-2">
+                                    <button @click="editarTicket(item)" :disabled="!canEdit(item)" class="px-3 py-1.5 rounded-lg text-xs font-bold border border-gray-300 text-gray-700 disabled:opacity-40">Editar</button>
+                                    <button @click="enviarTicket(item)" :disabled="!canSend(item)" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white disabled:opacity-40">Enviar Ticket</button>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                    <p x-show="!solicitudesPorEnviar.length" class="text-sm text-gray-400">No hay tickets por enviar.</p>
+                </div>
+
+                <div class="border rounded-xl p-4">
+                    <h4 class="font-bold text-gray-800 mb-3">Enviadas (Pendiente coordinación)</h4>
+                    <div class="space-y-3" x-show="solicitudesEnviadas.length">
+                        <template x-for="item in solicitudesEnviadas" :key="`pend-${item.id}`">
+                            <div class="border rounded-lg p-3">
+                                <div class="flex justify-between items-start gap-3">
+                                    <div>
+                                        <p class="font-semibold text-gray-800" x-text="`${item.nombre_cliente} - ${item.nombre_modulo || 'Sin módulo'}`"></p>
+                                        <p class="text-xs text-gray-500" x-text="`Caso: ${item.nro_caso_cliente || item.nro_caso_interno || '---'}`"></p>
+                                        <p class="text-xs text-gray-500" x-text="`Coord: ${item.nombre_coordinador || 'N/A'}`"></p>
+                                    </div>
+                                    <span class="px-2 py-1 rounded-full border text-xs font-bold" :class="estadoBadgeClass(item)" x-text="estadoAprobacionLabel(item)"></span>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                    <p x-show="!solicitudesEnviadas.length" class="text-sm text-gray-400">No hay tickets pendientes en coordinación.</p>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div x-show="modalOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" style="display: none;">

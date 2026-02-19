@@ -71,6 +71,8 @@ if (shouldUseSsl) {
 
 const pool = new Pool(poolConfig);
 let estadoAsignacionCache = null;
+let estadoMesaCache = null;
+let estadoFabricaCache = null;
 
 function normalizeEnumLabel(value) {
   return String(value || "")
@@ -202,6 +204,89 @@ function normalizeEstadoFabricaInput(value) {
     ["finalizado", "Finalizado"]
   ]);
   return map.get(norm) || null;
+}
+
+async function getEnumLabels(typeName, fallback = []) {
+  try {
+    const result = await pool.query(
+      `
+      SELECT e.enumlabel
+      FROM pg_type t
+      JOIN pg_enum e ON t.oid = e.enumtypid
+      WHERE t.typname = $1
+      ORDER BY e.enumsortorder
+      `,
+      [typeName]
+    );
+    const labels = (result.rows || []).map((r) => String(r.enumlabel || "").trim()).filter(Boolean);
+    return labels.length ? labels : fallback;
+  } catch (err) {
+    return fallback;
+  }
+}
+
+async function getEstadoMesaValues() {
+  if (estadoMesaCache) return estadoMesaCache;
+  const labels = await getEnumLabels("tipo_estado_mesa", ["Cerrado", "En Proceso", "Transferido Silver", "Transferido Corona"]);
+  const byNorm = new Map(labels.map((label) => [normalizeEnumLabel(label), label]));
+  const pick = (...candidates) => {
+    for (const candidate of candidates) {
+      const found = byNorm.get(normalizeEnumLabel(candidate));
+      if (found) return found;
+    }
+    return null;
+  };
+  estadoMesaCache = {
+    labels,
+    cerrado: pick("Cerrado"),
+    proceso: pick("En Proceso", "EnProceso"),
+    transferidoSilver: pick("Transferido Silver", "TransferidoSilver"),
+    transferidoCorona: pick("Transferido Corona", "TransferidoCorona")
+  };
+  return estadoMesaCache;
+}
+
+function resolveEstadoMesaInput(value, estadosMesa) {
+  if (!value) return null;
+  const norm = normalizeEnumLabel(value);
+  const labels = Array.isArray(estadosMesa?.labels) ? estadosMesa.labels : [];
+  const direct = labels.find((label) => normalizeEnumLabel(label) === norm);
+  if (direct) return direct;
+  if (norm === "cerrado") return estadosMesa?.cerrado || null;
+  if (norm === "enproceso") return estadosMesa?.proceso || null;
+  if (norm === "transferidosilver") return estadosMesa?.transferidoSilver || null;
+  if (norm === "transferidocorona") return estadosMesa?.transferidoCorona || null;
+  return null;
+}
+
+async function getEstadoFabricaValues() {
+  if (estadoFabricaCache) return estadoFabricaCache;
+  const labels = await getEnumLabels("tipo_estado_fabrica", ["En Proceso", "Finalizado"]);
+  const byNorm = new Map(labels.map((label) => [normalizeEnumLabel(label), label]));
+  const pick = (...candidates) => {
+    for (const candidate of candidates) {
+      const found = byNorm.get(normalizeEnumLabel(candidate));
+      if (found) return found;
+    }
+    return null;
+  };
+  estadoFabricaCache = {
+    labels,
+    proceso: pick("En Proceso", "EnProceso"),
+    finalizado: pick("Finalizado")
+  };
+  return estadoFabricaCache;
+}
+
+function resolveEstadoFabricaInput(value, estadosFabrica) {
+  if (!value) return null;
+  const norm = normalizeEnumLabel(value);
+  const labels = Array.isArray(estadosFabrica?.labels) ? estadosFabrica.labels : [];
+  const direct = labels.find((label) => normalizeEnumLabel(label) === norm);
+  if (direct) return direct;
+  if (norm === "endesarrollo" || norm === "enproceso") return estadosFabrica?.proceso || null;
+  if (norm === "finalizado") return estadosFabrica?.finalizado || null;
+  return null;
 }
 
 function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo) {
@@ -2238,59 +2323,42 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         ra.fecha_inicio,
         ra.fecha_fin,
         ra.valor_hora,
+        con.id_tipo_asignacion AS tipo_asignacion_id,
         c.id AS cliente_id,
         c.titulo AS nombre_cliente,
         m.id AS modulo_id,
         m.titulo AS nombre_modulo,
         ta.titulo AS tipo_asignacion,
         coord.nombre_usuario AS nombre_coordinador,
-        lr.estado_reporte AS estado_reporte,
-        lr.motivo_rechazo,
-        lr.total_cobrar,
-        lr.horas_reportadas,
-        lr.nro_caso_int_ext,
-        lr.reporte_id,
-        lr.estado_mesa_servicio,
-        lr.estado_fabrica,
-        lr.observacion_mesa_fabrica,
-        lr.fecha_cierre_mesa_fab,
-        lr.id_cuenta_cobro,
-        lr.requerimiento,
-        lr.perfil_fabrica,
-        lr.wricef
+        rh.estado_reporte AS estado_reporte,
+        rh.motivo_rechazo,
+        rh.total_cobrar,
+        rh.horas_reportadas,
+        rh.nro_caso_int_ext,
+        rh.id AS reporte_id,
+        rh.estado_mesa_servicio,
+        rh.estado_fabrica,
+        rh.observacion_mesa_fabrica,
+        rh.fecha_cierre_mesa_fab,
+        rh.id_cuenta_cobro,
+        rh.requerimiento,
+        rh.perfil_fabrica,
+        rh.wricef
       FROM registro_asignaciones ra
         JOIN consultorias con ON ra.id_consultoria = con.id
         JOIN clientes c ON con.id_cliente = c.id
         LEFT JOIN usuarios coord ON con.coordinador_responsable_id = coord.id
         LEFT JOIN modulo m ON ra.id_modulo = m.id
         LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
-        LEFT JOIN LATERAL (
-          SELECT
-            rh.id AS reporte_id,
-            rh.estado_reporte,
-            rh.motivo_rechazo,
-            rh.total_cobrar,
-            rh.horas_reportadas,
-            rh.nro_caso_int_ext,
-            rh.estado_mesa_servicio,
-            rh.estado_fabrica,
-            rh.observacion_mesa_fabrica,
-            rh.fecha_cierre_mesa_fab,
-            rh.id_cuenta_cobro,
-            rh.requerimiento,
-            rh.perfil_fabrica,
-            rh.wricef
-          FROM reporte_horas rh
-          WHERE rh.id_registro_asignacion = ra.id
-          ORDER BY rh.updated_at DESC NULLS LAST, rh.id DESC
-          LIMIT 1
-        ) lr ON true
+        LEFT JOIN reporte_horas rh
+          ON rh.id_registro_asignacion = ra.id
+         AND rh.estado_reporte IN ('Revisión', 'Rechazado', 'Pendiente')
       WHERE ra.consultor_responsable_id = $1
         AND (
           COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
           OR LOWER(TRIM(COALESCE(ta.titulo, ''))) IN ('mesa de servicio', 'fabrica', 'fábrica')
         )
-      ORDER BY ra.id DESC
+      ORDER BY ra.id DESC, rh.created_at DESC NULLS LAST, rh.id DESC
       `,
       [userId]
     );
@@ -2305,6 +2373,7 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
 app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   const { id } = req.params;
   const {
+    reporte_id,
     horas_reportadas,
     total_cobrar,
     tipo_servicio,
@@ -2366,6 +2435,18 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       return res.status(400).json({ error: "Solo Mesa/Fábrica se envía desde este módulo." });
     }
     const scope = getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo);
+    const estadosMesa = await getEstadoMesaValues();
+    const estadosFabrica = await getEstadoFabricaValues();
+    const estadoMesaNormalizado = resolveEstadoMesaInput(estado_mesa_servicio, estadosMesa);
+    const estadoFabricaNormalizado = resolveEstadoFabricaInput(estado_fabrica, estadosFabrica);
+    if (scope === "mesa" && estado_mesa_servicio && !estadoMesaNormalizado) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Estado de mesa de servicio inválido" });
+    }
+    if (scope === "fabrica" && estado_fabrica && !estadoFabricaNormalizado) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Estado de fábrica inválido" });
+    }
 
     const last = await client.query(
       `SELECT id, estado_reporte
@@ -2384,10 +2465,11 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       `SELECT id, estado_reporte
        FROM reporte_horas
        WHERE id_registro_asignacion = $1
+         AND ($2::int IS NULL OR id = $2::int)
          AND estado_reporte IN ('Revisión', 'Rechazado')
        ORDER BY updated_at DESC NULLS LAST, id DESC
        LIMIT 1`,
-      [id]
+      [id, reporte_id || null]
     );
     const editableRow = editable.rows[0];
 
@@ -2406,7 +2488,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     }
 
     let saved;
-    if (editableRow) {
+    if (reporte_id && editableRow) {
       saved = await client.query(
         `UPDATE reporte_horas
          SET horas_reportadas = COALESCE($1, horas_reportadas),
@@ -2438,8 +2520,8 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           finalNroCaso,
           finalObservacion,
           finalFechaCierre,
-          estado_mesa_servicio || null,
-          estado_fabrica || null,
+          scope === "mesa" ? estadoMesaNormalizado : null,
+          scope === "fabrica" ? estadoFabricaNormalizado : null,
           finalRequerimiento,
           finalPerfilFabrica,
           finalWricef,
@@ -2452,6 +2534,9 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           editableRow.id
         ]
       );
+    } else if (reporte_id && !editableRow) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Solicitud no editable o no encontrada" });
     } else {
       saved = await client.query(
         `INSERT INTO reporte_horas
@@ -2469,8 +2554,8 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           finalNroCaso,
           finalObservacion,
           finalFechaCierre,
-          estado_mesa_servicio || null,
-          estado_fabrica || null,
+          scope === "mesa" ? estadoMesaNormalizado : null,
+          scope === "fabrica" ? estadoFabricaNormalizado : null,
           finalRequerimiento,
           finalPerfilFabrica,
           finalWricef,
@@ -2543,6 +2628,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
 app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   const { id } = req.params;
   const {
+    reporte_id,
     nro_caso_interno,
     nro_caso_cliente,
     tipo_servicio,
@@ -2605,8 +2691,10 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     }
     const estadoMesaRaw = estado_mesa_servicio || (scope === "mesa" ? estado_ticket : null);
     const estadoFabricaRaw = estado_fabrica || (scope === "fabrica" ? estado_ticket : null);
-    const estadoMesaNormalizado = normalizeEstadoMesaInput(estadoMesaRaw);
-    const estadoFabricaNormalizado = normalizeEstadoFabricaInput(estadoFabricaRaw);
+    const estadosMesa = await getEstadoMesaValues();
+    const estadosFabrica = await getEstadoFabricaValues();
+    const estadoMesaNormalizado = resolveEstadoMesaInput(estadoMesaRaw, estadosMesa);
+    const estadoFabricaNormalizado = resolveEstadoFabricaInput(estadoFabricaRaw, estadosFabrica);
     if (scope === "mesa" && estadoMesaRaw && !estadoMesaNormalizado) {
       return res.status(400).json({ error: "Estado de mesa de servicio inválido" });
     }
@@ -2657,12 +2745,13 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
       `SELECT id
        FROM reporte_horas
        WHERE id_registro_asignacion = $1
+         AND ($2::int IS NULL OR id = $2::int)
          AND estado_reporte IN ('Revisión', 'Rechazado')
        ORDER BY updated_at DESC NULLS LAST, id DESC
        LIMIT 1`,
-      [id]
+      [id, reporte_id || null]
     );
-    if (editable.rows.length > 0) {
+    if (reporte_id && editable.rows.length > 0) {
       await pool.query(
         `UPDATE reporte_horas
          SET horas_reportadas = COALESCE($1, horas_reportadas),
@@ -2693,6 +2782,8 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
           editable.rows[0].id
         ]
       );
+    } else if (reporte_id && editable.rows.length === 0) {
+      return res.status(404).json({ error: "Solicitud no editable o no encontrada" });
     } else {
       await pool.query(
         `INSERT INTO reporte_horas

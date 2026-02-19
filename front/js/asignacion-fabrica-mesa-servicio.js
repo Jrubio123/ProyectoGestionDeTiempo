@@ -8,6 +8,7 @@ window.mesaFabricaApp = function () {
 
         form: {
             id: null,
+            reporte_id: null,
             nro_caso_interno: "",
             nro_caso_cliente: "",
             tipo_servicio: "",
@@ -48,6 +49,7 @@ window.mesaFabricaApp = function () {
             const tarifaInferida = horasBase > 0 ? (totalBase / horasBase) : 0;
             this.form = {
                 ...item,
+                reporte_id: item?.reporte_id || null,
                 estado_ticket: estadoTicket,
                 tipo_asignacion: item?.tipo_asignacion || "",
                 fecha_inicio: item?.fecha_inicio || "",
@@ -61,6 +63,38 @@ window.mesaFabricaApp = function () {
                 valor_hora: item?.valor_hora ?? tarifaInferida ?? null
             };
             this.recalcularTotalForm();
+            this.solicitudesOpen = false;
+            this.modalOpen = true;
+        },
+
+        crearSolicitud(item) {
+            const scope = this.getScope(item);
+            this.form = {
+                id: item.id,
+                reporte_id: null,
+                tipo_asignacion: item?.tipo_asignacion || "",
+                tipo_asignacion_id: item?.tipo_asignacion_id || null,
+                nombre_modulo: item?.nombre_modulo || "",
+                nro_caso_interno: "",
+                nro_caso_cliente: "",
+                tipo_servicio: "Servicio",
+                wricef: "",
+                requerimiento: "",
+                perfil_fabrica: "",
+                estado: "",
+                estado_ticket: "",
+                estado_mesa_servicio: "",
+                estado_fabrica: "",
+                observacion: "",
+                fecha_inicio: this.todayDate(),
+                fecha_cierre: "",
+                horas_reportadas: null,
+                total_cobrar: 0,
+                valor_hora: Number(item?.valor_hora || 0) || null
+            };
+            if (scope === "fabrica") {
+                this.form.tipo_servicio = "";
+            }
             this.solicitudesOpen = false;
             this.modalOpen = true;
         },
@@ -84,6 +118,7 @@ window.mesaFabricaApp = function () {
                 const scope = this.getScope(item);
                 const estadoTicket = this.getEstadoTicket(item);
                 await axios.post(`${this.API}/mesa-fabrica/${item.id}/enviar-aprobacion`, {
+                    reporte_id: item.reporte_id || null,
                     tipo_servicio: item.tipo_servicio || null,
                     nro_caso_int_ext: item.nro_caso_cliente || item.nro_caso_interno || null,
                     observacion_mesa_fabrica: item.observacion_mesa_fabrica || item.observacion || null,
@@ -280,6 +315,13 @@ window.mesaFabricaApp = function () {
             return d ? String(d).split("T")[0] : "";
         },
 
+        todayDate() {
+            const d = new Date();
+            const m = String(d.getMonth() + 1).padStart(2, "0");
+            const day = String(d.getDate()).padStart(2, "0");
+            return `${d.getFullYear()}-${m}-${day}`;
+        },
+
         estadoAprobacionLabel(item) {
             if (item?.estado_reporte === "Pendiente") return "En revisión";
             if (item?.estado_reporte === "Rechazado") return "Rechazado";
@@ -298,21 +340,32 @@ window.mesaFabricaApp = function () {
         get solicitudesPorEnviar() {
             return (this.tickets || []).filter((t) => {
                 const estado = String(t?.estado_reporte || "").toLowerCase();
-                return !estado || estado === "rechazado" || estado === "revisión" || estado === "revision";
+                return Boolean(t?.reporte_id) && (estado === "rechazado" || estado === "revisión" || estado === "revision");
             });
         },
 
         get solicitudesEnviadas() {
-            return (this.tickets || []).filter((t) => String(t?.estado_reporte || "").toLowerCase() === "pendiente");
+            return (this.tickets || []).filter((t) =>
+                Boolean(t?.reporte_id) && String(t?.estado_reporte || "").toLowerCase() === "pendiente"
+            );
+        },
+
+        get assignmentCards() {
+            const map = new Map();
+            for (const row of this.tickets || []) {
+                if (!map.has(row.id)) map.set(row.id, row);
+            }
+            return Array.from(map.values());
         },
 
         canEdit(item) {
-            return true;
+            const estado = String(item?.estado_reporte || "").toLowerCase();
+            return Boolean(item?.reporte_id) && (estado === "rechazado" || estado === "revisión" || estado === "revision");
         },
 
         canSend(item) {
             const estado = String(item?.estado_reporte || "").toLowerCase();
-            return !estado || estado === "rechazado" || estado === "revisión" || estado === "revision";
+            return Boolean(item?.reporte_id) && (estado === "rechazado" || estado === "revisión" || estado === "revision");
         }
     };
 };

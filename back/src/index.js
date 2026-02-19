@@ -162,6 +162,23 @@ function normalizeTipoServicioInput(value) {
   return map.get(norm) || null;
 }
 
+function normalizePerfilFabricaInput(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const norm = normalizeEnumLabel(raw);
+  const map = new Map([
+    ["abap", "ABAP"],
+    ["abaptm", "ABAP TM"],
+    ["pipo", "PI/PO"],
+    ["cpi", "CPI"],
+    ["fiori", "FIORI"],
+    ["wf", "WF"],
+    ["dataservice", "DATASERVICE"],
+    ["datasphere", "DATASPHERE"]
+  ]);
+  return map.get(norm) || null;
+}
+
 function normalizeEstadoMesaInput(value) {
   const raw = String(value || "").trim();
   if (!raw) return null;
@@ -2348,6 +2365,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "Solo Mesa/Fábrica se envía desde este módulo." });
     }
+    const scope = getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo);
 
     const last = await client.query(
       `SELECT id, estado_reporte
@@ -2380,8 +2398,12 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     const finalHoras = horas_reportadas ?? null;
     const finalTotal = total_cobrar ?? info.total_pagar ?? null;
     const finalRequerimiento = (requerimiento || "").toString().trim() || null;
-    const finalPerfilFabrica = (perfil_fabrica || "").toString().trim() || null;
+    const finalPerfilFabrica = normalizePerfilFabricaInput(perfil_fabrica);
     const finalWricef = (wricef || "").toString().trim() || null;
+    if (scope === "fabrica" && perfil_fabrica && !finalPerfilFabrica) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Perfil de fábrica inválido" });
+    }
 
     let saved;
     if (editableRow) {
@@ -2626,8 +2648,11 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
         : null);
     const finalNroCaso = (nro_caso_cliente || nro_caso_interno || "").toString().trim() || null;
     const finalRequerimiento = (requerimiento || "").toString().trim() || null;
-    const finalPerfilFabrica = (perfil_fabrica || "").toString().trim() || null;
+    const finalPerfilFabrica = normalizePerfilFabricaInput(perfil_fabrica);
     const finalWricef = (wricef || "").toString().trim() || null;
+    if (scope === "fabrica" && perfil_fabrica && !finalPerfilFabrica) {
+      return res.status(400).json({ error: "Perfil de fábrica inválido" });
+    }
     const editable = await pool.query(
       `SELECT id
        FROM reporte_horas

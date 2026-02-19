@@ -55,7 +55,7 @@ window.mesaFabricaApp = function () {
                 observacion: item?.observacion_mesa_fabrica || item?.observacion || "",
                 wricef: item?.wricef || "",
                 requerimiento: item?.requerimiento || "",
-                perfil_fabrica: item?.perfil_fabrica || "",
+                perfil_fabrica: this.normalizePerfilFabrica(item?.perfil_fabrica) || "",
                 horas_reportadas: item?.horas_reportadas ?? null,
                 total_cobrar: item?.total_cobrar ?? null,
                 valor_hora: item?.valor_hora ?? tarifaInferida ?? null
@@ -91,7 +91,7 @@ window.mesaFabricaApp = function () {
                     total_cobrar: item.total_cobrar || null,
                     horas_reportadas: item.horas_reportadas || null,
                     requerimiento: item.requerimiento || null,
-                    perfil_fabrica: item.perfil_fabrica || null,
+                    perfil_fabrica: this.normalizePerfilFabrica(item.perfil_fabrica) || null,
                     wricef: item.wricef || null,
                     estado_mesa_servicio: scope === "mesa" ? (estadoTicket || null) : null,
                     estado_fabrica: scope === "fabrica" ? (estadoTicket || null) : null
@@ -127,7 +127,7 @@ window.mesaFabricaApp = function () {
                     nro_caso_interno: scope === "mesa" ? (this.form.nro_caso_interno || null) : null,
                     wricef: scope === "fabrica" ? (this.form.wricef || null) : null,
                     requerimiento: scope === "fabrica" ? (this.form.requerimiento || null) : null,
-                    perfil_fabrica: scope === "fabrica" ? (this.form.perfil_fabrica || null) : null,
+                    perfil_fabrica: scope === "fabrica" ? (this.normalizePerfilFabrica(this.form.perfil_fabrica) || null) : null,
                     fecha_inicio: this.form.fecha_inicio || null,
                     fecha_cierre: shouldClose ? (this.form.fecha_cierre || null) : null
                 };
@@ -184,6 +184,9 @@ window.mesaFabricaApp = function () {
                 if (!String(item?.perfil_fabrica || "").trim()) {
                     return { ok: false, error: "Debes indicar el perfil." };
                 }
+                if (!this.normalizePerfilFabrica(item?.perfil_fabrica)) {
+                    return { ok: false, error: "Perfil inválido para Fábrica." };
+                }
                 if (estado === "Finalizado" && !fechaCierre) {
                     return { ok: false, error: "Debes indicar fecha de cierre cuando el estado es Finalizado." };
                 }
@@ -213,6 +216,26 @@ window.mesaFabricaApp = function () {
 
         isFabrica(item = null) {
             return this.getScope(item || this.form) === "fabrica";
+        },
+
+        perfilFabricaOptions() {
+            return ["ABAP", "ABAP TM", "PI/PO", "CPI", "FIORI", "WF", "DATASERVICE", "DATASPHERE"];
+        },
+
+        normalizePerfilFabrica(value) {
+            const raw = String(value || "").trim();
+            if (!raw) return "";
+            const norm = raw
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .replace(/\s+/g, "")
+                .toUpperCase()
+                .trim();
+            const byNorm = new Map(this.perfilFabricaOptions().map((opt) => [
+                String(opt).replace(/\s+/g, "").toUpperCase(),
+                opt
+            ]));
+            return byNorm.get(norm) || "";
         },
 
         estadoOptions() {

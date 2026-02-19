@@ -180,7 +180,12 @@
                         </div>
                         <div>
                             <label class="text-xs font-bold text-gray-500 uppercase">Perfil</label>
-                            <input type="text" x-model="form.perfil_fabrica" class="w-full mt-1 p-2 border rounded-lg text-sm">
+                            <select x-model="form.perfil_fabrica" class="w-full mt-1 p-2 border rounded-lg text-sm bg-white">
+                                <option value="">Seleccione...</option>
+                                <template x-for="opt in perfilFabricaOptions()" :key="`perfil-${opt}`">
+                                    <option :value="opt" x-text="opt"></option>
+                                </template>
+                            </select>
                         </div>
                     </div>
                 </template>

@@ -3612,31 +3612,37 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
       return res.status(400).json({ error: "Ya existe asignación para este consultor, cliente y módulo" });
     }
 
-    const tarifaRes = await pool.query(
-      `SELECT obtener_tarifa_consultor($1, $2, $3, $4) AS valor_tarifa`,
-      [consultor_responsable_id, clienteId, id_modulo || null, tipoAsignacionId || null]
-    );
-    const tarifaVigente = Number(tarifaRes.rows[0]?.valor_tarifa || 0);
-    if (!(tarifaVigente > 0)) {
-      return res.status(400).json({
-        error: "No existe una tarifa vigente para este consultor, cliente, módulo y tipo de asignación."
-      });
-    }
-
     const tipoAsigNorm = String(meta.rows[0]?.tipo_asignacion_titulo || "")
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .trim();
-    const esMensual = tipoAsigNorm.includes("full") || tipoAsigNorm.includes("part");
-    const valorHoraFinal = esMensual ? null : tarifaVigente;
-    const valorDiaFinal = esMensual ? (tarifaVigente / 20) : null;
-    const totalPagarFinal =
-      total_pagar !== undefined && total_pagar !== null
-        ? Number(total_pagar)
-        : (esMensual
-          ? (cantidad_dias ? (Number(cantidad_dias) / 20) * tarifaVigente : null)
-          : (horas_asignadas ? Number(horas_asignadas) * tarifaVigente : null));
+    const esMesaOFabrica =
+      [5, 6].includes(Number(tipoAsignacionId || 0)) ||
+      ["mesa de servicio", "fabrica"].includes(tipoAsigNorm);
+
+    let valorHoraFinal = valor_hora || null;
+    let valorDiaFinal = valor_dia || null;
+    let totalPagarFinal = total_pagar || null;
+
+    if (esMesaOFabrica) {
+      const tarifaRes = await pool.query(
+        `SELECT obtener_tarifa_consultor($1, $2, $3, $4) AS valor_tarifa`,
+        [consultor_responsable_id, clienteId, id_modulo || null, tipoAsignacionId || null]
+      );
+      const tarifaVigente = Number(tarifaRes.rows[0]?.valor_tarifa || 0);
+      if (!(tarifaVigente > 0)) {
+        return res.status(400).json({
+          error: "No existe una tarifa vigente para este consultor, cliente, módulo y tipo de asignación."
+        });
+      }
+      valorHoraFinal = tarifaVigente;
+      valorDiaFinal = null;
+      totalPagarFinal =
+        total_pagar !== undefined && total_pagar !== null
+          ? Number(total_pagar)
+          : (horas_asignadas ? Number(horas_asignadas) * tarifaVigente : null);
+    }
 
     const result = await pool.query(
       `INSERT INTO registro_asignaciones

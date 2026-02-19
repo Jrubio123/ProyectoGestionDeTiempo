@@ -162,6 +162,42 @@ function normalizeTipoServicioInput(value) {
   return map.get(norm) || null;
 }
 
+function normalizeEstadoMesaInput(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const norm = normalizeEnumLabel(raw);
+  const map = new Map([
+    ["cerrado", "Cerrado"],
+    ["enproceso", "En Proceso"],
+    ["transferidosilver", "Transferido Silver"],
+    ["transferidocorona", "Transferido Corona"]
+  ]);
+  return map.get(norm) || null;
+}
+
+function normalizeEstadoFabricaInput(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const norm = normalizeEnumLabel(raw);
+  const map = new Map([
+    ["endesarrollo", "En Proceso"],
+    ["enproceso", "En Proceso"],
+    ["finalizado", "Finalizado"]
+  ]);
+  return map.get(norm) || null;
+}
+
+function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo) {
+  const tituloNorm = String(tipoAsignacionTitulo || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (Number(tipoAsignacionId) === 5 || tituloNorm.includes("mesa de servicio")) return "mesa";
+  if (Number(tipoAsignacionId) === 6 || tituloNorm.includes("fabrica")) return "fabrica";
+  return null;
+}
+
 function buildTotalLetras(numero, moneda = 'COP') {
   const parteEntera = Math.floor(numero);
   const centavos = Math.round((numero - parteEntera) * 100);

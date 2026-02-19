@@ -189,8 +189,7 @@ window.mesaFabricaApp = function () {
         },
 
         canEdit(item) {
-            const estado = String(item?.estado_reporte || "").toLowerCase();
-            return estado !== "pendiente";
+            return true;
         },
 
         canSend(item) {

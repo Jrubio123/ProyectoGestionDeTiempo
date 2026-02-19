@@ -1,6 +1,6 @@
 <div x-data="mesaFabricaApp()" x-init="init()" class="max-w-7xl mx-auto space-y-6 animate-fade-in-up">
 
-    <div class="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-purple-50 flex justify-between items-center">
+    <div class="bg-white/80 backdrop-blur-md p-4 md:p-6 rounded-2xl shadow-sm border border-purple-50 flex flex-col md:flex-row justify-between md:items-center gap-4">
         <div>
             <h1 class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-pink-500">
                 Mesa de Servicio & Fábrica
@@ -77,9 +77,9 @@
 
     </div>
 
-    <div x-show="solicitudesOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" style="display: none;">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl p-6 max-h-[85vh] overflow-y-auto">
-            <div class="flex justify-between items-center mb-6">
+    <div x-show="solicitudesOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-start md:items-center justify-center bg-black/50 backdrop-blur-sm p-3 md:p-6 overflow-y-auto" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl p-4 sm:p-5 md:p-6 max-h-[92vh] md:max-h-[85vh] overflow-y-auto">
+            <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-6">
                 <div>
                     <h3 class="text-xl font-bold text-gray-800">Solicitudes</h3>
                     <p class="text-sm text-gray-500">Pool de tickets por enviar y tickets enviados a coordinación.</p>
@@ -103,7 +103,7 @@
                                     </div>
                                     <span class="px-2 py-1 rounded-full border text-xs font-bold" :class="estadoBadgeClass(item)" x-text="estadoAprobacionLabel(item)"></span>
                                 </div>
-                                <div class="mt-3 flex justify-end gap-2">
+                                <div class="mt-3 flex flex-col sm:flex-row sm:justify-end gap-2">
                                     <button @click="editarTicket(item)" :disabled="!canEdit(item)" class="px-3 py-1.5 rounded-lg text-xs font-bold border border-gray-300 text-gray-700 disabled:opacity-40">Editar</button>
                                     <button @click="enviarTicket(item)" :disabled="!canSend(item)" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white disabled:opacity-40">Enviar Ticket</button>
                                 </div>
@@ -135,8 +135,8 @@
         </div>
     </div>
 
-    <div x-show="modalOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" style="display: none;">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 transform transition-all scale-100">
+    <div x-show="modalOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-start md:items-center justify-center bg-black/50 backdrop-blur-sm p-3 md:p-6 overflow-y-auto" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-4 sm:p-5 md:p-6 transform transition-all scale-100 max-h-[92vh] overflow-y-auto">
             
             <div class="flex justify-between items-center mb-6">
                 <h3 class="text-xl font-bold text-gray-800">Gestionar Ticket</h3>
@@ -144,7 +144,7 @@
             </div>
 
             <form @submit.prevent="guardarCambios" class="space-y-4">
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                         <label class="text-xs font-bold text-gray-500 uppercase">Tipo Asignación</label>
                         <div class="w-full mt-1 p-2 rounded-lg text-sm border bg-gray-50 text-gray-700" x-text="form.tipo_asignacion || '---'"></div>
@@ -156,7 +156,7 @@
                 </div>
 
                 <template x-if="isMesa()">
-                    <div class="grid grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                             <label class="text-xs font-bold text-gray-500 uppercase">Nro Caso Interno</label>
                             <input type="text" x-model="form.nro_caso_interno" class="w-full mt-1 p-2 border rounded-lg text-sm">
@@ -190,7 +190,7 @@
                     </div>
                 </template>
 
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div x-show="isMesa()">
                         <label class="text-xs font-bold text-gray-500 uppercase">Tipo Servicio</label>
                         <select x-model="form.tipo_servicio" class="w-full mt-1 p-2 border rounded-lg text-sm bg-white">
@@ -210,7 +210,7 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                         <label class="text-xs font-bold text-gray-500 uppercase">Fecha Ingreso</label>
                         <input type="date" x-model="form.fecha_inicio" class="w-full mt-1 p-2 border rounded-lg text-sm">
@@ -235,7 +235,7 @@
                     <textarea x-model="form.observacion" rows="3" class="w-full mt-1 p-2 border rounded-lg text-sm resize-none"></textarea>
                 </div>
 
-                <div class="pt-4 flex justify-end gap-3">
+                <div class="pt-4 flex flex-col-reverse sm:flex-row justify-end gap-3">
                     <button type="button" @click="modalOpen = false" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">Cancelar</button>
                     <button type="submit" class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-bold shadow-lg shadow-purple-500/30">Guardar Cambios</button>
                 </div>

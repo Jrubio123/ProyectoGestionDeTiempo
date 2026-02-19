@@ -30,6 +30,11 @@ body {
         linear-gradient(180deg, #f8fbff 0%, #edf4fb 100%);
     color: var(--text-strong);
     font-family: "Segoe UI", "Inter", "Roboto", sans-serif;
+    overflow-x: hidden;
+}
+
+body.sidebar-mobile-open {
+    overflow: hidden;
 }
 
 /* Global app tone remap */
@@ -339,11 +344,25 @@ body.sidebar-collapsed .app-main {
 @media (max-width: 1024px) {
     .app-main {
         padding-left: var(--page-gutter);
+        padding-right: var(--page-gutter);
+        border-radius: 16px;
+    }
+
+    body.sidebar-collapsed .app-main {
+        padding-left: var(--page-gutter);
     }
 }
 
 @media (max-width: 640px) {
     :root {
         --page-gutter: 16px;
+    }
+
+    .app-main {
+        padding-top: calc(var(--navbar-height) + 12px);
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-bottom: 16px;
+        border-radius: 12px;
     }
 }

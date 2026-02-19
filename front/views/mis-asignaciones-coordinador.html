@@ -70,9 +70,10 @@
 
         <!-- Tabla de Asignaciones -->
         <div class="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
+            <div class="overflow-x-auto">
             
             <!-- Headers -->
-            <div class="grid grid-cols-8 gap-4 px-6 py-4 bg-gradient-to-r from-gray-50 to-blue-50 border-b-2 border-blue-600 font-semibold text-sm text-gray-700">
+            <div class="grid grid-cols-8 gap-4 px-6 py-4 bg-gradient-to-r from-gray-50 to-blue-50 border-b-2 border-blue-600 font-semibold text-sm text-gray-700 min-w-[980px]">
                 <div>ID</div>
                 <div>Cliente</div>
                 <div>Consultor</div>
@@ -102,10 +103,10 @@
             </div>
 
             <!-- Lista de Asignaciones -->
-            <div class="divide-y divide-gray-100 max-h-[600px] overflow-y-auto">
+            <div class="divide-y divide-gray-100 max-h-[420px] md:max-h-[600px] overflow-y-auto">
                 <template x-for="asignacion in asignacionesFiltradas" :key="asignacion._key">
                     <div 
-                        class="grid grid-cols-8 gap-4 px-6 py-4 hover:bg-blue-50 transition cursor-pointer"
+                        class="grid grid-cols-8 gap-4 px-6 py-4 hover:bg-blue-50 transition cursor-pointer min-w-[980px]"
                         :class="{'bg-blue-50 ring-2 ring-blue-200': asignacionSeleccionada?._key === asignacion._key}"
                         @click="seleccionarAsignacion(asignacion)"
                     >
@@ -141,18 +142,19 @@
                     </div>
                 </template>
             </div>
+            </div>
         </div>
 
     <!-- Modal de Edición -->
     <div 
         x-show="mostrarModal"
         @click.self="cerrarModal"
-        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-start md:items-center justify-center z-50 p-3 md:p-4 overflow-y-auto"
         x-transition
         x-cloak
     >
         <div 
-            class="bg-white rounded-3xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto"
+            class="bg-white rounded-3xl shadow-2xl w-full max-w-5xl max-h-[92vh] md:max-h-[90vh] overflow-y-auto"
             x-transition:enter="transition ease-out duration-300"
             x-transition:enter-start="opacity-0 transform scale-95"
             x-transition:enter-end="opacity-100 transform scale-100"

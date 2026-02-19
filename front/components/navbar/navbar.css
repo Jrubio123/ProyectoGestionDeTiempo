@@ -2,6 +2,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 1rem;
     background:
         linear-gradient(115deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02)),
         linear-gradient(132deg, #567fa7 0%, #486f95 52%, #3d6286 100%);
@@ -14,12 +15,20 @@
     top: 0;
     left: 0;
     right: 0;
-    z-index: 1000;
+    z-index: 40;
+}
+
+.navbar-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
 }
 
 .navbar-brand {
     display: flex;
     align-items: center;
+    min-width: 0;
 }
 
 .navbar-logo {
@@ -68,7 +77,8 @@
 
 .navbar-search {
     flex: 1;
-    max-width: 300px;
+    max-width: 380px;
+    min-width: 0;
 }
 
 .search-container {
@@ -107,6 +117,28 @@
 
 .navbar-user {
     margin-left: 2rem;
+}
+
+.navbar-mobile-toggle {
+    display: none;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    border: 1px solid rgba(225, 236, 248, 0.4);
+    background: rgba(28, 52, 77, 0.2);
+    color: white;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+}
+
+.navbar-mobile-toggle:hover {
+    background: rgba(28, 52, 77, 0.32);
+}
+
+.navbar-mobile-toggle-icon {
+    font-size: 1.1rem;
+    line-height: 1;
 }
 
 .user-profile {
@@ -199,4 +231,72 @@
 
 .dropdown-logout {
     color: #c2410c;
+}
+
+@media (max-width: 1024px) {
+    .navbar {
+        padding: 0 1rem;
+        gap: 0.75rem;
+    }
+
+    .navbar-mobile-toggle {
+        display: inline-flex;
+    }
+
+    .navbar-logo {
+        font-size: 1.25rem;
+    }
+
+    .navbar-search {
+        max-width: none;
+    }
+
+    .navbar-user {
+        margin-left: 0;
+    }
+
+    .user-text {
+        display: none;
+    }
+}
+
+@media (max-width: 768px) {
+    .navbar {
+        padding: 0 0.75rem;
+    }
+
+    .navbar-logo {
+        font-size: 1.1rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 160px;
+    }
+
+    .search-container {
+        padding: 0.45rem 0.75rem;
+    }
+
+    .search-input {
+        font-size: 0.85rem;
+    }
+
+    .search-input::placeholder {
+        font-size: 0.85rem;
+    }
+
+    .user-avatar {
+        width: 34px;
+        height: 34px;
+    }
+}
+
+@media (max-width: 520px) {
+    .navbar-search {
+        display: none;
+    }
+
+    .navbar {
+        justify-content: space-between;
+    }
 }

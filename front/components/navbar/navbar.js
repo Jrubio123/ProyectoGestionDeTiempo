@@ -64,6 +64,9 @@ function getAllowedViewsForCurrentRole() {
 }
 
 function initNavbar() {
+    const navbarRoot = document.querySelector(".navbar");
+    if (!navbarRoot) return;
+
     const navLinks = document.querySelectorAll(".nav-link");
     const userNameEl = document.querySelector(".user-name");
     const userRoleEl = document.querySelector(".user-role");
@@ -72,7 +75,11 @@ function initNavbar() {
     const userMenuToggle = document.getElementById("userMenuToggle");
     const searchInput = document.querySelector(".search-input");
     const viewsList = document.getElementById("views-list");
+    const mobileSidebarToggle = document.getElementById("mobileSidebarToggle");
     let avatarObjectUrl = null;
+
+    if (window.__navbarMounted) return;
+    window.__navbarMounted = true;
 
     async function loadAvatarFromToken(accessToken) {
         if (!accessToken || !userAvatarEl) return false;
@@ -177,6 +184,16 @@ function initNavbar() {
             if (e.key === "Enter") {
                 performSearch(this.value);
             }
+        });
+    }
+
+    if (mobileSidebarToggle) {
+        mobileSidebarToggle.addEventListener("click", function () {
+            const sidebar = document.querySelector(".sidebar");
+            if (!sidebar) return;
+            const nextOpen = !sidebar.classList.contains("mobile-open");
+            sidebar.classList.toggle("mobile-open", nextOpen);
+            document.body.classList.toggle("sidebar-mobile-open", nextOpen);
         });
     }
 

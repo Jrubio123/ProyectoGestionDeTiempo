@@ -14,7 +14,7 @@
         </div>
     </div>
 
-    <div class="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden min-h-[600px] flex flex-col">
+    <div class="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden min-h-[420px] md:min-h-[600px] flex flex-col">
         
         <div class="p-4 border-b border-gray-100 bg-gray-50/50 flex flex-wrap gap-4 items-end">
             <div>
@@ -87,8 +87,8 @@
         </div>
     </div>
 
-    <div x-show="modal.open" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" style="display: none;">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-6 flex flex-col max-h-[80vh]">
+    <div x-show="modal.open" x-transition.opacity class="fixed inset-0 z-50 flex items-start md:items-center justify-center bg-black/50 backdrop-blur-sm p-3 md:p-6 overflow-y-auto" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-4 md:p-6 flex flex-col max-h-[92vh] md:max-h-[80vh]">
             
             <div class="flex justify-between items-start mb-4 pb-4 border-b border-gray-100">
                 <div>
@@ -137,8 +137,8 @@
         </div>
     </div>
 
-    <div x-show="modalAdjuntos.open" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" style="display: none;">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-6 flex flex-col">
+    <div x-show="modalAdjuntos.open" x-transition.opacity class="fixed inset-0 z-50 flex items-start md:items-center justify-center bg-black/50 backdrop-blur-sm p-3 md:p-6 overflow-y-auto" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-4 md:p-6 flex flex-col max-h-[92vh] overflow-y-auto">
             <div class="flex justify-between items-start mb-4 pb-4 border-b border-gray-100">
                 <div>
                     <h3 class="text-xl font-bold text-gray-800">Subir Soportes #<span x-text="modalAdjuntos.cuenta?.id"></span></h3>

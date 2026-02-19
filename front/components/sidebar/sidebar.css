@@ -14,7 +14,7 @@
     transition: all 0.3s ease;
     border-right: 1px solid rgba(218, 230, 243, 0.3);
     box-shadow: 8px 0 22px rgba(41, 71, 102, 0.18);
-    z-index: 999;
+    z-index: 30;
 }
 
 .sidebar.collapsed {
@@ -220,4 +220,57 @@
 
 .logout-icon {
     font-size: 1.2rem;
+}
+
+.sidebar-mobile-backdrop {
+    position: fixed;
+    inset: 70px 0 0 0;
+    background: rgba(8, 15, 28, 0.45);
+    backdrop-filter: blur(2px);
+    z-index: 25;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+
+body.sidebar-mobile-open .sidebar-mobile-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+@media (max-width: 1024px) {
+    .sidebar,
+    .sidebar.collapsed {
+        width: min(86vw, 320px);
+        height: calc(100vh - 70px);
+        top: 70px;
+        left: 0;
+        padding: 1rem;
+        transform: translateX(-110%);
+        box-shadow: 16px 0 36px rgba(15, 30, 52, 0.35);
+        z-index: 30;
+    }
+
+    .sidebar.mobile-open {
+        transform: translateX(0);
+    }
+
+    .sidebar.collapsed .sidebar-title,
+    .sidebar.collapsed .menu-title,
+    .sidebar.collapsed .menu-text,
+    .sidebar.collapsed .user-info {
+        opacity: 1;
+        width: auto;
+        height: auto;
+        overflow: visible;
+        margin: initial;
+    }
+
+    .sidebar .sidebar-toggle {
+        display: none;
+    }
+
+    .menu-link:hover {
+        transform: none;
+    }
 }

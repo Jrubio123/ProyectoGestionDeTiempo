@@ -2184,6 +2184,7 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         ra.observacion,
         ra.fecha_inicio,
         ra.fecha_fin,
+        ra.valor_hora,
         c.id AS cliente_id,
         c.titulo AS nombre_cliente,
         m.id AS modulo_id,
@@ -2194,7 +2195,13 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         lr.motivo_rechazo,
         lr.total_cobrar,
         lr.horas_reportadas,
-        lr.nro_caso_int_ext
+        lr.nro_caso_int_ext,
+        lr.reporte_id,
+        lr.estado_mesa_servicio,
+        lr.estado_fabrica,
+        lr.observacion_mesa_fabrica,
+        lr.fecha_cierre_mesa_fab,
+        lr.id_cuenta_cobro
       FROM registro_asignaciones ra
         JOIN consultorias con ON ra.id_consultoria = con.id
         JOIN clientes c ON con.id_cliente = c.id
@@ -2202,7 +2209,18 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         LEFT JOIN modulo m ON ra.id_modulo = m.id
         LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
         LEFT JOIN LATERAL (
-          SELECT rh.estado_reporte, rh.motivo_rechazo, rh.total_cobrar, rh.horas_reportadas, rh.nro_caso_int_ext
+          SELECT
+            rh.id AS reporte_id,
+            rh.estado_reporte,
+            rh.motivo_rechazo,
+            rh.total_cobrar,
+            rh.horas_reportadas,
+            rh.nro_caso_int_ext,
+            rh.estado_mesa_servicio,
+            rh.estado_fabrica,
+            rh.observacion_mesa_fabrica,
+            rh.fecha_cierre_mesa_fab,
+            rh.id_cuenta_cobro
           FROM reporte_horas rh
           WHERE rh.id_registro_asignacion = ra.id
           ORDER BY rh.updated_at DESC NULLS LAST, rh.id DESC
@@ -2300,6 +2318,16 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "Este ticket ya está pendiente de aprobación." });
     }
+    const editable = await client.query(
+      `SELECT id, estado_reporte
+       FROM reporte_horas
+       WHERE id_registro_asignacion = $1
+         AND estado_reporte IN ('Revisión', 'Rechazado')
+       ORDER BY updated_at DESC NULLS LAST, id DESC
+       LIMIT 1`,
+      [id]
+    );
+    const editableRow = editable.rows[0];
 
     const finalTipoServicio = normalizeTipoServicioInput(tipo_servicio || info.ra_tipo_servicio || "Servicio") || null;
     const finalNroCaso = (nro_caso_int_ext || info.nro_caso_cliente || info.nro_caso_interno || "").toString().trim() || null;
@@ -2309,7 +2337,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     const finalTotal = total_cobrar ?? info.total_pagar ?? null;
 
     let saved;
-    if (lastRow) {
+    if (editableRow) {
       saved = await client.query(
         `UPDATE reporte_horas
          SET horas_reportadas = COALESCE($1, horas_reportadas),
@@ -2348,7 +2376,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           info.coordinador_responsable_id,
           info.consultor_responsable_id,
           info.consultor_responsable_id,
-          lastRow.id
+          editableRow.id
         ]
       );
     } else {
@@ -2444,14 +2472,28 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     nro_caso_cliente,
     tipo_servicio,
     estado,
+    estado_ticket,
+    estado_mesa_servicio,
+    estado_fabrica,
     observacion,
-    fecha_cierre
+    fecha_inicio,
+    fecha_cierre,
+    horas_reportadas,
+    total_cobrar
   } = req.body;
 
   try {
     const tipoValido = await pool.query(
       `
-      SELECT con.id_tipo_asignacion, ta.titulo AS tipo_asignacion_titulo
+      SELECT
+        con.id_tipo_asignacion,
+        ta.titulo AS tipo_asignacion_titulo,
+        ra.id_modulo,
+        ra.id_consultoria,
+        ra.valor_hora,
+        con.id_cliente,
+        con.coordinador_responsable_id,
+        ra.consultor_responsable_id
       FROM registro_asignaciones ra
         JOIN consultorias con ON con.id = ra.id_consultoria
         LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
@@ -2472,6 +2514,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     if (!esMesaOFabrica) {
       return res.status(400).json({ error: "Solo se permite actualizar tickets de Mesa/Fábrica en este módulo." });
     }
+    const scope = getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo);
 
     const estados = await getEstadoAsignacionValues();
     const estadoNormalizado = resolveEstadoAsignacionInput(estado, estados);
@@ -2482,6 +2525,16 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     if (tipo_servicio && !tipoServicioNormalizado) {
       return res.status(400).json({ error: "Tipo de servicio inválido" });
     }
+    const estadoMesaRaw = estado_mesa_servicio || (scope === "mesa" ? estado_ticket : null);
+    const estadoFabricaRaw = estado_fabrica || (scope === "fabrica" ? estado_ticket : null);
+    const estadoMesaNormalizado = normalizeEstadoMesaInput(estadoMesaRaw);
+    const estadoFabricaNormalizado = normalizeEstadoFabricaInput(estadoFabricaRaw);
+    if (scope === "mesa" && estadoMesaRaw && !estadoMesaNormalizado) {
+      return res.status(400).json({ error: "Estado de mesa de servicio inválido" });
+    }
+    if (scope === "fabrica" && estadoFabricaRaw && !estadoFabricaNormalizado) {
+      return res.status(400).json({ error: "Estado de fábrica inválido" });
+    }
 
     const result = await pool.query(
       `
@@ -2491,9 +2544,10 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
           tipo_servicio = $3,
           estado = $4,
           observacion = $5,
-          fecha_fin = $6
-      WHERE id = $7
-        AND consultor_responsable_id = $8
+          fecha_inicio = $6,
+          fecha_fin = $7
+      WHERE id = $8
+        AND consultor_responsable_id = $9
       RETURNING *
       `,
       [
@@ -2502,11 +2556,81 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
         tipoServicioNormalizado,
         estadoNormalizado,
         observacion || null,
+        fecha_inicio || null,
         fecha_cierre || null,
         id,
         req.user?.id
       ]
     );
+
+    const finalHoras = horas_reportadas ?? null;
+    const finalTotal = total_cobrar ??
+      ((finalHoras !== null && finalHoras !== undefined && tipoValido.rows[0]?.valor_hora !== null && tipoValido.rows[0]?.valor_hora !== undefined)
+        ? Number(finalHoras) * Number(tipoValido.rows[0].valor_hora)
+        : null);
+    const finalNroCaso = (nro_caso_cliente || nro_caso_interno || "").toString().trim() || null;
+    const editable = await pool.query(
+      `SELECT id
+       FROM reporte_horas
+       WHERE id_registro_asignacion = $1
+         AND estado_reporte IN ('Revisión', 'Rechazado')
+       ORDER BY updated_at DESC NULLS LAST, id DESC
+       LIMIT 1`,
+      [id]
+    );
+    if (editable.rows.length > 0) {
+      await pool.query(
+        `UPDATE reporte_horas
+         SET horas_reportadas = COALESCE($1, horas_reportadas),
+             total_cobrar = COALESCE($2, total_cobrar),
+             tipo_servicio = COALESCE($3, tipo_servicio),
+             nro_caso_int_ext = COALESCE($4, nro_caso_int_ext),
+             observacion_mesa_fabrica = COALESCE($5, observacion_mesa_fabrica),
+             fecha_cierre_mesa_fab = COALESCE($6, fecha_cierre_mesa_fab),
+             estado_mesa_servicio = COALESCE($7, estado_mesa_servicio),
+             estado_fabrica = COALESCE($8, estado_fabrica),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $9`,
+        [
+          finalHoras,
+          finalTotal,
+          tipoServicioNormalizado,
+          finalNroCaso,
+          observacion || null,
+          fecha_cierre || null,
+          scope === "mesa" ? estadoMesaNormalizado : null,
+          scope === "fabrica" ? estadoFabricaNormalizado : null,
+          editable.rows[0].id
+        ]
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO reporte_horas
+          (id_registro_asignacion, horas_reportadas, total_cobrar, tipo_servicio, nro_caso_int_ext,
+           observacion_mesa_fabrica, fecha_cierre_mesa_fab, estado_mesa_servicio, estado_fabrica,
+           cliente_id, tipo_asignacion_id, modulo_id, coordinador_id,
+           consultor_responsable_id, consultor_principal_id, created_by, estado_reporte)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'Revisión')`,
+        [
+          id,
+          finalHoras,
+          finalTotal,
+          tipoServicioNormalizado,
+          finalNroCaso,
+          observacion || null,
+          fecha_cierre || null,
+          scope === "mesa" ? estadoMesaNormalizado : null,
+          scope === "fabrica" ? estadoFabricaNormalizado : null,
+          tipoValido.rows[0]?.id_cliente || null,
+          tipoValido.rows[0]?.id_tipo_asignacion || null,
+          tipoValido.rows[0]?.id_modulo || null,
+          tipoValido.rows[0]?.coordinador_responsable_id || null,
+          tipoValido.rows[0]?.consultor_responsable_id || req.user?.id || null,
+          tipoValido.rows[0]?.consultor_responsable_id || req.user?.id || null,
+          req.user?.id || null
+        ]
+      );
+    }
     res.json(result.rows[0] || {});
   } catch (err) {
     console.error(err);
@@ -3456,7 +3580,14 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     }
 
     const meta = await pool.query(
-      "SELECT id_cliente, id_tipo_asignacion FROM consultorias WHERE id = $1 AND activo = true",
+      `SELECT
+         con.id_cliente,
+         con.id_tipo_asignacion,
+         ta.titulo AS tipo_asignacion_titulo
+       FROM consultorias con
+       LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
+       WHERE con.id = $1
+         AND con.activo = true`,
       [id_consultoria]
     );
     if (meta.rows.length === 0) {
@@ -3481,6 +3612,32 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
       return res.status(400).json({ error: "Ya existe asignación para este consultor, cliente y módulo" });
     }
 
+    const tarifaRes = await pool.query(
+      `SELECT obtener_tarifa_consultor($1, $2, $3, $4) AS valor_tarifa`,
+      [consultor_responsable_id, clienteId, id_modulo || null, tipoAsignacionId || null]
+    );
+    const tarifaVigente = Number(tarifaRes.rows[0]?.valor_tarifa || 0);
+    if (!(tarifaVigente > 0)) {
+      return res.status(400).json({
+        error: "No existe una tarifa vigente para este consultor, cliente, módulo y tipo de asignación."
+      });
+    }
+
+    const tipoAsigNorm = String(meta.rows[0]?.tipo_asignacion_titulo || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+    const esMensual = tipoAsigNorm.includes("full") || tipoAsigNorm.includes("part");
+    const valorHoraFinal = esMensual ? null : tarifaVigente;
+    const valorDiaFinal = esMensual ? (tarifaVigente / 20) : null;
+    const totalPagarFinal =
+      total_pagar !== undefined && total_pagar !== null
+        ? Number(total_pagar)
+        : (esMensual
+          ? (cantidad_dias ? (Number(cantidad_dias) / 20) * tarifaVigente : null)
+          : (horas_asignadas ? Number(horas_asignadas) * tarifaVigente : null));
+
     const result = await pool.query(
       `INSERT INTO registro_asignaciones
         (id_consultoria, id_modulo, consultor_responsable_id, fecha_inicio, fecha_fin,
@@ -3495,10 +3652,10 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
         fecha_fin || null,
         cantidad_dias || null,
         horas_asignadas || null,
-        valor_hora || null,
-        valor_dia || null,
+        valorHoraFinal,
+        valorDiaFinal,
         tipoServicioNormalizado,
-        total_pagar || null,
+        totalPagarFinal,
         estados.abierto
       ]
     );

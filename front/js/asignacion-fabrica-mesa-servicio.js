@@ -39,6 +39,9 @@ window.mesaFabricaApp = function () {
 
         editarTicket(item) {
             const estadoTicket = this.getEstadoTicket(item);
+            const horasBase = Number(item?.horas_reportadas || 0);
+            const totalBase = Number(item?.total_cobrar || 0);
+            const tarifaInferida = horasBase > 0 ? (totalBase / horasBase) : 0;
             this.form = {
                 ...item,
                 estado_ticket: estadoTicket,
@@ -48,7 +51,7 @@ window.mesaFabricaApp = function () {
                 observacion: item?.observacion_mesa_fabrica || item?.observacion || "",
                 horas_reportadas: item?.horas_reportadas ?? null,
                 total_cobrar: item?.total_cobrar ?? null,
-                valor_hora: item?.valor_hora ?? null
+                valor_hora: item?.valor_hora ?? tarifaInferida ?? null
             };
             this.recalcularTotalForm();
             this.solicitudesOpen = false;
@@ -142,7 +145,9 @@ window.mesaFabricaApp = function () {
         recalcularTotalForm() {
             const horas = Number(this.form?.horas_reportadas || 0);
             const tarifa = Number(this.form?.valor_hora || 0);
-            this.form.total_cobrar = horas > 0 && tarifa > 0 ? horas * tarifa : (this.form.total_cobrar || null);
+            if (horas > 0 && tarifa > 0) {
+                this.form.total_cobrar = horas * tarifa;
+            }
         },
 
         formatMoney(v) {
@@ -185,7 +190,7 @@ window.mesaFabricaApp = function () {
 
         canEdit(item) {
             const estado = String(item?.estado_reporte || "").toLowerCase();
-            return !estado || estado === "rechazado" || estado === "revisión" || estado === "revision";
+            return estado !== "pendiente";
         },
 
         canSend(item) {

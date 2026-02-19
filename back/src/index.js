@@ -304,15 +304,19 @@ function buildTotalLetras(numero, moneda = 'COP') {
   const parteEntera = Math.floor(numero);
   const centavos = Math.round((numero - parteEntera) * 100);
 
-  // Obtener texto y limpiar "00/100" si existe
+  // Texto base en letras (la librería suele incluir "PESOS 00/100 M.N.")
   let textoNumeros = NumerosALetras(parteEntera).toUpperCase();
 
-  // Eliminar " 00/100" si está presente
+  // Limpiar sufijos que agrega la librería
   textoNumeros = textoNumeros.replace(/\s*00\/100\s*/g, '');
-  // También eliminar "M.N." si existe
   textoNumeros = textoNumeros.replace(/\s*M\.N\.\s*/g, '');
+  textoNumeros = textoNumeros
+    .replace(/\s*(PESOS?|DOLARES|DÓLARES)\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  const nombreMoneda = moneda === 'USD' ? 'DÓLARES' : 'PESOS';
+  const monedaNorm = String(moneda || "COP").toUpperCase() === "USD" ? "USD" : "COP";
+  const nombreMoneda = monedaNorm === "USD" ? "DÓLARES" : "COP";
 
   if (centavos > 0) {
     return `${textoNumeros} CON ${centavos}/100 ${nombreMoneda}`;

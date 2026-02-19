@@ -15,7 +15,6 @@ window.asignacionConsultorApp = function () {
             fecha_fin: "",
             cantidad_dias: 0,
             horas_asignadas: 0,
-            tipo_servicio: "Servicio",
             estado_mesa: "Abierto",
             fecha_cierre: ""
         },
@@ -84,7 +83,6 @@ window.asignacionConsultorApp = function () {
             this.form.fecha_fin = "";
             this.form.cantidad_dias = this.esMensual ? 20 : 0;
             this.form.horas_asignadas = 0;
-            this.form.tipo_servicio = "Servicio";
         },
 
         async buscarTarifa() {
@@ -190,6 +188,7 @@ window.asignacionConsultorApp = function () {
 
         get formValido() {
             if (!this.form.consultor_id || !this.form.modulo_id || !(this.alertaTarifa.valor > 0)) return false;
+            if (this.esMesaServicio) return true;
             if (this.esPorHora) {
                 return (this.form.horas_asignadas || 0) > 0;
             }
@@ -215,26 +214,29 @@ window.asignacionConsultorApp = function () {
         async guardarAsignacion() {
             if (!this.proyectoSelected) return;
             const tarifa = this.alertaTarifa.valor || 0;
+            const esMesaOFabrica = this.esMesaServicio;
             const diasMensual = this.esMensual
                 ? this.calcularDiasMensual(this.form.fecha_inicio, this.form.fecha_fin) || 20
                 : 0;
             const meses = this.esMensual ? (diasMensual / 20) : 0;
-            const total = this.esMensual
+            const total = esMesaOFabrica
+                ? null
+                : this.esMensual
                 ? tarifa * (meses || 1)
                 : tarifa * (this.form.horas_asignadas || 0);
-            const valorDia = this.esMensual ? (tarifa / 20) : null;
+            const valorDia = esMesaOFabrica ? null : (this.esMensual ? (tarifa / 20) : null);
             const payload = {
                 id_consultoria: this.proyectoSelected.consultoria_id || this.proyectoSelected.id,
                 id_modulo: this.form.modulo_id,
                 consultor_responsable_id: this.form.consultor_id,
                 fecha_inicio: this.form.fecha_inicio || null,
                 fecha_fin: this.form.fecha_fin || null,
-                cantidad_dias: this.esMensual ? diasMensual : (this.form.cantidad_dias || null),
-                horas_asignadas: this.esMensual ? null : (this.form.horas_asignadas || null),
-                valor_hora: this.esMensual ? null : tarifa || null,
+                cantidad_dias: esMesaOFabrica ? null : (this.esMensual ? diasMensual : (this.form.cantidad_dias || null)),
+                horas_asignadas: esMesaOFabrica ? null : (this.esMensual ? null : (this.form.horas_asignadas || null)),
+                valor_hora: esMesaOFabrica ? tarifa || null : (this.esMensual ? null : tarifa || null),
                 valor_dia: valorDia,
                 total_pagar: total,
-                tipo_servicio: this.form.tipo_servicio || "Servicio"
+                tipo_servicio: null
             };
 
             try {

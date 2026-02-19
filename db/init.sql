@@ -54,7 +54,9 @@ CREATE TYPE tipo_estado_mesa AS ENUM
     'Abierto',
     'Cerrado',
     'En Proceso',
-    'Suspendido'
+    'Suspendido',
+    'Transferido Silver',
+    'Transferido Corona'
 );
 
 -- Estados de Fábrica

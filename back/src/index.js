@@ -162,6 +162,42 @@ function normalizeTipoServicioInput(value) {
   return map.get(norm) || null;
 }
 
+function normalizeEstadoMesaInput(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const norm = normalizeEnumLabel(raw);
+  const map = new Map([
+    ["cerrado", "Cerrado"],
+    ["enproceso", "En Proceso"],
+    ["transferidosilver", "Transferido Silver"],
+    ["transferidocorona", "Transferido Corona"]
+  ]);
+  return map.get(norm) || null;
+}
+
+function normalizeEstadoFabricaInput(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const norm = normalizeEnumLabel(raw);
+  const map = new Map([
+    ["endesarrollo", "En Proceso"],
+    ["enproceso", "En Proceso"],
+    ["finalizado", "Finalizado"]
+  ]);
+  return map.get(norm) || null;
+}
+
+function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo) {
+  const titleNorm = String(tipoAsignacionTitulo || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (titleNorm.includes("mesa de servicio") || Number(tipoAsignacionId) === 5) return "mesa";
+  if (titleNorm.includes("fabrica") || Number(tipoAsignacionId) === 6) return "fabrica";
+  return null;
+}
+
 function buildTotalLetras(numero, moneda = 'COP') {
   const parteEntera = Math.floor(numero);
   const centavos = Math.round((numero - parteEntera) * 100);
@@ -2194,6 +2230,7 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         ra.observacion,
         ra.fecha_inicio,
         ra.fecha_fin,
+        ra.valor_hora,
         c.id AS cliente_id,
         c.titulo AS nombre_cliente,
         m.id AS modulo_id,
@@ -2212,7 +2249,16 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         LEFT JOIN modulo m ON ra.id_modulo = m.id
         LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
         LEFT JOIN LATERAL (
-          SELECT rh.estado_reporte, rh.motivo_rechazo, rh.total_cobrar, rh.horas_reportadas, rh.nro_caso_int_ext
+          SELECT
+            rh.estado_reporte,
+            rh.motivo_rechazo,
+            rh.total_cobrar,
+            rh.horas_reportadas,
+            rh.nro_caso_int_ext,
+            rh.estado_mesa_servicio,
+            rh.estado_fabrica,
+            rh.observacion_mesa_fabrica,
+            rh.fecha_cierre_mesa_fab
           FROM reporte_horas rh
           WHERE rh.id_registro_asignacion = ra.id
           ORDER BY rh.updated_at DESC NULLS LAST, rh.id DESC
@@ -2264,6 +2310,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
         ra.observacion AS ra_observacion,
         ra.fecha_fin,
         ra.total_pagar,
+        ra.valor_hora,
         ra.consultor_responsable_id,
         con.id_cliente,
         con.id_tipo_asignacion,
@@ -2296,6 +2343,17 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "Solo Mesa/Fábrica se envía desde este módulo." });
     }
+    const scope = getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo);
+    const estadoMesaNorm = normalizeEstadoMesaInput(estado_mesa_servicio);
+    const estadoFabricaNorm = normalizeEstadoFabricaInput(estado_fabrica);
+    if (scope === "mesa" && estado_mesa_servicio && !estadoMesaNorm) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Estado de mesa de servicio inválido" });
+    }
+    if (scope === "fabrica" && estado_fabrica && !estadoFabricaNorm) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Estado de fábrica inválido" });
+    }
 
     const last = await client.query(
       `SELECT id, estado_reporte
@@ -2316,7 +2374,13 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     const finalObservacion = (observacion_mesa_fabrica || info.ra_observacion || "").toString().trim() || null;
     const finalFechaCierre = fecha_cierre_mesa_fab || info.fecha_fin || null;
     const finalHoras = horas_reportadas ?? null;
-    const finalTotal = total_cobrar ?? info.total_pagar ?? null;
+    const finalTotal = total_cobrar ??
+      info.total_pagar ??
+      ((finalHoras !== null && finalHoras !== undefined && info.valor_hora !== null && info.valor_hora !== undefined)
+        ? Number(finalHoras) * Number(info.valor_hora)
+        : null);
+    const finalEstadoMesa = scope === "mesa" ? (estadoMesaNorm || null) : null;
+    const finalEstadoFabrica = scope === "fabrica" ? (estadoFabricaNorm || null) : null;
 
     let saved;
     if (lastRow) {
@@ -2349,8 +2413,8 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           finalNroCaso,
           finalObservacion,
           finalFechaCierre,
-          estado_mesa_servicio || null,
-          estado_fabrica || null,
+          finalEstadoMesa,
+          finalEstadoFabrica,
           requerimiento || null,
           info.id_cliente,
           info.id_tipo_asignacion,
@@ -2378,8 +2442,8 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           finalNroCaso,
           finalObservacion,
           finalFechaCierre,
-          estado_mesa_servicio || null,
-          estado_fabrica || null,
+          finalEstadoMesa,
+          finalEstadoFabrica,
           requerimiento || null,
           info.id_cliente,
           info.id_tipo_asignacion,
@@ -2454,14 +2518,27 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     nro_caso_cliente,
     tipo_servicio,
     estado,
+    estado_ticket,
+    estado_mesa_servicio,
+    estado_fabrica,
     observacion,
-    fecha_cierre
+    fecha_cierre,
+    horas_reportadas,
+    total_cobrar
   } = req.body;
 
   try {
     const tipoValido = await pool.query(
       `
-      SELECT con.id_tipo_asignacion, ta.titulo AS tipo_asignacion_titulo
+      SELECT
+        con.id_tipo_asignacion,
+        ta.titulo AS tipo_asignacion_titulo,
+        ra.id_modulo,
+        ra.id_consultoria,
+        ra.valor_hora,
+        con.id_cliente,
+        con.coordinador_responsable_id,
+        ra.consultor_responsable_id
       FROM registro_asignaciones ra
         JOIN consultorias con ON con.id = ra.id_consultoria
         LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
@@ -2482,6 +2559,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     if (!esMesaOFabrica) {
       return res.status(400).json({ error: "Solo se permite actualizar tickets de Mesa/Fábrica en este módulo." });
     }
+    const scope = getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo);
 
     const estados = await getEstadoAsignacionValues();
     const estadoNormalizado = resolveEstadoAsignacionInput(estado, estados);
@@ -2491,6 +2569,16 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     const tipoServicioNormalizado = normalizeTipoServicioInput(tipo_servicio);
     if (tipo_servicio && !tipoServicioNormalizado) {
       return res.status(400).json({ error: "Tipo de servicio inválido" });
+    }
+    const estadoMesaRaw = estado_mesa_servicio || (scope === "mesa" ? estado_ticket : null);
+    const estadoFabricaRaw = estado_fabrica || (scope === "fabrica" ? estado_ticket : null);
+    const estadoMesaNormalizado = normalizeEstadoMesaInput(estadoMesaRaw);
+    const estadoFabricaNormalizado = normalizeEstadoFabricaInput(estadoFabricaRaw);
+    if (scope === "mesa" && estadoMesaRaw && !estadoMesaNormalizado) {
+      return res.status(400).json({ error: "Estado de mesa de servicio inválido" });
+    }
+    if (scope === "fabrica" && estadoFabricaRaw && !estadoFabricaNormalizado) {
+      return res.status(400).json({ error: "Estado de fábrica inválido" });
     }
 
     const result = await pool.query(
@@ -2517,6 +2605,75 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
         req.user?.id
       ]
     );
+
+    const finalHoras = horas_reportadas ?? null;
+    const finalTotal = total_cobrar ??
+      ((finalHoras !== null && finalHoras !== undefined && tipoValido.rows[0]?.valor_hora !== null && tipoValido.rows[0]?.valor_hora !== undefined)
+        ? Number(finalHoras) * Number(tipoValido.rows[0].valor_hora)
+        : null);
+    const finalNroCaso = (nro_caso_cliente || nro_caso_interno || "").toString().trim() || null;
+    const reportePrevio = await pool.query(
+      `SELECT id
+       FROM reporte_horas
+       WHERE id_registro_asignacion = $1
+       ORDER BY updated_at DESC NULLS LAST, id DESC
+       LIMIT 1`,
+      [id]
+    );
+    if (reportePrevio.rows.length > 0) {
+      await pool.query(
+        `UPDATE reporte_horas
+         SET horas_reportadas = COALESCE($1, horas_reportadas),
+             total_cobrar = COALESCE($2, total_cobrar),
+             tipo_servicio = COALESCE($3, tipo_servicio),
+             nro_caso_int_ext = COALESCE($4, nro_caso_int_ext),
+             observacion_mesa_fabrica = COALESCE($5, observacion_mesa_fabrica),
+             fecha_cierre_mesa_fab = COALESCE($6, fecha_cierre_mesa_fab),
+             estado_mesa_servicio = COALESCE($7, estado_mesa_servicio),
+             estado_fabrica = COALESCE($8, estado_fabrica),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $9`,
+        [
+          finalHoras,
+          finalTotal,
+          tipoServicioNormalizado,
+          finalNroCaso,
+          observacion || null,
+          fecha_cierre || null,
+          scope === "mesa" ? estadoMesaNormalizado : null,
+          scope === "fabrica" ? estadoFabricaNormalizado : null,
+          reportePrevio.rows[0].id
+        ]
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO reporte_horas
+          (id_registro_asignacion, horas_reportadas, total_cobrar, tipo_servicio, nro_caso_int_ext,
+           observacion_mesa_fabrica, fecha_cierre_mesa_fab, estado_mesa_servicio, estado_fabrica,
+           cliente_id, tipo_asignacion_id, modulo_id, coordinador_id,
+           consultor_responsable_id, consultor_principal_id, created_by, estado_reporte)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'Revisión')`,
+        [
+          id,
+          finalHoras,
+          finalTotal,
+          tipoServicioNormalizado,
+          finalNroCaso,
+          observacion || null,
+          fecha_cierre || null,
+          scope === "mesa" ? estadoMesaNormalizado : null,
+          scope === "fabrica" ? estadoFabricaNormalizado : null,
+          tipoValido.rows[0]?.id_cliente || null,
+          tipoValido.rows[0]?.id_tipo_asignacion || null,
+          tipoValido.rows[0]?.id_modulo || null,
+          tipoValido.rows[0]?.coordinador_responsable_id || null,
+          tipoValido.rows[0]?.consultor_responsable_id || req.user?.id || null,
+          tipoValido.rows[0]?.consultor_responsable_id || req.user?.id || null,
+          req.user?.id || null
+        ]
+      );
+    }
+
     res.json(result.rows[0] || {});
   } catch (err) {
     console.error(err);

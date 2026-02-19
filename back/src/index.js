@@ -312,7 +312,7 @@ function buildTotalLetras(numero, moneda = 'COP') {
   textoNumeros = textoNumeros.replace(/\s*M\.N\.\s*/g, '');
   textoNumeros = textoNumeros
     .replace(/\s*(PESOS?|DOLARES|DÓLARES|EUROS?)\s*$/i, '')
-    .replace(/\s+DE\s*$/i, '')
+    .replace(/\bDE\b/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 

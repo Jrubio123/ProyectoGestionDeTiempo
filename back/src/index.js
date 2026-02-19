@@ -311,12 +311,17 @@ function buildTotalLetras(numero, moneda = 'COP') {
   textoNumeros = textoNumeros.replace(/\s*00\/100\s*/g, '');
   textoNumeros = textoNumeros.replace(/\s*M\.N\.\s*/g, '');
   textoNumeros = textoNumeros
-    .replace(/\s*(PESOS?|DOLARES|DÓLARES)\s*$/i, '')
+    .replace(/\s*(PESOS?|DOLARES|DÓLARES|EUROS?)\s*$/i, '')
+    .replace(/\s+DE\s*$/i, '')
     .replace(/\s+/g, ' ')
     .trim();
 
-  const monedaNorm = String(moneda || "COP").toUpperCase() === "USD" ? "USD" : "COP";
-  const nombreMoneda = monedaNorm === "USD" ? "DÓLARES" : "COP";
+  const monedaNorm = String(moneda || "COP").toUpperCase();
+  const nombreMoneda = monedaNorm === "USD"
+    ? "DÓLARES"
+    : monedaNorm === "EUR"
+      ? "EUROS"
+      : "PESOS";
 
   if (centavos > 0) {
     return `${textoNumeros} CON ${centavos}/100 ${nombreMoneda}`;

@@ -2237,7 +2237,10 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         lr.estado_fabrica,
         lr.observacion_mesa_fabrica,
         lr.fecha_cierre_mesa_fab,
-        lr.id_cuenta_cobro
+        lr.id_cuenta_cobro,
+        lr.requerimiento,
+        lr.perfil_fabrica,
+        lr.wricef
       FROM registro_asignaciones ra
         JOIN consultorias con ON ra.id_consultoria = con.id
         JOIN clientes c ON con.id_cliente = c.id
@@ -2256,7 +2259,10 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
             rh.estado_fabrica,
             rh.observacion_mesa_fabrica,
             rh.fecha_cierre_mesa_fab,
-            rh.id_cuenta_cobro
+            rh.id_cuenta_cobro,
+            rh.requerimiento,
+            rh.perfil_fabrica,
+            rh.wricef
           FROM reporte_horas rh
           WHERE rh.id_registro_asignacion = ra.id
           ORDER BY rh.updated_at DESC NULLS LAST, rh.id DESC
@@ -2290,7 +2296,9 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     fecha_cierre_mesa_fab,
     estado_mesa_servicio,
     estado_fabrica,
-    requerimiento
+    requerimiento,
+    perfil_fabrica,
+    wricef
   } = req.body || {};
 
   const client = await pool.connect();
@@ -2371,6 +2379,9 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     const finalFechaCierre = fecha_cierre_mesa_fab || info.fecha_fin || null;
     const finalHoras = horas_reportadas ?? null;
     const finalTotal = total_cobrar ?? info.total_pagar ?? null;
+    const finalRequerimiento = (requerimiento || "").toString().trim() || null;
+    const finalPerfilFabrica = (perfil_fabrica || "").toString().trim() || null;
+    const finalWricef = (wricef || "").toString().trim() || null;
 
     let saved;
     if (editableRow) {
@@ -2385,16 +2396,18 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
              estado_mesa_servicio = COALESCE($7, estado_mesa_servicio),
              estado_fabrica = COALESCE($8, estado_fabrica),
              requerimiento = COALESCE($9, requerimiento),
-             cliente_id = COALESCE(cliente_id, $10),
-             tipo_asignacion_id = COALESCE(tipo_asignacion_id, $11),
-             modulo_id = COALESCE(modulo_id, $12),
-             coordinador_id = COALESCE(coordinador_id, $13),
-             consultor_responsable_id = COALESCE(consultor_responsable_id, $14),
-             consultor_principal_id = COALESCE(consultor_principal_id, $15),
+             perfil_fabrica = COALESCE($10, perfil_fabrica),
+             wricef = COALESCE($11, wricef),
+             cliente_id = COALESCE(cliente_id, $12),
+             tipo_asignacion_id = COALESCE(tipo_asignacion_id, $13),
+             modulo_id = COALESCE(modulo_id, $14),
+             coordinador_id = COALESCE(coordinador_id, $15),
+             consultor_responsable_id = COALESCE(consultor_responsable_id, $16),
+             consultor_principal_id = COALESCE(consultor_principal_id, $17),
              estado_reporte = 'Pendiente',
              motivo_rechazo = NULL,
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = $16
+         WHERE id = $18
          RETURNING *`,
         [
           finalHoras,
@@ -2405,7 +2418,9 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           finalFechaCierre,
           estado_mesa_servicio || null,
           estado_fabrica || null,
-          requerimiento || null,
+          finalRequerimiento,
+          finalPerfilFabrica,
+          finalWricef,
           info.id_cliente,
           info.id_tipo_asignacion,
           info.id_modulo,
@@ -2420,9 +2435,9 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
         `INSERT INTO reporte_horas
           (id_registro_asignacion, horas_reportadas, total_cobrar, tipo_servicio, nro_caso_int_ext,
            observacion_mesa_fabrica, fecha_cierre_mesa_fab, estado_mesa_servicio, estado_fabrica,
-           requerimiento, cliente_id, tipo_asignacion_id, modulo_id, coordinador_id,
+           requerimiento, perfil_fabrica, wricef, cliente_id, tipo_asignacion_id, modulo_id, coordinador_id,
            consultor_responsable_id, consultor_principal_id, created_by, estado_reporte)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'Pendiente')
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'Pendiente')
          RETURNING *`,
         [
           id,
@@ -2434,7 +2449,9 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           finalFechaCierre,
           estado_mesa_servicio || null,
           estado_fabrica || null,
-          requerimiento || null,
+          finalRequerimiento,
+          finalPerfilFabrica,
+          finalWricef,
           info.id_cliente,
           info.id_tipo_asignacion,
           info.id_modulo,
@@ -2512,6 +2529,9 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     estado_mesa_servicio,
     estado_fabrica,
     observacion,
+    requerimiento,
+    perfil_fabrica,
+    wricef,
     fecha_inicio,
     fecha_cierre,
     horas_reportadas,
@@ -2605,6 +2625,9 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
         ? Number(finalHoras) * Number(tipoValido.rows[0].valor_hora)
         : null);
     const finalNroCaso = (nro_caso_cliente || nro_caso_interno || "").toString().trim() || null;
+    const finalRequerimiento = (requerimiento || "").toString().trim() || null;
+    const finalPerfilFabrica = (perfil_fabrica || "").toString().trim() || null;
+    const finalWricef = (wricef || "").toString().trim() || null;
     const editable = await pool.query(
       `SELECT id
        FROM reporte_horas
@@ -2625,8 +2648,11 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
              fecha_cierre_mesa_fab = COALESCE($6, fecha_cierre_mesa_fab),
              estado_mesa_servicio = COALESCE($7, estado_mesa_servicio),
              estado_fabrica = COALESCE($8, estado_fabrica),
+             requerimiento = COALESCE($9, requerimiento),
+             perfil_fabrica = COALESCE($10, perfil_fabrica),
+             wricef = COALESCE($11, wricef),
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = $9`,
+         WHERE id = $12`,
         [
           finalHoras,
           finalTotal,
@@ -2636,6 +2662,9 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
           fecha_cierre || null,
           scope === "mesa" ? estadoMesaNormalizado : null,
           scope === "fabrica" ? estadoFabricaNormalizado : null,
+          finalRequerimiento,
+          finalPerfilFabrica,
+          finalWricef,
           editable.rows[0].id
         ]
       );
@@ -2644,9 +2673,9 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
         `INSERT INTO reporte_horas
           (id_registro_asignacion, horas_reportadas, total_cobrar, tipo_servicio, nro_caso_int_ext,
            observacion_mesa_fabrica, fecha_cierre_mesa_fab, estado_mesa_servicio, estado_fabrica,
-           cliente_id, tipo_asignacion_id, modulo_id, coordinador_id,
+           requerimiento, perfil_fabrica, wricef, cliente_id, tipo_asignacion_id, modulo_id, coordinador_id,
            consultor_responsable_id, consultor_principal_id, created_by, estado_reporte)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'Revisión')`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'Revisión')`,
         [
           id,
           finalHoras,
@@ -2657,6 +2686,9 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
           fecha_cierre || null,
           scope === "mesa" ? estadoMesaNormalizado : null,
           scope === "fabrica" ? estadoFabricaNormalizado : null,
+          finalRequerimiento,
+          finalPerfilFabrica,
+          finalWricef,
           tipoValido.rows[0]?.id_cliente || null,
           tipoValido.rows[0]?.id_tipo_asignacion || null,
           tipoValido.rows[0]?.id_modulo || null,

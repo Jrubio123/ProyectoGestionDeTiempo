@@ -11,6 +11,9 @@ window.mesaFabricaApp = function () {
             nro_caso_interno: "",
             nro_caso_cliente: "",
             tipo_servicio: "",
+            wricef: "",
+            requerimiento: "",
+            perfil_fabrica: "",
             estado: "",
             estado_ticket: "",
             tipo_asignacion: "",
@@ -38,7 +41,8 @@ window.mesaFabricaApp = function () {
         },
 
         editarTicket(item) {
-            const estadoTicket = this.getEstadoTicket(item);
+            const rawEstadoTicket = this.getEstadoTicket(item);
+            const estadoTicket = this.mapEstadoTicketToUi(item, rawEstadoTicket);
             const horasBase = Number(item?.horas_reportadas || 0);
             const totalBase = Number(item?.total_cobrar || 0);
             const tarifaInferida = horasBase > 0 ? (totalBase / horasBase) : 0;
@@ -49,6 +53,9 @@ window.mesaFabricaApp = function () {
                 fecha_inicio: item?.fecha_inicio || "",
                 fecha_cierre: item?.fecha_cierre_mesa_fab || item?.fecha_fin || "",
                 observacion: item?.observacion_mesa_fabrica || item?.observacion || "",
+                wricef: item?.wricef || "",
+                requerimiento: item?.requerimiento || "",
+                perfil_fabrica: item?.perfil_fabrica || "",
                 horas_reportadas: item?.horas_reportadas ?? null,
                 total_cobrar: item?.total_cobrar ?? null,
                 valor_hora: item?.valor_hora ?? tarifaInferida ?? null
@@ -67,6 +74,11 @@ window.mesaFabricaApp = function () {
                 alert("Este ticket no se puede reenviar en este estado.");
                 return;
             }
+            const validacion = this.validarTicket(item);
+            if (!validacion.ok) {
+                alert(validacion.error);
+                return;
+            }
             if (!confirm("¿Enviar ticket a aprobación del coordinador?")) return;
             try {
                 const scope = this.getScope(item);
@@ -78,6 +90,9 @@ window.mesaFabricaApp = function () {
                     fecha_cierre_mesa_fab: item.fecha_cierre_mesa_fab || item.fecha_fin || null,
                     total_cobrar: item.total_cobrar || null,
                     horas_reportadas: item.horas_reportadas || null,
+                    requerimiento: item.requerimiento || null,
+                    perfil_fabrica: item.perfil_fabrica || null,
+                    wricef: item.wricef || null,
                     estado_mesa_servicio: scope === "mesa" ? (estadoTicket || null) : null,
                     estado_fabrica: scope === "fabrica" ? (estadoTicket || null) : null
                 });
@@ -96,10 +111,25 @@ window.mesaFabricaApp = function () {
 
         async guardarCambios() {
             try {
+                const scope = this.getScope(this.form);
+                const shouldClose = this.shouldShowFechaCierre();
+                const validacion = this.validarTicket(this.form);
+                if (!validacion.ok) {
+                    alert(validacion.error);
+                    return;
+                }
                 const payload = {
                     ...this.form,
+                    tipo_servicio: scope === "mesa" ? (this.form.tipo_servicio || null) : null,
+                    estado_mesa_servicio: scope === "mesa" ? (this.form.estado_ticket || null) : null,
+                    estado_fabrica: scope === "fabrica" ? (this.form.estado_ticket || null) : null,
+                    nro_caso_cliente: scope === "mesa" ? (this.form.nro_caso_cliente || null) : null,
+                    nro_caso_interno: scope === "mesa" ? (this.form.nro_caso_interno || null) : null,
+                    wricef: scope === "fabrica" ? (this.form.wricef || null) : null,
+                    requerimiento: scope === "fabrica" ? (this.form.requerimiento || null) : null,
+                    perfil_fabrica: scope === "fabrica" ? (this.form.perfil_fabrica || null) : null,
                     fecha_inicio: this.form.fecha_inicio || null,
-                    fecha_cierre: this.form.fecha_cierre || null
+                    fecha_cierre: shouldClose ? (this.form.fecha_cierre || null) : null
                 };
                 await axios.put(`${this.API}/mesa-fabrica/${this.form.id}`, payload);
                 alert("Ticket actualizado");
@@ -108,6 +138,58 @@ window.mesaFabricaApp = function () {
             } catch (e) {
                 alert("Error guardando");
             }
+        },
+
+        mapEstadoTicketToUi(item, value) {
+            const scope = this.getScope(item);
+            if (scope === "fabrica" && String(value || "").trim() === "En Proceso") {
+                return "En Desarrollo";
+            }
+            return value || "";
+        },
+
+        validarTicket(item) {
+            const scope = this.getScope(item);
+            const estado = String(item?.estado_ticket || this.getEstadoTicket(item) || "").trim();
+            const fechaIngreso = String(item?.fecha_inicio || "").trim();
+            const fechaCierre = String(item?.fecha_cierre || item?.fecha_cierre_mesa_fab || "").trim();
+            const horas = Number(item?.horas_reportadas || 0);
+
+            if (!estado) return { ok: false, error: "Debes seleccionar un estado." };
+            if (!fechaIngreso) return { ok: false, error: "Debes indicar la fecha de ingreso." };
+            if (!(horas > 0)) return { ok: false, error: "Debes indicar horas mayores a 0." };
+
+            if (scope === "mesa") {
+                if (!String(item?.nro_caso_cliente || "").trim()) {
+                    return { ok: false, error: "Debes indicar el número de caso cliente." };
+                }
+                if (!String(item?.nro_caso_interno || "").trim()) {
+                    return { ok: false, error: "Debes indicar el número de caso interno." };
+                }
+                if (!String(item?.tipo_servicio || "").trim()) {
+                    return { ok: false, error: "Debes seleccionar el tipo de servicio." };
+                }
+                if (estado === "Cerrado" && !fechaCierre) {
+                    return { ok: false, error: "Debes indicar fecha de cierre cuando el estado es Cerrado." };
+                }
+            }
+
+            if (scope === "fabrica") {
+                if (!String(item?.wricef || "").trim()) {
+                    return { ok: false, error: "Debes indicar WRICEF." };
+                }
+                if (!String(item?.requerimiento || "").trim()) {
+                    return { ok: false, error: "Debes indicar el nombre del requerimiento." };
+                }
+                if (!String(item?.perfil_fabrica || "").trim()) {
+                    return { ok: false, error: "Debes indicar el perfil." };
+                }
+                if (estado === "Finalizado" && !fechaCierre) {
+                    return { ok: false, error: "Debes indicar fecha de cierre cuando el estado es Finalizado." };
+                }
+            }
+
+            return { ok: true };
         },
 
         normalizeTipo(tipo) {
@@ -125,6 +207,14 @@ window.mesaFabricaApp = function () {
             return "mesa";
         },
 
+        isMesa(item = null) {
+            return this.getScope(item || this.form) === "mesa";
+        },
+
+        isFabrica(item = null) {
+            return this.getScope(item || this.form) === "fabrica";
+        },
+
         estadoOptions() {
             const scope = this.getScope(this.form);
             if (scope === "fabrica") return ["En Desarrollo", "Finalizado"];
@@ -139,7 +229,9 @@ window.mesaFabricaApp = function () {
         },
 
         getEstadoTicket(item) {
-            return item?.estado_mesa_servicio || item?.estado_fabrica || "";
+            const scope = this.getScope(item);
+            if (scope === "fabrica") return item?.estado_fabrica || "";
+            return item?.estado_mesa_servicio || "";
         },
 
         recalcularTotalForm() {
@@ -147,14 +239,17 @@ window.mesaFabricaApp = function () {
             const tarifa = Number(this.form?.valor_hora || 0);
             if (horas > 0 && tarifa > 0) {
                 this.form.total_cobrar = horas * tarifa;
+                return;
             }
+            this.form.total_cobrar = 0;
         },
 
         formatMoney(v) {
             return new Intl.NumberFormat("es-CO", {
                 style: "currency",
                 currency: "COP",
-                maximumFractionDigits: 0
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 2
             }).format(Number(v || 0));
         },
 

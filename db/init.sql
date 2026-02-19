@@ -455,6 +455,8 @@ CREATE TABLE reporte_horas
 
     -- Información del reporte
     requerimiento TEXT,
+    perfil_fabrica VARCHAR(100),
+    wricef VARCHAR(120),
     es_costo_total BOOLEAN DEFAULT false,
     nro_caso_int_ext TEXT,
 
@@ -497,6 +499,8 @@ CREATE INDEX idx_reporte_fechas ON reporte_horas(created_at, fecha_cierre_mesa_f
 COMMENT ON TABLE reporte_horas IS 'Reporte de horas trabajadas por los consultores';
 COMMENT ON COLUMN reporte_horas.cliente_id IS 'Antes estaba quemado como texto, ahora es FK';
 COMMENT ON COLUMN reporte_horas.coordinador_id IS 'Antes era email quemado, ahora es FK a usuarios';
+ALTER TABLE reporte_horas ADD COLUMN IF NOT EXISTS perfil_fabrica VARCHAR(100);
+ALTER TABLE reporte_horas ADD COLUMN IF NOT EXISTS wricef VARCHAR(120);
 
 -- Tabla: AsignacionesConsultoriaMesaFabrica
 CREATE TABLE asignaciones_consultoria_mesa_fabrica

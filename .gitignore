@@ -1,8 +1,9 @@
 node_modules
 .env
-.env.local
-.env_tunnels
+.env*
+!.env.example
+!.env_produccion.example
+!.env_tunnels.example
 dist
 build
 .DS_Store
-.env_produccion

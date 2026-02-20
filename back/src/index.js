@@ -5,13 +5,13 @@ require("dotenv").config({ path: path.resolve(process.cwd(), envFile) });
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const https = require("https");
 const PDFDocument = require("pdfkit");
 const { NumerosALetras } = require("numero-a-letras");
 const { sendEmail, getGraphAccessToken } = require("./email");
+const { pool, getPoolStats, isTransientDbError } = require("./db");
 
 
 const app = express();
@@ -49,30 +49,29 @@ app.options('*', cors(corsOptions));
 /* ===============================
    BASE DE DATOS
 =============================== */
-const dbHost = String(process.env.DB_HOST || "").toLowerCase().trim();
-const dbSslEnv = String(process.env.DB_SSL || "").toLowerCase().trim();
-const localDbHosts = new Set(["localhost", "127.0.0.1", "db"]);
-const shouldUseSsl =
-  dbSslEnv
-    ? ["1", "true", "yes", "require"].includes(dbSslEnv)
-    : !localDbHosts.has(dbHost);
-
-const poolConfig = {
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT
-};
-
-if (shouldUseSsl) {
-  poolConfig.ssl = { rejectUnauthorized: false };
-}
-
-const pool = new Pool(poolConfig);
 let estadoAsignacionCache = null;
 let estadoMesaCache = null;
 let estadoFabricaCache = null;
+const FALLBACK_ESTADO_ASIGNACION = Object.freeze({
+  labels: ["Abierto", "Cerrado", "Proceso"],
+  abierto: "Abierto",
+  proceso: "Proceso",
+  cerrado: "Cerrado",
+  inactivo: null,
+  cancelado: null
+});
+
+function resetEnumCaches() {
+  estadoAsignacionCache = null;
+  estadoMesaCache = null;
+  estadoFabricaCache = null;
+}
+
+pool.on("error", (err) => {
+  if (isTransientDbError(err)) {
+    resetEnumCaches();
+  }
+});
 
 function normalizeEnumLabel(value) {
   return String(value || "")
@@ -116,14 +115,10 @@ async function getEstadoAsignacionValues() {
     return estadoAsignacionCache;
   } catch (err) {
     console.error("No se pudieron resolver valores de tipo_estado_asignacion:", err.message);
-    estadoAsignacionCache = {
-      labels: ["Abierto", "Cerrado", "Proceso"],
-      abierto: "Abierto",
-      proceso: "Proceso",
-      cerrado: "Cerrado",
-      inactivo: null,
-      cancelado: null
-    };
+    if (isTransientDbError(err)) {
+      return estadoAsignacionCache || FALLBACK_ESTADO_ASIGNACION;
+    }
+    estadoAsignacionCache = FALLBACK_ESTADO_ASIGNACION;
     return estadoAsignacionCache;
   }
 }
@@ -219,15 +214,21 @@ async function getEnumLabels(typeName, fallback = []) {
       [typeName]
     );
     const labels = (result.rows || []).map((r) => String(r.enumlabel || "").trim()).filter(Boolean);
-    return labels.length ? labels : fallback;
+    return {
+      labels: labels.length ? labels : fallback,
+      fromDb: labels.length > 0
+    };
   } catch (err) {
-    return fallback;
+    if (isTransientDbError(err)) {
+      resetEnumCaches();
+    }
+    return { labels: fallback, fromDb: false };
   }
 }
 
 async function getEstadoMesaValues() {
   if (estadoMesaCache) return estadoMesaCache;
-  const labels = await getEnumLabels("tipo_estado_mesa", ["Cerrado", "En Proceso", "Transferido Silver", "Transferido Corona"]);
+  const { labels, fromDb } = await getEnumLabels("tipo_estado_mesa", ["Cerrado", "En Proceso", "Transferido Silver", "Transferido Corona"]);
   const byNorm = new Map(labels.map((label) => [normalizeEnumLabel(label), label]));
   const pick = (...candidates) => {
     for (const candidate of candidates) {
@@ -236,14 +237,17 @@ async function getEstadoMesaValues() {
     }
     return null;
   };
-  estadoMesaCache = {
+  const resolved = {
     labels,
     cerrado: pick("Cerrado"),
     proceso: pick("En Proceso", "EnProceso"),
     transferidoSilver: pick("Transferido Silver", "TransferidoSilver"),
     transferidoCorona: pick("Transferido Corona", "TransferidoCorona")
   };
-  return estadoMesaCache;
+  if (fromDb) {
+    estadoMesaCache = resolved;
+  }
+  return resolved;
 }
 
 function resolveEstadoMesaInput(value, estadosMesa) {
@@ -261,7 +265,7 @@ function resolveEstadoMesaInput(value, estadosMesa) {
 
 async function getEstadoFabricaValues() {
   if (estadoFabricaCache) return estadoFabricaCache;
-  const labels = await getEnumLabels("tipo_estado_fabrica", ["En Proceso", "Finalizado"]);
+  const { labels, fromDb } = await getEnumLabels("tipo_estado_fabrica", ["En Proceso", "Finalizado"]);
   const byNorm = new Map(labels.map((label) => [normalizeEnumLabel(label), label]));
   const pick = (...candidates) => {
     for (const candidate of candidates) {
@@ -270,12 +274,15 @@ async function getEstadoFabricaValues() {
     }
     return null;
   };
-  estadoFabricaCache = {
+  const resolved = {
     labels,
     proceso: pick("En Proceso", "EnProceso"),
     finalizado: pick("Finalizado")
   };
-  return estadoFabricaCache;
+  if (fromDb) {
+    estadoFabricaCache = resolved;
+  }
+  return resolved;
 }
 
 function resolveEstadoFabricaInput(value, estadosFabrica) {
@@ -1633,9 +1640,16 @@ app.post("/auth/microsoft", async (req, res) => {
 app.get("/health", async (req, res) => {
   try {
     await pool.query("SELECT 1");
-    res.json({ status: "healthy", timestamp: new Date().toISOString() });
+    res.json({
+      status: "healthy",
+      timestamp: new Date().toISOString(),
+      db_pool: getPoolStats()
+    });
   } catch (err) {
-    res.status(503).json({ status: "unhealthy" });
+    res.status(503).json({
+      status: "unhealthy",
+      db_pool: getPoolStats()
+    });
   }
 });
 
@@ -3935,8 +3949,39 @@ app.listen(PORT, () => {
 // 2. Mantener 4000 como fallback para tu entorno local
 const port = process.env.PORT || 4000;
 
-// 3. AÁ±adir "0.0.0.0" asegura que el contenedor acepte conexiones externas
-app.listen(port, "0.0.0.0", () => {
+// 3. Añadir "0.0.0.0" asegura que el contenedor acepte conexiones externas
+const server = app.listen(port, "0.0.0.0", () => {
   console.log(`Server running on port ${port}`);
+});
+
+let isShuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`[shutdown] Señal recibida: ${signal}. Cerrando API...`);
+
+  const forceExitTimeout = setTimeout(() => {
+    console.error("[shutdown] Timeout agotado. Forzando cierre.");
+    process.exit(1);
+  }, 10000);
+  forceExitTimeout.unref();
+
+  server.close(async () => {
+    try {
+      await pool.end();
+      console.log("[shutdown] Pool de PostgreSQL cerrado.");
+      process.exit(0);
+    } catch (err) {
+      console.error("[shutdown] Error cerrando pool:", err?.message || err);
+      process.exit(1);
+    }
+  });
+}
+
+process.on("SIGINT", () => {
+  void gracefulShutdown("SIGINT");
+});
+process.on("SIGTERM", () => {
+  void gracefulShutdown("SIGTERM");
 });
 

@@ -1,9 +1,9 @@
 const path = require("path");
 const https = require("https");
-const { Pool } = require("pg");
 
 const envFile = process.env.NODE_ENV === "production" ? ".env_produccion" : ".env";
 require("dotenv").config({ path: path.resolve(process.cwd(), envFile) });
+const { pool } = require("../src/db");
 
 const {
   AZURE_TENANT_ID,
@@ -16,14 +16,6 @@ if (!AZURE_TENANT_ID || !AZURE_CLIENT_ID || !AZURE_CLIENT_SECRET || !AZURE_GROUP
   console.error("Faltan variables AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_GROUP_ID");
   process.exit(1);
 }
-
-const pool = new Pool({
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT
-});
 
 function httpsRequest({ hostname, path, method, headers, body }) {
   return new Promise((resolve, reject) => {

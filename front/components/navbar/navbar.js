@@ -76,7 +76,6 @@ function initNavbar() {
     const searchInput = document.querySelector(".search-input");
     const viewsList = document.getElementById("views-list");
     const mobileSidebarToggle = document.getElementById("mobileSidebarToggle");
-    let avatarObjectUrl = null;
 
     if (window.__navbarMounted) return;
     window.__navbarMounted = true;
@@ -84,16 +83,29 @@ function initNavbar() {
     async function loadAvatarFromToken(accessToken) {
         if (!accessToken || !userAvatarEl) return false;
         try {
-            const response = await fetch("https://graph.microsoft.com/v1.0/me/photo/$value", {
-                headers: { Authorization: `Bearer ${accessToken}` }
+            const appToken = window.auth?.getToken?.() || null;
+            const apiBase = window.API_BASE || "";
+            if (!appToken || !apiBase) return false;
+
+            const response = await fetch(`${apiBase}/auth/photo`, {
+                headers: {
+                    Authorization: `Bearer ${appToken}`,
+                    "X-Graph-Access-Token": accessToken
+                }
             });
             if (!response.ok) return false;
-            const blob = await response.blob();
-            if (!blob || !blob.size) return false;
 
-            if (avatarObjectUrl) URL.revokeObjectURL(avatarObjectUrl);
-            avatarObjectUrl = URL.createObjectURL(blob);
-            userAvatarEl.src = avatarObjectUrl;
+            const data = await response.json();
+            if (!data?.hasPhoto || !data?.data) {
+                if (!window.__avatarNoPhotoLogged) {
+                    console.info(data?.message || "No tiene foto de perfil");
+                    window.__avatarNoPhotoLogged = true;
+                }
+                return false;
+            }
+
+            const contentType = String(data.contentType || "image/jpeg");
+            userAvatarEl.src = `data:${contentType};base64,${data.data}`;
             return true;
         } catch (e) {
             return false;
@@ -204,10 +216,6 @@ function initNavbar() {
     }
 
     loadMicrosoftAvatar();
-
-    window.addEventListener("beforeunload", () => {
-        if (avatarObjectUrl) URL.revokeObjectURL(avatarObjectUrl);
-    });
 
     if (userMenuToggle && userMenu) {
         userMenuToggle.addEventListener("click", function () {

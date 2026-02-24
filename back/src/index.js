@@ -520,6 +520,127 @@ const isGuid = (value) =>
     String(value || "").trim()
   );
 
+const ID_TABLES = Object.freeze({
+  bancos: "bancos",
+  roles: "roles",
+  tipoCuentaBancaria: "tipo_cuenta_bancaria",
+  documentoIdentidad: "documento_identidad",
+  clientes: "clientes",
+  tipoAsignacion: "tipo_asignacion",
+  modulo: "modulo",
+  usuarios: "usuarios",
+  consultorias: "consultorias",
+  tarifaConsultor: "tarifa_consultor",
+  registroAsignaciones: "registro_asignaciones",
+  cuentaCobro: "cuenta_cobro",
+  reporteHoras: "reporte_horas",
+  solicitudesRrhh: "solicitudes_rrhh"
+});
+
+const ALLOWED_PUBLIC_ID_TABLES = new Set(Object.values(ID_TABLES));
+
+function isNumericId(value) {
+  return /^\d+$/.test(String(value || "").trim());
+}
+
+function makePublicIdNotFoundError(tableName, value) {
+  const err = new Error(`No se encontró registro para ${tableName}`);
+  err.code = "PUBLIC_ID_NOT_FOUND";
+  err.table = tableName;
+  err.value = value;
+  return err;
+}
+
+function normalizeIdInput(value) {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
+}
+
+async function resolveInternalId(db, tableName, value, { required = false } = {}) {
+  const raw = normalizeIdInput(value);
+  if (!raw) {
+    if (required) throw makePublicIdNotFoundError(tableName, value);
+    return null;
+  }
+
+  if (isNumericId(raw)) return Number(raw);
+  if (!isGuid(raw)) {
+    if (required) throw makePublicIdNotFoundError(tableName, value);
+    return null;
+  }
+
+  if (!ALLOWED_PUBLIC_ID_TABLES.has(tableName)) {
+    throw new Error(`Tabla no permitida para resolver public_id: ${tableName}`);
+  }
+
+  const result = await db.query(
+    `SELECT id FROM ${tableName} WHERE public_id = $1 LIMIT 1`,
+    [raw]
+  );
+  const resolved = result.rows[0]?.id || null;
+  if (!resolved && required) throw makePublicIdNotFoundError(tableName, value);
+  return resolved;
+}
+
+async function resolveInternalIds(db, tableName, values = []) {
+  if (!Array.isArray(values) || values.length === 0) return [];
+
+  const normalized = values.map((value) => normalizeIdInput(value));
+  const publicIds = [];
+  const publicSet = new Set();
+
+  for (const raw of normalized) {
+    if (!raw) throw makePublicIdNotFoundError(tableName, raw);
+    if (isNumericId(raw)) continue;
+    if (!isGuid(raw)) throw makePublicIdNotFoundError(tableName, raw);
+    if (!publicSet.has(raw)) {
+      publicSet.add(raw);
+      publicIds.push(raw);
+    }
+  }
+
+  const byPublicId = new Map();
+  if (publicIds.length > 0) {
+    if (!ALLOWED_PUBLIC_ID_TABLES.has(tableName)) {
+      throw new Error(`Tabla no permitida para resolver public_id: ${tableName}`);
+    }
+    const result = await db.query(
+      `SELECT id, public_id FROM ${tableName} WHERE public_id = ANY($1::uuid[])`,
+      [publicIds]
+    );
+    for (const row of result.rows || []) {
+      byPublicId.set(String(row.public_id), row.id);
+    }
+    for (const raw of publicIds) {
+      if (!byPublicId.has(raw)) {
+        throw makePublicIdNotFoundError(tableName, raw);
+      }
+    }
+  }
+
+  return normalized.map((raw) => (isNumericId(raw) ? Number(raw) : byPublicId.get(raw)));
+}
+
+function buildUserResponse(userRow) {
+  return {
+    id: userRow?.public_id || (userRow?.id ? String(userRow.id) : null),
+    nombre_usuario: userRow?.nombre_usuario || "",
+    email: userRow?.email || "",
+    rol: userRow?.rol || "",
+    rol_usuario_id: userRow?.rol_usuario_id || null,
+    tipo_consultor: userRow?.tipo_consultor || null
+  };
+}
+
+function withPublicId(row) {
+  if (!row || typeof row !== "object") return row;
+  if (!row.public_id) return row;
+  return {
+    ...row,
+    id: row.public_id
+  };
+}
+
 function graphGet(path, accessToken) {
   return new Promise((resolve, reject) => {
     const options = {
@@ -544,6 +665,41 @@ function graphGet(path, accessToken) {
         } else {
           reject(new Error(`Graph error ${res.statusCode}: ${data}`));
         }
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+function graphGetBinary(path, accessToken) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: "graph.microsoft.com",
+      path,
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    };
+    const req = https.request(options, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        const buffer = Buffer.concat(chunks);
+        const statusCode = Number(res.statusCode || 0);
+        if (statusCode >= 200 && statusCode < 300) {
+          return resolve({
+            statusCode,
+            buffer,
+            contentType: String(res.headers["content-type"] || "image/jpeg")
+          });
+        }
+        return reject(
+          new Error(
+            `Graph binary error ${statusCode}: ${buffer.toString("utf8")}`
+          )
+        );
       });
     });
     req.on("error", reject);
@@ -710,7 +866,7 @@ function decodeJwtPayload(token) {
 }
 
 function parseGraphErrorStatus(message) {
-  const match = String(message || "").match(/Graph error (\d{3})/);
+  const match = String(message || "").match(/Graph(?: binary)? error (\d{3})/);
   return match ? Number(match[1]) : null;
 }
 
@@ -791,7 +947,20 @@ const requireAuthenticated = (req, res, next) => {
 // 1. OBTENER TODOS
 app.get("/clientes", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM clientes WHERE activo = true ORDER BY id DESC");
+    const result = await pool.query(`
+      SELECT
+        public_id AS id,
+        titulo,
+        nit,
+        prefijo,
+        correlativo,
+        activo,
+        created_at,
+        updated_at
+      FROM clientes
+      WHERE activo = true
+      ORDER BY id DESC
+    `);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -815,7 +984,17 @@ app.post("/clientes", requireAccess({ roles: ["Administrador"] }), async (req, r
     const nuevoCorrelativo = corrRes.rows[0].next_val;
 
     const result = await pool.query(
-      "INSERT INTO clientes (titulo, nit, prefijo, correlativo, activo) VALUES ($1, $2, $3, $4, true) RETURNING *",
+      `INSERT INTO clientes (titulo, nit, prefijo, correlativo, activo)
+       VALUES ($1, $2, $3, $4, true)
+       RETURNING
+         public_id AS id,
+         titulo,
+         nit,
+         prefijo,
+         correlativo,
+         activo,
+         created_at,
+         updated_at`,
       [titulo, nit, prefijo || '', nuevoCorrelativo]
     );
 
@@ -832,12 +1011,28 @@ app.put("/clientes/:id", requireAccess({ roles: ["Administrador"] }), async (req
   const { titulo, nit, prefijo } = req.body;
 
   try {
+    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, id, { required: true });
     const result = await pool.query(
-      "UPDATE clientes SET titulo = $1, nit = $2, prefijo = $3 WHERE id = $4 RETURNING *",
-      [titulo, nit, prefijo, id]
+      `UPDATE clientes
+       SET titulo = $1, nit = $2, prefijo = $3
+       WHERE id = $4
+       RETURNING
+         public_id AS id,
+         titulo,
+         nit,
+         prefijo,
+         correlativo,
+         activo,
+         created_at,
+         updated_at`,
+      [titulo, nit, prefijo, clienteId]
     );
-    res.json(result.rows[0]);
+    if (!result.rows[0]) return res.status(404).json({ error: "Cliente no encontrado" });
+    res.json(withPublicId(result.rows[0]));
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Cliente no encontrado" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al actualizar" });
   }
@@ -848,13 +1043,17 @@ app.delete("/clientes/:id", requireAccess({ roles: ["Administrador"] }), async (
   const { id } = req.params;
 
   try {
+    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, id, { required: true });
     // Validar dependencias (Ejemplo: si tienes tabla consultorias)
     // const check = await pool.query("SELECT id FROM consultorias WHERE id_cliente = $1", [id]);
     // if (check.rows.length > 0) return res.status(400).json({ tiene_consultorias: true });
 
-    await pool.query("UPDATE clientes SET activo = false WHERE id = $1", [id]);
+    await pool.query("UPDATE clientes SET activo = false WHERE id = $1", [clienteId]);
     res.json({ ok: true });
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Cliente no encontrado" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al eliminar" });
   }
@@ -869,7 +1068,7 @@ app.get("/consultores", requireAccess({ roles: ["Administrador", "Coordinador"] 
   try {
     const result = await pool.query(`
       SELECT 
-        u.id,
+        u.public_id AS id,
         u.nombre_usuario AS nombre,
         u.moneda_cobro AS moneda
       FROM usuarios u
@@ -890,7 +1089,7 @@ app.get("/consultores/principales", requireAccess({ roles: ["Administrador", "Co
   try {
     const result = await pool.query(`
       SELECT
-        u.id,
+        u.public_id AS id,
         u.nombre_usuario,
         u.email
       FROM usuarios u
@@ -912,10 +1111,11 @@ app.get("/sub-consultores/:principalId", requireAccess({ roles: ["Administrador"
   const { principalId } = req.params;
   try {
     if (!principalId) return res.json([]);
+    const principalInternalId = await resolveInternalId(pool, ID_TABLES.usuarios, principalId, { required: true });
     const result = await pool.query(
       `
       SELECT
-        u.id,
+        u.public_id AS id,
         u.nombre_usuario,
         u.email
       FROM usuarios u
@@ -924,10 +1124,11 @@ app.get("/sub-consultores/:principalId", requireAccess({ roles: ["Administrador"
         AND LOWER(u.tipo_consultor::text) = 'asociado'
       ORDER BY u.nombre_usuario ASC
       `,
-      [principalId]
+      [principalInternalId]
     );
     res.json(result.rows);
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.json([]);
     console.error(err);
     res.status(500).json({ error: "Error al obtener consultores asociados" });
   }
@@ -938,10 +1139,11 @@ app.get("/sub-consultores/disponibles/:principalId", requireAccess({ roles: ["Ad
   const { principalId } = req.params;
   try {
     if (!principalId) return res.json([]);
+    const principalInternalId = await resolveInternalId(pool, ID_TABLES.usuarios, principalId, { required: true });
     const result = await pool.query(
       `
       SELECT
-        u.id,
+        u.public_id AS id,
         u.nombre_usuario,
         u.email
       FROM usuarios u
@@ -953,10 +1155,11 @@ app.get("/sub-consultores/disponibles/:principalId", requireAccess({ roles: ["Ad
         AND (u.tipo_consultor IS NULL OR LOWER(u.tipo_consultor::text) <> 'asociado')
       ORDER BY u.nombre_usuario ASC
       `,
-      [principalId]
+      [principalInternalId]
     );
     res.json(result.rows);
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.json([]);
     console.error(err);
     res.status(500).json({ error: "Error al obtener consultores disponibles" });
   }
@@ -969,10 +1172,12 @@ app.post("/sub-consultores/asociar", requireAccess({ roles: ["Administrador", "C
     if (!principal_id || !asociado_id) {
       return res.status(400).json({ error: "Faltan datos para asociar" });
     }
+    const principalId = await resolveInternalId(pool, ID_TABLES.usuarios, principal_id, { required: true });
+    const asociadoId = await resolveInternalId(pool, ID_TABLES.usuarios, asociado_id, { required: true });
 
     const principal = await pool.query(
       "SELECT id, tipo_consultor FROM usuarios WHERE id = $1 AND activo = true",
-      [principal_id]
+      [principalId]
     );
     if (principal.rows.length === 0) {
       return res.status(404).json({ error: "Consultor principal no encontrado" });
@@ -984,7 +1189,7 @@ app.post("/sub-consultores/asociar", requireAccess({ roles: ["Administrador", "C
 
     const asociado = await pool.query(
       "SELECT id, id_consultor_principal FROM usuarios WHERE id = $1 AND activo = true",
-      [asociado_id]
+      [asociadoId]
     );
     if (asociado.rows.length === 0) {
       return res.status(404).json({ error: "Consultor asociado no encontrado" });
@@ -999,11 +1204,14 @@ app.post("/sub-consultores/asociar", requireAccess({ roles: ["Administrador", "C
            tipo_consultor = 'Asociado',
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $2`,
-      [principal_id, asociado_id]
+      [principalId, asociadoId]
     );
 
     res.json({ ok: true });
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Consultor no encontrado" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al asociar consultor" });
   }
@@ -1017,15 +1225,17 @@ app.delete("/sub-consultores/:asociadoId", requireAccess({ roles: ["Administrado
     if (!asociadoId || !principal_id) {
       return res.status(400).json({ error: "Faltan datos para desvincular" });
     }
+    const asociadoInternalId = await resolveInternalId(pool, ID_TABLES.usuarios, asociadoId, { required: true });
+    const principalInternalId = await resolveInternalId(pool, ID_TABLES.usuarios, principal_id, { required: true });
 
     const asociado = await pool.query(
       "SELECT id, id_consultor_principal FROM usuarios WHERE id = $1 AND activo = true",
-      [asociadoId]
+      [asociadoInternalId]
     );
     if (asociado.rows.length === 0) {
       return res.status(404).json({ error: "Consultor asociado no encontrado" });
     }
-    if (String(asociado.rows[0].id_consultor_principal || "") !== String(principal_id)) {
+    if (String(asociado.rows[0].id_consultor_principal || "") !== String(principalInternalId)) {
       return res.status(403).json({ error: "No autorizado para desvincular" });
     }
 
@@ -1035,11 +1245,14 @@ app.delete("/sub-consultores/:asociadoId", requireAccess({ roles: ["Administrado
            tipo_consultor = NULL,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $1`,
-      [asociadoId]
+      [asociadoInternalId]
     );
 
     res.json({ ok: true });
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Consultor no encontrado" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al desvincular consultor" });
   }
@@ -1049,7 +1262,7 @@ app.delete("/sub-consultores/:asociadoId", requireAccess({ roles: ["Administrado
 app.get("/modulos", requireAuthenticated, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, titulo
+      SELECT public_id AS id, titulo
       FROM modulo
       WHERE activo = true
       ORDER BY titulo ASC
@@ -1065,7 +1278,7 @@ app.get("/modulos", requireAuthenticated, async (req, res) => {
 app.get("/tipos-asignacion", requireAuthenticated, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, titulo
+      SELECT public_id AS id, titulo
       FROM tipo_asignacion
       WHERE activo = true
       ORDER BY id ASC
@@ -1095,10 +1308,10 @@ app.get("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Reclutador"
     const result = await pool.query(
       `
       SELECT
-        s.id,
-        s.coordinador_id,
-        s.cliente_id,
-        s.modulo_id,
+        s.public_id AS id,
+        coord.public_id AS coordinador_id,
+        c.public_id AS cliente_id,
+        m.public_id AS modulo_id,
         s.perfil,
         s.nivel,
         s.tiempo,
@@ -1117,11 +1330,11 @@ app.get("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Reclutador"
         s.updated_at,
         c.titulo AS cliente,
         m.titulo AS modulo,
-        u.nombre_usuario AS solicitante
+        coord.nombre_usuario AS solicitante
       FROM solicitudes_rrhh s
         LEFT JOIN clientes c ON s.cliente_id = c.id
         LEFT JOIN modulo m ON s.modulo_id = m.id
-        LEFT JOIN usuarios u ON s.coordinador_id = u.id
+        LEFT JOIN usuarios coord ON s.coordinador_id = coord.id
       ${where}
       ORDER BY s.created_at DESC
       `,
@@ -1156,6 +1369,8 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
     if (!cliente_id || !modulo_id || !perfil || !nivel) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
+    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, cliente_id, { required: true });
+    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, modulo_id, { required: true });
     const result = await pool.query(
       `
       INSERT INTO solicitudes_rrhh
@@ -1178,12 +1393,12 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
         )
       VALUES
         ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-      RETURNING *
+      RETURNING id
       `,
       [
         req.user?.id,
-        cliente_id,
-        modulo_id,
+        clienteId,
+        moduloId,
         perfil,
         nivel,
         tiempo || null,
@@ -1198,7 +1413,42 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
         prioridad || "Media"
       ]
     );
-    const created = result.rows[0];
+    const createdInternalId = result.rows[0]?.id;
+    const createdRes = await pool.query(
+      `
+      SELECT
+        s.public_id AS id,
+        coord.public_id AS coordinador_id,
+        c.public_id AS cliente_id,
+        m.public_id AS modulo_id,
+        s.perfil,
+        s.nivel,
+        s.tiempo,
+        s.ubicacion,
+        s.modalidad,
+        s.fecha_inicio_esperada,
+        s.tipo_proyecto,
+        s.experiencia,
+        s.presupuesto,
+        s.descripcion,
+        s.informacion_adicional,
+        s.prioridad,
+        s.estado,
+        s.observaciones_rrhh,
+        s.created_at,
+        s.updated_at,
+        c.titulo AS cliente,
+        m.titulo AS modulo,
+        coord.nombre_usuario AS solicitante
+      FROM solicitudes_rrhh s
+      LEFT JOIN clientes c ON c.id = s.cliente_id
+      LEFT JOIN modulo m ON m.id = s.modulo_id
+      LEFT JOIN usuarios coord ON coord.id = s.coordinador_id
+      WHERE s.id = $1
+      `,
+      [createdInternalId]
+    );
+    const created = createdRes.rows[0];
 
     try {
       const [detalleSolicitud, reclutadores] = await Promise.all([
@@ -1219,7 +1469,7 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
             LEFT JOIN usuarios u ON u.id = s.coordinador_id
           WHERE s.id = $1
           `,
-          [created.id]
+          [createdInternalId]
         ),
         pool.query(
           `
@@ -1274,6 +1524,9 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
 
     res.json(created);
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(400).json({ error: "Cliente o módulo no válido" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al crear solicitud" });
   }
@@ -1284,6 +1537,7 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
   const { id } = req.params;
   const { estado, observaciones_rrhh } = req.body || {};
   try {
+    const solicitudId = await resolveInternalId(pool, ID_TABLES.solicitudesRrhh, id, { required: true });
     const solicitudInfo = await pool.query(
       `
       SELECT
@@ -1301,7 +1555,7 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
         LEFT JOIN usuarios u ON u.id = s.coordinador_id
       WHERE s.id = $1
       `,
-      [id]
+      [solicitudId]
     );
 
     if (solicitudInfo.rows.length === 0) {
@@ -1326,13 +1580,13 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
       return res.status(400).json({ error: "No hay cambios para actualizar" });
     }
 
-    values.push(id);
+    values.push(solicitudId);
     const result = await pool.query(
       `
       UPDATE solicitudes_rrhh
       SET ${fields.join(", ")}
       WHERE id = $${idx}
-      RETURNING *
+      RETURNING id
       `,
       values
     );
@@ -1340,7 +1594,42 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "Solicitud no encontrada" });
     }
-    const updated = result.rows[0];
+    const updatedId = result.rows[0]?.id;
+    const updatedRes = await pool.query(
+      `
+      SELECT
+        s.public_id AS id,
+        coord.public_id AS coordinador_id,
+        c.public_id AS cliente_id,
+        m.public_id AS modulo_id,
+        s.perfil,
+        s.nivel,
+        s.tiempo,
+        s.ubicacion,
+        s.modalidad,
+        s.fecha_inicio_esperada,
+        s.tipo_proyecto,
+        s.experiencia,
+        s.presupuesto,
+        s.descripcion,
+        s.informacion_adicional,
+        s.prioridad,
+        s.estado,
+        s.observaciones_rrhh,
+        s.created_at,
+        s.updated_at,
+        c.titulo AS cliente,
+        m.titulo AS modulo,
+        coord.nombre_usuario AS solicitante
+      FROM solicitudes_rrhh s
+      LEFT JOIN clientes c ON c.id = s.cliente_id
+      LEFT JOIN modulo m ON m.id = s.modulo_id
+      LEFT JOIN usuarios coord ON coord.id = s.coordinador_id
+      WHERE s.id = $1
+      `,
+      [updatedId]
+    );
+    const updated = updatedRes.rows[0];
 
     const estadoFinal = updated.estado;
     const cambioEstado = Boolean(estado) && String(before.estado_actual || "") !== String(estadoFinal || "");
@@ -1367,6 +1656,9 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
 
     res.json(updated);
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Solicitud no encontrada" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al actualizar solicitud" });
   }
@@ -1403,11 +1695,20 @@ app.post("/auth/register", async (req, res) => {
     const result = await pool.query(
       `INSERT INTO usuarios (nombre_usuario, email, password_hash, rol_usuario_id, activo)
        VALUES ($1, $2, $3, $4, true)
-       RETURNING id, nombre_usuario, email, rol_usuario_id`,
+       RETURNING id, public_id, nombre_usuario, email, rol_usuario_id`,
       [nombre_usuario, email, hash, rolId]
     );
 
-    res.json({ ok: true, user: result.rows[0] });
+    const user = result.rows[0];
+    res.json({
+      ok: true,
+      user: {
+        id: user.public_id || (user.id ? String(user.id) : null),
+        nombre_usuario: user.nombre_usuario,
+        email: user.email,
+        rol_usuario_id: user.rol_usuario_id
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al registrar" });
@@ -1426,7 +1727,7 @@ app.post("/auth/login", async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT u.id, u.nombre_usuario, u.email, u.password_hash, u.rol_usuario_id, u.tipo_consultor, r.titulo AS rol
+      `SELECT u.id, u.public_id, u.nombre_usuario, u.email, u.password_hash, u.rol_usuario_id, u.tipo_consultor, r.titulo AS rol
          FROM usuarios u
          LEFT JOIN roles r ON u.rol_usuario_id = r.id
          WHERE u.email = $1 AND u.activo = true`,
@@ -1434,17 +1735,18 @@ app.post("/auth/login", async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(401).json({ error: "Credenciales invÁ¡lidas" });
+      return res.status(401).json({ error: "Credenciales inválidas" });
     }
 
     const user = result.rows[0];
     const ok = await bcrypt.compare(password, user.password_hash || "");
     if (!ok) {
-      return res.status(401).json({ error: "Credenciales invÁ¡lidas" });
+      return res.status(401).json({ error: "Credenciales inválidas" });
     }
 
     const payload = {
       id: user.id,
+      public_id: user.public_id || null,
       nombre_usuario: user.nombre_usuario,
       email: user.email,
       rol: user.rol || "",
@@ -1453,7 +1755,7 @@ app.post("/auth/login", async (req, res) => {
     };
 
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "12h" });
-    res.json({ token, user: payload });
+    res.json({ token, user: buildUserResponse(user) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al iniciar sesión" });
@@ -1467,18 +1769,64 @@ app.get("/auth/me", async (req, res) => {
     if (!token) return res.status(401).json({ error: "No autorizado" });
     const decoded = jwt.verify(token, JWT_SECRET);
     const result = await pool.query(
-      `SELECT u.id, u.nombre_usuario, u.email, u.rol_usuario_id, u.tipo_consultor, r.titulo AS rol
+      `SELECT u.id, u.public_id, u.nombre_usuario, u.email, u.rol_usuario_id, u.tipo_consultor, r.titulo AS rol
          FROM usuarios u
          LEFT JOIN roles r ON u.rol_usuario_id = r.id
          WHERE u.id = $1 AND u.activo = true`,
       [decoded.id]
     );
     if (result.rows.length === 0) {
-      return res.status(401).json({ error: "Usuario no vÁ¡lido" });
+      return res.status(401).json({ error: "Usuario no válido" });
     }
-    res.json({ user: result.rows[0] });
+    res.json({ user: buildUserResponse(result.rows[0]) });
   } catch (err) {
-    res.status(401).json({ error: "Token invÁ¡lido" });
+    res.status(401).json({ error: "Token inválido" });
+  }
+});
+
+app.get("/auth/photo", async (req, res) => {
+  try {
+    const auth = req.headers.authorization || "";
+    const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ error: "No autorizado" });
+    jwt.verify(token, JWT_SECRET);
+
+    const graphAccessToken = String(req.headers["x-graph-access-token"] || "").trim();
+    if (!graphAccessToken) {
+      return res.json({
+        hasPhoto: false,
+        message: "No tiene foto de perfil"
+      });
+    }
+
+    const photo = await graphGetBinary("/v1.0/me/photo/$value", graphAccessToken);
+    return res.json({
+      hasPhoto: true,
+      contentType: photo.contentType || "image/jpeg",
+      data: photo.buffer.toString("base64")
+    });
+  } catch (err) {
+    if (err?.name === "JsonWebTokenError" || err?.name === "TokenExpiredError") {
+      return res.status(401).json({ error: "Token inválido" });
+    }
+    const status = parseGraphErrorStatus(err?.message);
+    if (status === 404) {
+      return res.json({
+        hasPhoto: false,
+        message: "No tiene foto de perfil"
+      });
+    }
+    if (status === 401 || status === 403) {
+      return res.json({
+        hasPhoto: false,
+        message: "No se pudo validar la sesión de Microsoft para la foto"
+      });
+    }
+    console.error("Error obteniendo foto de perfil Microsoft:", err?.message || err);
+    return res.status(500).json({
+      hasPhoto: false,
+      message: "Error al cargar foto de perfil"
+    });
   }
 });
 
@@ -1565,7 +1913,7 @@ app.post("/auth/microsoft", async (req, res) => {
     }
 
     let userRes = await pool.query(
-      `SELECT u.id, u.nombre_usuario, u.email, u.rol_usuario_id, u.tipo_consultor, u.azure_oid, r.titulo AS rol
+      `SELECT u.id, u.public_id, u.nombre_usuario, u.email, u.rol_usuario_id, u.tipo_consultor, u.azure_oid, r.titulo AS rol
        FROM usuarios u
        LEFT JOIN roles r ON u.rol_usuario_id = r.id
        WHERE (u.azure_oid = $1 OR u.email = $2) AND u.activo = true
@@ -1578,7 +1926,7 @@ app.post("/auth/microsoft", async (req, res) => {
         `INSERT INTO usuarios
           (nombre_usuario, email, rol_usuario_id, activo, telefono, created_by, azure_oid)
          VALUES ($1, $2, $3, true, $4, 'ms_sso', $5)
-         RETURNING id, nombre_usuario, email, rol_usuario_id`,
+         RETURNING id, public_id, nombre_usuario, email, rol_usuario_id`,
         [nombre, email, rolId, telefono, oid]
       );
     } else {
@@ -1597,6 +1945,7 @@ app.post("/auth/microsoft", async (req, res) => {
     }
     const payload = {
       id: userRow.id,
+      public_id: userRow.public_id || null,
       nombre_usuario: userRow.nombre_usuario || nombre,
       email: userRow.email || email,
       rol: userRow.rol || rolTitulo,
@@ -1605,7 +1954,13 @@ app.post("/auth/microsoft", async (req, res) => {
     };
 
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "12h" });
-    res.json({ token, user: payload });
+    res.json({
+      token,
+      user: buildUserResponse({
+        ...userRow,
+        rol: userRow.rol || rolTitulo
+      })
+    });
   } catch (err) {
     const status = parseGraphErrorStatus(err.message);
     if (status === 401 || status === 403) {
@@ -1667,7 +2022,7 @@ const authMiddleware = (req, res, next) => {
     req.user = jwt.verify(token, JWT_SECRET);
     return next();
   } catch (err) {
-    return res.status(401).json({ error: "Token invÁ¡lido" });
+    return res.status(401).json({ error: "Token inválido" });
   }
 };
 
@@ -1678,7 +2033,7 @@ app.get("/coordinadores", requireAccess({ roles: ["Administrador"] }), async (re
   try {
     const result = await pool.query(`
       SELECT 
-        u.id,
+        u.public_id AS id,
         u.nombre_usuario AS nombre
       FROM usuarios u
       LEFT JOIN roles r ON u.rol_usuario_id = r.id
@@ -1701,14 +2056,21 @@ app.get("/tarifa-consultor", requireAccess({ roles: ["Administrador", "Coordinad
   const { consultor_id, cliente_id, modulo_id, tipo_asignacion_id } = req.query;
   try {
     if (!consultor_id || !cliente_id) {
-      return res.status(400).json({ error: "Faltan parÁ¡metros requeridos" });
+      return res.status(400).json({ error: "Faltan parámetros requeridos" });
     }
+    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_id, { required: true });
+    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, cliente_id, { required: true });
+    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, modulo_id, { required: false });
+    const tipoAsignacionId = await resolveInternalId(pool, ID_TABLES.tipoAsignacion, tipo_asignacion_id, { required: false });
     const result = await pool.query(
       `SELECT obtener_tarifa_consultor($1, $2, $3, $4) AS valor_tarifa`,
-      [consultor_id, cliente_id, modulo_id || null, tipo_asignacion_id || null]
+      [consultorId, clienteId, moduloId || null, tipoAsignacionId || null]
     );
-    res.json(result.rows[0]);
+    res.json(withPublicId(result.rows[0]));
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "No se encontraron referencias para calcular tarifa" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al obtener tarifa" });
   }
@@ -1723,11 +2085,11 @@ app.get("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador"] }), 
   try {
     const result = await pool.query(`
       SELECT 
-        tc.id,
-        tc.id_cliente AS cliente_id,
-        tc.consultor_id,
-        tc.modulo_id,
-        tc.id_tipo_asignacion AS tipo_asignacion_id,
+        tc.public_id AS id,
+        c.public_id AS cliente_id,
+        u.public_id AS consultor_id,
+        m.public_id AS modulo_id,
+        ta.public_id AS tipo_asignacion_id,
         tc.valor_tarifa AS valor,
         tc.activo,
         c.titulo AS nombre_cliente,
@@ -1758,22 +2120,50 @@ app.post("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador"] }),
     if (!cliente_id || !consultor_id || !tipo_asignacion_id || !valor) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
+    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, cliente_id, { required: true });
+    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_id, { required: true });
+    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, modulo_id, { required: false });
+    const tipoAsignacionId = await resolveInternalId(pool, ID_TABLES.tipoAsignacion, tipo_asignacion_id, { required: true });
 
     const result = await pool.query(
-      `INSERT INTO tarifa_consultor 
-        (id_cliente, consultor_id, modulo_id, id_tipo_asignacion, valor_tarifa, activo)
-       VALUES ($1, $2, $3, $4, $5, true)
-       RETURNING *`,
+      `WITH ins AS (
+         INSERT INTO tarifa_consultor
+           (id_cliente, consultor_id, modulo_id, id_tipo_asignacion, valor_tarifa, activo)
+         VALUES ($1, $2, $3, $4, $5, true)
+         RETURNING id
+       )
+       SELECT
+         tc.public_id AS id,
+         c.public_id AS cliente_id,
+         u.public_id AS consultor_id,
+         m.public_id AS modulo_id,
+         ta.public_id AS tipo_asignacion_id,
+         tc.valor_tarifa AS valor,
+         tc.activo,
+         c.titulo AS nombre_cliente,
+         u.nombre_usuario AS nombre_consultor,
+         m.titulo AS nombre_modulo,
+         ta.titulo AS tipo_asignacion,
+         u.moneda_cobro AS moneda
+       FROM tarifa_consultor tc
+       JOIN clientes c ON c.id = tc.id_cliente
+       JOIN usuarios u ON u.id = tc.consultor_id
+       LEFT JOIN modulo m ON m.id = tc.modulo_id
+       LEFT JOIN tipo_asignacion ta ON ta.id = tc.id_tipo_asignacion
+       WHERE tc.id = (SELECT id FROM ins)`,
       [
-        cliente_id,
-        consultor_id,
-        modulo_id || null,
-        tipo_asignacion_id || null,
+        clienteId,
+        consultorId,
+        moduloId || null,
+        tipoAsignacionId || null,
         valor
       ]
     );
-    res.json(result.rows[0]);
+    res.json(withPublicId(result.rows[0]));
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(400).json({ error: "Cliente, consultor, módulo o tipo de asignación no válido" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al guardar tarifa" });
   }
@@ -1785,26 +2175,56 @@ app.put("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador"] 
   const { cliente_id, consultor_id, modulo_id, tipo_asignacion_id, valor } = req.body;
 
   try {
+    const tarifaId = await resolveInternalId(pool, ID_TABLES.tarifaConsultor, id, { required: true });
+    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, cliente_id, { required: true });
+    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_id, { required: true });
+    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, modulo_id, { required: false });
+    const tipoAsignacionId = await resolveInternalId(pool, ID_TABLES.tipoAsignacion, tipo_asignacion_id, { required: true });
     const result = await pool.query(
-      `UPDATE tarifa_consultor
-       SET id_cliente = $1,
-           consultor_id = $2,
-           modulo_id = $3,
-           id_tipo_asignacion = $4,
-           valor_tarifa = $5
-       WHERE id = $6
-       RETURNING *`,
+      `WITH upd AS (
+         UPDATE tarifa_consultor
+         SET id_cliente = $1,
+             consultor_id = $2,
+             modulo_id = $3,
+             id_tipo_asignacion = $4,
+             valor_tarifa = $5
+         WHERE id = $6
+         RETURNING id
+       )
+       SELECT
+         tc.public_id AS id,
+         c.public_id AS cliente_id,
+         u.public_id AS consultor_id,
+         m.public_id AS modulo_id,
+         ta.public_id AS tipo_asignacion_id,
+         tc.valor_tarifa AS valor,
+         tc.activo,
+         c.titulo AS nombre_cliente,
+         u.nombre_usuario AS nombre_consultor,
+         m.titulo AS nombre_modulo,
+         ta.titulo AS tipo_asignacion,
+         u.moneda_cobro AS moneda
+       FROM tarifa_consultor tc
+       JOIN clientes c ON c.id = tc.id_cliente
+       JOIN usuarios u ON u.id = tc.consultor_id
+       LEFT JOIN modulo m ON m.id = tc.modulo_id
+       LEFT JOIN tipo_asignacion ta ON ta.id = tc.id_tipo_asignacion
+       WHERE tc.id = (SELECT id FROM upd)`,
       [
-        cliente_id,
-        consultor_id,
-        modulo_id || null,
-        tipo_asignacion_id || null,
+        clienteId,
+        consultorId,
+        moduloId || null,
+        tipoAsignacionId || null,
         valor,
-        id
+        tarifaId
       ]
     );
+    if (!result.rows[0]) return res.status(404).json({ error: "Tarifa no encontrada" });
     res.json(result.rows[0]);
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Tarifa o referencias no encontradas" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al actualizar tarifa" });
   }
@@ -1815,9 +2235,13 @@ app.delete("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador
   const { id } = req.params;
 
   try {
-    await pool.query("UPDATE tarifa_consultor SET activo = false WHERE id = $1", [id]);
+    const tarifaId = await resolveInternalId(pool, ID_TABLES.tarifaConsultor, id, { required: true });
+    await pool.query("UPDATE tarifa_consultor SET activo = false WHERE id = $1", [tarifaId]);
     res.json({ ok: true });
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Tarifa no encontrada" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al eliminar tarifa" });
   }
@@ -1830,13 +2254,21 @@ app.delete("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador
 // Obtener consultorías
 app.get("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   try {
-    const coordinadorId = req.query.coordinador_id || null;
+    let coordinadorId = null;
+    if (req.query.coordinador_id) {
+      coordinadorId = await resolveInternalId(
+        pool,
+        ID_TABLES.usuarios,
+        req.query.coordinador_id,
+        { required: true }
+      );
+    }
     const result = await pool.query(`
       SELECT
-        c.id,
-        c.id_cliente AS cliente_id,
-        c.coordinador_responsable_id AS coordinador_id,
-        c.id_tipo_asignacion AS tipo_asignacion_id,
+        c.public_id AS id,
+        cli.public_id AS cliente_id,
+        u.public_id AS coordinador_id,
+        ta.public_id AS tipo_asignacion_id,
         c.descripcion_consultoria,
         c.activo,
         cli.titulo AS nombre_cliente,
@@ -1852,6 +2284,7 @@ app.get("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"]
     `, [coordinadorId]);
     res.json(result.rows);
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.json([]);
     console.error(err);
     res.status(500).json({ error: "Error al obtener consultorías" });
   }
@@ -1865,16 +2298,36 @@ app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"
     if (!cliente_id || !coordinador_id || !tipo_asignacion_id) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
+    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, cliente_id, { required: true });
+    const coordinadorId = await resolveInternalId(pool, ID_TABLES.usuarios, coordinador_id, { required: true });
+    const tipoAsignacionId = await resolveInternalId(pool, ID_TABLES.tipoAsignacion, tipo_asignacion_id, { required: true });
 
     const result = await pool.query(
-      `INSERT INTO consultorias
-        (id_cliente, coordinador_responsable_id, id_tipo_asignacion, descripcion_consultoria, activo)
-       VALUES ($1, $2, $3, $4, true)
-       RETURNING *`,
+      `WITH ins AS (
+         INSERT INTO consultorias
+           (id_cliente, coordinador_responsable_id, id_tipo_asignacion, descripcion_consultoria, activo)
+         VALUES ($1, $2, $3, $4, true)
+         RETURNING id
+       )
+       SELECT
+         c.public_id AS id,
+         cli.public_id AS cliente_id,
+         u.public_id AS coordinador_id,
+         ta.public_id AS tipo_asignacion_id,
+         c.descripcion_consultoria,
+         c.activo,
+         cli.titulo AS nombre_cliente,
+         u.nombre_usuario AS nombre_coordinador,
+         ta.titulo AS tipo_asignacion
+       FROM consultorias c
+       JOIN clientes cli ON cli.id = c.id_cliente
+       LEFT JOIN usuarios u ON u.id = c.coordinador_responsable_id
+       LEFT JOIN tipo_asignacion ta ON ta.id = c.id_tipo_asignacion
+       WHERE c.id = (SELECT id FROM ins)`,
       [
-        cliente_id,
-        coordinador_id,
-        tipo_asignacion_id,
+        clienteId,
+        coordinadorId,
+        tipoAsignacionId,
         descripcion_consultoria || null
       ]
     );
@@ -1890,8 +2343,8 @@ app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"
        FROM usuarios u
          JOIN clientes c ON c.id = $1
          JOIN tipo_asignacion ta ON ta.id = $2
-       WHERE u.id = $3`,
-      [cliente_id, tipo_asignacion_id, coordinador_id]
+        WHERE u.id = $3`,
+      [clienteId, tipoAsignacionId, coordinadorId]
     );
     const row = mailInfo.rows[0];
     if (row?.coordinador_email) {
@@ -1922,6 +2375,9 @@ app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"
 
     res.json(created);
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(400).json({ error: "Cliente, coordinador o tipo de asignación no válido" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al guardar consultoría" });
   }
@@ -1933,24 +2389,49 @@ app.put("/consultorias/:id", requireAccess({ roles: ["Administrador", "Coordinad
   const { cliente_id, coordinador_id, tipo_asignacion_id, descripcion_consultoria } = req.body;
 
   try {
+    const consultoriaId = await resolveInternalId(pool, ID_TABLES.consultorias, id, { required: true });
+    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, cliente_id, { required: true });
+    const coordinadorId = await resolveInternalId(pool, ID_TABLES.usuarios, coordinador_id, { required: true });
+    const tipoAsignacionId = await resolveInternalId(pool, ID_TABLES.tipoAsignacion, tipo_asignacion_id, { required: true });
     const result = await pool.query(
-      `UPDATE consultorias
-       SET id_cliente = $1,
-           coordinador_responsable_id = $2,
-           id_tipo_asignacion = $3,
-           descripcion_consultoria = $4
-       WHERE id = $5
-       RETURNING *`,
+      `WITH upd AS (
+         UPDATE consultorias
+         SET id_cliente = $1,
+             coordinador_responsable_id = $2,
+             id_tipo_asignacion = $3,
+             descripcion_consultoria = $4
+         WHERE id = $5
+         RETURNING id
+       )
+       SELECT
+         c.public_id AS id,
+         cli.public_id AS cliente_id,
+         u.public_id AS coordinador_id,
+         ta.public_id AS tipo_asignacion_id,
+         c.descripcion_consultoria,
+         c.activo,
+         cli.titulo AS nombre_cliente,
+         u.nombre_usuario AS nombre_coordinador,
+         ta.titulo AS tipo_asignacion
+       FROM consultorias c
+       JOIN clientes cli ON cli.id = c.id_cliente
+       LEFT JOIN usuarios u ON u.id = c.coordinador_responsable_id
+       LEFT JOIN tipo_asignacion ta ON ta.id = c.id_tipo_asignacion
+       WHERE c.id = (SELECT id FROM upd)`,
       [
-        cliente_id,
-        coordinador_id,
-        tipo_asignacion_id,
+        clienteId,
+        coordinadorId,
+        tipoAsignacionId,
         descripcion_consultoria || null,
-        id
+        consultoriaId
       ]
     );
+    if (!result.rows[0]) return res.status(404).json({ error: "Consultoría no encontrada" });
     res.json(result.rows[0]);
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Consultoría o referencias no encontradas" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al actualizar consultoría" });
   }
@@ -1961,9 +2442,13 @@ app.delete("/consultorias/:id", requireAccess({ roles: ["Administrador", "Coordi
   const { id } = req.params;
 
   try {
-    await pool.query("UPDATE consultorias SET activo = false WHERE id = $1", [id]);
+    const consultoriaId = await resolveInternalId(pool, ID_TABLES.consultorias, id, { required: true });
+    await pool.query("UPDATE consultorias SET activo = false WHERE id = $1", [consultoriaId]);
     res.json({ ok: true });
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Consultoría no encontrada" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al eliminar consultoría" });
   }
@@ -1979,18 +2464,18 @@ app.get("/mis-asignaciones-coordinador", requireAccess({ roles: ["Coordinador"] 
     const userId = req.user?.id || req.query.coordinador_id;
     const result = await pool.query(`
         SELECT
-          ra.id,
-          con.id AS consultoria_id,
-          c.id AS cliente_id,
+          ra.public_id AS id,
+          con.public_id AS consultoria_id,
+          c.public_id AS cliente_id,
           c.titulo AS cliente,
           u.nombre_usuario AS consultor_responsable,
           coord.nombre_usuario AS coordinador,
           m.titulo AS modulo,
           ta.titulo AS tipo_asignacion,
-          con.id_tipo_asignacion AS tipo_asignacion_id,
+          ta.public_id AS tipo_asignacion_id,
           con.descripcion_consultoria,
-          ra.consultor_responsable_id,
-          ra.id_modulo,
+          u.public_id AS consultor_responsable_id,
+          m.public_id AS id_modulo,
           ra.estado,
           ra.tipo_servicio,
           ra.valor_hora,
@@ -2026,9 +2511,9 @@ app.get("/mis-asignaciones", requireAccess({ roles: ["Consultor", "Consultor Pri
     const userId = req.user?.id || req.query.consultor_id;
     const result = await pool.query(`
       SELECT
-        ra.id,
-        con.id AS consultoria_id,
-        c.id AS cliente_id,
+        ra.public_id AS id,
+        con.public_id AS consultoria_id,
+        c.public_id AS cliente_id,
         c.titulo AS nombre_cliente,
         coord.nombre_usuario AS nombre_coordinador,
         m.titulo AS nombre_modulo,
@@ -2077,9 +2562,9 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
     const userId = req.user?.id || req.query.consultor_id;
     const result = await pool.query(`
       SELECT
-        ra.id,
-        con.id AS consultoria_id,
-        c.id AS cliente_id,
+        ra.public_id AS id,
+        con.public_id AS consultoria_id,
+        c.public_id AS cliente_id,
         c.titulo AS nombre_cliente,
         coord.nombre_usuario AS nombre_coordinador,
         m.titulo AS nombre_modulo,
@@ -2141,6 +2626,12 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
     if (!id_registro_asignacion) {
       return res.status(400).json({ error: "Falta id_registro_asignacion" });
     }
+    const registroAsignacionId = await resolveInternalId(
+      pool,
+      ID_TABLES.registroAsignaciones,
+      id_registro_asignacion,
+      { required: true }
+    );
 
     const existente = await pool.query(
       `SELECT id, estado_reporte
@@ -2149,7 +2640,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
            AND estado_reporte IN ('Pendiente', 'Rechazado')
          ORDER BY updated_at DESC NULLS LAST, id DESC
          LIMIT 1`,
-      [id_registro_asignacion]
+      [registroAsignacionId]
     );
     const existenteRow = existente.rows[0];
     if (existenteRow?.estado_reporte === "Pendiente") {
@@ -2169,7 +2660,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
         JOIN consultorias con ON ra.id_consultoria = con.id
         LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
       WHERE ra.id = $1
-    `, [id_registro_asignacion]);
+    `, [registroAsignacionId]);
 
     if (meta.rows.length === 0) {
       return res.status(404).json({ error: "Asignación no encontrada" });
@@ -2247,7 +2738,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
            RETURNING *`,
         [
-          id_registro_asignacion,
+          registroAsignacionId,
           horas_reportadas || null,
           cantidad_dias_reportados || null,
           total_cobrar || null,
@@ -2269,7 +2760,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
       `UPDATE registro_asignaciones
        SET estado = $2::tipo_estado_asignacion
        WHERE id = $1`,
-      [id_registro_asignacion, estados.proceso]
+      [registroAsignacionId, estados.proceso]
     );
 
     // Email al coordinador para aprobación
@@ -2288,7 +2779,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
        WHERE con.id = (
          SELECT id_consultoria FROM registro_asignaciones WHERE id = $1
        )`,
-      [id_registro_asignacion, consultorId]
+      [registroAsignacionId, consultorId]
     );
     const correoRow = correoInfo.rows[0];
     if (correoRow?.coordinador_email) {
@@ -2318,25 +2809,28 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
       });
     }
 
-    res.json(result.rows[0]);
+    res.json(withPublicId(result.rows[0]));
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Asignación no encontrada" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al reportar horas" });
   }
 });
 
 /* ===============================
-   API - MESA/FÁBRICA
+   API - MESA/FÁBRICA
 =============================== */
 
-// Listar tickets mesa/fÁ¡brica del consultor
+// Listar tickets mesa/fábrica del consultor
 app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   try {
     const userId = req.user?.id;
     const result = await pool.query(
       `
       SELECT
-        ra.id,
+        ra.public_id AS id,
         ra.nro_caso_interno,
         ra.nro_caso_cliente,
         ra.estado,
@@ -2346,10 +2840,10 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         ra.fecha_inicio,
         ra.fecha_fin,
         ra.valor_hora,
-        con.id_tipo_asignacion AS tipo_asignacion_id,
-        c.id AS cliente_id,
+        ta.public_id AS tipo_asignacion_id,
+        c.public_id AS cliente_id,
         c.titulo AS nombre_cliente,
-        m.id AS modulo_id,
+        m.public_id AS modulo_id,
         m.titulo AS nombre_modulo,
         ta.titulo AS tipo_asignacion,
         coord.nombre_usuario AS nombre_coordinador,
@@ -2358,12 +2852,12 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         rh.total_cobrar,
         rh.horas_reportadas,
         rh.nro_caso_int_ext,
-        rh.id AS reporte_id,
+        rh.public_id AS reporte_id,
         rh.estado_mesa_servicio,
         rh.estado_fabrica,
         rh.observacion_mesa_fabrica,
         rh.fecha_cierre_mesa_fab,
-        rh.id_cuenta_cobro,
+        (SELECT cc.public_id FROM cuenta_cobro cc WHERE cc.id = rh.id_cuenta_cobro) AS id_cuenta_cobro,
         rh.requerimiento,
         rh.perfil_fabrica,
         rh.wricef
@@ -2411,8 +2905,22 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
   } = req.body || {};
 
   const client = await pool.connect();
+  let txStarted = false;
   try {
+    const registroId = await resolveInternalId(
+      client,
+      ID_TABLES.registroAsignaciones,
+      id,
+      { required: true }
+    );
+    const reporteId = await resolveInternalId(
+      client,
+      ID_TABLES.reporteHoras,
+      reporte_id,
+      { required: false }
+    );
     await client.query("BEGIN");
+    txStarted = true;
     const meta = await client.query(
       `
       SELECT
@@ -2436,7 +2944,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       WHERE ra.id = $1
         AND ra.consultor_responsable_id = $2
       `,
-      [id, req.user?.id]
+      [registroId, req.user?.id]
     );
     if (!meta.rows.length) {
       await client.query("ROLLBACK");
@@ -2477,7 +2985,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
        WHERE id_registro_asignacion = $1
        ORDER BY updated_at DESC NULLS LAST, id DESC
        LIMIT 1`,
-      [id]
+      [registroId]
     );
     const lastRow = last.rows[0];
     if (lastRow?.estado_reporte === "Pendiente") {
@@ -2492,7 +3000,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
          AND estado_reporte IN ('Revisión', 'Rechazado')
        ORDER BY updated_at DESC NULLS LAST, id DESC
        LIMIT 1`,
-      [id, reporte_id || null]
+      [registroId, reporteId || null]
     );
     const editableRow = editable.rows[0];
 
@@ -2511,7 +3019,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     }
 
     let saved;
-    if (reporte_id && editableRow) {
+    if (reporteId && editableRow) {
       saved = await client.query(
         `UPDATE reporte_horas
          SET horas_reportadas = COALESCE($1, horas_reportadas),
@@ -2557,7 +3065,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           editableRow.id
         ]
       );
-    } else if (reporte_id && !editableRow) {
+    } else if (reporteId && !editableRow) {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Solicitud no editable o no encontrada" });
     } else {
@@ -2568,9 +3076,9 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
            requerimiento, perfil_fabrica, wricef, cliente_id, tipo_asignacion_id, modulo_id, coordinador_id,
            consultor_responsable_id, consultor_principal_id, created_by, estado_reporte)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'Pendiente')
-         RETURNING *`,
+          RETURNING *`,
         [
-          id,
+          registroId,
           finalHoras,
           finalTotal,
           finalTipoServicio,
@@ -2599,7 +3107,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
        SET aprobar_coordinador = 'Pendiente'::tipo_aprobacion,
            estado = $2::tipo_estado_asignacion
        WHERE id = $1`,
-      [id, estados.proceso]
+      [registroId, estados.proceso]
     );
 
     await client.query("COMMIT");
@@ -2637,9 +3145,14 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       });
     }
 
-    res.json(saved.rows[0] || {});
+    res.json(withPublicId(saved.rows[0] || {}));
   } catch (err) {
-    await client.query("ROLLBACK");
+    if (txStarted) {
+      await client.query("ROLLBACK");
+    }
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Ticket o reporte no encontrado" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al enviar ticket a aprobación" });
   } finally {
@@ -2647,7 +3160,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
   }
 });
 
-// Actualizar ticket mesa/fÁ¡brica
+// Actualizar ticket mesa/fábrica
 app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   const { id } = req.params;
   const {
@@ -2670,6 +3183,18 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
   } = req.body;
 
   try {
+    const registroId = await resolveInternalId(
+      pool,
+      ID_TABLES.registroAsignaciones,
+      id,
+      { required: true }
+    );
+    const reporteId = await resolveInternalId(
+      pool,
+      ID_TABLES.reporteHoras,
+      reporte_id,
+      { required: false }
+    );
     const tipoValido = await pool.query(
       `
       SELECT
@@ -2687,7 +3212,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
       WHERE ra.id = $1
         AND ra.consultor_responsable_id = $2
       `,
-      [id, req.user?.id]
+      [registroId, req.user?.id]
     );
     const tipoAsignacionId = Number(tipoValido.rows[0]?.id_tipo_asignacion || 0);
     const tipoAsignacionTitulo = String(tipoValido.rows[0]?.tipo_asignacion_titulo || "")
@@ -2747,7 +3272,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
         observacion || null,
         fecha_inicio || null,
         fecha_cierre || null,
-        id,
+        registroId,
         req.user?.id
       ]
     );
@@ -2772,9 +3297,9 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
          AND estado_reporte IN ('Revisión', 'Rechazado')
        ORDER BY updated_at DESC NULLS LAST, id DESC
        LIMIT 1`,
-      [id, reporte_id || null]
+      [registroId, reporteId || null]
     );
-    if (reporte_id && editable.rows.length > 0) {
+    if (reporteId && editable.rows.length > 0) {
       await pool.query(
         `UPDATE reporte_horas
          SET horas_reportadas = COALESCE($1, horas_reportadas),
@@ -2805,7 +3330,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
           editable.rows[0].id
         ]
       );
-    } else if (reporte_id && editable.rows.length === 0) {
+    } else if (reporteId && editable.rows.length === 0) {
       return res.status(404).json({ error: "Solicitud no editable o no encontrada" });
     } else {
       await pool.query(
@@ -2816,7 +3341,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
            consultor_responsable_id, consultor_principal_id, created_by, estado_reporte)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'Revisión')`,
         [
-          id,
+          registroId,
           finalHoras,
           finalTotal,
           tipoServicioNormalizado,
@@ -2838,8 +3363,11 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
         ]
       );
     }
-    res.json(result.rows[0] || {});
+    res.json(withPublicId(result.rows[0] || {}));
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Ticket o reporte no encontrado" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al actualizar ticket" });
   }
@@ -2853,15 +3381,16 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
 app.get("/horas-por-cobrar/:consultorId", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
   const { consultorId } = req.params;
   try {
+    const consultorInternalId = await resolveInternalId(pool, ID_TABLES.usuarios, consultorId, { required: true });
     const role = normalizeValue(req.user?.rol);
-    if (!["administrador", "coordinador"].includes(role) && String(req.user?.id) !== String(consultorId)) {
+    if (!["administrador", "coordinador"].includes(role) && String(req.user?.id) !== String(consultorInternalId)) {
       return res.status(403).json({ error: "Acceso denegado" });
     }
-    if (!consultorId) return res.json([]);
+    if (!consultorInternalId) return res.json([]);
     const result = await pool.query(
       `
       SELECT
-        rh.id,
+        rh.public_id AS id,
         rh.total_cobrar,
         rh.horas_reportadas,
         rh.cantidad_dias_reportados,
@@ -2878,10 +3407,11 @@ app.get("/horas-por-cobrar/:consultorId", requireAccess({ roles: ["Consultor", "
         AND (rh.consultor_principal_id = $1 OR rh.consultor_responsable_id = $1)
       ORDER BY rh.id DESC
       `,
-      [consultorId]
+      [consultorInternalId]
     );
     res.json(result.rows);
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.json([]);
     console.error(err);
     res.status(500).json({ error: "Error al obtener registros por cobrar" });
   }
@@ -2896,16 +3426,18 @@ app.post("/cuentas-cobro/preview", requireAccess({ roles: ["Consultor", "Consult
   }
 
   try {
+    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_id, { required: true });
+    const reporteIds = await resolveInternalIds(pool, ID_TABLES.reporteHoras, ids_reportes);
     if (normalizeValue(req.user?.tipo_consultor) === "asociado") {
       return res.status(403).json({ error: "Acceso denegado" });
     }
-    if (String(req.user?.id) !== String(consultor_id)) {
+    if (String(req.user?.id) !== String(consultorId)) {
       return res.status(403).json({ error: "Acceso denegado" });
     }
     // 1. Obtener moneda del consultor
     const monedaRes = await pool.query(
       "SELECT moneda_cobro FROM usuarios WHERE id = $1",
-      [consultor_id]
+      [consultorId]
     );
     const moneda = monedaRes.rows[0]?.moneda_cobro || "COP";
 
@@ -2921,7 +3453,7 @@ app.post("/cuentas-cobro/preview", requireAccess({ roles: ["Consultor", "Consult
         AND estado_reporte = 'Aprobado'
         AND id_cuenta_cobro IS NULL
         AND (consultor_principal_id = $2 OR consultor_responsable_id = $2)`,
-      [ids_reportes, consultor_id]
+      [reporteIds, consultorId]
     );
 
     const info = meta.rows[0];
@@ -2929,7 +3461,7 @@ app.post("/cuentas-cobro/preview", requireAccess({ roles: ["Consultor", "Consult
     // 3. Validar que todos los registros sean vÁ¡lidos
     if (Number(info.count) !== ids_reportes.length) {
       return res.status(400).json({
-        error: "Algunos registros no son vÁ¡lidos para cobro"
+        error: "Algunos registros no son válidos para cobro"
       });
     }
 
@@ -2947,6 +3479,9 @@ app.post("/cuentas-cobro/preview", requireAccess({ roles: ["Consultor", "Consult
     });
 
   } catch (error) {
+    if (error?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(400).json({ error: "Consultor o reportes inválidos para previsualizar" });
+    }
     console.error('âŒ Error en /cuentas-cobro/preview:', error);
     res.status(500).json({ error: "Error al calcular preview" });
   }
@@ -2960,14 +3495,18 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
   }
 
   const client = await pool.connect();
+  let txStarted = false;
   try {
+    const consultorId = await resolveInternalId(client, ID_TABLES.usuarios, consultor_id, { required: true });
+    const reporteIds = await resolveInternalIds(client, ID_TABLES.reporteHoras, ids_reportes);
     if (normalizeValue(req.user?.tipo_consultor) === "asociado") {
       return res.status(403).json({ error: "Acceso denegado" });
     }
-    if (String(req.user?.id) !== String(consultor_id)) {
+    if (String(req.user?.id) !== String(consultorId)) {
       return res.status(403).json({ error: "Acceso denegado" });
     }
     await client.query("BEGIN");
+    txStarted = true;
 
     const meta = await client.query(
       `
@@ -2982,13 +3521,13 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
         AND id_cuenta_cobro IS NULL
         AND (consultor_principal_id = $2 OR consultor_responsable_id = $2)
       `,
-      [ids_reportes, consultor_id]
+      [reporteIds, consultorId]
     );
 
     const info = meta.rows[0];
     if (Number(info.count) !== ids_reportes.length) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Algunos registros no son vÁ¡lidos para cobro" });
+      return res.status(400).json({ error: "Algunos registros no son v¡lidos para cobro" });
     }
 
     if (total_numeros !== undefined && Number(total_numeros) !== Number(info.total || 0)) {
@@ -2998,7 +3537,7 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
 
     const monedaRes = await client.query(
       "SELECT moneda_cobro FROM usuarios WHERE id = $1",
-      [consultor_id]
+      [consultorId]
     );
     const moneda = monedaRes.rows[0]?.moneda_cobro || "COP";
     const totalLetrasFinal = buildTotalLetras(Number(info.total || 0), moneda);
@@ -3020,7 +3559,7 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
         info.total,
         totalLetrasFinal,
         ciudad_cobro,
-        consultor_id
+        consultorId
       ]
     );
 
@@ -3032,7 +3571,7 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
       SET id_cuenta_cobro = $1
       WHERE id = ANY($2)
       `,
-      [cuentaId, ids_reportes]
+      [cuentaId, reporteIds]
     );
 
     const estados = await getEstadoAsignacionValues();
@@ -3046,7 +3585,7 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
         WHERE id = ANY($1)
       )
       `,
-      [ids_reportes, estados.cerrado]
+      [reporteIds, estados.cerrado]
     );
 
     await client.query("COMMIT");
@@ -3059,7 +3598,7 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
         `SELECT nombre_usuario, email
          FROM usuarios
          WHERE id = $1`,
-        [consultor_id]
+        [consultorId]
       );
       const consultor = userInfo.rows[0];
       await sendEmailSafe({
@@ -3075,9 +3614,20 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
       });
     }
 
-    res.json({ ok: true, cuenta });
+    res.json({
+      ok: true,
+      cuenta: {
+        ...cuenta,
+        id: cuenta.public_id || String(cuenta.id || "")
+      }
+    });
   } catch (err) {
-    await client.query("ROLLBACK");
+    if (txStarted) {
+      await client.query("ROLLBACK");
+    }
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(400).json({ error: "Consultor o reportes inválidos para crear la cuenta" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al generar cuenta de cobro" });
   } finally {
@@ -3090,12 +3640,13 @@ app.get("/cuentas-cobro/historial/:userId", requireAccess({ roles: ["Consultor",
   const { userId } = req.params;
   const { fecha_inicio, fecha_fin } = req.query;
   try {
+    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, userId, { required: true });
     const role = normalizeValue(req.user?.rol);
-    if (!["administrador", "coordinador"].includes(role) && String(req.user?.id) !== String(userId)) {
+    if (!["administrador", "coordinador"].includes(role) && String(req.user?.id) !== String(consultorId)) {
       return res.status(403).json({ error: "Acceso denegado" });
     }
-    if (!userId) return res.json([]);
-    const params = [userId];
+    if (!consultorId) return res.json([]);
+    const params = [consultorId];
     let whereFecha = "";
     if (fecha_inicio && fecha_fin) {
       params.push(fecha_inicio, fecha_fin);
@@ -3104,7 +3655,7 @@ app.get("/cuentas-cobro/historial/:userId", requireAccess({ roles: ["Consultor",
     const result = await pool.query(
       `
       SELECT
-        cc.id,
+        cc.public_id AS id,
         COALESCE(NULLIF(cc.descripcion, ''), 'Cuenta de cobro') AS descripcion,
         cc.fecha_correspondiente,
         cc.fecha_periodo_inicio AS fecha_inicio_periodo,
@@ -3123,6 +3674,7 @@ app.get("/cuentas-cobro/historial/:userId", requireAccess({ roles: ["Consultor",
     );
     res.json(result.rows);
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.json([]);
     console.error(err);
     res.status(500).json({ error: "Error al obtener historial de cobros" });
   }
@@ -3132,16 +3684,17 @@ app.get("/cuentas-cobro/historial/:userId", requireAccess({ roles: ["Consultor",
 app.get("/cuentas-cobro/soportes", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const { consultor_id } = req.query || {};
   try {
+    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_id, { required: false });
     const result = await pool.query(
       `
       SELECT
-        cc.id,
+        cc.public_id AS id,
         cc.created_at,
         cc.fecha_periodo_inicio AS fecha_inicio_periodo,
         cc.fecha_periodo_fin AS fecha_fin_periodo,
         cc.descripcion,
         cc.total_cuenta_cobro AS total_numeros,
-        u.id AS consultor_id,
+        u.public_id AS consultor_id,
         u.nombre_usuario AS consultor_nombre,
         u.email AS consultor_email,
         cc.datos_adjuntos
@@ -3152,10 +3705,11 @@ app.get("/cuentas-cobro/soportes", requireAccess({ roles: ["Administrador", "Coo
         AND ($1::int IS NULL OR cc.created_by = $1)
       ORDER BY cc.id DESC
       `,
-      [consultor_id || null]
+      [consultorId || null]
     );
     res.json(result.rows || []);
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.json([]);
     console.error(err);
     res.status(500).json({ error: "Error al obtener soportes de cuentas de cobro" });
   }
@@ -3165,11 +3719,12 @@ app.get("/cuentas-cobro/soportes", requireAccess({ roles: ["Administrador", "Coo
 app.get("/cuentas-cobro/detalle/:cuentaId", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
   const { cuentaId } = req.params;
   try {
+    const cuentaInternalId = await resolveInternalId(pool, ID_TABLES.cuentaCobro, cuentaId, { required: true });
     const role = normalizeValue(req.user?.rol);
     if (!["administrador", "coordinador"].includes(role)) {
       const owner = await pool.query(
         "SELECT created_by FROM cuenta_cobro WHERE id = $1",
-        [cuentaId]
+        [cuentaInternalId]
       );
       const createdBy = owner.rows[0]?.created_by;
       if (!createdBy || String(createdBy) !== String(req.user?.id)) {
@@ -3179,7 +3734,7 @@ app.get("/cuentas-cobro/detalle/:cuentaId", requireAccess({ roles: ["Consultor",
     const result = await pool.query(
       `
         SELECT
-          rh.id,
+          rh.public_id AS id,
           c.titulo AS cliente,
           m.titulo AS modulo,
           ta.titulo AS tipo_asignacion,
@@ -3196,10 +3751,13 @@ app.get("/cuentas-cobro/detalle/:cuentaId", requireAccess({ roles: ["Consultor",
       WHERE rh.id_cuenta_cobro = $1
       ORDER BY rh.id DESC
       `,
-      [cuentaId]
+      [cuentaInternalId]
     );
     res.json(result.rows);
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Cuenta no encontrada" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al obtener detalle de cuenta" });
   }
@@ -3225,10 +3783,12 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
 
   let graphStage = "init";
   try {
+    const cuentaInternalId = await resolveInternalId(pool, ID_TABLES.cuentaCobro, id, { required: true });
     const ownerResult = await pool.query(
       `
       SELECT
         cc.id,
+        cc.public_id,
         cc.created_by,
         cc.fecha_correspondiente,
         cc.created_at,
@@ -3238,7 +3798,7 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
       JOIN usuarios u ON u.id = cc.created_by
       WHERE cc.id = $1
       `,
-      [id]
+      [cuentaInternalId]
     );
 
     const cuenta = ownerResult.rows[0];
@@ -3275,7 +3835,8 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
 
     const fechaBase = String(cuenta.fecha_correspondiente || cuenta.created_at || new Date().toISOString()).slice(0, 10);
     const consultorFolder = sanitizePathSegment(cuenta.nombre_usuario || `Consultor_${cuenta.created_by}`, `Consultor_${cuenta.created_by}`);
-    const cuentaFolderName = `CuentaCobro_${cuenta.id}_${fechaBase}`;
+    const cuentaFolderToken = String(cuenta.public_id || cuenta.id).split("-")[0];
+    const cuentaFolderName = `CuentaCobro_${cuentaFolderToken}_${fechaBase}`;
 
     let targetPath = sanitizePathSegment(ONEDRIVE_ROOT_FOLDER, "AdjuntosCuentasCobro");
     graphStage = "ensure-root-folder";
@@ -3286,12 +3847,12 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
     targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, cuentaFolderName);
 
     const cuentaFileName = sanitizePdfFileName(
-      cuenta_pdf_nombre || `CuentaCobroFirmada_${cuenta.id}.pdf`,
-      `CuentaCobroFirmada_${cuenta.id}.pdf`
+      cuenta_pdf_nombre || `CuentaCobroFirmada_${cuentaFolderToken}.pdf`,
+      `CuentaCobroFirmada_${cuentaFolderToken}.pdf`
     );
     const seguridadFileName = sanitizePdfFileName(
-      seguridad_social_nombre || `SeguridadSocial_${cuenta.id}.pdf`,
-      `SeguridadSocial_${cuenta.id}.pdf`
+      seguridad_social_nombre || `SeguridadSocial_${cuentaFolderToken}.pdf`,
+      `SeguridadSocial_${cuentaFolderToken}.pdf`
     );
 
     const cuentaPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${cuentaFileName}`)}:/content`;
@@ -3332,7 +3893,7 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $2
       `,
-      [JSON.stringify(adjuntos), id]
+      [JSON.stringify(adjuntos), cuentaInternalId]
     );
 
     res.json({
@@ -3341,6 +3902,9 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
       soportes: adjuntos.soportes
     });
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ ok: false, error: "Cuenta de cobro no encontrada." });
+    }
     const status = parseGraphErrorStatus(err.message);
     console.error("Error cargando adjuntos de cuenta:", err.message, "stage:", graphStage);
 
@@ -3369,11 +3933,12 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
 app.get("/cuentas-cobro/:id/pdf", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
   const { id } = req.params;
   try {
+    const cuentaInternalId = await resolveInternalId(pool, ID_TABLES.cuentaCobro, id, { required: true });
     const role = normalizeValue(req.user?.rol);
     if (!["administrador", "coordinador"].includes(role)) {
       const owner = await pool.query(
         "SELECT created_by FROM cuenta_cobro WHERE id = $1",
-        [id]
+        [cuentaInternalId]
       );
       const createdBy = owner.rows[0]?.created_by;
       if (!createdBy || String(createdBy) !== String(req.user?.id)) {
@@ -3401,7 +3966,7 @@ app.get("/cuentas-cobro/:id/pdf", requireAccess({ roles: ["Consultor", "Consulto
         LEFT JOIN documento_identidad di ON u.tipo_documento_id = di.id
       WHERE cc.id = $1
       `,
-      [id]
+      [cuentaInternalId]
     );
 
     const cuenta = cuentaRes.rows[0];
@@ -3429,7 +3994,7 @@ app.get("/cuentas-cobro/:id/pdf", requireAccess({ roles: ["Consultor", "Consulto
       WHERE rh.id_cuenta_cobro = $1
       ORDER BY rh.id DESC
       `,
-      [id]
+      [cuentaInternalId]
     );
 
     const detalles = detallesRes.rows || [];
@@ -3464,12 +4029,13 @@ app.get("/cuentas-cobro/:id/pdf", requireAccess({ roles: ["Consultor", "Consulto
     const totalLetras = cuenta.total_letras || buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="CuentaCobro_${id}.pdf"`);
+    const publicIdForFile = cuenta.public_id || id;
+    res.setHeader("Content-Disposition", `attachment; filename="CuentaCobro_${publicIdForFile}.pdf"`);
 
     const doc = new PDFDocument({ margin: 40 });
     doc.pipe(res);
 
-    doc.fontSize(12).text(`Cuenta de Cobro NÂ° ${cuenta.id}`, { align: "right" });
+    doc.fontSize(12).text(`Cuenta de Cobro NÂ° ${cuenta.public_id || cuenta.id}`, { align: "right" });
     doc.moveDown(1);
     doc.fontSize(11).text(`${formatDate(cuenta.created_at)}, ${cuenta.ciudad_cobro || ""}`);
     doc.moveDown(1.5);
@@ -3537,6 +4103,9 @@ app.get("/cuentas-cobro/:id/pdf", requireAccess({ roles: ["Consultor", "Consulto
 
     doc.end();
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Cuenta no encontrada" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al generar PDF" });
   }
@@ -3549,7 +4118,7 @@ app.get("/aprobaciones/pendientes", requireAccess({ roles: ["Coordinador"] }), a
     const userId = req.user?.id;
     const result = await pool.query(`
       SELECT
-        rh.id,
+        rh.public_id AS id,
         rh.created_at AS fecha_reporte,
         rh.nro_caso_int_ext,
         rh.total_cobrar,
@@ -3582,6 +4151,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
   const { estado, motivo } = req.body;
 
   try {
+    const reporteId = await resolveInternalId(pool, ID_TABLES.reporteHoras, id, { required: true });
     if (!estado) {
       return res.status(400).json({ error: "Falta estado" });
     }
@@ -3591,7 +4161,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
            motivo_rechazo = $2
        WHERE id = $3
        RETURNING *`,
-      [estado, motivo || null, id]
+      [estado, motivo || null, reporteId]
     );
 
     if (result.rows.length === 0) {
@@ -3634,7 +4204,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
          LEFT JOIN clientes c ON rh.cliente_id = c.id
          LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
        WHERE rh.id = $1`,
-      [id]
+      [reporteId]
     );
     const info = detalle.rows[0];
     if (info?.consultor_email) {
@@ -3683,8 +4253,11 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
       });
     }
 
-    res.json(result.rows[0]);
+    res.json(withPublicId(result.rows[0]));
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Reporte no encontrado" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al actualizar reporte" });
   }
@@ -3710,6 +4283,9 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
   } = req.body;
 
   try {
+    const asignacionId = await resolveInternalId(pool, ID_TABLES.registroAsignaciones, id, { required: true });
+    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_responsable_id, { required: false });
+    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, id_modulo, { required: false });
     const estados = await getEstadoAsignacionValues();
     const estadoNormalizado = resolveEstadoAsignacionInput(estado, estados);
     if (estado && !estadoNormalizado) {
@@ -3733,12 +4309,12 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
            tipo_servicio = $10,
            estado = $11,
            observacion = $12,
-           total_pagar = $13
+        total_pagar = $13
        WHERE id = $14
        RETURNING *`,
       [
-        consultor_responsable_id || null,
-        id_modulo || null,
+        consultorId || null,
+        moduloId || null,
         fecha_inicio || null,
         fecha_fin || null,
         cantidad_dias || null,
@@ -3750,11 +4326,14 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
         estadoNormalizado,
         observacion || null,
         total_pagar || null,
-        id
+        asignacionId
       ]
     );
-    res.json(result.rows[0]);
+    res.json(withPublicId(result.rows[0]));
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Asignación o referencias no encontradas" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al actualizar asignación" });
   }
@@ -3781,6 +4360,9 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     if (!id_consultoria || !consultor_responsable_id || !id_modulo) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
+    const consultoriaId = await resolveInternalId(pool, ID_TABLES.consultorias, id_consultoria, { required: true });
+    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_responsable_id, { required: true });
+    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, id_modulo, { required: true });
     const tipoServicioNormalizado = normalizeTipoServicioInput(tipo_servicio || "Servicio");
     if (!tipoServicioNormalizado) {
       return res.status(400).json({ error: "Tipo de servicio inválido" });
@@ -3795,7 +4377,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
        LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
        WHERE con.id = $1
          AND con.activo = true`,
-      [id_consultoria]
+      [consultoriaId]
     );
     if (meta.rows.length === 0) {
       return res.status(400).json({ error: "Consultoría no válida" });
@@ -3807,13 +4389,13 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
       `SELECT ra.id
        FROM registro_asignaciones ra
        JOIN consultorias con ON ra.id_consultoria = con.id
-        WHERE ra.consultor_responsable_id = $1
-          AND ra.id_modulo = $2
-          AND con.id_cliente = $3
-          AND con.id_tipo_asignacion = $4
-          AND ra.estado IN ($5::tipo_estado_asignacion, $6::tipo_estado_asignacion)
-        LIMIT 1`,
-      [consultor_responsable_id, id_modulo, clienteId, tipoAsignacionId, estados.abierto, estados.proceso]
+         WHERE ra.consultor_responsable_id = $1
+           AND ra.id_modulo = $2
+           AND con.id_cliente = $3
+           AND con.id_tipo_asignacion = $4
+           AND ra.estado IN ($5::tipo_estado_asignacion, $6::tipo_estado_asignacion)
+         LIMIT 1`,
+      [consultorId, moduloId, clienteId, tipoAsignacionId, estados.abierto, estados.proceso]
     );
     if (dup.rows.length > 0) {
       return res.status(400).json({ error: "Ya existe asignación para este consultor, cliente y módulo" });
@@ -3835,7 +4417,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     if (esMesaOFabrica) {
       const tarifaRes = await pool.query(
         `SELECT obtener_tarifa_consultor($1, $2, $3, $4) AS valor_tarifa`,
-        [consultor_responsable_id, clienteId, id_modulo || null, tipoAsignacionId || null]
+        [consultorId, clienteId, moduloId || null, tipoAsignacionId || null]
       );
       const tarifaVigente = Number(tarifaRes.rows[0]?.valor_tarifa || 0);
       if (!(tarifaVigente > 0)) {
@@ -3858,9 +4440,9 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::tipo_estado_asignacion,'Pendiente')
        RETURNING *`,
       [
-        id_consultoria,
-        id_modulo,
-        consultor_responsable_id,
+        consultoriaId,
+        moduloId,
+        consultorId,
         fecha_inicio || null,
         fecha_fin || null,
         cantidad_dias || null,
@@ -3889,8 +4471,8 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
          LEFT JOIN modulo m ON m.id = $2
          LEFT JOIN usuarios ucoord ON ucoord.id = con.coordinador_responsable_id
          JOIN usuarios uc ON uc.id = $1
-       WHERE con.id = $3`,
-      [consultor_responsable_id, id_modulo, id_consultoria]
+        WHERE con.id = $3`,
+      [consultorId, moduloId, consultoriaId]
     );
     const row = mailInfo.rows[0];
     if (row?.consultor_email) {
@@ -3922,8 +4504,11 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
       });
     }
 
-    res.json(created);
+    res.json(withPublicId(created));
   } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(400).json({ error: "Consultoría, consultor o módulo no válido" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al crear asignación" });
   }
@@ -3932,7 +4517,8 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
 
 // Ruta Default para SPA (Siempre al final)
 app.get("/", (req, res) => {
-  res.json({ ok: true, message: "API activo. Abre el frontend en http://localhost:3000" });
+  //res.json({ ok: true, message: "API activo. Abre el frontend en http://localhost:3000" });
+  res.send("API activo. Abre el frontend en http://localhost:3000" );
 });
 
 /*const PORT = process.env.BACK_PORT || 4000;

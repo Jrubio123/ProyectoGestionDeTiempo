@@ -6,10 +6,9 @@
 
 -- Extensiones útiles
 CREATE EXTENSION
-IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION
 IF NOT EXISTS "pg_trgm";
 -- Para búsquedas de texto
+
 
 -- ============================================================================
 -- TIPOS ENUMERADOS (Reemplazo de Choice de SharePoint)
@@ -98,6 +97,7 @@ CREATE TYPE tipo_consultor_enum AS ENUM
 CREATE TABLE bancos
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     titulo VARCHAR(255) NOT NULL,
     codigo_bancolombia VARCHAR(50),
     codigo_conversor VARCHAR(50),
@@ -114,6 +114,7 @@ COMMENT ON TABLE bancos IS 'Catálogo de bancos para cuentas de cobro';
 CREATE TABLE roles
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     titulo VARCHAR(255) NOT NULL UNIQUE,
     descripcion TEXT,
     activo BOOLEAN DEFAULT true,
@@ -129,6 +130,7 @@ COMMENT ON TABLE roles IS 'Roles de usuario en el sistema';
 CREATE TABLE tipo_cuenta_bancaria
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     titulo VARCHAR(255) NOT NULL,
     tipo_cuenta INTEGER,
     tipo_transaccion VARCHAR(100),
@@ -143,6 +145,7 @@ COMMENT ON TABLE tipo_cuenta_bancaria IS 'Tipos de cuenta bancaria (Ahorros, Cor
 CREATE TABLE documento_identidad
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     titulo VARCHAR(255) NOT NULL UNIQUE,
     codigo VARCHAR(10),
     activo BOOLEAN DEFAULT true,
@@ -156,6 +159,7 @@ COMMENT ON TABLE documento_identidad IS 'Tipos de documento de identidad';
 CREATE TABLE clientes
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     titulo VARCHAR(255) NOT NULL,
     -- Nombre de la empresa
     nit VARCHAR(50) UNIQUE NOT NULL,
@@ -184,6 +188,7 @@ COMMENT ON COLUMN clientes.nit IS 'Número de identificación tributaria';
 CREATE TABLE tipo_asignacion
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     titulo VARCHAR(255) NOT NULL UNIQUE,
     -- Full Time, Part Time, Mesa Fábrica, etc
     descripcion TEXT,
@@ -200,6 +205,7 @@ COMMENT ON TABLE tipo_asignacion IS 'Tipos de asignación de consultores';
 CREATE TABLE modulo
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     titulo VARCHAR(50) NOT NULL UNIQUE,
     -- IT, AT, FI
     nombre_completo VARCHAR(255),
@@ -217,6 +223,7 @@ COMMENT ON TABLE modulo IS 'Módulos de consultoría (IT, AT, FI, etc)';
 CREATE TABLE period_1
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     group_number INTEGER NOT NULL,
     titulo VARCHAR(50) NOT NULL
 );
@@ -226,6 +233,7 @@ COMMENT ON TABLE period_1 IS 'Periodos para conversión de números a letras (Mi
 CREATE TABLE place_value_1
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     digit INTEGER NOT NULL,
     titulo VARCHAR(50) NOT NULL,
     column_value INTEGER NOT NULL
@@ -240,6 +248,7 @@ COMMENT ON TABLE place_value_1 IS 'Valores de lugar para conversión de números
 CREATE TABLE usuarios
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
 
     -- Información de usuario (Person/Group de SharePoint)
     nombre_usuario VARCHAR(255) NOT NULL,
@@ -301,6 +310,7 @@ COMMENT ON COLUMN usuarios.email IS 'Email del usuario - usado para mapear Perso
 -- Tabla: Consultorias
 CREATE TABLE consultorias (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     descripcion_consultoria TEXT,
     id_cliente INTEGER NOT NULL REFERENCES clientes(id) ON DELETE RESTRICT,
     
@@ -337,6 +347,7 @@ COMMENT ON TABLE consultorias IS 'Proyectos de consultoría para clientes';
 CREATE TABLE tarifa_consultor
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     id_cliente INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
 
     -- Consultor (antes Person/Group, ahora FK a usuarios)
@@ -368,6 +379,7 @@ COMMENT ON TABLE tarifa_consultor IS 'Tarifas por consultor, cliente y tipo de a
 CREATE TABLE registro_asignaciones
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     id_consultoria INTEGER NOT NULL REFERENCES consultorias(id) ON DELETE CASCADE,
     id_tarifa INTEGER REFERENCES tarifa_consultor(id) ON DELETE SET NULL,
     id_modulo INTEGER REFERENCES modulo(id) ON DELETE SET NULL,
@@ -413,6 +425,7 @@ COMMENT ON TABLE registro_asignaciones IS 'Asignaciones de consultores a proyect
 CREATE TABLE cuenta_cobro
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     descripcion TEXT,
     fecha_correspondiente DATE,
     total_cuenta_cobro DECIMAL(15, 2),
@@ -445,6 +458,7 @@ COMMENT ON COLUMN cuenta_cobro.datos_adjuntos IS 'Metadata de archivos adjuntos 
 CREATE TABLE reporte_horas
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     id_registro_asignacion INTEGER NOT NULL REFERENCES registro_asignaciones(id) ON DELETE CASCADE,
     id_cuenta_cobro INTEGER REFERENCES cuenta_cobro(id) ON DELETE SET NULL,
 
@@ -506,6 +520,7 @@ ALTER TABLE reporte_horas ADD COLUMN IF NOT EXISTS wricef VARCHAR(120);
 CREATE TABLE asignaciones_consultoria_mesa_fabrica
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     id_consultoria INTEGER NOT NULL REFERENCES consultorias(id) ON DELETE CASCADE,
 
     -- Consultor (antes Person/Group, ahora FK a usuarios)
@@ -528,6 +543,7 @@ COMMENT ON TABLE asignaciones_consultoria_mesa_fabrica IS 'Asignaciones específ
 CREATE TABLE permisos_administrador
 (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
 
     coordinador_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
 
@@ -545,6 +561,7 @@ COMMENT ON TABLE permisos_administrador IS 'Permisos de coordinadores para tipos
 
 CREATE TABLE solicitudes_rrhh (
     id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     
     coordinador_id INT NOT NULL REFERENCES usuarios(id),
     cliente_id INT NOT NULL REFERENCES clientes(id),
@@ -590,10 +607,60 @@ CREATE INDEX idx_rrhh_estado ON solicitudes_rrhh(estado);
 CREATE INDEX idx_rrhh_coordinador ON solicitudes_rrhh(coordinador_id);
 CREATE INDEX idx_rrhh_cliente ON solicitudes_rrhh(cliente_id);
 
-CREATE TRIGGER update_solicitudes_rrhh_modtime
-    BEFORE UPDATE ON solicitudes_rrhh
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+-- ============================================================================
+-- COMPAT: PUBLIC ID FOR EXISTING DATABASES
+-- ============================================================================
+
+DO $$
+DECLARE
+  t TEXT;
+  has_unique_public_id BOOLEAN;
+  tables TEXT[] := ARRAY[
+    'bancos',
+    'roles',
+    'tipo_cuenta_bancaria',
+    'documento_identidad',
+    'clientes',
+    'tipo_asignacion',
+    'modulo',
+    'period_1',
+    'place_value_1',
+    'usuarios',
+    'consultorias',
+    'tarifa_consultor',
+    'registro_asignaciones',
+    'cuenta_cobro',
+    'reporte_horas',
+    'asignaciones_consultoria_mesa_fabrica',
+    'permisos_administrador',
+    'solicitudes_rrhh'
+  ];
+BEGIN
+  FOREACH t IN ARRAY tables
+  LOOP
+    EXECUTE format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS public_id UUID', t);
+    EXECUTE format('UPDATE %I SET public_id = gen_random_uuid() WHERE public_id IS NULL', t);
+    EXECUTE format('ALTER TABLE %I ALTER COLUMN public_id SET DEFAULT gen_random_uuid()', t);
+    EXECUTE format('ALTER TABLE %I ALTER COLUMN public_id SET NOT NULL', t);
+
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_class tbl
+      JOIN pg_catalog.pg_namespace ns ON ns.oid = tbl.relnamespace
+      JOIN pg_catalog.pg_index i ON i.indrelid = tbl.oid
+      JOIN pg_catalog.pg_attribute a ON a.attrelid = tbl.oid
+      WHERE ns.nspname = current_schema()
+        AND tbl.relname = t
+        AND a.attname = 'public_id'
+        AND a.attnum = ANY(i.indkey)
+        AND i.indisunique
+    ) INTO has_unique_public_id;
+
+    IF NOT has_unique_public_id THEN
+      EXECUTE format('CREATE UNIQUE INDEX IF NOT EXISTS idx_%I_public_id ON %I(public_id)', t, t);
+    END IF;
+  END LOOP;
+END $$;
 
 -- ============================================================================
 -- FUNCIONES Y TRIGGERS
@@ -620,6 +687,10 @@ BEGIN
     WHERE column_name = 'updated_at'
         AND table_schema = 'public'
     LOOP
+    EXECUTE format(
+            'DROP TRIGGER IF EXISTS update_%I_updated_at ON %I',
+            t, t
+        );
     EXECUTE format
     ('
             CREATE TRIGGER update_%I_updated_at 

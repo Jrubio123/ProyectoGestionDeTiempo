@@ -4,10 +4,26 @@
         api_local: "http://localhost:4000",
         api_container: "",
         api_tunnel: "https://d053flnv-4000.use.devtunnels.ms",
-        api_prod: "https://proyectogestiondetiempo.onrender.com",
+        api_prod: "https://backapp-eghxaxfafuecc2dr.westus-01.azurewebsites.net",
         azure_tenant_id: "9c6fde39-4030-44e7-aeb7-c6c97aa49ba4",
         azure_client_id: "8544473b-8df2-49c7-8916-264a0b4cbc6b",
         azure_redirect_path: "/auth/callback"
+    };
+
+    const normalizeApiBase = (value) => {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+
+        if (/^https?:\/\//i.test(raw)) return raw.replace(/\/+$/, "");
+        if (raw.startsWith("//")) return `${window.location.protocol}${raw}`.replace(/\/+$/, "");
+        if (raw.startsWith("/")) return `${window.location.origin}${raw}`.replace(/\/+$/, "");
+
+        // If the value looks like a host without protocol, default to HTTPS.
+        if (/^[a-z0-9.-]+\.[a-z]{2,}(:\d+)?(\/.*)?$/i.test(raw)) {
+            return `https://${raw}`.replace(/\/+$/, "");
+        }
+
+        return raw.replace(/\/+$/, "");
     };
 
     const getSafe = (key) => {
@@ -53,7 +69,7 @@
     }
 
     if (modeParam) setSafe("APP_MODE", modeParam);
-    if (apiParam) setSafe("APP_API_BASE", apiParam);
+    if (apiParam) setSafe("APP_API_BASE", normalizeApiBase(apiParam));
 
     const sameHostApi =
         host && !host.includes("azurestaticapps.net")
@@ -67,7 +83,7 @@
     if (mode === "prod" && config.api_prod) apiFromMode = config.api_prod;
 
     window.APP_MODE = mode;
-    window.API_BASE = apiParam || storedApi || apiFromMode;
+    window.API_BASE = normalizeApiBase(apiParam || storedApi || apiFromMode);
     window.AZURE_TENANT_ID = config.azure_tenant_id;
     window.AZURE_CLIENT_ID = config.azure_client_id;
     window.AZURE_REDIRECT_PATH = config.azure_redirect_path;
@@ -75,7 +91,8 @@
 
     window.setApiBase = function (apiBase) {
         if (!apiBase) return;
-        setSafe("APP_API_BASE", String(apiBase));
-        window.API_BASE = String(apiBase);
+        const normalized = normalizeApiBase(apiBase);
+        setSafe("APP_API_BASE", normalized);
+        window.API_BASE = normalized;
     };
 })();

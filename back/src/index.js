@@ -5506,7 +5506,9 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
 
     let estadoDestino = null;
     if (status === "signed") {
-      estadoDestino = "Aprobado";
+      estadoDestino = (documentoFirmado && documentoFirmado.url)
+        ? "Aprobado"
+        : await getCuentaCobroEstadoEnFirma();
     } else if (status === "rejected") {
       estadoDestino = "Rechazado";
     } else if (status === "pending") {
@@ -5562,6 +5564,129 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
     }
     console.error("Error reconciliando firma digital:", err);
     return res.status(500).json({ error: "Error reconciliando firma digital" });
+  }
+});
+
+app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
+  const { id } = req.params;
+  const cuentaPdfBase64 = req.body?.cuenta_pdf_base64 || req.body?.archivo_base64 || req.body?.signed_pdf_base64 || "";
+  const cuentaPdfNombre = req.body?.cuenta_pdf_nombre || req.body?.archivo_nombre || req.body?.signed_pdf_nombre || "";
+
+  if (!ONEDRIVE_ENABLED) {
+    return res.status(503).json({ error: "Servicio de carga no disponible temporalmente." });
+  }
+  if (!cuentaPdfBase64) {
+    return res.status(400).json({ error: "Debe enviar el PDF firmado en base64." });
+  }
+
+  try {
+    const cuentaInternalId = await resolveInternalId(pool, ID_TABLES.cuentaCobro, id, { required: true });
+    await assertCuentaCobroOwnerAccess(cuentaInternalId, req);
+
+    const cuentaResult = await pool.query(
+      `
+      SELECT
+        cc.id,
+        cc.public_id,
+        cc.created_by,
+        cc.fecha_correspondiente,
+        cc.created_at,
+        cc.datos_adjuntos,
+        u.nombre_usuario,
+        u.email
+      FROM cuenta_cobro cc
+      LEFT JOIN usuarios u ON u.id = cc.created_by
+      WHERE cc.id = $1
+      LIMIT 1
+      `,
+      [cuentaInternalId]
+    );
+    const cuenta = cuentaResult.rows[0] || null;
+    if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
+
+    const pdfBuffer = parsePdfDataUrl(cuentaPdfBase64);
+    if (!isPdfBuffer(pdfBuffer)) {
+      return res.status(400).json({ error: "El archivo firmado debe ser un PDF válido." });
+    }
+
+    const defaultName = sanitizePdfFileName(
+      `CuentaCobroFirmada_${String(cuenta.public_id || cuenta.id || "cuenta")}.pdf`,
+      "CuentaCobroFirmada.pdf"
+    );
+    const uploadResult = await uploadSignedPdfToOneDrive(
+      cuenta,
+      pdfBuffer,
+      sanitizePdfFileName(cuentaPdfNombre || defaultName, defaultName)
+    );
+
+    const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object"
+      ? cuenta.datos_adjuntos
+      : {};
+    const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object"
+      ? prevAdjuntos.firma
+      : {};
+    const prevSoportes = prevAdjuntos.soportes && typeof prevAdjuntos.soportes === "object"
+      ? prevAdjuntos.soportes
+      : {};
+    const nowIso = new Date().toISOString();
+
+    const documentoFirmado = {
+      ...uploadResult.archivo,
+      carpeta: uploadResult.carpeta,
+      origen: "manual_upload",
+      actualizado_en: nowIso
+    };
+
+    const firma = {
+      ...prevFirma,
+      estado: "signed",
+      actualizado_en: nowIso,
+      ultimo_evento: "MANUAL_UPLOAD",
+      documento_firmado: documentoFirmado,
+      documento_firmado_error: null
+    };
+
+    const adjuntos = {
+      ...prevAdjuntos,
+      firma,
+      soportes: {
+        ...prevSoportes,
+        carpeta: uploadResult.carpeta || prevSoportes.carpeta || "",
+        actualizado_en: nowIso,
+        cuenta_cobro_firmada: {
+          id: documentoFirmado.id || null,
+          nombre: documentoFirmado.nombre || defaultName,
+          url: documentoFirmado.url || ""
+        }
+      }
+    };
+
+    await pool.query(
+      `
+      UPDATE cuenta_cobro
+      SET datos_adjuntos = $1::jsonb,
+          estado = $2::tipo_estado_reporte,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3
+      `,
+      [JSON.stringify(adjuntos), "Aprobado", cuenta.id]
+    );
+
+    return res.json({
+      ok: true,
+      cuenta_id: String(cuenta.public_id || cuenta.id || ""),
+      estado_cuenta: "Aprobado",
+      documento_firmado_url: documentoFirmado.url || null
+    });
+  } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Cuenta no encontrada" });
+    }
+    if (err?.code === "ACCESS_DENIED") {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+    console.error("Error adjuntando PDF firmado manual:", err);
+    return res.status(500).json({ error: "Error adjuntando PDF firmado" });
   }
 });
 
@@ -5781,7 +5906,9 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
 
         let estadoDestino = null;
         if (status === "signed") {
-          estadoDestino = "Aprobado";
+          estadoDestino = (documentoFirmado && documentoFirmado.url)
+            ? "Aprobado"
+            : await getCuentaCobroEstadoEnFirma();
         } else if (status === "rejected") {
           estadoDestino = "Rechazado";
         } else if (status === "pending") {

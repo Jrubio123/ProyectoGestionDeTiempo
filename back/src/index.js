@@ -934,6 +934,20 @@ function maskSecret(value, visible = 4) {
   return `${"*".repeat(Math.max(0, raw.length - visible))}${raw.slice(-visible)}`;
 }
 
+function buildClickSignAuthHeaders({ includeLegacyHeader = true, includeJsonHeaders = true } = {}) {
+  const headers = {
+    Authorization: `x-api-key ${CLICKSIGN_API_KEY}`
+  };
+  if (includeLegacyHeader) {
+    headers["x-api-key"] = CLICKSIGN_API_KEY;
+  }
+  if (includeJsonHeaders) {
+    headers["Content-Type"] = "application/json; charset=utf-8";
+    headers.Accept = "application/json";
+  }
+  return headers;
+}
+
 function getByPath(source, pathName) {
   const parts = String(pathName || "").split(".");
   let current = source;
@@ -1201,7 +1215,7 @@ async function resolveSignedPdfFromSource(source, preferredName = "CuentaCobroFi
 
   const tryHeaders = [
     {},
-    CLICKSIGN_API_KEY ? { "x-api-key": CLICKSIGN_API_KEY } : {}
+    CLICKSIGN_API_KEY ? buildClickSignAuthHeaders({ includeJsonHeaders: false }) : {}
   ];
 
   for (const headers of tryHeaders) {
@@ -1341,7 +1355,9 @@ async function resolveSignedPdfFromClickSign({ event, requestId, contractId, pub
       const downloaded = await binaryRequest({
         method: "GET",
         url: templateUrl,
-        headers: CLICKSIGN_API_KEY ? { "x-api-key": CLICKSIGN_API_KEY } : {}
+        headers: CLICKSIGN_API_KEY
+          ? buildClickSignAuthHeaders({ includeJsonHeaders: false })
+          : {}
       });
       if (isPdfBuffer(downloaded.buffer)) {
         return {
@@ -1361,10 +1377,7 @@ async function resolveSignedPdfFromClickSign({ event, requestId, contractId, pub
       const response = await jsonRequest({
         method: lookup.method,
         url: buildClickSignUrl(lookup.path),
-        headers: {
-          "x-api-key": CLICKSIGN_API_KEY,
-          "Content-Type": "application/json"
-        },
+        headers: buildClickSignAuthHeaders(),
         body: lookup.body || null
       });
       const resolved = await resolveSignedPdfFromSource(response.data, defaultName);
@@ -4952,10 +4965,7 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
     const clickSignRes = await jsonRequest({
       method: "POST",
       url: buildClickSignUrl("start_signature"),
-      headers: {
-        "x-api-key": CLICKSIGN_API_KEY,
-        "Content-Type": "application/json"
-      },
+      headers: buildClickSignAuthHeaders(),
       body: signaturePayload
     });
     const urlFirma = getClickSignLandingUrl(clickSignRes.data);

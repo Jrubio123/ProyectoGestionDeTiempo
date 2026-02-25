@@ -67,6 +67,8 @@ function resetEnumCaches() {
   estadoAsignacionCache = null;
   estadoMesaCache = null;
   estadoFabricaCache = null;
+  estadoCuentaCobroEnFirmaCache = null;
+  estadoCuentaCobroAprobadoCache = null;
 }
 
 pool.on("error", (err) => {
@@ -379,6 +381,7 @@ const CLICKSIGN_WEBHOOK_TOKEN = String(process.env.CLICKSIGN_WEBHOOK_TOKEN || ""
 const CLICKSIGN_SIGNED_FILE_URL_TEMPLATE = String(process.env.CLICKSIGN_SIGNED_FILE_URL_TEMPLATE || "").trim();
 const DEBUG_CLICKSIGN_TOKEN = String(process.env.DEBUG_CLICKSIGN_TOKEN || "").trim();
 let estadoCuentaCobroEnFirmaCache = null;
+let estadoCuentaCobroAprobadoCache = null;
 
 function buildPortalUrl(hashRoute = "inicio") {
   const base = String(FRONT_PORTAL_BASE || "").trim();
@@ -1752,6 +1755,37 @@ async function getCuentaCobroEstadoEnFirma() {
   } catch (err) {
     estadoCuentaCobroEnFirmaCache = "Pendiente";
     return estadoCuentaCobroEnFirmaCache;
+  }
+}
+
+async function getCuentaCobroEstadoAprobado() {
+  if (estadoCuentaCobroAprobadoCache) return estadoCuentaCobroAprobadoCache;
+  try {
+    const result = await pool.query(
+      `
+      SELECT e.enumlabel
+      FROM pg_type t
+      JOIN pg_enum e ON t.oid = e.enumtypid
+      WHERE t.typname = 'tipo_estado_reporte'
+      ORDER BY e.enumsortorder
+      `
+    );
+    const labels = (result.rows || []).map((row) => String(row.enumlabel || "").trim()).filter(Boolean);
+    const byNorm = new Map(labels.map((label) => [normalizeEnumLabel(label), label]));
+    estadoCuentaCobroAprobadoCache =
+      byNorm.get("aprobado") ||
+      byNorm.get("aprobada") ||
+      byNorm.get("finalizado") ||
+      byNorm.get("cerrado") ||
+      byNorm.get("pagado") ||
+      byNorm.get("enfirma") ||
+      byNorm.get("en_firma") ||
+      labels[0] ||
+      "Pendiente";
+    return estadoCuentaCobroAprobadoCache;
+  } catch (err) {
+    estadoCuentaCobroAprobadoCache = "Pendiente";
+    return estadoCuentaCobroAprobadoCache;
   }
 }
 
@@ -5919,8 +5953,9 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
 
     let estadoDestino = null;
     if (status === "signed") {
+      const estadoAprobado = await getCuentaCobroEstadoAprobado();
       estadoDestino = (documentoFirmado && documentoFirmado.url)
-        ? "Aprobado"
+        ? estadoAprobado
         : await getCuentaCobroEstadoEnFirma();
     } else if (status === "rejected") {
       estadoDestino = "Rechazado";
@@ -6087,6 +6122,7 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
       }
     };
 
+    const estadoAprobado = await getCuentaCobroEstadoAprobado();
     await pool.query(
       `
       UPDATE cuenta_cobro
@@ -6095,13 +6131,13 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $3
       `,
-      [JSON.stringify(adjuntos), "Aprobado", cuenta.id]
+      [JSON.stringify(adjuntos), estadoAprobado, cuenta.id]
     );
 
     return res.json({
       ok: true,
       cuenta_id: String(cuenta.public_id || cuenta.id || ""),
-      estado_cuenta: "Aprobado",
+      estado_cuenta: estadoAprobado,
       documento_firmado_url: documentoFirmado.url || null
     });
   } catch (err) {
@@ -6128,7 +6164,11 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
       });
     }
     console.error("Error adjuntando PDF firmado manual:", err);
-    return res.status(500).json({ error: "Error adjuntando PDF firmado" });
+    return res.status(500).json({
+      error: "Error adjuntando PDF firmado",
+      codigo: err?.code || null,
+      detalle: err?.message || null
+    });
   }
 });
 
@@ -6356,8 +6396,9 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
 
         let estadoDestino = null;
         if (status === "signed") {
+          const estadoAprobado = await getCuentaCobroEstadoAprobado();
           estadoDestino = (documentoFirmado && documentoFirmado.url)
-            ? "Aprobado"
+            ? estadoAprobado
             : await getCuentaCobroEstadoEnFirma();
         } else if (status === "rejected") {
           estadoDestino = "Rechazado";

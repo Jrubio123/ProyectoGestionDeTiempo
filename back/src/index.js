@@ -1458,7 +1458,7 @@ function normalizeClickSignStatus(value) {
   if (!raw) return "";
   if (["signed", "completed", "done", "success", "firmado", "aprobado"].includes(raw)) return "signed";
   if (["rejected", "declined", "failed", "error", "cancelled", "canceled", "rechazado", "cancelado"].includes(raw)) return "rejected";
-  if (["pending", "in_progress", "inprogress", "started", "sent", "created", "open", "en_firma"].includes(raw)) return "pending";
+  if (["pending", "in_progress", "inprogress", "started", "sent", "created", "open", "en_firma", "start_signature", "start"].includes(raw)) return "pending";
   return raw;
 }
 

@@ -1,4 +1,4 @@
-﻿// js/generar-cuenta-cobro.js
+// js/generar-cuenta-cobro.js
 window.cuentaCobroApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
 
@@ -7,6 +7,13 @@ window.cuentaCobroApp = function () {
         usuarioId: null,
         totalBackend: 0,
         monedaBackend: "",
+        modalFirma: {
+            open: false,
+            loading: false,
+            cuentaId: "",
+            urlFirma: "",
+            mensaje: ""
+        },
 
         form: {
             fecha_inicio: "",
@@ -96,8 +103,36 @@ window.cuentaCobroApp = function () {
             }
         },
 
+        async iniciarFirma(cuentaId) {
+            this.modalFirma = {
+                open: true,
+                loading: true,
+                cuentaId,
+                urlFirma: "",
+                mensaje: "Iniciando proceso de firma digital..."
+            };
+
+            try {
+                const res = await axios.post(`${API}/cuentas-cobro/${cuentaId}/firma/iniciar`);
+                const urlFirma = res?.data?.url_firma || "";
+                if (!urlFirma) {
+                    this.modalFirma.mensaje = "La cuenta se genero, pero no se recibio URL de firma.";
+                    return;
+                }
+
+                this.modalFirma.urlFirma = urlFirma;
+                this.modalFirma.mensaje = "Cuenta generada. Abre el enlace para firmar.";
+                window.open(urlFirma, "_blank", "noopener");
+            } catch (e) {
+                const msg = e?.response?.data?.error || "La cuenta se genero, pero no se pudo iniciar firma en este momento.";
+                this.modalFirma.mensaje = msg;
+            } finally {
+                this.modalFirma.loading = false;
+            }
+        },
+
         async generarCuenta() {
-            if (!confirm("¿Estas seguro de enviar esta cuenta de cobro?")) return;
+            if (!confirm("Estas seguro de generar e iniciar firma de esta cuenta de cobro?")) return;
 
             const seleccionados = this.registros.filter((r) => r.checked).map((r) => r.id);
             if (seleccionados.length === 0) return;
@@ -113,15 +148,46 @@ window.cuentaCobroApp = function () {
             };
 
             try {
-                await axios.post(`${API}/cuentas-cobro`, payload);
-                alert("Cuenta de Cobro enviada exitosamente");
+                const created = await axios.post(`${API}/cuentas-cobro`, payload);
+                const cuentaId = created?.data?.cuenta?.id || "";
 
                 this.form = { fecha_inicio: "", fecha_fin: "", total_letras: "", ciudad_cobro: "" };
                 await this.cargarRegistros();
+
+                if (!cuentaId) {
+                    alert("Cuenta generada, pero no se pudo obtener el id para firma.");
+                    return;
+                }
+
+                await this.iniciarFirma(cuentaId);
             } catch (e) {
                 const msg = e?.response?.data?.error || "Error al generar la cuenta";
                 alert(msg);
             }
+        },
+
+        cerrarModalFirma() {
+            this.modalFirma = {
+                open: false,
+                loading: false,
+                cuentaId: "",
+                urlFirma: "",
+                mensaje: ""
+            };
+        },
+
+        async copiarEnlaceFirma() {
+            if (!this.modalFirma.urlFirma) return;
+            try {
+                await navigator.clipboard.writeText(this.modalFirma.urlFirma);
+                alert("Enlace de firma copiado");
+            } catch (e) {
+                alert("No se pudo copiar el enlace");
+            }
+        },
+
+        irHistorialCobros() {
+            window.location.hash = "#mis-cuentas-cobros";
         },
 
         formatearDinero(val) {

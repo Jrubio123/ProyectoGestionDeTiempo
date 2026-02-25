@@ -1319,7 +1319,7 @@ function buildCuentaCobroFolderContext(cuenta = {}) {
   return { consultorFolder, cuentaFolderToken, cuentaFolderName };
 }
 
-async function uploadSignedPdfToOneDrive(cuenta, pdfBuffer, fileName) {
+async function uploadSignedPdfToOneDrive(cuenta, pdfBuffer, fileName, { accessToken = "" } = {}) {
   if (!ONEDRIVE_ENABLED) {
     const err = new Error("ONEDRIVE_DISABLED");
     err.code = "ONEDRIVE_DISABLED";
@@ -1331,7 +1331,7 @@ async function uploadSignedPdfToOneDrive(cuenta, pdfBuffer, fileName) {
     throw err;
   }
 
-  const token = await getGraphAccessToken();
+  const token = String(accessToken || "").trim() || await getGraphAccessToken();
   const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
   await graphGet(`/v1.0/users/${encodedUser}/drive`, token);
 
@@ -6007,11 +6007,24 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
       `CuentaCobroFirmada_${String(cuenta.public_id || cuenta.id || "cuenta")}.pdf`,
       "CuentaCobroFirmada.pdf"
     );
-    const uploadResult = await uploadSignedPdfToOneDrive(
-      cuenta,
-      pdfBuffer,
-      sanitizePdfFileName(cuentaPdfNombre || defaultName, defaultName)
-    );
+    let uploadResult = null;
+    const uploadName = sanitizePdfFileName(cuentaPdfNombre || defaultName, defaultName);
+    try {
+      uploadResult = await uploadSignedPdfToOneDrive(
+        cuenta,
+        pdfBuffer,
+        uploadName
+      );
+    } catch (uploadErr) {
+      const delegatedGraphToken = String(req?.headers?.["x-graph-access-token"] || "").trim();
+      if (!delegatedGraphToken) throw uploadErr;
+      uploadResult = await uploadSignedPdfToOneDrive(
+        cuenta,
+        pdfBuffer,
+        uploadName,
+        { accessToken: delegatedGraphToken }
+      );
+    }
 
     const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object"
       ? cuenta.datos_adjuntos
@@ -6078,6 +6091,17 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
     }
     if (err?.code === "ACCESS_DENIED") {
       return res.status(403).json({ error: "Acceso denegado" });
+    }
+    const status = parseGraphErrorStatus(err?.message || "");
+    if (status === 401 || status === 403) {
+      return res.status(502).json({
+        error: "Servicio de almacenamiento no autorizado. Verifica permisos de Graph/OneDrive."
+      });
+    }
+    if (status === 404) {
+      return res.status(502).json({
+        error: "No se encontró el repositorio de OneDrive configurado."
+      });
     }
     console.error("Error adjuntando PDF firmado manual:", err);
     return res.status(500).json({ error: "Error adjuntando PDF firmado" });

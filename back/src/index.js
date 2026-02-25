@@ -1331,7 +1331,16 @@ async function uploadSignedPdfToOneDrive(cuenta, pdfBuffer, fileName, { accessTo
     throw err;
   }
 
-  const token = String(accessToken || "").trim() || await getGraphAccessToken();
+  let token = String(accessToken || "").trim();
+  if (!token) {
+    try {
+      token = await getGraphAccessToken();
+    } catch (err) {
+      const tokenErr = new Error(`No se pudo obtener token de Microsoft Graph: ${err?.message || err}`);
+      tokenErr.code = "GRAPH_TOKEN_ERROR";
+      throw tokenErr;
+    }
+  }
   const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
   await graphGet(`/v1.0/users/${encodedUser}/drive`, token);
 
@@ -1600,6 +1609,10 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
       byType.get("signed_once")?.[0] ||
       byType.get("signature_stamp")?.[0] ||
       byType.get("signatory_stamp")?.[0] ||
+      byType.get("show_landing")?.[0] ||
+      byType.get("start_files")?.[0] ||
+      byType.get("contract_files")?.[0] ||
+      catalog.entries?.[0] ||
       null;
     if (signedEntry) {
       const buffer = await fetchClickSignFileBuffer(signedEntry.fileId);
@@ -6097,6 +6110,11 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
     }
     if (err?.code === "ACCESS_DENIED") {
       return res.status(403).json({ error: "Acceso denegado" });
+    }
+    if (err?.code === "GRAPH_TOKEN_ERROR") {
+      return res.status(502).json({
+        error: "No se pudo autenticar OneDrive (Microsoft Graph). Verifica credenciales y permisos."
+      });
     }
     const status = parseGraphErrorStatus(err?.message || "");
     if (status === 401 || status === 403) {

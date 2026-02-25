@@ -4,6 +4,7 @@ window.authApp = function () {
     const graphScopes = ["openid", "profile", "email", "User.Read", "Mail.Send"];
     const SAVED_USERS_KEY = "LOCAL_LOGIN_USERS";
     const isLocalMode = String(window.APP_MODE || "").toLowerCase() === "local";
+    const isTestMode = String(window.APP_MODE || "").toLowerCase() === "test";
     const forceSwitch =
         window.location.search.includes("switch=1") ||
         window.location.search.includes("forceLogin=1");
@@ -99,6 +100,7 @@ window.authApp = function () {
         email: "",
         password: "",
         isLocalMode,
+        isTestMode,
         savedUsers: [],
         msalInstance: null,
 

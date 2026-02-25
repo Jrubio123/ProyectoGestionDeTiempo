@@ -7,6 +7,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const http = require("http");
 const https = require("https");
 const PDFDocument = require("pdfkit");
 const { NumerosALetras } = require("numero-a-letras");
@@ -44,6 +45,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json({ limit: "35mb" }));
+app.use(express.urlencoded({ extended: true, limit: "35mb" }));
 app.options('*', cors(corsOptions));
 
 /* ===============================
@@ -366,12 +368,31 @@ const FRONT_PORTAL_BASE =
 const ONEDRIVE_ENABLED = String(process.env.ONEDRIVE_ENABLED || "true").toLowerCase() === "true";
 const ONEDRIVE_TARGET_USER = process.env.ONEDRIVE_TARGET_USER || "admin.apps@silverconsulting.com.co";
 const ONEDRIVE_ROOT_FOLDER = process.env.ONEDRIVE_ROOT_FOLDER || "AdjuntosCuentasCobro";
+const CLICKSIGN_API_BASE = String(process.env.CLICKSIGN_API_BASE || "https://api.lleida.net/cs/v1").trim().replace(/\/+$/, "");
+const CLICKSIGN_API_KEY = String(process.env.CLICKSIGN_API_KEY || "").trim();
+const CLICKSIGN_USER = String(process.env.CLICKSIGN_USER || "").trim();
+const CLICKSIGN_CONFIG_ID = Number(process.env.CLICKSIGN_CONFIG_ID || 0);
+const CLICKSIGN_SIGNATURE_CB_URL = String(process.env.CLICKSIGN_SIGNATURE_CB_URL || "").trim();
+const CLICKSIGN_SIGNATORY_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_CB_URL || "").trim();
+const CLICKSIGN_SIGNATORY_EMAIL_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_EMAIL_CB_URL || "").trim();
+const CLICKSIGN_WEBHOOK_TOKEN = String(process.env.CLICKSIGN_WEBHOOK_TOKEN || "").trim();
+const CLICKSIGN_SIGNED_FILE_URL_TEMPLATE = String(process.env.CLICKSIGN_SIGNED_FILE_URL_TEMPLATE || "").trim();
+let estadoCuentaCobroEnFirmaCache = null;
 
 function buildPortalUrl(hashRoute = "inicio") {
   const base = String(FRONT_PORTAL_BASE || "").trim();
   if (!base) return "#";
   const safeHash = String(hashRoute || "inicio").replace(/^#/, "");
   return `${base}#${safeHash}`;
+}
+
+function getRequestPublicBaseUrl(req) {
+  const protoHeader = String(req?.headers?.["x-forwarded-proto"] || "").split(",")[0].trim();
+  const hostHeader = String(req?.headers?.["x-forwarded-host"] || "").split(",")[0].trim();
+  const host = hostHeader || String(req?.headers?.host || "").trim();
+  const proto = protoHeader || req?.protocol || "https";
+  if (!host) return "";
+  return `${proto}://${host}`.replace(/\/+$/, "");
 }
 
 function buildEmailLayout({ title, intro, blocks = [], ctaLabel, ctaUrl, closing }) {
@@ -885,6 +906,705 @@ async function graphGetAll(path, accessToken, maxPages = 20) {
   }
 
   return values;
+}
+
+function buildClickSignUrl(pathName) {
+  const suffix = String(pathName || "").replace(/^\/+/, "");
+  return `${CLICKSIGN_API_BASE}/${suffix}`;
+}
+
+function getByPath(source, pathName) {
+  const parts = String(pathName || "").split(".");
+  let current = source;
+  for (const part of parts) {
+    if (current === null || current === undefined) return undefined;
+    if (Array.isArray(current) && /^\d+$/.test(part)) {
+      current = current[Number(part)];
+      continue;
+    }
+    current = current[part];
+  }
+  return current;
+}
+
+function pickStringByPaths(source, paths = []) {
+  for (const pathName of paths) {
+    const value = getByPath(source, pathName);
+    if (value === undefined || value === null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function parseJsonSafe(rawText) {
+  try {
+    return JSON.parse(rawText || "{}");
+  } catch (err) {
+    return { raw: String(rawText || "") };
+  }
+}
+
+function jsonRequest({ method = "GET", url, headers = {}, body = null, timeoutMs = 25000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const payload =
+      body === null || body === undefined
+        ? null
+        : Buffer.from(typeof body === "string" ? body : JSON.stringify(body));
+
+    const requestHeaders = { ...headers };
+    if (payload && !requestHeaders["Content-Type"] && !requestHeaders["content-type"]) {
+      requestHeaders["Content-Type"] = "application/json";
+    }
+    if (payload && !requestHeaders["Content-Length"] && !requestHeaders["content-length"]) {
+      requestHeaders["Content-Length"] = String(payload.length);
+    }
+
+    const req = https.request(
+      {
+        protocol: parsed.protocol,
+        hostname: parsed.hostname,
+        port: parsed.port || undefined,
+        path: `${parsed.pathname}${parsed.search}`,
+        method,
+        headers: requestHeaders
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+        res.on("end", () => {
+          const status = Number(res.statusCode || 0);
+          const parsedBody = parseJsonSafe(data);
+          if (status >= 200 && status < 300) {
+            resolve({ status, data: parsedBody });
+            return;
+          }
+          const err = new Error(`HTTP ${status} ${method} ${parsed.pathname}`);
+          err.status = status;
+          err.response = parsedBody;
+          reject(err);
+        });
+      }
+    );
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error("HTTP_TIMEOUT"));
+    });
+    req.on("error", reject);
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+function binaryRequest({ method = "GET", url, headers = {}, body = null, timeoutMs = 30000, maxRedirects = 4 } = {}) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const payload =
+      body === null || body === undefined
+        ? null
+        : Buffer.from(typeof body === "string" ? body : JSON.stringify(body));
+
+    const requestHeaders = { ...headers };
+    if (payload && !requestHeaders["Content-Length"] && !requestHeaders["content-length"]) {
+      requestHeaders["Content-Length"] = String(payload.length);
+    }
+
+    const transport = parsed.protocol === "http:" ? http : https;
+    const req = transport.request(
+      {
+        protocol: parsed.protocol,
+        hostname: parsed.hostname,
+        port: parsed.port || undefined,
+        path: `${parsed.pathname}${parsed.search}`,
+        method,
+        headers: requestHeaders
+      },
+      (res) => {
+        const status = Number(res.statusCode || 0);
+        const location = String(res.headers?.location || "").trim();
+        if (status >= 300 && status < 400 && location && maxRedirects > 0) {
+          const redirectedUrl = new URL(location, parsed).toString();
+          res.resume();
+          return resolve(
+            binaryRequest({
+              method: "GET",
+              url: redirectedUrl,
+              headers,
+              body: null,
+              timeoutMs,
+              maxRedirects: maxRedirects - 1
+            })
+          );
+        }
+
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          const buffer = Buffer.concat(chunks);
+          if (status >= 200 && status < 300) {
+            return resolve({
+              status,
+              buffer,
+              contentType: String(res.headers?.["content-type"] || "").toLowerCase(),
+              finalUrl: parsed.toString()
+            });
+          }
+          const err = new Error(`HTTP ${status} ${method} ${parsed.pathname}`);
+          err.status = status;
+          err.response = parseJsonSafe(buffer.toString("utf8"));
+          reject(err);
+        });
+      }
+    );
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error("HTTP_TIMEOUT"));
+    });
+    req.on("error", reject);
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+function parseBase64Pdf(rawValue) {
+  const raw = String(rawValue || "").trim();
+  if (!raw) return null;
+  const fromDataUrl = parsePdfDataUrl(raw);
+  if (isPdfBuffer(fromDataUrl)) return fromDataUrl;
+
+  const compact = raw.replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9+/=]+$/.test(compact)) return null;
+  try {
+    const buffer = Buffer.from(compact, "base64");
+    return isPdfBuffer(buffer) ? buffer : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function isHttpUrl(value) {
+  try {
+    const parsed = new URL(String(value || "").trim());
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch (err) {
+    return false;
+  }
+}
+
+function applyTemplatePlaceholders(template, values = {}) {
+  let output = String(template || "");
+  for (const [key, value] of Object.entries(values)) {
+    const safeValue = encodeURIComponent(String(value || ""));
+    output = output.replace(new RegExp(`\\{${key}\\}`, "gi"), safeValue);
+  }
+  return output.trim();
+}
+
+function extractSignedPdfCandidate(source) {
+  if (!source || typeof source !== "object") return null;
+  const fileUrl = pickStringByPaths(source, [
+    "signed_file_url",
+    "signed_url",
+    "file_url",
+    "document_url",
+    "signature.signed_file_url",
+    "signature.file_url",
+    "signature.document_url",
+    "signature.file.0.url",
+    "signature.files.0.url",
+    "data.signed_file_url",
+    "data.file_url",
+    "data.document_url",
+    "data.signature.file.0.url",
+    "data.signature.files.0.url"
+  ]);
+  const fileBase64 = pickStringByPaths(source, [
+    "signed_file_base64",
+    "file_base64",
+    "document_base64",
+    "signature.signed_file_base64",
+    "signature.file_base64",
+    "signature.document_base64",
+    "signature.file.0.content",
+    "signature.files.0.content",
+    "data.signed_file_base64",
+    "data.file_base64",
+    "data.document_base64",
+    "data.signature.file.0.content",
+    "data.signature.files.0.content"
+  ]);
+  const fileName = pickStringByPaths(source, [
+    "signed_file_name",
+    "signed_filename",
+    "file_name",
+    "filename",
+    "signature.file.0.filename",
+    "signature.files.0.filename",
+    "data.signature.file.0.filename",
+    "data.signature.files.0.filename"
+  ]);
+
+  if (!fileUrl && !fileBase64) return null;
+  return {
+    url: fileUrl,
+    base64: fileBase64,
+    fileName: sanitizePdfFileName(fileName || "CuentaCobroFirmada.pdf", "CuentaCobroFirmada.pdf")
+  };
+}
+
+async function resolveSignedPdfFromSource(source, preferredName = "CuentaCobroFirmada.pdf") {
+  const candidate = extractSignedPdfCandidate(source);
+  if (!candidate) return null;
+
+  const fromBase64 = parseBase64Pdf(candidate.base64);
+  if (isPdfBuffer(fromBase64)) {
+    return {
+      buffer: fromBase64,
+      fileName: candidate.fileName || preferredName,
+      source: "payload_base64"
+    };
+  }
+
+  let candidateUrl = String(candidate.url || "").trim();
+  if (candidateUrl && !isHttpUrl(candidateUrl) && candidateUrl.startsWith("/")) {
+    try {
+      candidateUrl = new URL(candidateUrl, `${CLICKSIGN_API_BASE}/`).toString();
+    } catch (err) {
+      candidateUrl = "";
+    }
+  }
+  if (!isHttpUrl(candidateUrl)) return null;
+
+  const tryHeaders = [
+    {},
+    CLICKSIGN_API_KEY ? { "x-api-key": CLICKSIGN_API_KEY } : {}
+  ];
+
+  for (const headers of tryHeaders) {
+    try {
+      const downloaded = await binaryRequest({
+        method: "GET",
+        url: candidateUrl,
+        headers
+      });
+      if (isPdfBuffer(downloaded.buffer)) {
+        return {
+          buffer: downloaded.buffer,
+          fileName: candidate.fileName || preferredName,
+          source: "payload_url"
+        };
+      }
+      if (downloaded.contentType.includes("application/json")) {
+        const nested = parseJsonSafe(downloaded.buffer.toString("utf8"));
+        const nestedResolved = await resolveSignedPdfFromSource(nested, preferredName);
+        if (nestedResolved) return nestedResolved;
+      }
+    } catch (err) {
+      // Se sigue con otras variantes/cabeceras.
+    }
+  }
+
+  return null;
+}
+
+function buildClickSignLookupRequests({ requestId = "", contractId = "" } = {}) {
+  const requests = [];
+  const rid = String(requestId || "").trim();
+  const cid = String(contractId || "").trim();
+
+  if (rid) {
+    requests.push(
+      { method: "GET", path: `get_signature?request_id=${encodeURIComponent(rid)}` },
+      { method: "GET", path: `signature_status?request_id=${encodeURIComponent(rid)}` },
+      { method: "GET", path: `get_signature_status?request_id=${encodeURIComponent(rid)}` },
+      { method: "GET", path: `get_signature/${encodeURIComponent(rid)}` },
+      { method: "GET", path: `signature_status/${encodeURIComponent(rid)}` },
+      {
+        method: "POST",
+        path: "get_signature",
+        body: { request: "GET_SIGNATURE", request_id: rid, user: CLICKSIGN_USER }
+      },
+      {
+        method: "POST",
+        path: "signature_status",
+        body: { request: "GET_SIGNATURE_STATUS", request_id: rid, user: CLICKSIGN_USER }
+      }
+    );
+  }
+
+  if (cid) {
+    requests.push(
+      { method: "GET", path: `get_signature?contract_id=${encodeURIComponent(cid)}` },
+      { method: "GET", path: `signature_status?contract_id=${encodeURIComponent(cid)}` },
+      { method: "GET", path: `get_signature_status?contract_id=${encodeURIComponent(cid)}` },
+      {
+        method: "POST",
+        path: "get_signature",
+        body: { request: "GET_SIGNATURE", contract_id: cid, user: CLICKSIGN_USER }
+      }
+    );
+  }
+
+  return requests;
+}
+
+function buildCuentaCobroFolderContext(cuenta = {}) {
+  const fechaBase = String(cuenta.fecha_correspondiente || cuenta.created_at || new Date().toISOString()).slice(0, 10);
+  const consultorFolder = sanitizePathSegment(
+    cuenta.nombre_usuario || `Consultor_${cuenta.created_by || "NA"}`,
+    `Consultor_${cuenta.created_by || "NA"}`
+  );
+  const cuentaFolderToken = String(cuenta.public_id || cuenta.id || "cuenta").split("-")[0];
+  const cuentaFolderName = `CuentaCobro_${cuentaFolderToken}_${fechaBase}`;
+  return { consultorFolder, cuentaFolderToken, cuentaFolderName };
+}
+
+async function uploadSignedPdfToOneDrive(cuenta, pdfBuffer, fileName) {
+  if (!ONEDRIVE_ENABLED) {
+    const err = new Error("ONEDRIVE_DISABLED");
+    err.code = "ONEDRIVE_DISABLED";
+    throw err;
+  }
+  if (!isPdfBuffer(pdfBuffer)) {
+    const err = new Error("SIGNED_PDF_INVALID");
+    err.code = "SIGNED_PDF_INVALID";
+    throw err;
+  }
+
+  const token = await getGraphAccessToken();
+  const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
+  await graphGet(`/v1.0/users/${encodedUser}/drive`, token);
+
+  const { consultorFolder, cuentaFolderToken, cuentaFolderName } = buildCuentaCobroFolderContext(cuenta);
+  let targetPath = sanitizePathSegment(ONEDRIVE_ROOT_FOLDER, "AdjuntosCuentasCobro");
+  targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
+  targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, consultorFolder);
+  targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, cuentaFolderName);
+
+  const safeName = sanitizePdfFileName(
+    fileName || `CuentaCobroFirmada_${cuentaFolderToken}.pdf`,
+    `CuentaCobroFirmada_${cuentaFolderToken}.pdf`
+  );
+  const uploadPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${safeName}`)}:/content`;
+  const uploaded = await graphPutBinary(uploadPath, token, pdfBuffer, "application/pdf");
+
+  return {
+    carpeta: targetPath,
+    archivo: {
+      id: uploaded.id,
+      nombre: uploaded.name || safeName,
+      url: uploaded.webUrl || ""
+    }
+  };
+}
+
+async function resolveSignedPdfFromClickSign({ event, requestId, contractId, publicId }) {
+  const defaultName = sanitizePdfFileName(
+    `CuentaCobroFirmada_${publicId || requestId || "documento"}.pdf`,
+    "CuentaCobroFirmada.pdf"
+  );
+
+  const direct = await resolveSignedPdfFromSource(event, defaultName);
+  if (direct) return direct;
+
+  const templateUrl = applyTemplatePlaceholders(CLICKSIGN_SIGNED_FILE_URL_TEMPLATE, {
+    request_id: requestId || "",
+    contract_id: contractId || "",
+    public_id: publicId || ""
+  });
+  if (isHttpUrl(templateUrl)) {
+    try {
+      const downloaded = await binaryRequest({
+        method: "GET",
+        url: templateUrl,
+        headers: CLICKSIGN_API_KEY ? { "x-api-key": CLICKSIGN_API_KEY } : {}
+      });
+      if (isPdfBuffer(downloaded.buffer)) {
+        return {
+          buffer: downloaded.buffer,
+          fileName: defaultName,
+          source: "template_url"
+        };
+      }
+    } catch (err) {
+      // Se continúa con consultas de fallback.
+    }
+  }
+
+  const lookupRequests = buildClickSignLookupRequests({ requestId, contractId });
+  for (const lookup of lookupRequests) {
+    try {
+      const response = await jsonRequest({
+        method: lookup.method,
+        url: buildClickSignUrl(lookup.path),
+        headers: {
+          "x-api-key": CLICKSIGN_API_KEY,
+          "Content-Type": "application/json"
+        },
+        body: lookup.body || null
+      });
+      const resolved = await resolveSignedPdfFromSource(response.data, defaultName);
+      if (resolved) {
+        return {
+          ...resolved,
+          source: `lookup_${lookup.path}`
+        };
+      }
+    } catch (err) {
+      // Algunos endpoints no existen según plan contratado; se ignora y continúa.
+    }
+  }
+
+  return null;
+}
+
+function getClickSignLandingUrl(responseBody) {
+  const directPaths = [
+    "sign_url",
+    "url_firma",
+    "landing_url",
+    "signature_url",
+    "signatories.0.landing_url",
+    "signatories.0.sign_url",
+    "data.landing_url",
+    "data.signatories.0.landing_url"
+  ];
+  return pickStringByPaths(responseBody, directPaths);
+}
+
+function isClickSignConfigured() {
+  return Boolean(CLICKSIGN_API_KEY && CLICKSIGN_USER && CLICKSIGN_CONFIG_ID > 0);
+}
+
+async function getCuentaCobroEstadoEnFirma() {
+  if (estadoCuentaCobroEnFirmaCache) return estadoCuentaCobroEnFirmaCache;
+  try {
+    const result = await pool.query(
+      `
+      SELECT e.enumlabel
+      FROM pg_type t
+      JOIN pg_enum e ON t.oid = e.enumtypid
+      WHERE t.typname = 'tipo_estado_reporte'
+      ORDER BY e.enumsortorder
+      `
+    );
+    const labels = (result.rows || []).map((row) => String(row.enumlabel || "").trim()).filter(Boolean);
+    const byNorm = new Map(
+      labels.map((label) => [
+        normalizeEnumLabel(label),
+        label
+      ])
+    );
+    estadoCuentaCobroEnFirmaCache =
+      byNorm.get("enfirma") ||
+      byNorm.get("en_firma") ||
+      byNorm.get("revision") ||
+      byNorm.get("revisión") ||
+      labels[0] ||
+      "Pendiente";
+    return estadoCuentaCobroEnFirmaCache;
+  } catch (err) {
+    estadoCuentaCobroEnFirmaCache = "Pendiente";
+    return estadoCuentaCobroEnFirmaCache;
+  }
+}
+
+function normalizeClickSignStatus(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  if (["signed", "completed", "done", "success", "firmado", "aprobado"].includes(raw)) return "signed";
+  if (["rejected", "declined", "failed", "error", "cancelled", "canceled", "rechazado", "cancelado"].includes(raw)) return "rejected";
+  if (["pending", "in_progress", "inprogress", "started", "sent", "created", "open", "en_firma"].includes(raw)) return "pending";
+  return raw;
+}
+
+function extractPublicIdFromContract(contractId) {
+  const match = String(contractId || "").match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i);
+  return match ? match[0] : "";
+}
+
+async function assertCuentaCobroOwnerAccess(cuentaInternalId, req) {
+  const role = normalizeValue(req.user?.rol);
+  if (["administrador", "coordinador"].includes(role)) return;
+  const owner = await pool.query("SELECT created_by FROM cuenta_cobro WHERE id = $1", [cuentaInternalId]);
+  const createdBy = owner.rows[0]?.created_by;
+  if (!createdBy || String(createdBy) !== String(req.user?.id)) {
+    const err = new Error("Acceso denegado");
+    err.code = "ACCESS_DENIED";
+    throw err;
+  }
+}
+
+async function getCuentaCobroPdfContext(cuentaInternalId) {
+  const cuentaRes = await pool.query(
+    `
+    SELECT
+      cc.*,
+      u.nombre_usuario,
+      u.email,
+      u.cedula,
+      u.direccion,
+      u.telefono,
+      u.ciudad,
+      u.nro_cuenta_bancaria,
+      u.moneda_cobro,
+      b.titulo AS banco,
+      tcb.titulo AS tipo_cuenta,
+      di.titulo AS tipo_documento
+    FROM cuenta_cobro cc
+      JOIN usuarios u ON cc.created_by = u.id
+      LEFT JOIN bancos b ON u.banco_id = b.id
+      LEFT JOIN tipo_cuenta_bancaria tcb ON u.tipo_cuenta_id = tcb.id
+      LEFT JOIN documento_identidad di ON u.tipo_documento_id = di.id
+    WHERE cc.id = $1
+    `,
+    [cuentaInternalId]
+  );
+  const cuenta = cuentaRes.rows[0] || null;
+  if (!cuenta) return { cuenta: null, detalles: [] };
+
+  const detallesRes = await pool.query(
+    `
+    SELECT
+      rh.id,
+      rh.public_id,
+      c.titulo AS cliente,
+      m.titulo AS modulo,
+      ta.titulo AS tipo_asignacion,
+      u.nombre_usuario AS consultor_responsable,
+      rh.nro_caso_int_ext,
+      rh.horas_reportadas,
+      rh.cantidad_dias_reportados,
+      rh.total_cobrar
+    FROM reporte_horas rh
+      LEFT JOIN clientes c ON rh.cliente_id = c.id
+      LEFT JOIN modulo m ON rh.modulo_id = m.id
+      LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
+      LEFT JOIN usuarios u ON rh.consultor_responsable_id = u.id
+    WHERE rh.id_cuenta_cobro = $1
+    ORDER BY rh.id DESC
+    `,
+    [cuentaInternalId]
+  );
+
+  return {
+    cuenta,
+    detalles: detallesRes.rows || []
+  };
+}
+
+function formatCuentaCobroCurrency(value) {
+  return new Intl.NumberFormat("es-CO", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(Number(value || 0));
+}
+
+function formatCuentaCobroDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const months = [
+    "Enero",
+    "Febrero",
+    "Marzo",
+    "Abril",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre"
+  ];
+  return `${date.getDate()} de ${months[date.getMonth()]} de ${date.getFullYear()}`;
+}
+
+function writeCuentaCobroPdf(doc, cuenta, detalles) {
+  const totalNumeros = Number(cuenta.total_cuenta_cobro || 0);
+  const totalLetras = cuenta.total_letras || buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
+
+  doc.fontSize(12).text(`Cuenta de Cobro N° ${cuenta.public_id || cuenta.id}`, { align: "right" });
+  doc.moveDown(1);
+  doc.fontSize(11).text(`${formatCuentaCobroDate(cuenta.created_at)}, ${cuenta.ciudad_cobro || ""}`);
+  doc.moveDown(1.5);
+
+  doc.fontSize(12).font("Helvetica-Bold").text("SILVER CONSULTING S.A.S.", { align: "center" });
+  doc.text("NIT 901.149.190-0", { align: "center" });
+  doc.moveDown(1.5);
+
+  doc.font("Helvetica-Bold").text("DEBE A:", { align: "center" });
+  doc.font("Helvetica").text(cuenta.nombre_usuario || "", { align: "center" });
+  doc.text(`${cuenta.tipo_documento || "Documento"}: ${cuenta.cedula || ""}`, { align: "center" });
+  doc.moveDown(1);
+
+  doc.font("Helvetica-Bold").text("LA SUMA DE:", { align: "center" });
+  doc.font("Helvetica-Bold").text(`${formatCuentaCobroCurrency(totalNumeros)} (${totalLetras})`, { align: "center" });
+  doc.moveDown(1.5);
+
+  doc.font("Helvetica-Bold").text("Por concepto de:", { continued: true });
+  doc.font("Helvetica").text(
+    ` Honorarios de Consultorias: ${cuenta.descripcion || "Cuenta de cobro"} del ${cuenta.fecha_periodo_inicio || ""} al ${cuenta.fecha_periodo_fin || ""}`
+  );
+  doc.moveDown(1);
+
+  doc.font("Helvetica").text(`Direccion: ${cuenta.direccion || "-"}`);
+  doc.text(`Telefono: ${cuenta.telefono || "-"}`);
+  doc.text(`No de Cuenta Bancaria: ${cuenta.nro_cuenta_bancaria || "-"}`);
+  doc.text(`Banco: ${cuenta.banco || "-"}`);
+  doc.text(`Tipo de Cuenta: ${cuenta.tipo_cuenta || "-"}`);
+  doc.text(`Titular: ${cuenta.nombre_usuario || "-"}`);
+  doc.text(`${cuenta.tipo_documento || "Documento"}: ${cuenta.cedula || "-"}`);
+  doc.moveDown(1.5);
+
+  doc.font("Helvetica-Bold").text("Detalle de Cuenta de Cobro");
+  doc.moveDown(0.5);
+
+  const tableStartY = doc.y;
+  const colX = { cliente: 40, consultor: 170, tipo: 300, caso: 400, cant: 470, total: 520 };
+  doc.fontSize(9).font("Helvetica-Bold");
+  doc.text("Cliente", colX.cliente, tableStartY);
+  doc.text("Consultor", colX.consultor, tableStartY);
+  doc.text("Tipo", colX.tipo, tableStartY);
+  doc.text("Caso", colX.caso, tableStartY);
+  doc.text("Cant.", colX.cant, tableStartY, { width: 40, align: "right" });
+  doc.text("Total", colX.total, tableStartY, { width: 60, align: "right" });
+  doc.moveDown(0.5);
+  doc.font("Helvetica").fontSize(9);
+
+  let y = doc.y + 2;
+  for (const detalle of detalles || []) {
+    doc.text(detalle.cliente || "-", colX.cliente, y, { width: 120 });
+    doc.text(detalle.consultor_responsable || "-", colX.consultor, y, { width: 120 });
+    doc.text(detalle.tipo_asignacion || "-", colX.tipo, y, { width: 90 });
+    doc.text(detalle.nro_caso_int_ext || "-", colX.caso, y, { width: 60 });
+    const cantidad = Number(detalle.cantidad_dias_reportados || 0) > 0
+      ? `${detalle.cantidad_dias_reportados} D`
+      : `${Number(detalle.horas_reportadas || 0)} H`;
+    doc.text(cantidad, colX.cant, y, { width: 40, align: "right" });
+    doc.text(formatCuentaCobroCurrency(detalle.total_cobrar), colX.total, y, { width: 60, align: "right" });
+    y += 14;
+    if (y > doc.page.height - 60) {
+      doc.addPage();
+      y = 50;
+    }
+  }
+}
+
+function generateCuentaCobroPdfBuffer(cuenta, detalles) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    const doc = new PDFDocument({ margin: 40 });
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+    writeCuentaCobroPdf(doc, cuenta, detalles);
+    doc.end();
+  });
 }
 
 const hasAccess = (req, { roles = [], tipos = [] }) => {
@@ -2011,6 +2731,7 @@ app.get("/health", async (req, res) => {
 const authMiddleware = (req, res, next) => {
   const publicPaths = ["/", "/auth/login", "/auth/register", "/auth/me", "/auth/microsoft"];
   if (publicPaths.includes(req.path) || req.path.startsWith("/auth/")) return next();
+  if (req.path.startsWith("/webhooks/")) return next();
   if (req.method === "OPTIONS") return next();
 
   const auth = req.headers.authorization || "";
@@ -3604,7 +4325,7 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
       await sendEmailSafe({
         ...getGraphContext(req),
         to: contabilidadEmail,
-        subject: `Nueva cuenta de cobro #${cuenta.id}`,
+        subject: `Nueva cuenta de cobro #${cuenta.public_id || cuenta.id}`,
         text:
           `Se generó una cuenta de cobro.\n` +
           `Consultor: ${consultor?.nombre_usuario || ""} (${consultor?.email || ""})\n` +
@@ -3701,7 +4422,10 @@ app.get("/cuentas-cobro/soportes", requireAccess({ roles: ["Administrador", "Coo
       FROM cuenta_cobro cc
         JOIN usuarios u ON u.id = cc.created_by
       WHERE cc.datos_adjuntos IS NOT NULL
-        AND cc.datos_adjuntos ? 'soportes'
+        AND (
+          cc.datos_adjuntos ? 'soportes'
+          OR cc.datos_adjuntos #> '{firma,documento_firmado}' IS NOT NULL
+        )
         AND ($1::int IS NULL OR cc.created_by = $1)
       ORDER BY cc.id DESC
       `,
@@ -3934,99 +4658,9 @@ app.get("/cuentas-cobro/:id/pdf", requireAccess({ roles: ["Consultor", "Consulto
   const { id } = req.params;
   try {
     const cuentaInternalId = await resolveInternalId(pool, ID_TABLES.cuentaCobro, id, { required: true });
-    const role = normalizeValue(req.user?.rol);
-    if (!["administrador", "coordinador"].includes(role)) {
-      const owner = await pool.query(
-        "SELECT created_by FROM cuenta_cobro WHERE id = $1",
-        [cuentaInternalId]
-      );
-      const createdBy = owner.rows[0]?.created_by;
-      if (!createdBy || String(createdBy) !== String(req.user?.id)) {
-        return res.status(403).json({ error: "Acceso denegado" });
-      }
-    }
-    const cuentaRes = await pool.query(
-      `
-      SELECT
-        cc.*,
-        u.nombre_usuario,
-        u.cedula,
-        u.direccion,
-        u.telefono,
-        u.ciudad,
-        u.nro_cuenta_bancaria,
-        u.moneda_cobro,
-        b.titulo AS banco,
-        tcb.titulo AS tipo_cuenta,
-        di.titulo AS tipo_documento
-      FROM cuenta_cobro cc
-        JOIN usuarios u ON cc.created_by = u.id
-        LEFT JOIN bancos b ON u.banco_id = b.id
-        LEFT JOIN tipo_cuenta_bancaria tcb ON u.tipo_cuenta_id = tcb.id
-        LEFT JOIN documento_identidad di ON u.tipo_documento_id = di.id
-      WHERE cc.id = $1
-      `,
-      [cuentaInternalId]
-    );
-
-    const cuenta = cuentaRes.rows[0];
-    if (!cuenta) {
-      return res.status(404).json({ error: "Cuenta no encontrada" });
-    }
-
-    const detallesRes = await pool.query(
-      `
-      SELECT
-        rh.id,
-        c.titulo AS cliente,
-        m.titulo AS modulo,
-        ta.titulo AS tipo_asignacion,
-        u.nombre_usuario AS consultor_responsable,
-        rh.nro_caso_int_ext,
-        rh.horas_reportadas,
-        rh.cantidad_dias_reportados,
-        rh.total_cobrar
-      FROM reporte_horas rh
-        LEFT JOIN clientes c ON rh.cliente_id = c.id
-        LEFT JOIN modulo m ON rh.modulo_id = m.id
-        LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
-        LEFT JOIN usuarios u ON rh.consultor_responsable_id = u.id
-      WHERE rh.id_cuenta_cobro = $1
-      ORDER BY rh.id DESC
-      `,
-      [cuentaInternalId]
-    );
-
-    const detalles = detallesRes.rows || [];
-    const formatNumber = (val) =>
-      new Intl.NumberFormat("es-CO", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      }).format(Number(val || 0));
-
-    const formatDate = (d) => {
-      if (!d) return "";
-      const date = new Date(d);
-      if (Number.isNaN(date.getTime())) return "";
-      const months = [
-        "Enero",
-        "Febrero",
-        "Marzo",
-        "Abril",
-        "Mayo",
-        "Junio",
-        "Julio",
-        "Agosto",
-        "Septiembre",
-        "Octubre",
-        "Noviembre",
-        "Diciembre"
-      ];
-      return `${date.getDate()} de ${months[date.getMonth()]} de ${date.getFullYear()}`;
-    };
-
-    const totalNumeros = Number(cuenta.total_cuenta_cobro || 0);
-    const totalLetras = cuenta.total_letras || buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
+    await assertCuentaCobroOwnerAccess(cuentaInternalId, req);
+    const { cuenta, detalles } = await getCuentaCobroPdfContext(cuentaInternalId);
+    if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
 
     res.setHeader("Content-Type", "application/pdf");
     const publicIdForFile = cuenta.public_id || id;
@@ -4034,80 +4668,418 @@ app.get("/cuentas-cobro/:id/pdf", requireAccess({ roles: ["Consultor", "Consulto
 
     const doc = new PDFDocument({ margin: 40 });
     doc.pipe(res);
-
-    doc.fontSize(12).text(`Cuenta de Cobro NÂ° ${cuenta.public_id || cuenta.id}`, { align: "right" });
-    doc.moveDown(1);
-    doc.fontSize(11).text(`${formatDate(cuenta.created_at)}, ${cuenta.ciudad_cobro || ""}`);
-    doc.moveDown(1.5);
-
-    doc.fontSize(12).font("Helvetica-Bold").text("SILVER CONSULTING S.A.S.", { align: "center" });
-    doc.text("NIT 901.149.190-0", { align: "center" });
-    doc.moveDown(1.5);
-
-    doc.font("Helvetica-Bold").text("DEBE A:", { align: "center" });
-    doc.font("Helvetica").text(cuenta.nombre_usuario || "", { align: "center" });
-    doc.text(`${cuenta.tipo_documento || "Documento"}: ${cuenta.cedula || ""}`, { align: "center" });
-    doc.moveDown(1);
-
-    doc.font("Helvetica-Bold").text("LA SUMA DE:", { align: "center" });
-    doc.font("Helvetica-Bold").text(`${formatNumber(totalNumeros)} (${totalLetras})`, { align: "center" });
-    doc.moveDown(1.5);
-
-    doc.font("Helvetica-Bold").text("Por concepto de:", { continued: true });
-    doc.font("Helvetica").text(
-      ` Honorarios de Consultorías: ${cuenta.descripcion || "Cuenta de cobro"} del ${cuenta.fecha_periodo_inicio || ""} al ${cuenta.fecha_periodo_fin || ""}`
-    );
-    doc.moveDown(1);
-
-    doc.font("Helvetica").text(`Dirección: ${cuenta.direccion || "—"}`);
-    doc.text(`Teléfono: ${cuenta.telefono || "—"}`);
-    doc.text(`No de Cuenta Bancaria: ${cuenta.nro_cuenta_bancaria || "—"}`);
-    doc.text(`Banco: ${cuenta.banco || "—"}`);
-    doc.text(`Tipo de Cuenta: ${cuenta.tipo_cuenta || "—"}`);
-    doc.text(`Titular: ${cuenta.nombre_usuario || "—"}`);
-    doc.text(`${cuenta.tipo_documento || "Documento"}: ${cuenta.cedula || "—"}`);
-    doc.moveDown(1.5);
-
-    doc.font("Helvetica-Bold").text("Detalle de Cuenta de Cobro");
-    doc.moveDown(0.5);
-
-    const tableStartY = doc.y;
-    const colX = { cliente: 40, consultor: 170, tipo: 300, caso: 400, cant: 470, total: 520 };
-    doc.fontSize(9).font("Helvetica-Bold");
-    doc.text("Cliente", colX.cliente, tableStartY);
-    doc.text("Consultor", colX.consultor, tableStartY);
-    doc.text("Tipo", colX.tipo, tableStartY);
-    doc.text("Caso", colX.caso, tableStartY);
-    doc.text("Cant.", colX.cant, tableStartY, { width: 40, align: "right" });
-    doc.text("Total", colX.total, tableStartY, { width: 60, align: "right" });
-    doc.moveDown(0.5);
-    doc.font("Helvetica").fontSize(9);
-
-    let y = doc.y + 2;
-    detalles.forEach((d) => {
-      doc.text(d.cliente || "â€”", colX.cliente, y, { width: 120 });
-      doc.text(d.consultor_responsable || "â€”", colX.consultor, y, { width: 120 });
-      doc.text(d.tipo_asignacion || "â€”", colX.tipo, y, { width: 90 });
-      doc.text(d.nro_caso_int_ext || "â€”", colX.caso, y, { width: 60 });
-      const cantidad = d.cantidad_dias_reportados > 0
-        ? `${d.cantidad_dias_reportados} D`
-        : `${Number(d.horas_reportadas || 0)} H`;
-      doc.text(cantidad, colX.cant, y, { width: 40, align: "right" });
-      doc.text(formatNumber(d.total_cobrar), colX.total, y, { width: 60, align: "right" });
-      y += 14;
-      if (y > doc.page.height - 60) {
-        doc.addPage();
-        y = 50;
-      }
-    });
-
+    writeCuentaCobroPdf(doc, cuenta, detalles);
     doc.end();
   } catch (err) {
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {
       return res.status(404).json({ error: "Cuenta no encontrada" });
     }
+    if (err?.code === "ACCESS_DENIED") {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al generar PDF" });
+  }
+});
+
+app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
+  const { id } = req.params;
+  if (!isClickSignConfigured()) {
+    return res.status(503).json({
+      error: "Click&Sign no esta configurado. Falta CLICKSIGN_API_KEY, CLICKSIGN_USER o CLICKSIGN_CONFIG_ID."
+    });
+  }
+
+  try {
+    const cuentaInternalId = await resolveInternalId(pool, ID_TABLES.cuentaCobro, id, { required: true });
+    await assertCuentaCobroOwnerAccess(cuentaInternalId, req);
+
+    const { cuenta, detalles } = await getCuentaCobroPdfContext(cuentaInternalId);
+    if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
+    if (!cuenta.email) {
+      return res.status(400).json({
+        error: "El consultor no tiene correo para iniciar firma digital."
+      });
+    }
+
+    const firmaExistente =
+      cuenta.datos_adjuntos &&
+      typeof cuenta.datos_adjuntos === "object" &&
+      cuenta.datos_adjuntos.firma &&
+      typeof cuenta.datos_adjuntos.firma === "object"
+        ? cuenta.datos_adjuntos.firma
+        : null;
+    const forceRestart = String(req.body?.force || "").toLowerCase() === "true" || req.body?.force === true;
+    const firmaEstado = String(firmaExistente?.estado || "").toLowerCase().trim();
+    if (
+      !forceRestart &&
+      firmaExistente?.url_firma &&
+      ["pending", "in_progress", "en_firma", "started", "sent"].includes(firmaEstado)
+    ) {
+      return res.json({
+        ok: true,
+        reused: true,
+        cuenta_id: String(cuenta.public_id || cuenta.id || ""),
+        request_id: firmaExistente.request_id || null,
+        contract_id: firmaExistente.contract_id || null,
+        url_firma: firmaExistente.url_firma
+      });
+    }
+
+    const pdfBuffer = await generateCuentaCobroPdfBuffer(cuenta, detalles);
+    const cuentaPublicId = String(cuenta.public_id || "");
+    const requestId = `CC-${cuentaPublicId || cuenta.id}-${Date.now()}`;
+    const contractId = `CC-${cuentaPublicId || cuenta.id}`;
+    const fileName = sanitizePdfFileName(
+      `CuentaCobro_${cuentaPublicId || cuenta.id}.pdf`,
+      `CuentaCobro_${cuenta.id}.pdf`
+    );
+
+    const signaturePayload = {
+      request: "START_SIGNATURE",
+      request_id: requestId,
+      user: CLICKSIGN_USER,
+      signature: {
+        config_id: CLICKSIGN_CONFIG_ID,
+        contract_id: contractId,
+        level: [
+          {
+            level_order: 0,
+            required_signatories_to_complete_level: 1,
+            signatories: [
+              {
+                email: cuenta.email,
+                name: cuenta.nombre_usuario || cuenta.email,
+                external_id: String(cuenta.created_by || "")
+              }
+            ]
+          }
+        ],
+        file: [
+          {
+            filename: fileName,
+            content: pdfBuffer.toString("base64"),
+            sign_on_landing: "Y"
+          }
+        ]
+      }
+    };
+    const fallbackWebhookBase = getRequestPublicBaseUrl(req);
+    const fallbackSignatureCbUrl = fallbackWebhookBase
+      ? `${fallbackWebhookBase}/webhooks/clicksign/signature${
+          CLICKSIGN_WEBHOOK_TOKEN
+            ? `?token=${encodeURIComponent(CLICKSIGN_WEBHOOK_TOKEN)}`
+            : ""
+        }`
+      : "";
+    const signatureCbUrl = CLICKSIGN_SIGNATURE_CB_URL || fallbackSignatureCbUrl;
+    if (signatureCbUrl) {
+      signaturePayload.signature.signature_cb_url = signatureCbUrl;
+    }
+    if (CLICKSIGN_SIGNATORY_CB_URL) {
+      signaturePayload.signature.signatory_cb_url = CLICKSIGN_SIGNATORY_CB_URL;
+    }
+    if (CLICKSIGN_SIGNATORY_EMAIL_CB_URL) {
+      signaturePayload.signature.signatory_email_cb_url = CLICKSIGN_SIGNATORY_EMAIL_CB_URL;
+    }
+
+    const clickSignRes = await jsonRequest({
+      method: "POST",
+      url: buildClickSignUrl("start_signature"),
+      headers: {
+        "x-api-key": CLICKSIGN_API_KEY,
+        "Content-Type": "application/json"
+      },
+      body: signaturePayload
+    });
+    const urlFirma = getClickSignLandingUrl(clickSignRes.data);
+    if (!urlFirma) {
+      return res.status(502).json({
+        error: "Click&Sign no devolvio URL de firma.",
+        detalle: clickSignRes.data
+      });
+    }
+
+    const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object"
+      ? cuenta.datos_adjuntos
+      : {};
+    const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object"
+      ? prevAdjuntos.firma
+      : {};
+    const ahoraIso = new Date().toISOString();
+    const firma = {
+      ...prevFirma,
+      proveedor: "clicksign",
+      estado: "pending",
+      request_id: requestId,
+      contract_id: contractId,
+      url_firma: urlFirma,
+      iniciado_en: ahoraIso,
+      actualizado_en: ahoraIso,
+      ultimo_evento: "START_SIGNATURE"
+    };
+    const adjuntos = {
+      ...prevAdjuntos,
+      firma
+    };
+    const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
+    await pool.query(
+      `
+      UPDATE cuenta_cobro
+      SET datos_adjuntos = $1::jsonb,
+          estado = $2::tipo_estado_reporte,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3
+      `,
+      [JSON.stringify(adjuntos), estadoEnFirma, cuentaInternalId]
+    );
+
+    return res.json({
+      ok: true,
+      cuenta_id: cuentaPublicId || String(cuenta.id || ""),
+      request_id: requestId,
+      contract_id: contractId,
+      url_firma: urlFirma
+    });
+  } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Cuenta no encontrada" });
+    }
+    if (err?.code === "ACCESS_DENIED") {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+    if (Number(err?.status || 0) > 0) {
+      return res.status(502).json({
+        error: "Error al iniciar firma en Click&Sign",
+        detalle: err.response || err.message
+      });
+    }
+    console.error("Error iniciando firma digital:", err);
+    return res.status(500).json({ error: "Error al iniciar proceso de firma" });
+  }
+});
+
+app.post("/webhooks/clicksign/signature", async (req, res) => {
+  try {
+    if (CLICKSIGN_WEBHOOK_TOKEN) {
+      const inboundToken = String(
+        req.headers["x-clicksign-token"] ||
+        req.headers["x-webhook-token"] ||
+        req.query?.token ||
+        ""
+      ).trim();
+      if (!inboundToken || inboundToken !== CLICKSIGN_WEBHOOK_TOKEN) {
+        return res.status(401).json({ ok: false, error: "Webhook no autorizado" });
+      }
+    }
+
+    const event = req.body && typeof req.body === "object" ? req.body : {};
+    res.status(200).json({ ok: true });
+
+    setImmediate(async () => {
+      try {
+        const requestId = pickStringByPaths(event, [
+          "request_id",
+          "signature.request_id",
+          "data.request_id"
+        ]);
+        const contractId = pickStringByPaths(event, [
+          "contract_id",
+          "signature.contract_id",
+          "data.contract_id"
+        ]);
+        const rawStatus = pickStringByPaths(event, [
+          "status",
+          "signature_status",
+          "signature.status",
+          "event.status",
+          "data.status"
+        ]);
+        const status = normalizeClickSignStatus(rawStatus);
+        const publicIdFromEvent = extractPublicIdFromContract(contractId) || pickStringByPaths(event, [
+          "public_id",
+          "cuenta_public_id",
+          "data.public_id"
+        ]);
+
+        let cuentaResult = null;
+        if (publicIdFromEvent) {
+          cuentaResult = await pool.query(
+            `
+            SELECT
+              cc.id,
+              cc.public_id,
+              cc.created_by,
+              cc.fecha_correspondiente,
+              cc.created_at,
+              cc.datos_adjuntos,
+              u.nombre_usuario,
+              u.email
+            FROM cuenta_cobro cc
+            LEFT JOIN usuarios u ON u.id = cc.created_by
+            WHERE cc.public_id = $1
+            LIMIT 1
+            `,
+            [publicIdFromEvent]
+          );
+        } else if (requestId) {
+          cuentaResult = await pool.query(
+            `
+            SELECT
+              cc.id,
+              cc.public_id,
+              cc.created_by,
+              cc.fecha_correspondiente,
+              cc.created_at,
+              cc.datos_adjuntos,
+              u.nombre_usuario,
+              u.email
+            FROM cuenta_cobro cc
+            LEFT JOIN usuarios u ON u.id = cc.created_by
+            WHERE cc.datos_adjuntos->'firma'->>'request_id' = $1
+            ORDER BY cc.id DESC
+            LIMIT 1
+            `,
+            [requestId]
+          );
+        }
+
+        const cuenta = cuentaResult?.rows?.[0] || null;
+        if (!cuenta) {
+          console.warn("Webhook Click&Sign sin cuenta asociada:", { requestId, contractId, rawStatus });
+          return;
+        }
+
+        const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object"
+          ? cuenta.datos_adjuntos
+          : {};
+        const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object"
+          ? prevAdjuntos.firma
+          : {};
+        const prevDocumentoFirmado = prevFirma.documento_firmado && typeof prevFirma.documento_firmado === "object"
+          ? prevFirma.documento_firmado
+          : null;
+
+        const nowIso = new Date().toISOString();
+        const eventosPrev = Array.isArray(prevFirma.eventos) ? prevFirma.eventos.slice(-19) : [];
+        const eventoResumen = {
+          recibido_en: nowIso,
+          status: rawStatus || status || "",
+          request_id: requestId || null,
+          contract_id: contractId || null
+        };
+
+        let documentoFirmado = prevDocumentoFirmado;
+        let documentoFirmadoError = "";
+
+        if (status === "signed") {
+          const resolvedPdf = await resolveSignedPdfFromClickSign({
+            event,
+            requestId,
+            contractId,
+            publicId: String(cuenta.public_id || "")
+          });
+
+          if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
+            try {
+              const uploadResult = await uploadSignedPdfToOneDrive(
+                cuenta,
+                resolvedPdf.buffer,
+                resolvedPdf.fileName
+              );
+              documentoFirmado = {
+                ...uploadResult.archivo,
+                carpeta: uploadResult.carpeta,
+                origen: resolvedPdf.source || "clicksign",
+                actualizado_en: nowIso
+              };
+            } catch (uploadErr) {
+              documentoFirmadoError = `Error almacenando firmado en OneDrive: ${uploadErr.message || "desconocido"}`;
+              console.error("Error guardando firmado en OneDrive:", uploadErr?.message || uploadErr);
+            }
+          } else {
+            documentoFirmadoError = "No se encontró PDF firmado en webhook/API de Click&Sign.";
+            console.warn("No se pudo resolver PDF firmado de Click&Sign:", { requestId, contractId, cuentaId: cuenta.id });
+          }
+        }
+
+        const firma = {
+          ...prevFirma,
+          estado: status || prevFirma.estado || "pending",
+          request_id: requestId || prevFirma.request_id || null,
+          contract_id: contractId || prevFirma.contract_id || null,
+          actualizado_en: nowIso,
+          ultimo_evento: rawStatus || status || "webhook",
+          eventos: [...eventosPrev, eventoResumen]
+        };
+        if (documentoFirmado && documentoFirmado.url) {
+          firma.documento_firmado = documentoFirmado;
+        }
+        if (documentoFirmadoError) {
+          firma.documento_firmado_error = documentoFirmadoError;
+        } else if (status === "signed" && prevFirma.documento_firmado_error) {
+          firma.documento_firmado_error = null;
+        }
+
+        const adjuntos = {
+          ...prevAdjuntos,
+          firma
+        };
+        if (documentoFirmado && documentoFirmado.url) {
+          const prevSoportes = prevAdjuntos.soportes && typeof prevAdjuntos.soportes === "object"
+            ? prevAdjuntos.soportes
+            : {};
+          const nuevoSoporteCuenta = {
+            id: documentoFirmado.id || prevSoportes?.cuenta_cobro?.id || null,
+            nombre: documentoFirmado.nombre || prevSoportes?.cuenta_cobro?.nombre || "CuentaCobroFirmada.pdf",
+            url: documentoFirmado.url || prevSoportes?.cuenta_cobro?.url || ""
+          };
+          adjuntos.soportes = {
+            ...prevSoportes,
+            carpeta: documentoFirmado.carpeta || prevSoportes.carpeta || "",
+            actualizado_en: nowIso,
+            cuenta_cobro: nuevoSoporteCuenta
+          };
+        }
+
+        let estadoDestino = null;
+        if (status === "signed") {
+          estadoDestino = "Aprobado";
+        } else if (status === "rejected") {
+          estadoDestino = "Rechazado";
+        } else if (status === "pending") {
+          estadoDestino = await getCuentaCobroEstadoEnFirma();
+        }
+
+        if (estadoDestino) {
+          await pool.query(
+            `
+            UPDATE cuenta_cobro
+            SET datos_adjuntos = $1::jsonb,
+                estado = $2::tipo_estado_reporte,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $3
+            `,
+            [JSON.stringify(adjuntos), estadoDestino, cuenta.id]
+          );
+        } else {
+          await pool.query(
+            `
+            UPDATE cuenta_cobro
+            SET datos_adjuntos = $1::jsonb,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $2
+            `,
+            [JSON.stringify(adjuntos), cuenta.id]
+          );
+        }
+      } catch (innerErr) {
+        console.error("Error procesando webhook Click&Sign:", innerErr);
+      }
+    });
+  } catch (err) {
+    console.error("Error webhook Click&Sign:", err);
+    return res.status(500).json({ ok: false });
   }
 });
 

@@ -1444,13 +1444,14 @@ function normalizeClickSignFileEntries(source) {
   return entries;
 }
 
-async function fetchClickSignFilesCatalog({ event, requestId, contractId }) {
+async function fetchClickSignFilesCatalog({ event, requestId, contractId, signatureId }) {
   const fromEvent = normalizeClickSignFileEntries(event);
   if (fromEvent.length > 0) {
     return { entries: fromEvent, source: "event" };
   }
 
-  const signatureId = extractClickSignSignatureId(event);
+  const signatureIdRaw = String(signatureId || extractClickSignSignatureId(event) || "").trim();
+  const signatureIdNumeric = /^\d+$/.test(signatureIdRaw) ? Number(signatureIdRaw) : null;
   const bodies = [];
   if (requestId) {
     bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}`, user: CLICKSIGN_USER, signature: { request_id: requestId } });
@@ -1460,8 +1461,8 @@ async function fetchClickSignFilesCatalog({ event, requestId, contractId }) {
     bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-cid`, user: CLICKSIGN_USER, signature: { contract_id: contractId } });
     bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-cid2`, user: CLICKSIGN_USER, contract_id: contractId });
   }
-  if (signatureId) {
-    bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-sid`, user: CLICKSIGN_USER, signature: { signature_id: signatureId } });
+  if (signatureIdNumeric) {
+    bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-sid`, user: CLICKSIGN_USER, signature: { signature_id: signatureIdNumeric } });
   }
   bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-fallback`, user: CLICKSIGN_USER, request_id: requestId || undefined, contract_id: contractId || undefined });
 
@@ -1517,9 +1518,9 @@ async function fetchClickSignFileBuffer(fileId) {
   return null;
 }
 
-async function resolveClickSignArtifacts({ event, requestId, contractId, publicId }) {
+async function resolveClickSignArtifacts({ event, requestId, contractId, publicId, signatureId }) {
   const signedByLegacy = await resolveSignedPdfFromClickSign({ event, requestId, contractId, publicId });
-  const catalog = await fetchClickSignFilesCatalog({ event, requestId, contractId });
+  const catalog = await fetchClickSignFilesCatalog({ event, requestId, contractId, signatureId });
   const byType = new Map();
   for (const entry of catalog.entries) {
     if (!byType.has(entry.fileType)) byType.set(entry.fileType, []);
@@ -5265,6 +5266,12 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       headers: buildClickSignAuthHeaders(),
       body: signaturePayload
     });
+    const signatureId = pickStringByPaths(clickSignRes.data, [
+      "signature.signature_id",
+      "signature_id",
+      "data.signature.signature_id",
+      "data.signature_id"
+    ]);
     const urlFirma = getClickSignLandingUrl(clickSignRes.data);
     if (!urlFirma) {
       return res.status(502).json({
@@ -5286,6 +5293,7 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       estado: "pending",
       request_id: requestId,
       contract_id: contractId,
+      signature_id: signatureId || null,
       url_firma: urlFirma,
       iniciado_en: ahoraIso,
       actualizado_en: ahoraIso,
@@ -5312,6 +5320,7 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       cuenta_id: cuentaPublicId || String(cuenta.id || ""),
       request_id: requestId,
       contract_id: contractId,
+      signature_id: signatureId || null,
       url_firma: urlFirma
     });
   } catch (err) {
@@ -5378,6 +5387,7 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
 
     const requestId = String(req.body?.request_id || prevFirma.request_id || "").trim();
     const contractId = String(req.body?.contract_id || prevFirma.contract_id || `CC-${cuenta.public_id || cuenta.id}`).trim();
+    const signatureId = String(req.body?.signature_id || prevFirma.signature_id || "").trim();
 
     if (!requestId && !contractId) {
       return res.status(400).json({
@@ -5387,6 +5397,8 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
 
     const snapshot = await fetchClickSignSignatureSnapshot({ requestId, contractId });
     const event = snapshot.event && typeof snapshot.event === "object" ? snapshot.event : {};
+    const signatureIdFromSnapshot = String(extractClickSignSignatureId(event) || "").trim();
+    const effectiveSignatureId = signatureId || signatureIdFromSnapshot;
     const rawStatusFromRequest = String(req.body?.status || "").trim();
     const rawStatus = rawStatusFromRequest || snapshot.rawStatus || prevFirma.ultimo_evento || prevFirma.estado || "pending";
     let status = normalizeClickSignStatus(rawStatus);
@@ -5410,7 +5422,8 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
         event,
         requestId,
         contractId,
-        publicId: String(cuenta.public_id || "")
+        publicId: String(cuenta.public_id || ""),
+        signatureId: effectiveSignatureId
       });
       const resolvedPdf = artifacts?.signedPdf || null;
 
@@ -5451,6 +5464,7 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
       estado: status || prevFirma.estado || "pending",
       request_id: requestId || prevFirma.request_id || null,
       contract_id: contractId || prevFirma.contract_id || null,
+      signature_id: effectiveSignatureId || prevFirma.signature_id || null,
       actualizado_en: nowIso,
       ultimo_evento: rawStatus || status || "reconciliacion",
       eventos: [...eventosPrev, eventoResumen]
@@ -5719,6 +5733,12 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
           "signature.contract_id",
           "data.contract_id"
         ]);
+        const signatureId = pickStringByPaths(event, [
+          "signature.signature_id",
+          "signature_id",
+          "data.signature.signature_id",
+          "data.signature_id"
+        ]);
         const rawStatus = pickStringByPaths(event, [
           "status",
           "signature_status",
@@ -5809,7 +5829,8 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
             event,
             requestId,
             contractId,
-            publicId: String(cuenta.public_id || "")
+            publicId: String(cuenta.public_id || ""),
+            signatureId: signatureId || prevFirma.signature_id || ""
           });
           const resolvedPdf = artifacts?.signedPdf || null;
 
@@ -5851,6 +5872,7 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
           estado: status || prevFirma.estado || "pending",
           request_id: requestId || prevFirma.request_id || null,
           contract_id: contractId || prevFirma.contract_id || null,
+          signature_id: signatureId || prevFirma.signature_id || null,
           actualizado_en: nowIso,
           ultimo_evento: rawStatus || status || "webhook",
           eventos: [...eventosPrev, eventoResumen]

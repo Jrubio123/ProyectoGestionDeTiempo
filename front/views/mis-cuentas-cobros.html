@@ -5,17 +5,17 @@
             <h1 class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-600 to-blue-600">
                 Historial de Cobros
             </h1>
-            <p class="text-gray-500 text-sm mt-1">Consulta el estado de tus cuentas de cobro generadas.</p>
+            <p class="text-gray-500 text-sm mt-1">Consulta el estado de firma de tus cuentas de cobro generadas.</p>
         </div>
 
         <div class="bg-gradient-to-br from-cyan-500 to-blue-600 p-6 rounded-2xl shadow-lg text-white flex flex-col justify-center">
-            <p class="text-xs font-bold uppercase opacity-80">Total Cobrado (Año)</p>
+            <p class="text-xs font-bold uppercase opacity-80">Total Cobrado (Ano)</p>
             <p class="text-3xl font-mono font-bold" x-text="formatearDinero(totalAnual)"></p>
         </div>
     </div>
 
     <div class="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden min-h-[420px] md:min-h-[600px] flex flex-col">
-        
+
         <div class="p-4 border-b border-gray-100 bg-gray-50/50 flex flex-wrap gap-4 items-end">
             <div>
                 <label class="text-xs font-bold text-gray-500 uppercase">Desde</label>
@@ -38,7 +38,8 @@
                     <tr>
                         <th class="px-6 py-4">ID / Fecha Gen.</th>
                         <th class="px-6 py-4">Periodo Cobrado</th>
-                        <th class="px-6 py-4">Descripción</th>
+                        <th class="px-6 py-4">Estado Firma</th>
+                        <th class="px-6 py-4">Descripcion</th>
                         <th class="px-6 py-4 text-right">Total</th>
                         <th class="px-6 py-4 text-center">Acciones</th>
                     </tr>
@@ -53,32 +54,40 @@
                             <td class="px-6 py-4">
                                 <div class="flex items-center gap-2 text-gray-600">
                                     <span x-text="formatDate(c.fecha_inicio_periodo)"></span>
-                                    <span>→</span>
+                                    <span>&rarr;</span>
                                     <span x-text="formatDate(c.fecha_fin_periodo)"></span>
                                 </div>
                             </td>
+                            <td class="px-6 py-4">
+                                <span class="px-2 py-1 rounded-full text-xs font-bold"
+                                      :class="estaFirmada(c) ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'"
+                                      x-text="estadoFirma(c)"></span>
+                            </td>
                             <td class="px-6 py-4 text-gray-600">
-                                <span x-text="c.descripcion || '—'"></span>
+                                <span x-text="c.descripcion || '-'"></span>
                             </td>
                             <td class="px-6 py-4 text-right font-mono font-bold text-gray-700">
                                 <span x-text="formatearDinero(c.total_numeros)"></span>
                             </td>
                             <td class="px-6 py-4 text-center flex justify-center gap-2">
-                                <button @click="verDetalle(c)" class="p-2 text-blue-600 hover:bg-blue-50 rounded-lg tooltip" title="Ver Detalle">
+                                <button @click="verDetalle(c)" class="p-2 text-blue-600 hover:bg-blue-50 rounded-lg tooltip" title="Ver detalle">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                                 </button>
                                 <button @click="descargarPDF(c)" class="p-2 text-red-600 hover:bg-red-50 rounded-lg tooltip" title="Descargar PDF">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
                                 </button>
-                                <button @click="abrirModalAdjuntos(c)" class="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg tooltip" title="Subir soportes">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16l5-5m0 0l5 5m-5-5v10M5 21h14"></path></svg>
+                                <button x-show="getUrlCuentaFirmada(c)" @click="abrirCuentaFirmada(c)" class="p-2 text-emerald-700 hover:bg-emerald-50 rounded-lg tooltip" title="Ver cuenta firmada">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 1.657-1.343 3-3 3s-3-1.343-3-3 1.343-3 3-3 3 1.343 3 3z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 11s3-6 9-6 9 6 9 6-3 6-9 6-9-6-9-6z"></path></svg>
+                                </button>
+                                <button x-show="puedeFirmar(c)" @click="iniciarFirma(c)" class="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg tooltip" title="Firmar cuenta">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5h2m-1 0v14m-7-7h14"></path></svg>
                                 </button>
                             </td>
                         </tr>
                     </template>
-                    
+
                     <tr x-show="cuentas.length === 0">
-                        <td colspan="5" class="py-10 text-center text-gray-400">
+                        <td colspan="6" class="py-10 text-center text-gray-400">
                             No se encontraron registros.
                         </td>
                     </tr>
@@ -89,7 +98,7 @@
 
     <div x-show="modal.open" x-transition.opacity class="fixed inset-0 z-50 flex items-start md:items-center justify-center bg-black/50 backdrop-blur-sm p-3 md:p-6 overflow-y-auto" style="display: none;">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-4 md:p-6 flex flex-col max-h-[92vh] md:max-h-[80vh]">
-            
+
             <div class="flex justify-between items-start mb-4 pb-4 border-b border-gray-100">
                 <div>
                     <h3 class="text-xl font-bold text-gray-800">Detalle Cuenta de Cobro #<span x-text="modal.data?.id"></span></h3>
@@ -102,9 +111,9 @@
                 <table class="w-full text-left">
                     <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
                         <tr>
-                            <th class="p-3">Cliente / Módulo</th>
+                            <th class="p-3">Cliente / Modulo</th>
                             <th class="p-3">Consultor</th>
-                            <th class="p-3">Tipo Asignación</th>
+                            <th class="p-3">Tipo Asignacion</th>
                             <th class="p-3">Caso</th>
                             <th class="p-3 text-right">Cantidad</th>
                             <th class="p-3 text-right">Total</th>
@@ -117,11 +126,11 @@
                                     <p class="font-bold text-gray-800" x-text="d.cliente"></p>
                                     <p class="text-xs text-gray-500" x-text="d.modulo"></p>
                                 </td>
-                                <td class="p-3 text-gray-600" x-text="d.consultor_responsable || '—'"></td>
-                                <td class="p-3 text-gray-600" x-text="d.tipo_asignacion || '—'"></td>
+                                <td class="p-3 text-gray-600" x-text="d.consultor_responsable || '-'"></td>
+                                <td class="p-3 text-gray-600" x-text="d.tipo_asignacion || '-'"></td>
                                 <td class="p-3 text-gray-600" x-text="d.nro_caso_int_ext || '---'"></td>
                                 <td class="p-3 text-right">
-                                    <span x-text="d.cantidad_dias_reportados > 0 ? d.cantidad_dias_reportados + ' Días' : d.horas_reportadas + ' Hrs'"></span>
+                                    <span x-text="d.cantidad_dias_reportados > 0 ? d.cantidad_dias_reportados + ' Dias' : d.horas_reportadas + ' Hrs'"></span>
                                 </td>
                                 <td class="p-3 text-right font-mono font-bold text-gray-700" x-text="formatearDinero(d.total_cobrar)"></td>
                             </tr>
@@ -134,49 +143,6 @@
                 <button @click="modal.open = false" class="px-6 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 font-bold">Cerrar</button>
             </div>
 
-        </div>
-    </div>
-
-    <div x-show="modalAdjuntos.open" x-transition.opacity class="fixed inset-0 z-50 flex items-start md:items-center justify-center bg-black/50 backdrop-blur-sm p-3 md:p-6 overflow-y-auto" style="display: none;">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-4 md:p-6 flex flex-col max-h-[92vh] overflow-y-auto">
-            <div class="flex justify-between items-start mb-4 pb-4 border-b border-gray-100">
-                <div>
-                    <h3 class="text-xl font-bold text-gray-800">Subir Soportes #<span x-text="modalAdjuntos.cuenta?.id"></span></h3>
-                    <p class="text-sm text-gray-500">Carga cuenta de cobro firmada y seguridad social en PDF.</p>
-                </div>
-                <button @click="cerrarModalAdjuntos()" class="text-gray-400 hover:text-gray-600"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
-            </div>
-
-            <div class="space-y-3">
-                <label class="flex items-center gap-3 p-3 border border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-emerald-50 hover:border-emerald-300 transition-colors">
-                    <div class="bg-emerald-100 p-2 rounded-lg text-emerald-600">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16l5-5m0 0l5 5m-5-5v10M5 21h14"></path></svg>
-                    </div>
-                    <div class="flex-1">
-                        <p class="text-sm font-bold text-gray-700">Cuenta de Cobro Firmada (PDF)</p>
-                        <p class="text-xs text-gray-400" x-text="modalAdjuntos.files.cuenta ? modalAdjuntos.files.cuenta.name : 'Click para subir'"></p>
-                    </div>
-                    <input type="file" accept="application/pdf" class="hidden" @change="modalAdjuntos.files.cuenta = $event.target.files[0]">
-                </label>
-
-                <label class="flex items-center gap-3 p-3 border border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-emerald-50 hover:border-emerald-300 transition-colors">
-                    <div class="bg-blue-100 p-2 rounded-lg text-blue-600">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16l5-5m0 0l5 5m-5-5v10M5 21h14"></path></svg>
-                    </div>
-                    <div class="flex-1">
-                        <p class="text-sm font-bold text-gray-700">Seguridad Social (PDF)</p>
-                        <p class="text-xs text-gray-400" x-text="modalAdjuntos.files.seguridad ? modalAdjuntos.files.seguridad.name : 'Click para subir'"></p>
-                    </div>
-                    <input type="file" accept="application/pdf" class="hidden" @change="modalAdjuntos.files.seguridad = $event.target.files[0]">
-                </label>
-            </div>
-
-            <div class="mt-4 pt-4 border-t border-gray-100 flex justify-end gap-2">
-                <button @click="cerrarModalAdjuntos()" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">Cancelar</button>
-                <button @click="subirAdjuntos()" :disabled="modalAdjuntos.loading" class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-                    <span x-text="modalAdjuntos.loading ? 'Subiendo...' : 'Guardar soportes'"></span>
-                </button>
-            </div>
         </div>
     </div>
 

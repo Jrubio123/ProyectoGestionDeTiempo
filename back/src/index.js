@@ -1428,6 +1428,9 @@ function extractClickSignSignatureId(source) {
 
 function normalizeClickSignFileEntries(source) {
   const candidates = [
+    getByPath(source, "file_list.files"),
+    getByPath(source, "data.file_list.files"),
+    getByPath(source, "result.file_list.files"),
     getByPath(source, "signature.file"),
     getByPath(source, "signature.files"),
     getByPath(source, "data.signature.file"),
@@ -1552,13 +1555,16 @@ async function fetchClickSignFileBuffer(fileId) {
 
   for (const body of bodyVariants) {
     try {
-      const response = await jsonRequest({
+      const response = await binaryRequest({
         method: "POST",
         url: buildClickSignUrl("get_file"),
         headers: buildClickSignAuthHeaders(),
         body
       });
-      const data = response?.data || {};
+      if (isPdfBuffer(response?.buffer)) {
+        return response.buffer;
+      }
+      const data = parseJsonSafe(response?.buffer?.toString("utf8") || "");
       const rawBase64 = pickStringByPaths(data, [
         "file.content",
         "file.file_content",

@@ -4783,6 +4783,11 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
       soportes: {
         carpeta: targetPath,
         actualizado_en: new Date().toISOString(),
+        cuenta_cobro_original: {
+          id: cuentaUpload.id,
+          nombre: cuentaUpload.name,
+          url: cuentaUpload.webUrl
+        },
         cuenta_cobro: {
           id: cuentaUpload.id,
           nombre: cuentaUpload.name,
@@ -5212,16 +5217,16 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
           const prevSoportes = prevAdjuntos.soportes && typeof prevAdjuntos.soportes === "object"
             ? prevAdjuntos.soportes
             : {};
-          const nuevoSoporteCuenta = {
-            id: documentoFirmado.id || prevSoportes?.cuenta_cobro?.id || null,
-            nombre: documentoFirmado.nombre || prevSoportes?.cuenta_cobro?.nombre || "CuentaCobroFirmada.pdf",
-            url: documentoFirmado.url || prevSoportes?.cuenta_cobro?.url || ""
+          const nuevoSoporteCuentaFirmada = {
+            id: documentoFirmado.id || prevSoportes?.cuenta_cobro_firmada?.id || prevSoportes?.cuenta_cobro?.id || null,
+            nombre: documentoFirmado.nombre || prevSoportes?.cuenta_cobro_firmada?.nombre || prevSoportes?.cuenta_cobro?.nombre || "CuentaCobroFirmada.pdf",
+            url: documentoFirmado.url || prevSoportes?.cuenta_cobro_firmada?.url || prevSoportes?.cuenta_cobro?.url || ""
           };
           adjuntos.soportes = {
             ...prevSoportes,
             carpeta: documentoFirmado.carpeta || prevSoportes.carpeta || "",
             actualizado_en: nowIso,
-            cuenta_cobro: nuevoSoporteCuenta
+            cuenta_cobro_firmada: nuevoSoporteCuentaFirmada
           };
         }
 

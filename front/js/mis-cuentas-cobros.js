@@ -83,8 +83,10 @@ window.misCuentasApp = function () {
 
         getUrlCuentaFirmada(cuenta) {
             return (
-                cuenta?.datos_adjuntos?.soportes?.cuenta_cobro?.url ||
+                cuenta?.datos_adjuntos?.soportes?.cuenta_cobro_firmada?.url ||
                 cuenta?.datos_adjuntos?.firma?.documento_firmado?.url ||
+                cuenta?.datos_adjuntos?.soportes?.cuenta_cobro?.url ||
+                cuenta?.datos_adjuntos?.soportes?.cuenta_cobro_original?.url ||
                 ""
             );
         },

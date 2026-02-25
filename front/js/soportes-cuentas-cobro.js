@@ -47,8 +47,10 @@ window.soportesCuentasCobroApp = function () {
             const soporte = item?.datos_adjuntos?.soportes || {};
             if (tipo === "cuenta") {
                 return (
-                    soporte?.cuenta_cobro?.url ||
+                    soporte?.cuenta_cobro_firmada?.url ||
                     item?.datos_adjuntos?.firma?.documento_firmado?.url ||
+                    soporte?.cuenta_cobro?.url ||
+                    soporte?.cuenta_cobro_original?.url ||
                     ""
                 );
             }

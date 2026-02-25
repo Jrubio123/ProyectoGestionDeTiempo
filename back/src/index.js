@@ -1462,6 +1462,77 @@ function normalizeClickSignStatus(value) {
   return raw;
 }
 
+async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = "" } = {}) {
+  const lookupRequests = buildClickSignLookupRequests({ requestId, contractId });
+  const statusPaths = [
+    "signature.status",
+    "signature.signature_status",
+    "signature_status",
+    "data.signature.status",
+    "data.signature.signature_status",
+    "data.signature_status",
+    "signature.signatories.0.status",
+    "data.signatories.0.status"
+  ];
+
+  let pendingCandidate = null;
+  let lastEvent = null;
+
+  for (const lookup of lookupRequests) {
+    try {
+      const response = await jsonRequest({
+        method: lookup.method,
+        url: buildClickSignUrl(lookup.path),
+        headers: buildClickSignAuthHeaders(),
+        body: lookup.body || null
+      });
+      const event = response?.data && typeof response.data === "object" ? response.data : {};
+      lastEvent = event;
+
+      const signedCandidate = extractSignedPdfCandidate(event);
+      if (signedCandidate?.url || signedCandidate?.base64) {
+        return {
+          event,
+          rawStatus: "signed",
+          status: "signed",
+          source: `lookup:${lookup.path}`
+        };
+      }
+
+      const rawStatus = pickStringByPaths(event, statusPaths);
+      const status = normalizeClickSignStatus(rawStatus);
+
+      if (status === "signed" || status === "rejected") {
+        return {
+          event,
+          rawStatus,
+          status,
+          source: `lookup:${lookup.path}`
+        };
+      }
+
+      if (!pendingCandidate && status === "pending") {
+        pendingCandidate = {
+          event,
+          rawStatus,
+          status,
+          source: `lookup:${lookup.path}`
+        };
+      }
+    } catch (err) {
+      // Algunos endpoints no existen según plan contratado; se ignoran.
+    }
+  }
+
+  if (pendingCandidate) return pendingCandidate;
+  return {
+    event: lastEvent || {},
+    rawStatus: "",
+    status: "",
+    source: ""
+  };
+}
+
 function extractPublicIdFromContract(contractId) {
   const match = String(contractId || "").match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i);
   return match ? match[0] : "";
@@ -5044,6 +5115,208 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
     }
     console.error("Error iniciando firma digital:", err);
     return res.status(500).json({ error: "Error al iniciar proceso de firma" });
+  }
+});
+
+app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
+  const { id } = req.params;
+  if (!isClickSignConfigured()) {
+    return res.status(503).json({
+      error: "Click&Sign no esta configurado. Falta CLICKSIGN_API_KEY, CLICKSIGN_USER o CLICKSIGN_CONFIG_ID."
+    });
+  }
+
+  try {
+    const cuentaInternalId = await resolveInternalId(pool, ID_TABLES.cuentaCobro, id, { required: true });
+    await assertCuentaCobroOwnerAccess(cuentaInternalId, req);
+
+    const cuentaResult = await pool.query(
+      `
+      SELECT
+        cc.id,
+        cc.public_id,
+        cc.created_by,
+        cc.fecha_correspondiente,
+        cc.created_at,
+        cc.datos_adjuntos,
+        u.nombre_usuario,
+        u.email
+      FROM cuenta_cobro cc
+      LEFT JOIN usuarios u ON u.id = cc.created_by
+      WHERE cc.id = $1
+      LIMIT 1
+      `,
+      [cuentaInternalId]
+    );
+
+    const cuenta = cuentaResult.rows[0] || null;
+    if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
+
+    const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object"
+      ? cuenta.datos_adjuntos
+      : {};
+    const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object"
+      ? prevAdjuntos.firma
+      : {};
+    const prevDocumentoFirmado = prevFirma.documento_firmado && typeof prevFirma.documento_firmado === "object"
+      ? prevFirma.documento_firmado
+      : null;
+
+    const requestId = String(req.body?.request_id || prevFirma.request_id || "").trim();
+    const contractId = String(req.body?.contract_id || prevFirma.contract_id || `CC-${cuenta.public_id || cuenta.id}`).trim();
+
+    if (!requestId && !contractId) {
+      return res.status(400).json({
+        error: "La cuenta no tiene request_id/contract_id para reconciliar."
+      });
+    }
+
+    const snapshot = await fetchClickSignSignatureSnapshot({ requestId, contractId });
+    const event = snapshot.event && typeof snapshot.event === "object" ? snapshot.event : {};
+    const rawStatusFromRequest = String(req.body?.status || "").trim();
+    const rawStatus = rawStatusFromRequest || snapshot.rawStatus || prevFirma.ultimo_evento || prevFirma.estado || "pending";
+    let status = normalizeClickSignStatus(rawStatus);
+    const nowIso = new Date().toISOString();
+
+    const eventosPrev = Array.isArray(prevFirma.eventos) ? prevFirma.eventos.slice(-19) : [];
+    const eventoResumen = {
+      recibido_en: nowIso,
+      status: rawStatus || status || "",
+      request_id: requestId || null,
+      contract_id: contractId || null,
+      origen: "reconciliacion"
+    };
+
+    let documentoFirmado = prevDocumentoFirmado;
+    let documentoFirmadoError = "";
+
+    if (status === "signed" || !status || status === "pending") {
+      const resolvedPdf = await resolveSignedPdfFromClickSign({
+        event,
+        requestId,
+        contractId,
+        publicId: String(cuenta.public_id || "")
+      });
+
+      if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
+        try {
+          const uploadResult = await uploadSignedPdfToOneDrive(
+            cuenta,
+            resolvedPdf.buffer,
+            resolvedPdf.fileName
+          );
+          documentoFirmado = {
+            ...uploadResult.archivo,
+            carpeta: uploadResult.carpeta,
+            origen: resolvedPdf.source || "clicksign",
+            actualizado_en: nowIso
+          };
+          status = "signed";
+        } catch (uploadErr) {
+          documentoFirmadoError = `Error almacenando firmado en OneDrive: ${uploadErr.message || "desconocido"}`;
+        }
+      } else if (status === "signed") {
+        documentoFirmadoError = "No se encontró PDF firmado en API de Click&Sign.";
+      }
+    }
+
+    const firma = {
+      ...prevFirma,
+      estado: status || prevFirma.estado || "pending",
+      request_id: requestId || prevFirma.request_id || null,
+      contract_id: contractId || prevFirma.contract_id || null,
+      actualizado_en: nowIso,
+      ultimo_evento: rawStatus || status || "reconciliacion",
+      eventos: [...eventosPrev, eventoResumen]
+    };
+    if (documentoFirmado && documentoFirmado.url) {
+      firma.documento_firmado = documentoFirmado;
+    }
+    if (documentoFirmadoError) {
+      firma.documento_firmado_error = documentoFirmadoError;
+    } else if (status === "signed" && prevFirma.documento_firmado_error) {
+      firma.documento_firmado_error = null;
+    }
+
+    const adjuntos = {
+      ...prevAdjuntos,
+      firma
+    };
+    if (documentoFirmado && documentoFirmado.url) {
+      const prevSoportes = prevAdjuntos.soportes && typeof prevAdjuntos.soportes === "object"
+        ? prevAdjuntos.soportes
+        : {};
+      const nuevoSoporteCuentaFirmada = {
+        id: documentoFirmado.id || prevSoportes?.cuenta_cobro_firmada?.id || prevSoportes?.cuenta_cobro?.id || null,
+        nombre: documentoFirmado.nombre || prevSoportes?.cuenta_cobro_firmada?.nombre || prevSoportes?.cuenta_cobro?.nombre || "CuentaCobroFirmada.pdf",
+        url: documentoFirmado.url || prevSoportes?.cuenta_cobro_firmada?.url || prevSoportes?.cuenta_cobro?.url || ""
+      };
+      adjuntos.soportes = {
+        ...prevSoportes,
+        carpeta: documentoFirmado.carpeta || prevSoportes.carpeta || "",
+        actualizado_en: nowIso,
+        cuenta_cobro_firmada: nuevoSoporteCuentaFirmada
+      };
+    }
+
+    let estadoDestino = null;
+    if (status === "signed") {
+      estadoDestino = "Aprobado";
+    } else if (status === "rejected") {
+      estadoDestino = "Rechazado";
+    } else if (status === "pending") {
+      estadoDestino = await getCuentaCobroEstadoEnFirma();
+    }
+
+    if (estadoDestino) {
+      await pool.query(
+        `
+        UPDATE cuenta_cobro
+        SET datos_adjuntos = $1::jsonb,
+            estado = $2::tipo_estado_reporte,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+        `,
+        [JSON.stringify(adjuntos), estadoDestino, cuenta.id]
+      );
+    } else {
+      await pool.query(
+        `
+        UPDATE cuenta_cobro
+        SET datos_adjuntos = $1::jsonb,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+        `,
+        [JSON.stringify(adjuntos), cuenta.id]
+      );
+    }
+
+    return res.json({
+      ok: true,
+      cuenta_id: String(cuenta.public_id || cuenta.id || ""),
+      request_id: requestId || null,
+      contract_id: contractId || null,
+      estado_firma: firma.estado || null,
+      estado_cuenta: estadoDestino || null,
+      documento_firmado_url: firma?.documento_firmado?.url || null,
+      documento_firmado_error: firma?.documento_firmado_error || null,
+      origen_snapshot: snapshot.source || null
+    });
+  } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Cuenta no encontrada" });
+    }
+    if (err?.code === "ACCESS_DENIED") {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+    if (Number(err?.status || 0) > 0) {
+      return res.status(502).json({
+        error: "Error consultando firma en Click&Sign",
+        detalle: err.response || err.message
+      });
+    }
+    console.error("Error reconciliando firma digital:", err);
+    return res.status(500).json({ error: "Error reconciliando firma digital" });
   }
 });
 

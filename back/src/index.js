@@ -1401,9 +1401,16 @@ function getClickSignLandingUrl(responseBody) {
     "url_firma",
     "landing_url",
     "signature_url",
+    "url",
+    "signature.url",
+    "signature.signatories.0.url",
+    "signature.signatories.0.sign_url",
+    "signature.signatories.0.landing_url",
+    "signatories.0.url",
     "signatories.0.landing_url",
     "signatories.0.sign_url",
     "data.landing_url",
+    "data.signature.signatories.0.url",
     "data.signatories.0.landing_url"
   ];
   return pickStringByPaths(responseBody, directPaths);

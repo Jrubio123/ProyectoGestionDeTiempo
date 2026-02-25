@@ -1154,6 +1154,13 @@ function isHttpUrl(value) {
   }
 }
 
+function sameResourceUrl(a, b) {
+  const ua = String(a || "").trim();
+  const ub = String(b || "").trim();
+  if (!ua || !ub) return false;
+  return ua === ub;
+}
+
 function applyTemplatePlaceholders(template, values = {}) {
   let output = String(template || "");
   for (const [key, value] of Object.entries(values)) {
@@ -1604,6 +1611,7 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
   }
 
   let signedPdf = signedByLegacy;
+  let signedFileId = "";
   if (!signedPdf) {
     const signedEntry =
       byType.get("signed_contract")?.[0] ||
@@ -1612,12 +1620,9 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
       byType.get("signed_once")?.[0] ||
       byType.get("signature_stamp")?.[0] ||
       byType.get("signatory_stamp")?.[0] ||
-      byType.get("show_landing")?.[0] ||
-      byType.get("start_files")?.[0] ||
-      byType.get("contract_files")?.[0] ||
-      catalog.entries?.[0] ||
       null;
     if (signedEntry) {
+      signedFileId = String(signedEntry.fileId || "").trim();
       const buffer = await fetchClickSignFileBuffer(signedEntry.fileId);
       if (isPdfBuffer(buffer)) {
         signedPdf = {
@@ -1634,7 +1639,7 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
     byType.get("uploaded")?.[0] ||
     byType.get("uploaded_files")?.[0] ||
     null;
-  if (uploadedEntry) {
+  if (uploadedEntry && String(uploadedEntry.fileId || "").trim() !== signedFileId) {
     const uploadedBuffer = await fetchClickSignFileBuffer(uploadedEntry.fileId);
     if (isPdfBuffer(uploadedBuffer)) {
       extraFiles.push({
@@ -1649,7 +1654,7 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
     byType.get("signatory_evidence")?.[0] ||
     byType.get("signature_evidence")?.[0] ||
     null;
-  if (evidenceEntry) {
+  if (evidenceEntry && String(evidenceEntry.fileId || "").trim() !== signedFileId) {
     const evidenceBuffer = await fetchClickSignFileBuffer(evidenceEntry.fileId);
     if (isPdfBuffer(evidenceBuffer)) {
       extraFiles.push({
@@ -5932,7 +5937,8 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
       };
       const extraSeguridad = uploadedExtras.find((item) => item.kind === "seguridad_social_firma" && item.url);
       const extraEvidencia = uploadedExtras.find((item) => item.kind === "evidencia_firma" && item.url);
-      if (extraSeguridad) {
+      const cuentaFirmadaUrl = nuevoSoporteCuentaFirmada.url || "";
+      if (extraSeguridad && !sameResourceUrl(extraSeguridad.url, cuentaFirmadaUrl)) {
         adjuntos.soportes.seguridad_social_firma = {
           id: extraSeguridad.id || null,
           nombre: extraSeguridad.nombre || "SeguridadSocial.pdf",
@@ -5942,7 +5948,7 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
           adjuntos.soportes.seguridad_social = { ...adjuntos.soportes.seguridad_social_firma };
         }
       }
-      if (extraEvidencia) {
+      if (extraEvidencia && !sameResourceUrl(extraEvidencia.url, cuentaFirmadaUrl)) {
         adjuntos.soportes.evidencia_firma = {
           id: extraEvidencia.id || null,
           nombre: extraEvidencia.nombre || "EvidenciaFirma.pdf",
@@ -6375,7 +6381,8 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
           };
           const extraSeguridad = uploadedExtras.find((item) => item.kind === "seguridad_social_firma" && item.url);
           const extraEvidencia = uploadedExtras.find((item) => item.kind === "evidencia_firma" && item.url);
-          if (extraSeguridad) {
+          const cuentaFirmadaUrl = nuevoSoporteCuentaFirmada.url || "";
+          if (extraSeguridad && !sameResourceUrl(extraSeguridad.url, cuentaFirmadaUrl)) {
             adjuntos.soportes.seguridad_social_firma = {
               id: extraSeguridad.id || null,
               nombre: extraSeguridad.nombre || "SeguridadSocial.pdf",
@@ -6385,7 +6392,7 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
               adjuntos.soportes.seguridad_social = { ...adjuntos.soportes.seguridad_social_firma };
             }
           }
-          if (extraEvidencia) {
+          if (extraEvidencia && !sameResourceUrl(extraEvidencia.url, cuentaFirmadaUrl)) {
             adjuntos.soportes.evidencia_firma = {
               id: extraEvidencia.id || null,
               nombre: extraEvidencia.nombre || "EvidenciaFirma.pdf",

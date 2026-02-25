@@ -45,16 +45,20 @@ window.soportesCuentasCobroApp = function () {
 
         getSoporteUrl(item, tipo) {
             const soporte = item?.datos_adjuntos?.soportes || {};
+            const cuentaUrl =
+                soporte?.cuenta_cobro_firmada?.url ||
+                item?.datos_adjuntos?.firma?.documento_firmado?.url ||
+                soporte?.cuenta_cobro?.url ||
+                soporte?.cuenta_cobro_original?.url ||
+                "";
             if (tipo === "cuenta") {
-                return (
-                    soporte?.cuenta_cobro_firmada?.url ||
-                    item?.datos_adjuntos?.firma?.documento_firmado?.url ||
-                    soporte?.cuenta_cobro?.url ||
-                    soporte?.cuenta_cobro_original?.url ||
-                    ""
-                );
+                return cuentaUrl;
             }
-            if (tipo === "seguridad") return soporte?.seguridad_social?.url || "";
+            if (tipo === "seguridad") {
+                const seguridadUrl = soporte?.seguridad_social?.url || "";
+                if (!seguridadUrl) return "";
+                return seguridadUrl === cuentaUrl ? "" : seguridadUrl;
+            }
             return "";
         },
 

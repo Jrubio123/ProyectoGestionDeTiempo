@@ -377,6 +377,7 @@ const CLICKSIGN_SIGNATORY_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_CB_URL
 const CLICKSIGN_SIGNATORY_EMAIL_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_EMAIL_CB_URL || "").trim();
 const CLICKSIGN_WEBHOOK_TOKEN = String(process.env.CLICKSIGN_WEBHOOK_TOKEN || "").trim();
 const CLICKSIGN_SIGNED_FILE_URL_TEMPLATE = String(process.env.CLICKSIGN_SIGNED_FILE_URL_TEMPLATE || "").trim();
+const DEBUG_CLICKSIGN_TOKEN = String(process.env.DEBUG_CLICKSIGN_TOKEN || "").trim();
 let estadoCuentaCobroEnFirmaCache = null;
 
 function buildPortalUrl(hashRoute = "inicio") {
@@ -911,6 +912,26 @@ async function graphGetAll(path, accessToken, maxPages = 20) {
 function buildClickSignUrl(pathName) {
   const suffix = String(pathName || "").replace(/^\/+/, "");
   return `${CLICKSIGN_API_BASE}/${suffix}`;
+}
+
+function normalizeClickSignBaseUrl(baseUrl) {
+  const raw = String(baseUrl || "").trim().replace(/\/+$/, "");
+  if (!raw) return "";
+  if (raw.endsWith("/cs/v1")) return raw;
+  return `${raw}/cs/v1`;
+}
+
+function buildClickSignCustomUrl(baseUrl, pathName) {
+  const base = normalizeClickSignBaseUrl(baseUrl);
+  const suffix = String(pathName || "").replace(/^\/+/, "");
+  return `${base}/${suffix}`;
+}
+
+function maskSecret(value, visible = 4) {
+  const raw = String(value || "");
+  if (!raw) return "";
+  if (raw.length <= visible) return "*".repeat(raw.length);
+  return `${"*".repeat(Math.max(0, raw.length - visible))}${raw.slice(-visible)}`;
 }
 
 function getByPath(source, pathName) {
@@ -2700,7 +2721,10 @@ app.post("/auth/microsoft", async (req, res) => {
       return res.status(500).json({ error: "No se pudo conectar a la base de datos (DB_HOST/DB_PORT)" });
     }
     if (err.code === "42703") {
-      return res.status(500).json({ error: "Falta una columna requerida en la tabla usuarios (revisa migraciones)" });
+      return res.status(500).json({
+        error:
+          "Falta una columna requerida en la BD. Ejecuta la migracion db/migrations/2026-02-24-add-public-id.sql y reinicia el backend."
+      });
     }
     if (err.code === "23505") {
       return res.status(500).json({ error: "Conflicto de datos al crear usuario (email/azure_oid duplicado)" });
@@ -2725,6 +2749,148 @@ app.get("/health", async (req, res) => {
       status: "unhealthy",
       db_pool: getPoolStats()
     });
+  }
+});
+
+// Debug temporal para validar autenticación Click&Sign (base URL + header + user).
+// Uso:
+//   GET /debug/clicksign?token=... [&user=...] [&base=...]
+app.get("/debug/clicksign", async (req, res) => {
+  try {
+    if (!DEBUG_CLICKSIGN_TOKEN) {
+      return res.status(404).json({ error: "Ruta no disponible" });
+    }
+
+    const inboundToken = String(
+      req.query?.token || req.headers["x-debug-token"] || ""
+    ).trim();
+    if (!inboundToken || inboundToken !== DEBUG_CLICKSIGN_TOKEN) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+
+    const apiKey = CLICKSIGN_API_KEY;
+    if (!apiKey) {
+      return res.status(400).json({ error: "Falta CLICKSIGN_API_KEY en entorno" });
+    }
+
+    const requestedUser = String(req.query?.user || "").trim();
+    const requestedBase = String(req.query?.base || "").trim();
+
+    const userCandidates = Array.from(
+      new Set([requestedUser, CLICKSIGN_USER].map((v) => String(v || "").trim()).filter(Boolean))
+    );
+    if (userCandidates.length === 0) {
+      return res.status(400).json({ error: "Falta user para prueba (CLICKSIGN_USER o ?user=...)" });
+    }
+
+    const baseCandidates = Array.from(
+      new Set(
+        [requestedBase, CLICKSIGN_API_BASE, "https://api.lleida.net/cs/v1", "https://api.clickandsign.eu/cs/v1"]
+          .map((v) => normalizeClickSignBaseUrl(v))
+          .filter(Boolean)
+      )
+    );
+
+    const headerModes = [
+      {
+        mode: "x-api-key",
+        headers: {
+          "x-api-key": apiKey,
+          "Content-Type": "application/json; charset=utf-8",
+          Accept: "application/json"
+        }
+      },
+      {
+        mode: "authorization",
+        headers: {
+          Authorization: `x-api-key ${apiKey}`,
+          "Content-Type": "application/json; charset=utf-8",
+          Accept: "application/json"
+        }
+      },
+      {
+        mode: "both",
+        headers: {
+          "x-api-key": apiKey,
+          Authorization: `x-api-key ${apiKey}`,
+          "Content-Type": "application/json; charset=utf-8",
+          Accept: "application/json"
+        }
+      }
+    ];
+
+    const attempts = [];
+    let seq = 0;
+    for (const base of baseCandidates) {
+      for (const user of userCandidates) {
+        for (const headerMode of headerModes) {
+          seq += 1;
+          const requestId = `dbg-${Date.now()}-${seq}`;
+          const targetUrl = buildClickSignCustomUrl(base, "get_config_list");
+          const attempt = {
+            target: targetUrl,
+            base,
+            header_mode: headerMode.mode,
+            user,
+            request_id: requestId
+          };
+
+          try {
+            const response = await jsonRequest({
+              method: "POST",
+              url: targetUrl,
+              headers: headerMode.headers,
+              body: {
+                request: "GET_CONFIG_LIST",
+                request_id: requestId,
+                user
+              },
+              timeoutMs: 20000
+            });
+            attempts.push({
+              ...attempt,
+              ok: true,
+              http_status: response.status,
+              code: response?.data?.code ?? response?.data?.result?.code ?? null,
+              status: response?.data?.status ?? response?.data?.result?.status ?? "OK",
+              sample: response.data
+            });
+          } catch (err) {
+            attempts.push({
+              ...attempt,
+              ok: false,
+              http_status: Number(err?.status || 0) || null,
+              code: err?.response?.code ?? err?.response?.result?.code ?? null,
+              status: err?.response?.status ?? err?.response?.result?.status ?? err?.message ?? "ERROR",
+              sample: err?.response ?? null
+            });
+          }
+        }
+      }
+    }
+
+    const success = attempts.filter((a) => a.ok);
+    return res.json({
+      ok: success.length > 0,
+      configured: {
+        api_base: normalizeClickSignBaseUrl(CLICKSIGN_API_BASE),
+        api_key_masked: maskSecret(apiKey),
+        clicksign_user: CLICKSIGN_USER
+      },
+      tested: {
+        users: userCandidates,
+        bases: baseCandidates,
+        header_modes: headerModes.map((h) => h.mode)
+      },
+      summary: {
+        total_attempts: attempts.length,
+        success_attempts: success.length
+      },
+      success,
+      attempts
+    });
+  } catch (err) {
+    return res.status(500).json({ error: "Error debug Click&Sign", detalle: err?.message || String(err) });
   }
 });
 

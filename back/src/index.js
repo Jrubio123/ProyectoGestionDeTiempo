@@ -1110,8 +1110,8 @@ function parseBase64Pdf(rawValue) {
   const fromDataUrl = parsePdfDataUrl(raw);
   if (isPdfBuffer(fromDataUrl)) return fromDataUrl;
 
-  const compact = raw.replace(/\s+/g, "");
-  if (!/^[A-Za-z0-9+/=]+$/.test(compact)) return null;
+  const compact = normalizeBase64Input(raw);
+  if (!compact) return null;
   try {
     const buffer = Buffer.from(compact, "base64");
     return isPdfBuffer(buffer) ? buffer : null;
@@ -1123,14 +1123,23 @@ function parseBase64Pdf(rawValue) {
 function parseBase64Buffer(rawValue) {
   const raw = String(rawValue || "").trim();
   if (!raw) return null;
-  const compact = raw.replace(/\s+/g, "");
-  if (!/^[A-Za-z0-9+/=]+$/.test(compact)) return null;
+  const compact = normalizeBase64Input(raw);
+  if (!compact) return null;
   try {
     const buffer = Buffer.from(compact, "base64");
     return buffer.length ? buffer : null;
   } catch (err) {
     return null;
   }
+}
+
+function normalizeBase64Input(rawValue) {
+  const compact = String(rawValue || "").replace(/\s+/g, "");
+  if (!compact) return "";
+  const normalized = compact.replace(/-/g, "+").replace(/_/g, "/");
+  if (!/^[A-Za-z0-9+/=]+$/.test(normalized)) return "";
+  const missingPadding = normalized.length % 4;
+  return missingPadding ? `${normalized}${"=".repeat(4 - missingPadding)}` : normalized;
 }
 
 function isHttpUrl(value) {
@@ -1432,7 +1441,8 @@ function normalizeClickSignFileEntries(source) {
     for (const item of value) {
       if (!item || typeof item !== "object") continue;
       const fileId = String(item.file_id || item.id || "").trim();
-      const fileType = String(item.file_type || item.type || "").trim().toLowerCase();
+      const rawFileType = String(item.file_type || item.type || item.file_group || item.group || "").trim();
+      const fileType = rawFileType.toLowerCase().replace(/\s+/g, "_");
       const fileName = sanitizePdfFileName(
         item.filename || item.file_name || item.name || "DocumentoClickSign.pdf",
         "DocumentoClickSign.pdf"
@@ -1444,10 +1454,58 @@ function normalizeClickSignFileEntries(source) {
   return entries;
 }
 
+async function fetchClickSignFileListEntries({ requestId, contractId, signatureId }) {
+  const signatureIdRaw = String(signatureId || "").trim();
+  const signatureIdNumeric = /^\d+$/.test(signatureIdRaw) ? Number(signatureIdRaw) : null;
+  if (!signatureIdNumeric && !requestId && !contractId) return [];
+
+  const basePayload = {
+    request: "GET_FILE_LIST",
+    request_id: `file-list-${Date.now()}`,
+    user: CLICKSIGN_USER
+  };
+  const bodyCandidates = [];
+  if (signatureIdNumeric) {
+    bodyCandidates.push({ ...basePayload, signature_id: signatureIdNumeric });
+  }
+  if (requestId) {
+    bodyCandidates.push({ ...basePayload, request_id_search: requestId });
+    bodyCandidates.push({ ...basePayload, signature: { request_id: requestId } });
+  }
+  if (contractId) {
+    bodyCandidates.push({ ...basePayload, contract_id: contractId });
+    bodyCandidates.push({ ...basePayload, signature: { contract_id: contractId } });
+  }
+
+  for (const body of bodyCandidates) {
+    try {
+      const response = await jsonRequest({
+        method: "POST",
+        url: buildClickSignUrl("get_file_list"),
+        headers: buildClickSignAuthHeaders(),
+        body
+      });
+      const entries = normalizeClickSignFileEntries(response?.data || {});
+      if (entries.length > 0) {
+        return entries;
+      }
+    } catch (err) {
+      // Se ignora y continúa con otras variantes.
+    }
+  }
+
+  return [];
+}
+
 async function fetchClickSignFilesCatalog({ event, requestId, contractId, signatureId }) {
   const fromEvent = normalizeClickSignFileEntries(event);
   if (fromEvent.length > 0) {
     return { entries: fromEvent, source: "event" };
+  }
+
+  const fromFileList = await fetchClickSignFileListEntries({ requestId, contractId, signatureId });
+  if (fromFileList.length > 0) {
+    return { entries: fromFileList, source: "get_file_list" };
   }
 
   const signatureIdRaw = String(signatureId || extractClickSignSignatureId(event) || "").trim();
@@ -1533,6 +1591,9 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
       byType.get("signed_contract")?.[0] ||
       byType.get("signed")?.[0] ||
       byType.get("contract_signed")?.[0] ||
+      byType.get("signed_once")?.[0] ||
+      byType.get("signature_stamp")?.[0] ||
+      byType.get("signatory_stamp")?.[0] ||
       null;
     if (signedEntry) {
       const buffer = await fetchClickSignFileBuffer(signedEntry.fileId);
@@ -1547,7 +1608,10 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
   }
 
   const extraFiles = [];
-  const uploadedEntry = byType.get("uploaded")?.[0] || null;
+  const uploadedEntry =
+    byType.get("uploaded")?.[0] ||
+    byType.get("uploaded_files")?.[0] ||
+    null;
   if (uploadedEntry) {
     const uploadedBuffer = await fetchClickSignFileBuffer(uploadedEntry.fileId);
     if (isPdfBuffer(uploadedBuffer)) {
@@ -1558,7 +1622,11 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
       });
     }
   }
-  const evidenceEntry = byType.get("evidence")?.[0] || null;
+  const evidenceEntry =
+    byType.get("evidence")?.[0] ||
+    byType.get("signatory_evidence")?.[0] ||
+    byType.get("signature_evidence")?.[0] ||
+    null;
   if (evidenceEntry) {
     const evidenceBuffer = await fetchClickSignFileBuffer(evidenceEntry.fileId);
     if (isPdfBuffer(evidenceBuffer)) {

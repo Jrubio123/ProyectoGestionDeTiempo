@@ -1120,6 +1120,19 @@ function parseBase64Pdf(rawValue) {
   }
 }
 
+function parseBase64Buffer(rawValue) {
+  const raw = String(rawValue || "").trim();
+  if (!raw) return null;
+  const compact = raw.replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9+/=]+$/.test(compact)) return null;
+  try {
+    const buffer = Buffer.from(compact, "base64");
+    return buffer.length ? buffer : null;
+  } catch (err) {
+    return null;
+  }
+}
+
 function isHttpUrl(value) {
   try {
     const parsed = new URL(String(value || "").trim());
@@ -1393,6 +1406,207 @@ async function resolveSignedPdfFromClickSign({ event, requestId, contractId, pub
   }
 
   return null;
+}
+
+function extractClickSignSignatureId(source) {
+  return pickStringByPaths(source, [
+    "signature.signature_id",
+    "signature_id",
+    "data.signature.signature_id",
+    "data.signature_id"
+  ]);
+}
+
+function normalizeClickSignFileEntries(source) {
+  const candidates = [
+    getByPath(source, "signature.file"),
+    getByPath(source, "signature.files"),
+    getByPath(source, "data.signature.file"),
+    getByPath(source, "data.signature.files"),
+    getByPath(source, "file"),
+    getByPath(source, "files")
+  ];
+  const entries = [];
+  for (const value of candidates) {
+    if (!Array.isArray(value)) continue;
+    for (const item of value) {
+      if (!item || typeof item !== "object") continue;
+      const fileId = String(item.file_id || item.id || "").trim();
+      const fileType = String(item.file_type || item.type || "").trim().toLowerCase();
+      const fileName = sanitizePdfFileName(
+        item.filename || item.file_name || item.name || "DocumentoClickSign.pdf",
+        "DocumentoClickSign.pdf"
+      );
+      if (!fileId) continue;
+      entries.push({ fileId, fileType, fileName });
+    }
+  }
+  return entries;
+}
+
+async function fetchClickSignFilesCatalog({ event, requestId, contractId }) {
+  const fromEvent = normalizeClickSignFileEntries(event);
+  if (fromEvent.length > 0) {
+    return { entries: fromEvent, source: "event" };
+  }
+
+  const signatureId = extractClickSignSignatureId(event);
+  const bodies = [];
+  if (requestId) {
+    bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}`, user: CLICKSIGN_USER, signature: { request_id: requestId } });
+    bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-rid`, user: CLICKSIGN_USER, request_id_search: requestId });
+  }
+  if (contractId) {
+    bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-cid`, user: CLICKSIGN_USER, signature: { contract_id: contractId } });
+    bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-cid2`, user: CLICKSIGN_USER, contract_id: contractId });
+  }
+  if (signatureId) {
+    bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-sid`, user: CLICKSIGN_USER, signature: { signature_id: signatureId } });
+  }
+  bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-fallback`, user: CLICKSIGN_USER, request_id: requestId || undefined, contract_id: contractId || undefined });
+
+  for (const body of bodies) {
+    try {
+      const response = await jsonRequest({
+        method: "POST",
+        url: buildClickSignUrl("get_signature"),
+        headers: buildClickSignAuthHeaders(),
+        body
+      });
+      const entries = normalizeClickSignFileEntries(response?.data || {});
+      if (entries.length > 0) {
+        return { entries, source: "get_signature" };
+      }
+    } catch (err) {
+      // Se ignora y continúa con otras variantes.
+    }
+  }
+
+  return { entries: [], source: "" };
+}
+
+async function fetchClickSignFileBuffer(fileId) {
+  const bodyVariants = [
+    { request: "GET_FILE", request_id: `file-${Date.now()}`, user: CLICKSIGN_USER, file: { file_id: fileId } },
+    { request: "GET_FILE", request_id: `file-${Date.now()}-alt`, user: CLICKSIGN_USER, file_id: fileId }
+  ];
+
+  for (const body of bodyVariants) {
+    try {
+      const response = await jsonRequest({
+        method: "POST",
+        url: buildClickSignUrl("get_file"),
+        headers: buildClickSignAuthHeaders(),
+        body
+      });
+      const data = response?.data || {};
+      const rawBase64 = pickStringByPaths(data, [
+        "file.content",
+        "file.file_content",
+        "content",
+        "data.file.content",
+        "data.content"
+      ]);
+      const buffer = parseBase64Buffer(rawBase64);
+      if (buffer && buffer.length > 0) return buffer;
+    } catch (err) {
+      // continúa con variante alterna.
+    }
+  }
+
+  return null;
+}
+
+async function resolveClickSignArtifacts({ event, requestId, contractId, publicId }) {
+  const signedByLegacy = await resolveSignedPdfFromClickSign({ event, requestId, contractId, publicId });
+  const catalog = await fetchClickSignFilesCatalog({ event, requestId, contractId });
+  const byType = new Map();
+  for (const entry of catalog.entries) {
+    if (!byType.has(entry.fileType)) byType.set(entry.fileType, []);
+    byType.get(entry.fileType).push(entry);
+  }
+
+  let signedPdf = signedByLegacy;
+  if (!signedPdf) {
+    const signedEntry =
+      byType.get("signed_contract")?.[0] ||
+      byType.get("signed")?.[0] ||
+      byType.get("contract_signed")?.[0] ||
+      null;
+    if (signedEntry) {
+      const buffer = await fetchClickSignFileBuffer(signedEntry.fileId);
+      if (isPdfBuffer(buffer)) {
+        signedPdf = {
+          buffer,
+          fileName: sanitizePdfFileName(signedEntry.fileName || `CuentaCobroFirmada_${publicId || "documento"}.pdf`, "CuentaCobroFirmada.pdf"),
+          source: "get_file_signed_contract"
+        };
+      }
+    }
+  }
+
+  const extraFiles = [];
+  const uploadedEntry = byType.get("uploaded")?.[0] || null;
+  if (uploadedEntry) {
+    const uploadedBuffer = await fetchClickSignFileBuffer(uploadedEntry.fileId);
+    if (isPdfBuffer(uploadedBuffer)) {
+      extraFiles.push({
+        kind: "seguridad_social_firma",
+        fileName: sanitizePdfFileName(uploadedEntry.fileName || `SeguridadSocial_${publicId || "cuenta"}.pdf`, "SeguridadSocial.pdf"),
+        buffer: uploadedBuffer
+      });
+    }
+  }
+  const evidenceEntry = byType.get("evidence")?.[0] || null;
+  if (evidenceEntry) {
+    const evidenceBuffer = await fetchClickSignFileBuffer(evidenceEntry.fileId);
+    if (isPdfBuffer(evidenceBuffer)) {
+      extraFiles.push({
+        kind: "evidencia_firma",
+        fileName: sanitizePdfFileName(evidenceEntry.fileName || `EvidenciaFirma_${publicId || "cuenta"}.pdf`, "EvidenciaFirma.pdf"),
+        buffer: evidenceBuffer
+      });
+    }
+  }
+
+  return {
+    signedPdf,
+    extraFiles,
+    catalogSource: catalog.source || null
+  };
+}
+
+async function uploadClickSignExtraFilesToOneDrive(cuenta, extraFiles = [], targetPathHint = "") {
+  if (!ONEDRIVE_ENABLED || !Array.isArray(extraFiles) || extraFiles.length === 0) return { uploaded: [], carpeta: targetPathHint || "" };
+
+  const token = await getGraphAccessToken();
+  const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
+  await graphGet(`/v1.0/users/${encodedUser}/drive`, token);
+
+  let targetPath = String(targetPathHint || "").trim();
+  if (!targetPath) {
+    const { consultorFolder, cuentaFolderName } = buildCuentaCobroFolderContext(cuenta);
+    targetPath = sanitizePathSegment(ONEDRIVE_ROOT_FOLDER, "AdjuntosCuentasCobro");
+    targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
+    targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, consultorFolder);
+    targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, cuentaFolderName);
+  }
+
+  const uploaded = [];
+  for (const file of extraFiles) {
+    if (!file?.buffer || !isPdfBuffer(file.buffer)) continue;
+    const safeName = sanitizePdfFileName(file.fileName || `${file.kind || "archivo"}.pdf`, `${file.kind || "archivo"}.pdf`);
+    const uploadPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${safeName}`)}:/content`;
+    const result = await graphPutBinary(uploadPath, token, file.buffer, "application/pdf");
+    uploaded.push({
+      kind: file.kind,
+      id: result.id || "",
+      nombre: result.name || safeName,
+      url: result.webUrl || ""
+    });
+  }
+
+  return { uploaded, carpeta: targetPath };
 }
 
 function getClickSignLandingUrl(responseBody) {
@@ -5190,13 +5404,15 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
     let documentoFirmado = prevDocumentoFirmado;
     let documentoFirmadoError = "";
 
+    let uploadedExtras = [];
     if (status === "signed" || !status || status === "pending") {
-      const resolvedPdf = await resolveSignedPdfFromClickSign({
+      const artifacts = await resolveClickSignArtifacts({
         event,
         requestId,
         contractId,
         publicId: String(cuenta.public_id || "")
       });
+      const resolvedPdf = artifacts?.signedPdf || null;
 
       if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
         try {
@@ -5212,6 +5428,16 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
             actualizado_en: nowIso
           };
           status = "signed";
+          try {
+            const extrasResult = await uploadClickSignExtraFilesToOneDrive(
+              cuenta,
+              artifacts?.extraFiles || [],
+              uploadResult.carpeta || ""
+            );
+            uploadedExtras = extrasResult.uploaded || [];
+          } catch (extraErr) {
+            console.warn("No se pudieron subir adjuntos extra de Click&Sign (reconciliacion):", extraErr?.message || extraErr);
+          }
         } catch (uploadErr) {
           documentoFirmadoError = `Error almacenando firmado en OneDrive: ${uploadErr.message || "desconocido"}`;
         }
@@ -5257,6 +5483,25 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
         actualizado_en: nowIso,
         cuenta_cobro_firmada: nuevoSoporteCuentaFirmada
       };
+      const extraSeguridad = uploadedExtras.find((item) => item.kind === "seguridad_social_firma" && item.url);
+      const extraEvidencia = uploadedExtras.find((item) => item.kind === "evidencia_firma" && item.url);
+      if (extraSeguridad) {
+        adjuntos.soportes.seguridad_social_firma = {
+          id: extraSeguridad.id || null,
+          nombre: extraSeguridad.nombre || "SeguridadSocial.pdf",
+          url: extraSeguridad.url || ""
+        };
+        if (!adjuntos.soportes.seguridad_social?.url) {
+          adjuntos.soportes.seguridad_social = { ...adjuntos.soportes.seguridad_social_firma };
+        }
+      }
+      if (extraEvidencia) {
+        adjuntos.soportes.evidencia_firma = {
+          id: extraEvidencia.id || null,
+          nombre: extraEvidencia.nombre || "EvidenciaFirma.pdf",
+          url: extraEvidencia.url || ""
+        };
+      }
     }
 
     let estadoDestino = null;
@@ -5433,13 +5678,15 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
         let documentoFirmado = prevDocumentoFirmado;
         let documentoFirmadoError = "";
 
+        let uploadedExtras = [];
         if (status === "signed") {
-          const resolvedPdf = await resolveSignedPdfFromClickSign({
+          const artifacts = await resolveClickSignArtifacts({
             event,
             requestId,
             contractId,
             publicId: String(cuenta.public_id || "")
           });
+          const resolvedPdf = artifacts?.signedPdf || null;
 
           if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
             try {
@@ -5454,6 +5701,16 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
                 origen: resolvedPdf.source || "clicksign",
                 actualizado_en: nowIso
               };
+              try {
+                const extrasResult = await uploadClickSignExtraFilesToOneDrive(
+                  cuenta,
+                  artifacts?.extraFiles || [],
+                  uploadResult.carpeta || ""
+                );
+                uploadedExtras = extrasResult.uploaded || [];
+              } catch (extraErr) {
+                console.warn("No se pudieron subir adjuntos extra de Click&Sign:", extraErr?.message || extraErr);
+              }
             } catch (uploadErr) {
               documentoFirmadoError = `Error almacenando firmado en OneDrive: ${uploadErr.message || "desconocido"}`;
               console.error("Error guardando firmado en OneDrive:", uploadErr?.message || uploadErr);
@@ -5501,6 +5758,25 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
             actualizado_en: nowIso,
             cuenta_cobro_firmada: nuevoSoporteCuentaFirmada
           };
+          const extraSeguridad = uploadedExtras.find((item) => item.kind === "seguridad_social_firma" && item.url);
+          const extraEvidencia = uploadedExtras.find((item) => item.kind === "evidencia_firma" && item.url);
+          if (extraSeguridad) {
+            adjuntos.soportes.seguridad_social_firma = {
+              id: extraSeguridad.id || null,
+              nombre: extraSeguridad.nombre || "SeguridadSocial.pdf",
+              url: extraSeguridad.url || ""
+            };
+            if (!adjuntos.soportes.seguridad_social?.url) {
+              adjuntos.soportes.seguridad_social = { ...adjuntos.soportes.seguridad_social_firma };
+            }
+          }
+          if (extraEvidencia) {
+            adjuntos.soportes.evidencia_firma = {
+              id: extraEvidencia.id || null,
+              nombre: extraEvidencia.nombre || "EvidenciaFirma.pdf",
+              url: extraEvidencia.url || ""
+            };
+          }
         }
 
         let estadoDestino = null;

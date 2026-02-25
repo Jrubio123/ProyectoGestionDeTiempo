@@ -39,6 +39,9 @@
             </div>
 
             <div class="mb-8 mt-10">
+                <div x-show="isTestMode" class="mb-3 inline-flex items-center rounded-full border border-amber-300/80 bg-amber-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-800">
+                    Entorno test
+                </div>
                 <h2 class="text-3xl font-extrabold text-white drop-shadow-sm">Acceso Corporativo</h2>
                 <p class="text-white/80 text-sm mt-2" x-text="isLocalMode ? 'Modo local: puedes usar correo/contraseña o Microsoft.' : 'Inicia sesión con tu cuenta Microsoft.'"></p>
             </div>

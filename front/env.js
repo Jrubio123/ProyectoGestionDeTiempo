@@ -4,7 +4,11 @@
         api_local: "http://localhost:4000",
         api_container: "",
         api_tunnel: "https://d053flnv-4000.use.devtunnels.ms",
+        api_test: "https://proyectogestiondetiempo.onrender.com",
         api_prod: "https://backapp-eghxaxfafuecc2dr.westus-01.azurewebsites.net",
+        test_front_hosts: [
+            "zealous-mud-057b4ca0f.1.azurestaticapps.net"
+        ],
         azure_tenant_id: "9c6fde39-4030-44e7-aeb7-c6c97aa49ba4",
         azure_client_id: "8544473b-8df2-49c7-8916-264a0b4cbc6b",
         azure_redirect_path: "/auth/callback"
@@ -58,9 +62,12 @@
         /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
         /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(host);
 
-    const inferredMode = host.includes("azurestaticapps.net")
-        ? "prod"
-        : (isLocalHost ? "local" : null);
+    const isKnownTestFront = (config.test_front_hosts || []).includes(host);
+    const inferredMode = isKnownTestFront
+        ? "test"
+        : host.includes("azurestaticapps.net")
+            ? "prod"
+            : (isLocalHost ? "local" : null);
 
     const localSafeStoredMode = isLocalHost && storedMode === "prod" ? null : storedMode;
     let mode = modeParam || localSafeStoredMode || inferredMode || config.mode;
@@ -80,10 +87,16 @@
     if (mode === "local" && config.api_container) apiFromMode = config.api_container;
     if (mode === "local" && sameHostApi) apiFromMode = sameHostApi;
     if (mode === "tunnel" && config.api_tunnel) apiFromMode = config.api_tunnel;
+    if (mode === "test" && config.api_test) apiFromMode = config.api_test;
     if (mode === "prod" && config.api_prod) apiFromMode = config.api_prod;
 
+    const shouldIgnoreStoredApi = isKnownTestFront && !apiParam;
+    if (shouldIgnoreStoredApi && config.api_test) {
+        setSafe("APP_API_BASE", normalizeApiBase(config.api_test));
+    }
+
     window.APP_MODE = mode;
-    window.API_BASE = normalizeApiBase(apiParam || storedApi || apiFromMode);
+    window.API_BASE = normalizeApiBase(apiParam || (shouldIgnoreStoredApi ? "" : storedApi) || apiFromMode);
     window.AZURE_TENANT_ID = config.azure_tenant_id;
     window.AZURE_CLIENT_ID = config.azure_client_id;
     window.AZURE_REDIRECT_PATH = config.azure_redirect_path;

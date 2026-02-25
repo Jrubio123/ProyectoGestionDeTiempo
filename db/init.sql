@@ -42,6 +42,7 @@ CREATE TYPE tipo_servicio AS ENUM
 CREATE TYPE tipo_estado_reporte AS ENUM
 (
     'Aprobado',
+    'En_Firma',
     'Pendiente',
     'Rechazado',
     'Revisión'

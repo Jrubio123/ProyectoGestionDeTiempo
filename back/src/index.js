@@ -1990,394 +1990,318 @@ function formatCuentaCobroDate(value) {
   }
 }*/
 // ============================================================
-//  writeCuentaCobroPdf  —  versión mejorada
-//  Dependencias: pdfkit (ya instalado en el proyecto)
-//  Paleta: colores Silver Consulting (#20272F, #189FA9, #1C61AB)
+//  writeCuentaCobroPdf  —  versión corregida
+//  Fix: header sin solapamiento, fechas formateadas, espaciado
 // ============================================================
 
-// ── Constantes de diseño ─────────────────────────────────────
 const COLOR = {
-  azulOscuro:  "#20272F",   // Fondo header / texto oscuro
-  turquesa:    "#189FA9",   // Acento principal (secciones)
-  azulMedio:   "#1C61AB",   // Acento secundario
-  grisClaro:   "#F4F6F9",   // Fondo filas pares de tabla
-  grisLinea:   "#D5DCE8",   // Líneas separadoras
-  blanco:      "#FFFFFF",
-  textoPrin:   "#20272F",
-  textoSec:    "#4A5568",
+  azulOscuro: "#20272F",
+  turquesa:   "#189FA9",
+  azulMedio:  "#1C61AB",
+  grisClaro:  "#F4F6F9",
+  grisLinea:  "#D5DCE8",
+  blanco:     "#FFFFFF",
+  textoPrin:  "#20272F",
+  textoSec:   "#4A5568",
 };
 
-const MARGIN = { top: 40, left: 40, right: 40, bottom: 40 };
+const MARGIN = { top: 40, left: 40, right: 40, bottom: 50 };
 
-// ── Helpers ──────────────────────────────────────────────────
-
-/** Ancho útil de la página */
 function pageWidth(doc) {
   return doc.page.width - MARGIN.left - MARGIN.right;
 }
 
-/** Dibuja un rectángulo relleno */
 function fillRect(doc, x, y, w, h, color) {
   doc.save().rect(x, y, w, h).fill(color).restore();
 }
 
-/** Línea horizontal */
 function hLine(doc, x, y, w, color = COLOR.grisLinea, lineWidth = 0.5) {
   doc.save()
     .strokeColor(color)
     .lineWidth(lineWidth)
-    .moveTo(x, y)
-    .lineTo(x + w, y)
+    .moveTo(x, y).lineTo(x + w, y)
     .stroke()
     .restore();
 }
 
-/** Bloque de dos columnas clave:valor */
-function infoRow(doc, x, y, label, value, labelWidth = 130) {
-  doc
-    .fontSize(9)
-    .font("Helvetica-Bold")
-    .fillColor(COLOR.textoPrin)
+// Formatea fecha sin mostrar UTC — acepta string ISO o Date
+function fmtFecha(value) {
+  if (!value) return "-";
+  // Si viene como "2026-02-01" o "2026-02-01T00:00:00.000Z"
+  const str = String(value);
+  // Tomar solo la parte de fecha para evitar desfase de zona horaria
+  const soloFecha = str.slice(0, 10); // "2026-02-01"
+  const [year, month, day] = soloFecha.split("-").map(Number);
+  if (!year || !month || !day) return str;
+  const meses = [
+    "Enero","Febrero","Marzo","Abril","Mayo","Junio",
+    "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"
+  ];
+  return `${day} de ${meses[month - 1]} de ${year}`;
+}
+
+function infoRow(doc, x, y, label, value, labelWidth = 90) {
+  const w = pageWidth(doc) / 2 - labelWidth - 10;
+  doc.fontSize(8.5).font("Helvetica-Bold").fillColor(COLOR.textoPrin)
     .text(label, x, y, { width: labelWidth, lineBreak: false });
-  doc
-    .font("Helvetica")
-    .fillColor(COLOR.textoSec)
-    .text(String(value || "-"), x + labelWidth, y, {
-      width: pageWidth(doc) / 2 - labelWidth,
-      lineBreak: false,
-    });
+  doc.font("Helvetica").fillColor(COLOR.textoSec)
+    .text(String(value || "-"), x + labelWidth, y, { width: w, lineBreak: false });
+}
+
+function sectionTitle(doc, title, y) {
+  const ML = MARGIN.left;
+  fillRect(doc, ML, y, 3, 13, COLOR.turquesa);
+  doc.fontSize(9).font("Helvetica-Bold").fillColor(COLOR.azulOscuro)
+    .text(title, ML + 10, y + 1, { lineBreak: false });
+  return y + 20;
 }
 
 // ── Función principal ─────────────────────────────────────────
 function writeCuentaCobroPdf(doc, cuenta, detalles) {
-  const PW   = pageWidth(doc);
-  const ML   = MARGIN.left;
-  const MR   = doc.page.width - MARGIN.right;
+  const PW = pageWidth(doc);
+  const ML = MARGIN.left;
+  const PW_TOTAL = doc.page.width; // ancho real de página
 
   const totalNumeros = Number(cuenta.total_cuenta_cobro || 0);
   const totalLetras  = cuenta.total_letras
     || buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
-  const monedaSimbolo = (cuenta.moneda_cobro || "COP").toUpperCase() === "USD" ? "USD" : "COP";
+  const monedaSimbolo = String(cuenta.moneda_cobro || "COP").toUpperCase() === "USD" ? "USD" : "COP";
 
   // ══════════════════════════════════════════════
-  // 1. ENCABEZADO — banda oscura con datos empresa
+  // 1. HEADER — dos bloques separados sin solaparse
   // ══════════════════════════════════════════════
-  const headerH = 72;
-  fillRect(doc, 0, 0, doc.page.width, headerH, COLOR.azulOscuro);
+  const headerH = 80;
+  fillRect(doc, 0, 0, PW_TOTAL, headerH, COLOR.azulOscuro);
 
-  // Nombre empresa (izquierda)
-  doc
-    .fontSize(16)
-    .font("Helvetica-Bold")
-    .fillColor(COLOR.blanco)
-    .text("SILVER CONSULTING S.A.S.", ML, 18, { lineBreak: false });
+  // — Bloque izquierdo: empresa
+  doc.fontSize(15).font("Helvetica-Bold").fillColor(COLOR.blanco)
+    .text("SILVER CONSULTING S.A.S.", ML, 16, { width: PW / 2, lineBreak: false });
 
-  doc
-    .fontSize(9)
-    .font("Helvetica")
-    .fillColor(COLOR.turquesa)
-    .text("NIT 901.149.190-0", ML, 38, { lineBreak: false });
+  doc.fontSize(8).font("Helvetica").fillColor(COLOR.turquesa)
+    .text("NIT 901.149.190-0", ML, 34, { width: PW / 2, lineBreak: false });
 
-  // Número de cuenta y fecha (derecha)
-  const numCuenta = `N° ${cuenta.public_id || cuenta.id}`;
-  doc
-    .fontSize(11)
-    .font("Helvetica-Bold")
-    .fillColor(COLOR.blanco)
-    .text("CUENTA DE COBRO", ML, 14, { align: "right", lineBreak: false });
+  // — Bloque derecho: tipo doc + número + fecha
+  const rightX = ML + PW / 2;
+  const rightW = PW / 2;
 
-  doc
-    .fontSize(10)
-    .font("Helvetica")
-    .fillColor(COLOR.turquesa)
-    .text(numCuenta, ML, 30, { align: "right", lineBreak: false });
+  doc.fontSize(9).font("Helvetica-Bold").fillColor("#A0AEC0")
+    .text("CUENTA DE COBRO", rightX, 16, { width: rightW, align: "right", lineBreak: false });
 
-  doc
-    .fontSize(8.5)
-    .fillColor("#A0AEC0")
-    .text(
-      `${formatCuentaCobroDate(cuenta.created_at)}   ·   ${cuenta.ciudad_cobro || ""}`,
-      ML, 48, { align: "right", lineBreak: false }
-    );
+  const numCuenta = String(cuenta.public_id || cuenta.id || "").substring(0, 18);
+  doc.fontSize(8).font("Helvetica").fillColor(COLOR.turquesa)
+    .text(`N° ${numCuenta}`, rightX, 30, { width: rightW, align: "right", lineBreak: false });
+
+  const fechaDoc   = fmtFecha(cuenta.created_at);
+  const ciudadDoc  = cuenta.ciudad_cobro || "";
+  doc.fontSize(8).fillColor("#718096")
+    .text(`${fechaDoc}  ·  ${ciudadDoc}`, rightX, 44, { width: rightW, align: "right", lineBreak: false });
+
+  // Banda turquesa inferior del header
+  fillRect(doc, 0, headerH, PW_TOTAL, 4, COLOR.turquesa);
+
+  let curY = headerH + 18;
 
   // ══════════════════════════════════════════════
-  // 2. BANDA DE ACENTO bajo el header
+  // 2. DEBE A — tarjeta con 2 columnas
   // ══════════════════════════════════════════════
-  fillRect(doc, 0, headerH, doc.page.width, 4, COLOR.turquesa);
+  curY = sectionTitle(doc, "DEBE A", curY);
 
-  let curY = headerH + 20;
-
-  // ══════════════════════════════════════════════
-  // 3. SECCIÓN: DEBE A
-  // ══════════════════════════════════════════════
-  // Título de sección con línea lateral de color
-  function sectionTitle(title, y) {
-    fillRect(doc, ML, y, 3, 14, COLOR.turquesa);
-    doc
-      .fontSize(10)
-      .font("Helvetica-Bold")
-      .fillColor(COLOR.azulOscuro)
-      .text(title, ML + 10, y + 1, { lineBreak: false });
-    return y + 22;
-  }
-
-  curY = sectionTitle("DEBE A", curY);
-
-  // Tarjeta blanca con borde suave
-  const cardX = ML;
-  const cardW = PW;
-  const cardH = 64;
+  const cardPad = 12;
+  const cardH   = 72;
   doc.save()
-    .roundedRect(cardX, curY, cardW, cardH, 6)
-    .strokeColor(COLOR.grisLinea)
-    .lineWidth(0.8)
-    .stroke()
+    .roundedRect(ML, curY, PW, cardH, 5)
+    .strokeColor(COLOR.grisLinea).lineWidth(0.8).stroke()
     .restore();
 
-  // Datos en dos columnas dentro de la tarjeta
-  const col1X = cardX + 14;
-  const col2X = cardX + cardW / 2 + 14;
-  const rowH  = 16;
+  const c1x = ML + cardPad;
+  const c2x = ML + PW / 2 + cardPad;
+  const rh  = 15;
   let ry = curY + 10;
 
-  infoRow(doc, col1X, ry, "Nombre:",         cuenta.nombre_usuario || "-", 80);
-  infoRow(doc, col2X, ry, "Teléfono:",       cuenta.telefono || "-",       80);
-  ry += rowH;
+  infoRow(doc, c1x, ry, "Nombre:",       cuenta.nombre_usuario || "-");
+  infoRow(doc, c2x, ry, "Teléfono:",     cuenta.telefono       || "-");
+  ry += rh;
 
-  infoRow(doc, col1X, ry, "Documento:",
-    `${cuenta.tipo_documento || "CC"}: ${cuenta.cedula || "-"}`, 80);
-  infoRow(doc, col2X, ry, "Dirección:",      cuenta.direccion || "-",      80);
-  ry += rowH;
+  infoRow(doc, c1x, ry, "Documento:",
+    `${cuenta.tipo_documento || "CC"}: ${cuenta.cedula || "-"}`);
+  infoRow(doc, c2x, ry, "Dirección:",    cuenta.direccion      || "-");
+  ry += rh;
 
-  infoRow(doc, col1X, ry, "Banco:",          cuenta.banco || "-",          80);
-  infoRow(doc, col2X, ry, "No. Cuenta:",     cuenta.nro_cuenta_bancaria || "-", 80);
-  ry += rowH;
+  infoRow(doc, c1x, ry, "Banco:",        cuenta.banco          || "-");
+  infoRow(doc, c2x, ry, "No. Cuenta:",   cuenta.nro_cuenta_bancaria || "-");
+  ry += rh;
 
-  infoRow(doc, col1X, ry, "Tipo cuenta:",    cuenta.tipo_cuenta || "-",    80);
+  infoRow(doc, c1x, ry, "Tipo cuenta:",  cuenta.tipo_cuenta    || "-");
 
-  curY += cardH + 16;
+  curY += cardH + 14;
 
   // ══════════════════════════════════════════════
-  // 4. SECCIÓN: VALOR TOTAL (caja destacada)
+  // 3. VALOR A COBRAR
   // ══════════════════════════════════════════════
-  curY = sectionTitle("VALOR A COBRAR", curY);
+  curY = sectionTitle(doc, "VALOR A COBRAR", curY);
 
-  // Caja con fondo azul turquesa suave
-  const totalBoxH = 50;
+  const totalBoxH = 52;
   fillRect(doc, ML, curY, PW, totalBoxH, "#EAF7F8");
   doc.save()
-    .roundedRect(ML, curY, PW, totalBoxH, 6)
-    .strokeColor(COLOR.turquesa)
-    .lineWidth(1)
-    .stroke()
+    .roundedRect(ML, curY, PW, totalBoxH, 5)
+    .strokeColor(COLOR.turquesa).lineWidth(1).stroke()
     .restore();
 
-  // Monto grande
-  doc
-    .fontSize(20)
-    .font("Helvetica-Bold")
-    .fillColor(COLOR.azulMedio)
+  doc.fontSize(20).font("Helvetica-Bold").fillColor(COLOR.azulMedio)
     .text(
       `${monedaSimbolo} ${formatCuentaCobroCurrency(totalNumeros)}`,
-      ML + 16, curY + 8, { lineBreak: false }
+      ML + 14, curY + 8, { lineBreak: false }
     );
 
-  // Total en letras
-  doc
-    .fontSize(8.5)
-    .font("Helvetica")
-    .fillColor(COLOR.textoSec)
+  // Limpiar "PESOS PESOS" duplicado si viene así
+  const letrasLimpias = totalLetras.replace(/\bPESOS\s+PESOS\b/gi, "PESOS");
+  doc.fontSize(8.5).font("Helvetica").fillColor(COLOR.textoSec)
+    .text(`Son: ${letrasLimpias}`, ML + 14, curY + 34, { width: PW - 28, lineBreak: false });
+
+  curY += totalBoxH + 14;
+
+  // ══════════════════════════════════════════════
+  // 4. CONCEPTO
+  // ══════════════════════════════════════════════
+  curY = sectionTitle(doc, "CONCEPTO", curY);
+
+  const periodoInicio = fmtFecha(cuenta.fecha_periodo_inicio);
+  const periodoFin    = fmtFecha(cuenta.fecha_periodo_fin);
+
+  doc.fontSize(8.5).font("Helvetica").fillColor(COLOR.textoSec)
     .text(
-      `Son: ${totalLetras}`,
-      ML + 16, curY + 33, { lineBreak: false, width: PW - 32 }
+      `Honorarios de Consultoría — ${cuenta.descripcion || "Cuenta de cobro"}\n` +
+      `Período: ${periodoInicio}  al  ${periodoFin}`,
+      ML, curY, { width: PW, lineBreak: true }
     );
 
-  curY += totalBoxH + 16;
+  curY = doc.y + 14;
 
   // ══════════════════════════════════════════════
-  // 5. SECCIÓN: CONCEPTO
+  // 5. TABLA DE DETALLES
   // ══════════════════════════════════════════════
-  curY = sectionTitle("CONCEPTO", curY);
+  curY = sectionTitle(doc, "DETALLE DE SERVICIOS", curY);
 
-  const conceptoText =
-    `Honorarios de Consultoría — ${cuenta.descripcion || "Cuenta de cobro"}\n` +
-    `Período: ${cuenta.fecha_periodo_inicio || "-"}  al  ${cuenta.fecha_periodo_fin || "-"}`;
-
-  doc
-    .fontSize(9)
-    .font("Helvetica")
-    .fillColor(COLOR.textoSec)
-    .text(conceptoText, ML, curY, { width: PW, lineBreak: true });
-
-  curY = doc.y + 16;
-
-  // ══════════════════════════════════════════════
-  // 6. TABLA DE DETALLES
-  // ══════════════════════════════════════════════
-  curY = sectionTitle("DETALLE DE SERVICIOS", curY);
-
-  // Definición de columnas
   const cols = [
-    { label: "Cliente",    key: "cliente",                w: 120 },
-    { label: "Consultor",  key: "consultor_responsable",  w: 110 },
-    { label: "Tipo",       key: "tipo_asignacion",        w: 85  },
-    { label: "Caso / Req.",key: "nro_caso_int_ext",       w: 70  },
-    { label: "Cant.",      key: "_cant",                  w: 40, align: "right" },
-    { label: "Total",      key: "_total",                 w: 65, align: "right" },
+    { label: "Cliente",     key: "cliente",               w: 115 },
+    { label: "Consultor",   key: "consultor_responsable",  w: 110 },
+    { label: "Tipo",        key: "tipo_asignacion",        w: 85  },
+    { label: "Caso / Req.", key: "nro_caso_int_ext",       w: 70  },
+    { label: "Cant.",       key: "_cant",  w: 38, align: "right" },
+    { label: "Total",       key: "_total", w: 62, align: "right" },
   ];
 
-  const ROW_H      = 16;
-  const HEADER_H   = 18;
-  const TABLE_X    = ML;
+  // Ajustar anchos para que sumen exactamente PW
+  const totalW = cols.reduce((s, c) => s + c.w, 0);
+  const diff   = PW - totalW;
+  cols[0].w   += diff; // absorber diferencia en la primera columna
 
-  // Calcular posiciones X de cada col
-  let cx = TABLE_X;
-  cols.forEach((c) => { c.x = cx; cx += c.w; });
+  // Calcular X de cada columna
+  let cx = ML;
+  cols.forEach(c => { c.x = cx; cx += c.w; });
 
-  // Cabecera de tabla
-  fillRect(doc, TABLE_X, curY, PW, HEADER_H, COLOR.azulOscuro);
+  const ROW_H    = 16;
+  const HEADER_H = 18;
 
-  cols.forEach((c) => {
-    doc
-      .fontSize(8)
-      .font("Helvetica-Bold")
-      .fillColor(COLOR.blanco)
-      .text(c.label, c.x + 4, curY + 4, {
-        width: c.w - 8,
-        align: c.align || "left",
-        lineBreak: false,
-      });
-  });
+  function drawTableHeader(y) {
+    fillRect(doc, ML, y, PW, HEADER_H, COLOR.azulOscuro);
+    cols.forEach(c => {
+      doc.fontSize(8).font("Helvetica-Bold").fillColor(COLOR.blanco)
+        .text(c.label, c.x + 4, y + 5, { width: c.w - 8, align: c.align || "left", lineBreak: false });
+    });
+    return y + HEADER_H;
+  }
 
-  curY += HEADER_H;
+  curY = drawTableHeader(curY);
 
-  // Filas
   (detalles || []).forEach((d, i) => {
-    // Salto de página si no hay espacio
-    if (curY + ROW_H > doc.page.height - MARGIN.bottom - 40) {
+    if (curY + ROW_H > doc.page.height - MARGIN.bottom) {
       doc.addPage();
       curY = MARGIN.top;
-      // Re-dibujar cabecera en nueva página
-      fillRect(doc, TABLE_X, curY, PW, HEADER_H, COLOR.azulOscuro);
-      cols.forEach((c) => {
-        doc
-          .fontSize(8).font("Helvetica-Bold").fillColor(COLOR.blanco)
-          .text(c.label, c.x + 4, curY + 4, { width: c.w - 8, align: c.align || "left", lineBreak: false });
-      });
-      curY += HEADER_H;
+      curY = drawTableHeader(curY);
     }
 
-    // Fondo alterno
-    if (i % 2 === 0) {
-      fillRect(doc, TABLE_X, curY, PW, ROW_H, COLOR.grisClaro);
-    }
+    if (i % 2 === 0) fillRect(doc, ML, curY, PW, ROW_H, COLOR.grisClaro);
+    hLine(doc, ML, curY + ROW_H, PW);
 
-    // Línea inferior de fila
-    hLine(doc, TABLE_X, curY + ROW_H, PW, COLOR.grisLinea);
-
-    // Cantidad — días preferidos sobre horas
     const cant = Number(d.cantidad_dias_reportados || 0) > 0
       ? `${d.cantidad_dias_reportados} D`
       : `${Number(d.horas_reportadas || 0)} H`;
 
-    const valores = {
-      cliente:               d.cliente || "-",
+    const vals = {
+      cliente:               d.cliente               || "-",
       consultor_responsable: d.consultor_responsable || "-",
-      tipo_asignacion:       d.tipo_asignacion || "-",
-      nro_caso_int_ext:      d.nro_caso_int_ext || "-",
+      tipo_asignacion:       d.tipo_asignacion        || "-",
+      nro_caso_int_ext:      d.nro_caso_int_ext       || "-",
       _cant:  cant,
       _total: formatCuentaCobroCurrency(d.total_cobrar),
     };
 
-    cols.forEach((c) => {
-      doc
-        .fontSize(8)
-        .font("Helvetica")
-        .fillColor(COLOR.textoPrin)
-        .text(valores[c.key], c.x + 4, curY + 4, {
-          width: c.w - 8,
-          align: c.align || "left",
-          lineBreak: false,
-          ellipsis: true,
-        });
+    cols.forEach(c => {
+      doc.fontSize(8).font("Helvetica").fillColor(COLOR.textoPrin)
+        .text(vals[c.key], c.x + 4, curY + 4,
+          { width: c.w - 8, align: c.align || "left", lineBreak: false, ellipsis: true });
     });
 
     curY += ROW_H;
   });
 
-  // Borde inferior de tabla
-  hLine(doc, TABLE_X, curY, PW, COLOR.azulOscuro, 1);
+  // Borde inferior tabla
+  hLine(doc, ML, curY, PW, COLOR.azulOscuro, 1);
 
   // Fila TOTAL
   curY += 1;
-  fillRect(doc, TABLE_X, curY, PW, ROW_H + 2, "#E8ECF4");
-  doc
-    .fontSize(8.5)
-    .font("Helvetica-Bold")
-    .fillColor(COLOR.azulOscuro)
-    .text("TOTAL", TABLE_X + 4, curY + 4, {
-      width: PW - 80,
-      align: "right",
-      lineBreak: false,
-    });
-  doc
-    .fontSize(8.5)
-    .font("Helvetica-Bold")
-    .fillColor(COLOR.azulMedio)
+  const totalRowH = 18;
+  fillRect(doc, ML, curY, PW, totalRowH, "#E8ECF4");
+
+  doc.fontSize(8.5).font("Helvetica-Bold").fillColor(COLOR.azulOscuro)
+    .text("TOTAL", ML + 4, curY + 4, { width: PW - cols[cols.length-1].w - 8, align: "right", lineBreak: false });
+
+  doc.fontSize(8.5).font("Helvetica-Bold").fillColor(COLOR.azulMedio)
     .text(
       `${monedaSimbolo} ${formatCuentaCobroCurrency(totalNumeros)}`,
-      cols[cols.length - 1].x + 4,
-      curY + 4,
-      { width: cols[cols.length - 1].w - 8, align: "right", lineBreak: false }
+      cols[cols.length-1].x + 4, curY + 4,
+      { width: cols[cols.length-1].w - 8, align: "right", lineBreak: false }
     );
 
-  curY += ROW_H + 14;
+  curY += totalRowH + 18;
 
   // ══════════════════════════════════════════════
-  // 7. PIE: firma / nota
+  // 6. PIE DE PÁGINA
   // ══════════════════════════════════════════════
-  if (curY > doc.page.height - 100) {
+  if (curY > doc.page.height - 90) {
     doc.addPage();
     curY = MARGIN.top;
   }
 
-  hLine(doc, ML, curY, PW, COLOR.grisLinea);
-  curY += 10;
+  hLine(doc, ML, curY, PW);
+  curY += 8;
 
-  doc
-    .fontSize(8)
-    .font("Helvetica")
-    .fillColor(COLOR.textoSec)
+  doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
     .text(
       "Documento generado electrónicamente — Silver Consulting S.A.S.  ·  NIT 901.149.190-0  ·  Medellín, Colombia",
       ML, curY, { width: PW, align: "center", lineBreak: false }
     );
 
-  // Espacio para firma física
-  curY += 30;
-  const firmaW = 160;
+  // Línea de firma
+  curY += 28;
+  const firmaW = 180;
   const firmaX = ML + PW / 2 - firmaW / 2;
   hLine(doc, firmaX, curY, firmaW, COLOR.azulOscuro, 0.8);
-  doc
-    .fontSize(8)
-    .font("Helvetica")
-    .fillColor(COLOR.textoPrin)
-    .text(cuenta.nombre_usuario || "Consultor", firmaX, curY + 4, {
-      width: firmaW,
-      align: "center",
-      lineBreak: false,
-    });
-  doc
-    .fontSize(7.5)
-    .fillColor(COLOR.textoSec)
-    .text(`${cuenta.tipo_documento || "CC"}: ${cuenta.cedula || "-"}`, firmaX, curY + 14, {
-      width: firmaW,
-      align: "center",
-      lineBreak: false,
-    });
+
+  doc.fontSize(8).font("Helvetica-Bold").fillColor(COLOR.textoPrin)
+    .text(cuenta.nombre_usuario || "Consultor", firmaX, curY + 5,
+      { width: firmaW, align: "center", lineBreak: false });
+
+  doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
+    .text(
+      `${cuenta.tipo_documento || "CC"}: ${cuenta.cedula || "-"}`,
+      firmaX, curY + 16,
+      { width: firmaW, align: "center", lineBreak: false }
+    );
 }
 
-
+//--------------------------------------------------------------//
 function generateCuentaCobroPdfBuffer(cuenta, detalles) {
   return new Promise((resolve, reject) => {
     const chunks = [];

@@ -1919,7 +1919,7 @@ function formatCuentaCobroDate(value) {
   return `${date.getDate()} de ${months[date.getMonth()]} de ${date.getFullYear()}`;
 }
 
-function writeCuentaCobroPdf(doc, cuenta, detalles) {
+/*function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const totalNumeros = Number(cuenta.total_cuenta_cobro || 0);
   const totalLetras = cuenta.total_letras || buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
 
@@ -1988,7 +1988,395 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
       y = 50;
     }
   }
+}*/
+// ============================================================
+//  writeCuentaCobroPdf  —  versión mejorada
+//  Dependencias: pdfkit (ya instalado en el proyecto)
+//  Paleta: colores Silver Consulting (#20272F, #189FA9, #1C61AB)
+// ============================================================
+
+// ── Constantes de diseño ─────────────────────────────────────
+const COLOR = {
+  azulOscuro:  "#20272F",   // Fondo header / texto oscuro
+  turquesa:    "#189FA9",   // Acento principal (secciones)
+  azulMedio:   "#1C61AB",   // Acento secundario
+  grisClaro:   "#F4F6F9",   // Fondo filas pares de tabla
+  grisLinea:   "#D5DCE8",   // Líneas separadoras
+  blanco:      "#FFFFFF",
+  textoPrin:   "#20272F",
+  textoSec:    "#4A5568",
+};
+
+const MARGIN = { top: 40, left: 40, right: 40, bottom: 40 };
+
+// ── Helpers ──────────────────────────────────────────────────
+
+/** Ancho útil de la página */
+function pageWidth(doc) {
+  return doc.page.width - MARGIN.left - MARGIN.right;
 }
+
+/** Dibuja un rectángulo relleno */
+function fillRect(doc, x, y, w, h, color) {
+  doc.save().rect(x, y, w, h).fill(color).restore();
+}
+
+/** Línea horizontal */
+function hLine(doc, x, y, w, color = COLOR.grisLinea, lineWidth = 0.5) {
+  doc.save()
+    .strokeColor(color)
+    .lineWidth(lineWidth)
+    .moveTo(x, y)
+    .lineTo(x + w, y)
+    .stroke()
+    .restore();
+}
+
+/** Bloque de dos columnas clave:valor */
+function infoRow(doc, x, y, label, value, labelWidth = 130) {
+  doc
+    .fontSize(9)
+    .font("Helvetica-Bold")
+    .fillColor(COLOR.textoPrin)
+    .text(label, x, y, { width: labelWidth, lineBreak: false });
+  doc
+    .font("Helvetica")
+    .fillColor(COLOR.textoSec)
+    .text(String(value || "-"), x + labelWidth, y, {
+      width: pageWidth(doc) / 2 - labelWidth,
+      lineBreak: false,
+    });
+}
+
+// ── Función principal ─────────────────────────────────────────
+function writeCuentaCobroPdf(doc, cuenta, detalles) {
+  const PW   = pageWidth(doc);
+  const ML   = MARGIN.left;
+  const MR   = doc.page.width - MARGIN.right;
+
+  const totalNumeros = Number(cuenta.total_cuenta_cobro || 0);
+  const totalLetras  = cuenta.total_letras
+    || buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
+  const monedaSimbolo = (cuenta.moneda_cobro || "COP").toUpperCase() === "USD" ? "USD" : "COP";
+
+  // ══════════════════════════════════════════════
+  // 1. ENCABEZADO — banda oscura con datos empresa
+  // ══════════════════════════════════════════════
+  const headerH = 72;
+  fillRect(doc, 0, 0, doc.page.width, headerH, COLOR.azulOscuro);
+
+  // Nombre empresa (izquierda)
+  doc
+    .fontSize(16)
+    .font("Helvetica-Bold")
+    .fillColor(COLOR.blanco)
+    .text("SILVER CONSULTING S.A.S.", ML, 18, { lineBreak: false });
+
+  doc
+    .fontSize(9)
+    .font("Helvetica")
+    .fillColor(COLOR.turquesa)
+    .text("NIT 901.149.190-0", ML, 38, { lineBreak: false });
+
+  // Número de cuenta y fecha (derecha)
+  const numCuenta = `N° ${cuenta.public_id || cuenta.id}`;
+  doc
+    .fontSize(11)
+    .font("Helvetica-Bold")
+    .fillColor(COLOR.blanco)
+    .text("CUENTA DE COBRO", ML, 14, { align: "right", lineBreak: false });
+
+  doc
+    .fontSize(10)
+    .font("Helvetica")
+    .fillColor(COLOR.turquesa)
+    .text(numCuenta, ML, 30, { align: "right", lineBreak: false });
+
+  doc
+    .fontSize(8.5)
+    .fillColor("#A0AEC0")
+    .text(
+      `${formatCuentaCobroDate(cuenta.created_at)}   ·   ${cuenta.ciudad_cobro || ""}`,
+      ML, 48, { align: "right", lineBreak: false }
+    );
+
+  // ══════════════════════════════════════════════
+  // 2. BANDA DE ACENTO bajo el header
+  // ══════════════════════════════════════════════
+  fillRect(doc, 0, headerH, doc.page.width, 4, COLOR.turquesa);
+
+  let curY = headerH + 20;
+
+  // ══════════════════════════════════════════════
+  // 3. SECCIÓN: DEBE A
+  // ══════════════════════════════════════════════
+  // Título de sección con línea lateral de color
+  function sectionTitle(title, y) {
+    fillRect(doc, ML, y, 3, 14, COLOR.turquesa);
+    doc
+      .fontSize(10)
+      .font("Helvetica-Bold")
+      .fillColor(COLOR.azulOscuro)
+      .text(title, ML + 10, y + 1, { lineBreak: false });
+    return y + 22;
+  }
+
+  curY = sectionTitle("DEBE A", curY);
+
+  // Tarjeta blanca con borde suave
+  const cardX = ML;
+  const cardW = PW;
+  const cardH = 64;
+  doc.save()
+    .roundedRect(cardX, curY, cardW, cardH, 6)
+    .strokeColor(COLOR.grisLinea)
+    .lineWidth(0.8)
+    .stroke()
+    .restore();
+
+  // Datos en dos columnas dentro de la tarjeta
+  const col1X = cardX + 14;
+  const col2X = cardX + cardW / 2 + 14;
+  const rowH  = 16;
+  let ry = curY + 10;
+
+  infoRow(doc, col1X, ry, "Nombre:",         cuenta.nombre_usuario || "-", 80);
+  infoRow(doc, col2X, ry, "Teléfono:",       cuenta.telefono || "-",       80);
+  ry += rowH;
+
+  infoRow(doc, col1X, ry, "Documento:",
+    `${cuenta.tipo_documento || "CC"}: ${cuenta.cedula || "-"}`, 80);
+  infoRow(doc, col2X, ry, "Dirección:",      cuenta.direccion || "-",      80);
+  ry += rowH;
+
+  infoRow(doc, col1X, ry, "Banco:",          cuenta.banco || "-",          80);
+  infoRow(doc, col2X, ry, "No. Cuenta:",     cuenta.nro_cuenta_bancaria || "-", 80);
+  ry += rowH;
+
+  infoRow(doc, col1X, ry, "Tipo cuenta:",    cuenta.tipo_cuenta || "-",    80);
+
+  curY += cardH + 16;
+
+  // ══════════════════════════════════════════════
+  // 4. SECCIÓN: VALOR TOTAL (caja destacada)
+  // ══════════════════════════════════════════════
+  curY = sectionTitle("VALOR A COBRAR", curY);
+
+  // Caja con fondo azul turquesa suave
+  const totalBoxH = 50;
+  fillRect(doc, ML, curY, PW, totalBoxH, "#EAF7F8");
+  doc.save()
+    .roundedRect(ML, curY, PW, totalBoxH, 6)
+    .strokeColor(COLOR.turquesa)
+    .lineWidth(1)
+    .stroke()
+    .restore();
+
+  // Monto grande
+  doc
+    .fontSize(20)
+    .font("Helvetica-Bold")
+    .fillColor(COLOR.azulMedio)
+    .text(
+      `${monedaSimbolo} ${formatCuentaCobroCurrency(totalNumeros)}`,
+      ML + 16, curY + 8, { lineBreak: false }
+    );
+
+  // Total en letras
+  doc
+    .fontSize(8.5)
+    .font("Helvetica")
+    .fillColor(COLOR.textoSec)
+    .text(
+      `Son: ${totalLetras}`,
+      ML + 16, curY + 33, { lineBreak: false, width: PW - 32 }
+    );
+
+  curY += totalBoxH + 16;
+
+  // ══════════════════════════════════════════════
+  // 5. SECCIÓN: CONCEPTO
+  // ══════════════════════════════════════════════
+  curY = sectionTitle("CONCEPTO", curY);
+
+  const conceptoText =
+    `Honorarios de Consultoría — ${cuenta.descripcion || "Cuenta de cobro"}\n` +
+    `Período: ${cuenta.fecha_periodo_inicio || "-"}  al  ${cuenta.fecha_periodo_fin || "-"}`;
+
+  doc
+    .fontSize(9)
+    .font("Helvetica")
+    .fillColor(COLOR.textoSec)
+    .text(conceptoText, ML, curY, { width: PW, lineBreak: true });
+
+  curY = doc.y + 16;
+
+  // ══════════════════════════════════════════════
+  // 6. TABLA DE DETALLES
+  // ══════════════════════════════════════════════
+  curY = sectionTitle("DETALLE DE SERVICIOS", curY);
+
+  // Definición de columnas
+  const cols = [
+    { label: "Cliente",    key: "cliente",                w: 120 },
+    { label: "Consultor",  key: "consultor_responsable",  w: 110 },
+    { label: "Tipo",       key: "tipo_asignacion",        w: 85  },
+    { label: "Caso / Req.",key: "nro_caso_int_ext",       w: 70  },
+    { label: "Cant.",      key: "_cant",                  w: 40, align: "right" },
+    { label: "Total",      key: "_total",                 w: 65, align: "right" },
+  ];
+
+  const ROW_H      = 16;
+  const HEADER_H   = 18;
+  const TABLE_X    = ML;
+
+  // Calcular posiciones X de cada col
+  let cx = TABLE_X;
+  cols.forEach((c) => { c.x = cx; cx += c.w; });
+
+  // Cabecera de tabla
+  fillRect(doc, TABLE_X, curY, PW, HEADER_H, COLOR.azulOscuro);
+
+  cols.forEach((c) => {
+    doc
+      .fontSize(8)
+      .font("Helvetica-Bold")
+      .fillColor(COLOR.blanco)
+      .text(c.label, c.x + 4, curY + 4, {
+        width: c.w - 8,
+        align: c.align || "left",
+        lineBreak: false,
+      });
+  });
+
+  curY += HEADER_H;
+
+  // Filas
+  (detalles || []).forEach((d, i) => {
+    // Salto de página si no hay espacio
+    if (curY + ROW_H > doc.page.height - MARGIN.bottom - 40) {
+      doc.addPage();
+      curY = MARGIN.top;
+      // Re-dibujar cabecera en nueva página
+      fillRect(doc, TABLE_X, curY, PW, HEADER_H, COLOR.azulOscuro);
+      cols.forEach((c) => {
+        doc
+          .fontSize(8).font("Helvetica-Bold").fillColor(COLOR.blanco)
+          .text(c.label, c.x + 4, curY + 4, { width: c.w - 8, align: c.align || "left", lineBreak: false });
+      });
+      curY += HEADER_H;
+    }
+
+    // Fondo alterno
+    if (i % 2 === 0) {
+      fillRect(doc, TABLE_X, curY, PW, ROW_H, COLOR.grisClaro);
+    }
+
+    // Línea inferior de fila
+    hLine(doc, TABLE_X, curY + ROW_H, PW, COLOR.grisLinea);
+
+    // Cantidad — días preferidos sobre horas
+    const cant = Number(d.cantidad_dias_reportados || 0) > 0
+      ? `${d.cantidad_dias_reportados} D`
+      : `${Number(d.horas_reportadas || 0)} H`;
+
+    const valores = {
+      cliente:               d.cliente || "-",
+      consultor_responsable: d.consultor_responsable || "-",
+      tipo_asignacion:       d.tipo_asignacion || "-",
+      nro_caso_int_ext:      d.nro_caso_int_ext || "-",
+      _cant:  cant,
+      _total: formatCuentaCobroCurrency(d.total_cobrar),
+    };
+
+    cols.forEach((c) => {
+      doc
+        .fontSize(8)
+        .font("Helvetica")
+        .fillColor(COLOR.textoPrin)
+        .text(valores[c.key], c.x + 4, curY + 4, {
+          width: c.w - 8,
+          align: c.align || "left",
+          lineBreak: false,
+          ellipsis: true,
+        });
+    });
+
+    curY += ROW_H;
+  });
+
+  // Borde inferior de tabla
+  hLine(doc, TABLE_X, curY, PW, COLOR.azulOscuro, 1);
+
+  // Fila TOTAL
+  curY += 1;
+  fillRect(doc, TABLE_X, curY, PW, ROW_H + 2, "#E8ECF4");
+  doc
+    .fontSize(8.5)
+    .font("Helvetica-Bold")
+    .fillColor(COLOR.azulOscuro)
+    .text("TOTAL", TABLE_X + 4, curY + 4, {
+      width: PW - 80,
+      align: "right",
+      lineBreak: false,
+    });
+  doc
+    .fontSize(8.5)
+    .font("Helvetica-Bold")
+    .fillColor(COLOR.azulMedio)
+    .text(
+      `${monedaSimbolo} ${formatCuentaCobroCurrency(totalNumeros)}`,
+      cols[cols.length - 1].x + 4,
+      curY + 4,
+      { width: cols[cols.length - 1].w - 8, align: "right", lineBreak: false }
+    );
+
+  curY += ROW_H + 14;
+
+  // ══════════════════════════════════════════════
+  // 7. PIE: firma / nota
+  // ══════════════════════════════════════════════
+  if (curY > doc.page.height - 100) {
+    doc.addPage();
+    curY = MARGIN.top;
+  }
+
+  hLine(doc, ML, curY, PW, COLOR.grisLinea);
+  curY += 10;
+
+  doc
+    .fontSize(8)
+    .font("Helvetica")
+    .fillColor(COLOR.textoSec)
+    .text(
+      "Documento generado electrónicamente — Silver Consulting S.A.S.  ·  NIT 901.149.190-0  ·  Medellín, Colombia",
+      ML, curY, { width: PW, align: "center", lineBreak: false }
+    );
+
+  // Espacio para firma física
+  curY += 30;
+  const firmaW = 160;
+  const firmaX = ML + PW / 2 - firmaW / 2;
+  hLine(doc, firmaX, curY, firmaW, COLOR.azulOscuro, 0.8);
+  doc
+    .fontSize(8)
+    .font("Helvetica")
+    .fillColor(COLOR.textoPrin)
+    .text(cuenta.nombre_usuario || "Consultor", firmaX, curY + 4, {
+      width: firmaW,
+      align: "center",
+      lineBreak: false,
+    });
+  doc
+    .fontSize(7.5)
+    .fillColor(COLOR.textoSec)
+    .text(`${cuenta.tipo_documento || "CC"}: ${cuenta.cedula || "-"}`, firmaX, curY + 14, {
+      width: firmaW,
+      align: "center",
+      lineBreak: false,
+    });
+}
+
 
 function generateCuentaCobroPdfBuffer(cuenta, detalles) {
   return new Promise((resolve, reject) => {

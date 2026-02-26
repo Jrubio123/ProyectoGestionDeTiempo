@@ -167,9 +167,18 @@ async function sendEmailViaGraphDelegated({ to, subject, html, text, cc, bcc, gr
   });
 }
 
-async function sendEmailViaGraphApp({ to, subject, html, text, cc, bcc }) {
-  if (!GRAPH_SENDER_USER) {
-    throw new Error("GRAPH_SENDER_USER is not configured");
+function resolveGraphSenderUser(graphUserEmail) {
+  const preferred = String(graphUserEmail || "").trim();
+  if (preferred) return preferred;
+  const fallback = String(GRAPH_SENDER_USER || "").trim();
+  if (fallback) return fallback;
+  return "";
+}
+
+async function sendEmailViaGraphApp({ to, subject, html, text, cc, bcc, graphUserEmail }) {
+  const senderUser = resolveGraphSenderUser(graphUserEmail);
+  if (!senderUser) {
+    throw new Error("GRAPH_SENDER_USER is not configured and graphUserEmail is missing");
   }
 
   const token = await getGraphAccessToken();
@@ -178,7 +187,7 @@ async function sendEmailViaGraphApp({ to, subject, html, text, cc, bcc }) {
   const body = JSON.stringify(payload);
   await requestJson({
     hostname: "graph.microsoft.com",
-    path: `/v1.0/users/${encodeURIComponent(GRAPH_SENDER_USER)}/sendMail`,
+    path: `/v1.0/users/${encodeURIComponent(senderUser)}/sendMail`,
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -213,7 +222,7 @@ async function sendEmailViaSmtp({ to, subject, html, text, cc, bcc }) {
   });
 }
 
-async function sendEmail({ to, subject, html, text, cc, bcc, graphAccessToken }) {
+async function sendEmail({ to, subject, html, text, cc, bcc, graphAccessToken, graphUserEmail }) {
   if (!EMAIL_ENABLED) {
     console.log("[email] disabled", { to, subject });
     return;
@@ -240,7 +249,7 @@ async function sendEmail({ to, subject, html, text, cc, bcc, graphAccessToken })
       throw new Error("Graph delegated token is required (set GRAPH_ALLOW_APP_FALLBACK=true to allow app sender)");
     }
     try {
-      await sendEmailViaGraphApp({ to, subject, html, text, cc, bcc });
+      await sendEmailViaGraphApp({ to, subject, html, text, cc, bcc, graphUserEmail });
       return;
     } catch (err) {
       if (!EMAIL_FALLBACK_SMTP) throw err;

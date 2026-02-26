@@ -2321,6 +2321,7 @@ const COLOR = {
   blanco: "#FFFFFF",
   textoPrin: "#20272F",
   textoSec: "#4A5568",
+  naranjaSilver: "#FF6000",
 };
 
 const MARGIN = { top: 40, left: 40, right: 40, bottom: 50 };
@@ -2434,7 +2435,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
     .text(`${fechaDoc}  ·  ${ciudadDoc}`, rightX, 44, { width: rightW, align: "right", lineBreak: false });
 
   // Banda turquesa inferior del header
-  fillRect(doc, 0, headerH, PW_TOTAL, 4, COLOR.turquesa);
+  fillRect(doc, 0, headerH, PW_TOTAL, 4, COLOR.naranjaSilver);
 
   let curY = headerH + 18;
 

@@ -2333,23 +2333,23 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   doc.fontSize(15).font("Helvetica-Bold").fillColor(COLOR.blanco)
     .text("SILVER CONSULTING S.A.S.", ML, 16, { width: PW / 2, lineBreak: false });
 
-  doc.fontSize(8).font("Helvetica").fillColor(COLOR.turquesa)
+  doc.fontSize(8).font("Helvetica").fillColor(COLOR.blanco)
     .text("NIT 901.149.190-0", ML, 34, { width: PW / 2, lineBreak: false });
 
   // — Bloque derecho: tipo doc + número + fecha
   const rightX = ML + PW / 2;
   const rightW = PW / 2;
 
-  doc.fontSize(9).font("Helvetica-Bold").fillColor("#A0AEC0")
+  doc.fontSize(9).font("Helvetica-Bold").fillColor(COLOR.blanco)
     .text("CUENTA DE COBRO", rightX, 16, { width: rightW, align: "right", lineBreak: false });
 
   const numCuenta = String(cuenta.public_id || cuenta.id || "").substring(0, 18);
-  doc.fontSize(8).font("Helvetica").fillColor(COLOR.turquesa)
+  doc.fontSize(8).font("Helvetica").fillColor(COLOR.blanco)
     .text(`N° ${numCuenta}`, rightX, 30, { width: rightW, align: "right", lineBreak: false });
 
   const fechaDoc   = fmtFecha(cuenta.created_at);
   const ciudadDoc  = cuenta.ciudad_cobro || "";
-  doc.fontSize(8).fillColor("#718096")
+  doc.fontSize(8).fillColor(COLOR.blanco)
     .text(`${fechaDoc}  ·  ${ciudadDoc}`, rightX, 44, { width: rightW, align: "right", lineBreak: false });
 
   // Banda turquesa inferior del header
@@ -5938,12 +5938,39 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       signaturePayload.signature.signatory_email_cb_url = signatoryEmailCbUrl;
     }
 
-    const clickSignRes = await jsonRequest({
-      method: "POST",
-      url: buildClickSignUrl("start_signature"),
-      headers: buildClickSignAuthHeaders(),
-      body: signaturePayload
-    });
+    let clickSignRes;
+    let signatureSizeApplied = true;
+    try {
+      clickSignRes = await jsonRequest({
+        method: "POST",
+        url: buildClickSignUrl("start_signature"),
+        headers: buildClickSignAuthHeaders(),
+        body: signaturePayload
+      });
+    } catch (startErr) {
+      if (!isClickSignSignaturePositionValidationError(startErr)) {
+        throw startErr;
+      }
+
+      const fallbackPayload = {
+        ...signaturePayload,
+        signature: {
+          ...signaturePayload.signature,
+          file: (signaturePayload.signature.file || []).map((item) => {
+            const { signature_position, ...rest } = item;
+            return rest;
+          })
+        }
+      };
+
+      signatureSizeApplied = false;
+      clickSignRes = await jsonRequest({
+        method: "POST",
+        url: buildClickSignUrl("start_signature"),
+        headers: buildClickSignAuthHeaders(),
+        body: fallbackPayload
+      });
+    }
     const signatureId = extractClickSignSignatureId(clickSignRes.data);
     const urlFirma = getClickSignLandingUrl(clickSignRes.data);
     if (!urlFirma) {
@@ -5974,7 +6001,8 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       tamano_firma: {
         width_mm: signatureDimensions.width,
         height_mm: signatureDimensions.height,
-        incremento_percent: signatureDimensions.percent
+        incremento_percent: signatureDimensions.percent,
+        aplicado: signatureSizeApplied
       }
     };
     const adjuntos = {
@@ -6003,7 +6031,8 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       tamano_firma: {
         width_mm: signatureDimensions.width,
         height_mm: signatureDimensions.height,
-        incremento_percent: signatureDimensions.percent
+        incremento_percent: signatureDimensions.percent,
+        aplicado: signatureSizeApplied
       }
     });
   } catch (err) {

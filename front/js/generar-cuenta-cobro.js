@@ -1,6 +1,7 @@
 // js/generar-cuenta-cobro.js
 window.cuentaCobroApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
+    const SIGNATURE_SIZE_PERCENT = 20;
 
     return {
         registros: [],
@@ -113,7 +114,9 @@ window.cuentaCobroApp = function () {
             };
 
             try {
-                const res = await axios.post(`${API}/cuentas-cobro/${cuentaId}/firma/iniciar`);
+                const res = await axios.post(`${API}/cuentas-cobro/${cuentaId}/firma/iniciar`, {
+                    signature_size_percent: SIGNATURE_SIZE_PERCENT
+                });
                 const urlFirma = res?.data?.url_firma || "";
                 if (!urlFirma) {
                     this.modalFirma.mensaje = "La cuenta se genero, pero no se recibio URL de firma.";

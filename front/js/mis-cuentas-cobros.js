@@ -1,6 +1,7 @@
 // js/mis-cuentas-cobros.js
 window.misCuentasApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
+    const SIGNATURE_SIZE_PERCENT = 20;
 
     return {
         usuario: { id: null },
@@ -147,7 +148,9 @@ window.misCuentasApp = function () {
             if (!confirmar) return;
 
             try {
-                const res = await axios.post(`${API}/cuentas-cobro/${cuenta.id}/firma/iniciar`);
+                const res = await axios.post(`${API}/cuentas-cobro/${cuenta.id}/firma/iniciar`, {
+                    signature_size_percent: SIGNATURE_SIZE_PERCENT
+                });
                 const urlFirma = res?.data?.url_firma || "";
                 if (urlFirma) {
                     window.open(urlFirma, "_blank", "noopener");

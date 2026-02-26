@@ -341,9 +341,9 @@ function buildTotalLetras(numero, moneda = 'COP') {
   }
 }
 
-async function sendEmailSafe({ to, subject, text, html, cc, bcc, graphAccessToken, graphUserEmail }) {
+async function sendEmailSafe({ to, subject, text, html, cc, bcc, attachments, graphAccessToken, graphUserEmail }) {
   try {
-    await sendEmail({ to, subject, text, html, cc, bcc, graphAccessToken, graphUserEmail });
+    await sendEmail({ to, subject, text, html, cc, bcc, attachments, graphAccessToken, graphUserEmail });
     return { ok: true };
   } catch (err) {
     console.error("Error enviando correo:", err.message);
@@ -440,9 +440,46 @@ function resolveCuentaCobroConsultorNombre(cuenta = {}) {
   return email || "Consultor";
 }
 
+function buildCuentaCobroEmailAttachments({ cuenta, signedPdf = null, extraFiles = [] } = {}) {
+  const maxAttachments = 4;
+  const maxFileBytes = 8 * 1024 * 1024;
+  const attachments = [];
+  const cuentaRef = resolveCuentaCobroReference(cuenta);
+
+  const pushPdf = (buffer, fileName, fallbackName) => {
+    if (attachments.length >= maxAttachments) return;
+    if (!isPdfBuffer(buffer)) return;
+    if (buffer.length > maxFileBytes) return;
+    const safeName = sanitizePdfFileName(fileName || fallbackName, fallbackName);
+    attachments.push({
+      filename: safeName,
+      contentType: "application/pdf",
+      content: buffer
+    });
+  };
+
+  pushPdf(
+    signedPdf?.buffer || null,
+    signedPdf?.fileName || signedPdf?.name || "",
+    `CuentaCobroFirmada_${cuentaRef}.pdf`
+  );
+
+  for (const extra of Array.isArray(extraFiles) ? extraFiles : []) {
+    if (attachments.length >= maxAttachments) break;
+    pushPdf(
+      extra?.buffer || null,
+      extra?.fileName || extra?.name || "",
+      `${String(extra?.kind || "Adjunto").replace(/[^a-z0-9_-]/gi, "") || "Adjunto"}_${cuentaRef}.pdf`
+    );
+  }
+
+  return attachments;
+}
+
 async function notifyCuentaCobroFirmadaToProveedores({
   cuenta,
   documentoFirmado,
+  attachments = [],
   prevNotification = null,
   nowIso = new Date().toISOString(),
   graphContext = {}
@@ -481,7 +518,8 @@ async function notifyCuentaCobroFirmadaToProveedores({
     bcc: CLICKSIGN_SIGNED_NOTIFY_BCC || null,
     subject,
     text: textoPlano,
-    html
+    html,
+    attachments
   });
 
   return {
@@ -492,6 +530,7 @@ async function notifyCuentaCobroFirmadaToProveedores({
     destinatario: CLICKSIGN_SIGNED_NOTIFY_TO,
     asunto: subject,
     documento_url: documentoFirmado.url,
+    adjuntos_enviados: Array.isArray(attachments) ? attachments.length : 0,
     error: sendResult?.ok ? null : (sendResult?.error || "Error enviando correo")
   };
 }
@@ -6094,6 +6133,7 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
 
     let documentoFirmado = prevDocumentoFirmado;
     let documentoFirmadoError = "";
+    let documentosAdjuntosCorreo = [];
 
     let uploadedExtras = [];
     let catalogSource = null;
@@ -6109,6 +6149,14 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
       const resolvedPdf = artifacts?.signedPdf || null;
 
       if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
+        documentosAdjuntosCorreo = buildCuentaCobroEmailAttachments({
+          cuenta,
+          signedPdf: {
+            buffer: resolvedPdf.buffer,
+            fileName: resolvedPdf.fileName || ""
+          },
+          extraFiles: artifacts?.extraFiles || []
+        });
         try {
           const uploadResult = await uploadSignedPdfToOneDrive(
             cuenta,
@@ -6166,6 +6214,7 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
       firma.notificacion_proveedores = await notifyCuentaCobroFirmadaToProveedores({
         cuenta,
         documentoFirmado,
+        attachments: documentosAdjuntosCorreo,
         prevNotification: prevNotificacionProveedores,
         nowIso,
         graphContext: getGraphContext(req)
@@ -6369,6 +6418,13 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
       origen: "manual_upload",
       actualizado_en: nowIso
     };
+    const documentosAdjuntosCorreo = buildCuentaCobroEmailAttachments({
+      cuenta,
+      signedPdf: {
+        buffer: pdfBuffer,
+        fileName: uploadName
+      }
+    });
 
     const firma = {
       ...prevFirma,
@@ -6386,6 +6442,7 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
       firma.notificacion_proveedores = await notifyCuentaCobroFirmadaToProveedores({
         cuenta,
         documentoFirmado,
+        attachments: documentosAdjuntosCorreo,
         prevNotification: prevNotificacionProveedores,
         nowIso,
         graphContext: getGraphContext(req)
@@ -6578,6 +6635,7 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
 
         let documentoFirmado = prevDocumentoFirmado;
         let documentoFirmadoError = "";
+        let documentosAdjuntosCorreo = [];
 
         let uploadedExtras = [];
         if (status === "signed") {
@@ -6591,6 +6649,14 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
           const resolvedPdf = artifacts?.signedPdf || null;
 
           if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
+            documentosAdjuntosCorreo = buildCuentaCobroEmailAttachments({
+              cuenta,
+              signedPdf: {
+                buffer: resolvedPdf.buffer,
+                fileName: resolvedPdf.fileName || ""
+              },
+              extraFiles: artifacts?.extraFiles || []
+            });
             try {
               const uploadResult = await uploadSignedPdfToOneDrive(
                 cuenta,
@@ -6649,6 +6715,7 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
           firma.notificacion_proveedores = await notifyCuentaCobroFirmadaToProveedores({
             cuenta,
             documentoFirmado,
+            attachments: documentosAdjuntosCorreo,
             prevNotification: prevNotificacionProveedores,
             nowIso
           });

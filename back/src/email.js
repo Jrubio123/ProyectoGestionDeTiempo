@@ -50,6 +50,43 @@ function buildRecipients(input) {
   }));
 }
 
+function normalizeAttachments(input) {
+  if (!Array.isArray(input)) return [];
+  const normalized = [];
+
+  for (let i = 0; i < input.length; i += 1) {
+    const item = input[i];
+    if (!item || typeof item !== "object") continue;
+
+    const fileName = String(item.filename || item.name || `adjunto-${i + 1}.bin`).trim();
+    if (!fileName) continue;
+
+    const contentType = String(item.contentType || item.content_type || "application/octet-stream").trim();
+    let base64 = "";
+
+    if (item.contentBase64) {
+      base64 = String(item.contentBase64).replace(/\s+/g, "").trim();
+    } else if (Buffer.isBuffer(item.content)) {
+      base64 = item.content.toString("base64");
+    } else if (typeof item.content === "string") {
+      if (String(item.encoding || "").toLowerCase() === "base64") {
+        base64 = item.content.replace(/\s+/g, "").trim();
+      } else {
+        base64 = Buffer.from(item.content, "utf8").toString("base64");
+      }
+    }
+
+    if (!base64) continue;
+    normalized.push({
+      filename: fileName,
+      contentType,
+      contentBase64: base64
+    });
+  }
+
+  return normalized;
+}
+
 function requestJson({ hostname, path, method = "GET", headers = {}, body }) {
   return new Promise((resolve, reject) => {
     const req = https.request(
@@ -127,32 +164,45 @@ async function getGraphAccessToken() {
   return graphTokenCache.token;
 }
 
-function buildGraphPayload({ to, subject, html, text, cc, bcc }) {
+function buildGraphPayload({ to, subject, html, text, cc, bcc, attachments }) {
   const toRecipients = buildRecipients(to);
   if (!toRecipients.length) {
     throw new Error("Missing recipients for Graph email");
   }
-  return {
-    message: {
-      subject: subject || "Notification",
-      body: {
-        contentType: html ? "HTML" : "Text",
-        content: html || text || "Notification"
-      },
-      toRecipients,
-      ccRecipients: buildRecipients(cc),
-      bccRecipients: buildRecipients(bcc)
+  const normalizedAttachments = normalizeAttachments(attachments);
+  const graphAttachments = normalizedAttachments.map((item) => ({
+    "@odata.type": "#microsoft.graph.fileAttachment",
+    name: item.filename,
+    contentType: item.contentType,
+    contentBytes: item.contentBase64
+  }));
+
+  const message = {
+    subject: subject || "Notification",
+    body: {
+      contentType: html ? "HTML" : "Text",
+      content: html || text || "Notification"
     },
+    toRecipients,
+    ccRecipients: buildRecipients(cc),
+    bccRecipients: buildRecipients(bcc)
+  };
+  if (graphAttachments.length > 0) {
+    message.attachments = graphAttachments;
+  }
+
+  return {
+    message,
     saveToSentItems: "true"
   };
 }
 
-async function sendEmailViaGraphDelegated({ to, subject, html, text, cc, bcc, graphAccessToken }) {
+async function sendEmailViaGraphDelegated({ to, subject, html, text, cc, bcc, attachments, graphAccessToken }) {
   if (!graphAccessToken) {
     throw new Error("Missing delegated Graph access token");
   }
 
-  const payload = buildGraphPayload({ to, subject, html, text, cc, bcc });
+  const payload = buildGraphPayload({ to, subject, html, text, cc, bcc, attachments });
   const body = JSON.stringify(payload);
   await requestJson({
     hostname: "graph.microsoft.com",
@@ -175,14 +225,14 @@ function resolveGraphSenderUser(graphUserEmail) {
   return "";
 }
 
-async function sendEmailViaGraphApp({ to, subject, html, text, cc, bcc, graphUserEmail }) {
+async function sendEmailViaGraphApp({ to, subject, html, text, cc, bcc, attachments, graphUserEmail }) {
   const senderUser = resolveGraphSenderUser(graphUserEmail);
   if (!senderUser) {
     throw new Error("GRAPH_SENDER_USER is not configured and graphUserEmail is missing");
   }
 
   const token = await getGraphAccessToken();
-  const payload = buildGraphPayload({ to, subject, html, text, cc, bcc });
+  const payload = buildGraphPayload({ to, subject, html, text, cc, bcc, attachments });
 
   const body = JSON.stringify(payload);
   await requestJson({
@@ -209,7 +259,8 @@ function getTransporter() {
   return transporter;
 }
 
-async function sendEmailViaSmtp({ to, subject, html, text, cc, bcc }) {
+async function sendEmailViaSmtp({ to, subject, html, text, cc, bcc, attachments }) {
+  const normalizedAttachments = normalizeAttachments(attachments);
   const transport = getTransporter();
   await transport.sendMail({
     from: EMAIL_FROM,
@@ -218,11 +269,16 @@ async function sendEmailViaSmtp({ to, subject, html, text, cc, bcc }) {
     bcc,
     subject: subject || "Notification",
     text,
-    html
+    html,
+    attachments: normalizedAttachments.map((item) => ({
+      filename: item.filename,
+      content: Buffer.from(item.contentBase64, "base64"),
+      contentType: item.contentType
+    }))
   });
 }
 
-async function sendEmail({ to, subject, html, text, cc, bcc, graphAccessToken, graphUserEmail }) {
+async function sendEmail({ to, subject, html, text, cc, bcc, attachments, graphAccessToken, graphUserEmail }) {
   if (!EMAIL_ENABLED) {
     console.log("[email] disabled", { to, subject });
     return;
@@ -234,7 +290,7 @@ async function sendEmail({ to, subject, html, text, cc, bcc, graphAccessToken, g
 
   if (graphAccessToken) {
     try {
-      await sendEmailViaGraphDelegated({ to, subject, html, text, cc, bcc, graphAccessToken });
+      await sendEmailViaGraphDelegated({ to, subject, html, text, cc, bcc, attachments, graphAccessToken });
       return;
     } catch (err) {
       if (!EMAIL_FALLBACK_SMTP && !GRAPH_ALLOW_APP_FALLBACK && EMAIL_PROVIDER !== "smtp") {
@@ -249,7 +305,7 @@ async function sendEmail({ to, subject, html, text, cc, bcc, graphAccessToken, g
       throw new Error("Graph delegated token is required (set GRAPH_ALLOW_APP_FALLBACK=true to allow app sender)");
     }
     try {
-      await sendEmailViaGraphApp({ to, subject, html, text, cc, bcc, graphUserEmail });
+      await sendEmailViaGraphApp({ to, subject, html, text, cc, bcc, attachments, graphUserEmail });
       return;
     } catch (err) {
       if (!EMAIL_FALLBACK_SMTP) throw err;
@@ -257,7 +313,7 @@ async function sendEmail({ to, subject, html, text, cc, bcc, graphAccessToken, g
     }
   }
 
-  await sendEmailViaSmtp({ to, subject, html, text, cc, bcc });
+  await sendEmailViaSmtp({ to, subject, html, text, cc, bcc, attachments });
 }
 
 module.exports = { sendEmail, getGraphAccessToken };

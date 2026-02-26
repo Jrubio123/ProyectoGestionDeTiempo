@@ -381,10 +381,6 @@ const CLICKSIGN_SIGNATORY_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_CB_URL
 const CLICKSIGN_SIGNATORY_EMAIL_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_EMAIL_CB_URL || "").trim();
 const CLICKSIGN_WEBHOOK_TOKEN = String(process.env.CLICKSIGN_WEBHOOK_TOKEN || "").trim();
 const CLICKSIGN_SIGNED_FILE_URL_TEMPLATE = String(process.env.CLICKSIGN_SIGNED_FILE_URL_TEMPLATE || "").trim();
-const CLICKSIGN_SIGNATURE_BASE_WIDTH_MM = Number(process.env.CLICKSIGN_SIGNATURE_BASE_WIDTH_MM || 30);
-const CLICKSIGN_SIGNATURE_BASE_HEIGHT_MM = Number(process.env.CLICKSIGN_SIGNATURE_BASE_HEIGHT_MM || 20);
-const CLICKSIGN_SIGNATURE_SCALE_PERCENT = Number(process.env.CLICKSIGN_SIGNATURE_SCALE_PERCENT || 20);
-const CLICKSIGN_SIGNATURE_PAGE = String(process.env.CLICKSIGN_SIGNATURE_PAGE || "1").trim() || "1";
 const CLICKSIGN_SIGNED_NOTIFY_ENABLED = String(process.env.CLICKSIGN_SIGNED_NOTIFY_ENABLED || "true").toLowerCase() === "true";
 const CLICKSIGN_SIGNED_NOTIFY_TO = String(process.env.CLICKSIGN_SIGNED_NOTIFY_TO || "proveedores@silverconsulting.com.co").trim();
 const CLICKSIGN_SIGNED_NOTIFY_CC = String(process.env.CLICKSIGN_SIGNED_NOTIFY_CC || "").trim();
@@ -392,57 +388,6 @@ const CLICKSIGN_SIGNED_NOTIFY_BCC = String(process.env.CLICKSIGN_SIGNED_NOTIFY_B
 const DEBUG_CLICKSIGN_TOKEN = String(process.env.DEBUG_CLICKSIGN_TOKEN || "").trim();
 let estadoCuentaCobroEnFirmaCache = null;
 let estadoCuentaCobroAprobadoCache = null;
-
-function toFiniteNumber(value, fallback) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function roundOneDecimal(value) {
-  return Math.round(value * 10) / 10;
-}
-
-function resolveClickSignSignatureDimensions(percentOverride) {
-  const minMm = 20;
-  const baseWidth = Math.max(minMm, toFiniteNumber(CLICKSIGN_SIGNATURE_BASE_WIDTH_MM, 30));
-  const baseHeight = Math.max(minMm, toFiniteNumber(CLICKSIGN_SIGNATURE_BASE_HEIGHT_MM, 20));
-  const rawPercent = toFiniteNumber(percentOverride, toFiniteNumber(CLICKSIGN_SIGNATURE_SCALE_PERCENT, 20));
-  const safePercent = Math.min(Math.max(rawPercent, 0), 200);
-  const scaleFactor = 1 + (safePercent / 100);
-
-  return {
-    width: roundOneDecimal(Math.max(minMm, baseWidth * scaleFactor)),
-    height: roundOneDecimal(Math.max(minMm, baseHeight * scaleFactor)),
-    percent: safePercent
-  };
-}
-
-function isClickSignSignaturePositionValidationError(err) {
-  if (Number(err?.status || 0) !== 400) return false;
-  const raw = JSON.stringify(err?.response || err?.message || "").toLowerCase();
-  return [
-    "signature_position",
-    "signatory_external_id",
-    "\"x\"",
-    "\"y\"",
-    "width",
-    "height",
-    "page"
-  ].some((token) => raw.includes(token));
-}
-
-function stripClickSignSignaturePosition(payload = {}) {
-  return {
-    ...payload,
-    signature: {
-      ...(payload.signature || {}),
-      file: ((payload.signature && payload.signature.file) || []).map((item) => {
-        const { signature_position, ...rest } = item || {};
-        return rest;
-      })
-    }
-  };
-}
 
 function buildPortalUrl(hashRoute = "inicio") {
   const base = String(FRONT_PORTAL_BASE || "").trim();
@@ -510,6 +455,7 @@ async function notifyCuentaCobroFirmadaToProveedores({
   const cuentaRef = resolveCuentaCobroReference(cuenta);
   const consultorNombre = resolveCuentaCobroConsultorNombre(cuenta);
   const subject = `Cuenta de cobro firmada | ${consultorNombre} | ${cuentaRef}`;
+  const senderEmail = String(cuenta?.email || graphContext?.graphUserEmail || "").trim();
   const textoPlano =
     `Se completó la firma digital de una cuenta de cobro.\n` +
     `Consultor: ${consultorNombre}\n` +
@@ -529,7 +475,7 @@ async function notifyCuentaCobroFirmadaToProveedores({
   });
 
   let sendResult = await sendEmailSafe({
-    ...graphContext,
+    graphUserEmail: senderEmail || null,
     to: CLICKSIGN_SIGNED_NOTIFY_TO,
     cc: CLICKSIGN_SIGNED_NOTIFY_CC || null,
     bcc: CLICKSIGN_SIGNED_NOTIFY_BCC || null,
@@ -537,16 +483,6 @@ async function notifyCuentaCobroFirmadaToProveedores({
     text: textoPlano,
     html
   });
-  if (!sendResult?.ok && graphContext?.graphAccessToken) {
-    sendResult = await sendEmailSafe({
-      to: CLICKSIGN_SIGNED_NOTIFY_TO,
-      cc: CLICKSIGN_SIGNED_NOTIFY_CC || null,
-      bcc: CLICKSIGN_SIGNED_NOTIFY_BCC || null,
-      subject,
-      text: textoPlano,
-      html
-    });
-  }
 
   return {
     ...prev,
@@ -5959,12 +5895,6 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       `CuentaCobro_${cuenta.id}.pdf`
     );
     const signatoryExternalId = String(cuenta.created_by || "");
-    const requestedSignatureSizePercent =
-      req.body?.signature_size_percent ??
-      req.body?.signature_scale_percent ??
-      req.body?.firma_size_percent ??
-      req.body?.firma_scale_percent;
-    const signatureDimensions = resolveClickSignSignatureDimensions(requestedSignatureSizePercent);
 
     const signaturePayload = {
       request: "START_SIGNATURE",
@@ -5990,15 +5920,7 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
           {
             filename: fileName,
             content: pdfBuffer.toString("base64"),
-            sign_on_landing: "Y",
-            signature_position: [
-              {
-                signatory_external_id: signatoryExternalId,
-                page: CLICKSIGN_SIGNATURE_PAGE,
-                width: signatureDimensions.width,
-                height: signatureDimensions.height
-              }
-            ]
+            sign_on_landing: "Y"
           }
         ]
       }
@@ -6022,63 +5944,14 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
     if (signatoryEmailCbUrl) {
       signaturePayload.signature.signatory_email_cb_url = signatoryEmailCbUrl;
     }
-    const signaturePayloadWithoutPosition = stripClickSignSignaturePosition(signaturePayload);
-
-    let clickSignRes;
-    let signatureSizeApplied = true;
-    try {
-      clickSignRes = await jsonRequest({
-        method: "POST",
-        url: buildClickSignUrl("start_signature"),
-        headers: buildClickSignAuthHeaders(),
-        body: signaturePayload
-      });
-    } catch (startErr) {
-      if (!isClickSignSignaturePositionValidationError(startErr)) {
-        throw startErr;
-      }
-
-      signatureSizeApplied = false;
-      clickSignRes = await jsonRequest({
-        method: "POST",
-        url: buildClickSignUrl("start_signature"),
-        headers: buildClickSignAuthHeaders(),
-        body: signaturePayloadWithoutPosition
-      });
-    }
-    let signatureId = extractClickSignSignatureId(clickSignRes.data);
-    let urlFirma = getClickSignLandingUrl(clickSignRes.data);
-    if (!urlFirma && signatureSizeApplied) {
-      try {
-        const snapshot = await fetchClickSignSignatureSnapshot({
-          requestId,
-          contractId,
-          signatureId
-        });
-        const snapshotEvent = snapshot?.event && typeof snapshot.event === "object"
-          ? snapshot.event
-          : {};
-        const snapshotUrl = getClickSignLandingUrl(snapshotEvent);
-        if (snapshotUrl) {
-          urlFirma = snapshotUrl;
-          const signatureIdFromSnapshot = String(extractClickSignSignatureId(snapshotEvent) || "").trim();
-          if (signatureIdFromSnapshot) signatureId = signatureIdFromSnapshot;
-        }
-      } catch (snapshotErr) {
-        // Se ignora y se intenta fallback de inicio sin signature_position.
-      }
-    }
-    if (!urlFirma && signatureSizeApplied) {
-      signatureSizeApplied = false;
-      clickSignRes = await jsonRequest({
-        method: "POST",
-        url: buildClickSignUrl("start_signature"),
-        headers: buildClickSignAuthHeaders(),
-        body: signaturePayloadWithoutPosition
-      });
-      signatureId = extractClickSignSignatureId(clickSignRes.data);
-      urlFirma = getClickSignLandingUrl(clickSignRes.data);
-    }
+    const clickSignRes = await jsonRequest({
+      method: "POST",
+      url: buildClickSignUrl("start_signature"),
+      headers: buildClickSignAuthHeaders(),
+      body: signaturePayload
+    });
+    const signatureId = extractClickSignSignatureId(clickSignRes.data);
+    const urlFirma = getClickSignLandingUrl(clickSignRes.data);
     if (!urlFirma) {
       return res.status(502).json({
         error: "Click&Sign no devolvio URL de firma.",
@@ -6103,13 +5976,7 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       url_firma: urlFirma,
       iniciado_en: ahoraIso,
       actualizado_en: ahoraIso,
-      ultimo_evento: "START_SIGNATURE",
-      tamano_firma: {
-        width_mm: signatureDimensions.width,
-        height_mm: signatureDimensions.height,
-        incremento_percent: signatureDimensions.percent,
-        aplicado: signatureSizeApplied
-      }
+      ultimo_evento: "START_SIGNATURE"
     };
     const adjuntos = {
       ...prevAdjuntos,
@@ -6133,13 +6000,7 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       request_id: requestId,
       contract_id: contractId,
       signature_id: signatureId || null,
-      url_firma: urlFirma,
-      tamano_firma: {
-        width_mm: signatureDimensions.width,
-        height_mm: signatureDimensions.height,
-        incremento_percent: signatureDimensions.percent,
-        aplicado: signatureSizeApplied
-      }
+      url_firma: urlFirma
     });
   } catch (err) {
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {

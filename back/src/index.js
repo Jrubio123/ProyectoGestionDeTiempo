@@ -5974,8 +5974,6 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
               {
                 signatory_external_id: signatoryExternalId,
                 page: "last",
-                x: 40,
-                y: 230,
                 width: 70,
                 height: 30,
                 rotation: 0

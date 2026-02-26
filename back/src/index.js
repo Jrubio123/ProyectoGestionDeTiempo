@@ -5966,21 +5966,23 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
           }
         ],
         file: [
-          {
-            filename: fileName,
-            content: pdfBuffer.toString("base64"),
-            sign_on_landing: "Y",
-            signature_position: [
-              {
-                signatory_external_id: signatoryExternalId,
-                page: "last",
-                width: 70,
-                height: 30,
-                rotation: 0
-              }
-            ]
-          }
-        ]
+  {
+    filename: fileName,
+    content: pdfBuffer.toString("base64"),
+    sign_on_landing: "Y",
+    signature_position: [
+      {
+        signatory_external_id: signatoryExternalId,
+        page: "last",
+        x: 140,
+        y: 250,
+        width: 84,
+        height: 36,
+        rotation: 0
+      }
+    ]
+  }
+]
       }
     };
     const fallbackWebhookBase = getRequestPublicBaseUrl(req);

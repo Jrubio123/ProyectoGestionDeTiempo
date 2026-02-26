@@ -2412,7 +2412,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   // Limpiar "PESOS PESOS" duplicado si viene así
   const letrasLimpias = totalLetras.replace(/\bPESOS\s+PESOS\b/gi, "PESOS");
   doc.fontSize(8.5).font("Helvetica").fillColor(COLOR.textoSec)
-    .text(`Son: ${letrasLimpias}`, ML + 14, curY + 34, { width: PW - 28, lineBreak: false });
+    .text(`Valor en letras: ${letrasLimpias}`, ML + 14, curY + 34, { width: PW - 28, lineBreak: false });
 
   curY += totalBoxH + 14;
 

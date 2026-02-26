@@ -6133,7 +6133,6 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
 
     let documentoFirmado = prevDocumentoFirmado;
     let documentoFirmadoError = "";
-    let documentosAdjuntosCorreo = [];
 
     let uploadedExtras = [];
     let catalogSource = null;
@@ -6149,14 +6148,6 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
       const resolvedPdf = artifacts?.signedPdf || null;
 
       if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
-        documentosAdjuntosCorreo = buildCuentaCobroEmailAttachments({
-          cuenta,
-          signedPdf: {
-            buffer: resolvedPdf.buffer,
-            fileName: resolvedPdf.fileName || ""
-          },
-          extraFiles: artifacts?.extraFiles || []
-        });
         try {
           const uploadResult = await uploadSignedPdfToOneDrive(
             cuenta,
@@ -6206,21 +6197,6 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
     } else if (status === "signed" && prevFirma.documento_firmado_error) {
       firma.documento_firmado_error = null;
     }
-    if (status === "signed" && documentoFirmado?.url) {
-      const prevNotificacionProveedores =
-        prevFirma.notificacion_proveedores && typeof prevFirma.notificacion_proveedores === "object"
-          ? prevFirma.notificacion_proveedores
-          : {};
-      firma.notificacion_proveedores = await notifyCuentaCobroFirmadaToProveedores({
-        cuenta,
-        documentoFirmado,
-        attachments: documentosAdjuntosCorreo,
-        prevNotification: prevNotificacionProveedores,
-        nowIso,
-        graphContext: getGraphContext(req)
-      });
-    }
-
     const adjuntos = {
       ...prevAdjuntos,
       firma
@@ -6418,14 +6394,6 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
       origen: "manual_upload",
       actualizado_en: nowIso
     };
-    const documentosAdjuntosCorreo = buildCuentaCobroEmailAttachments({
-      cuenta,
-      signedPdf: {
-        buffer: pdfBuffer,
-        fileName: uploadName
-      }
-    });
-
     const firma = {
       ...prevFirma,
       estado: "signed",
@@ -6434,21 +6402,6 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
       documento_firmado: documentoFirmado,
       documento_firmado_error: null
     };
-    if (documentoFirmado?.url) {
-      const prevNotificacionProveedores =
-        prevFirma.notificacion_proveedores && typeof prevFirma.notificacion_proveedores === "object"
-          ? prevFirma.notificacion_proveedores
-          : {};
-      firma.notificacion_proveedores = await notifyCuentaCobroFirmadaToProveedores({
-        cuenta,
-        documentoFirmado,
-        attachments: documentosAdjuntosCorreo,
-        prevNotification: prevNotificacionProveedores,
-        nowIso,
-        graphContext: getGraphContext(req)
-      });
-    }
-
     const adjuntos = {
       ...prevAdjuntos,
       firma,

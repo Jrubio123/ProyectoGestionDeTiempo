@@ -491,8 +491,9 @@ async function notifyCuentaCobroFirmadaToProveedores({
   if (prev.enviada) return prev;
 
   const cuentaRef = resolveCuentaCobroReference(cuenta);
+  const cuentaRefCorta = String(cuenta.public_id || cuenta.id || "").split("-")[0];
   const consultorNombre = resolveCuentaCobroConsultorNombre(cuenta);
-  const subject = `Cuenta de cobro firmada | ${consultorNombre} | ${cuentaRef}`;
+  const subject = `Cuenta de cobro firmada | ${consultorNombre} | ${cuentaRefCorta}`;
   const senderEmail = String(cuenta?.email || graphContext?.graphUserEmail || "").trim();
   const notificationLockKey = String(cuenta?.id || cuenta?.public_id || cuentaRef || "").trim();
   if (notificationLockKey && providerNotificationInFlight.has(notificationLockKey)) {
@@ -501,14 +502,14 @@ async function notifyCuentaCobroFirmadaToProveedores({
   const textoPlano =
     `Se completó la firma digital de una cuenta de cobro.\n` +
     `Consultor: ${consultorNombre}\n` +
-    `Cuenta de cobro: ${cuentaRef}\n` +
+    `Cuenta de cobro: ${cuentaRefCorta}\n` +
     `Documento firmado: ${documentoFirmado.url}\n`;
   const html = buildEmailLayout({
     title: "Cuenta de cobro firmada",
-    intro: `Se completó la firma digital de la cuenta de cobro <strong>${cuentaRef}</strong>.`,
+    intro: `Se completó la firma digital de la cuenta de cobro <strong>${cuentaRefCorta}</strong>.`,
     blocks: [
       { label: "Consultor", value: consultorNombre },
-      { label: "Cuenta de cobro", value: cuentaRef },
+      { label: "Cuenta de cobro", value: cuentaRefCorta },
       { label: "Documento firmado", value: documentoFirmado.url }
     ],
     ctaLabel: "Abrir documento firmado",
@@ -5939,7 +5940,7 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
     const pdfBuffer = await generateCuentaCobroPdfBuffer(cuenta, detalles);
     const cuentaPublicId = String(cuenta.public_id || "");
     const requestId = `CC-${cuentaPublicId || cuenta.id}-${Date.now()}`;
-    const contractId = `CC-${cuentaPublicId || cuenta.id}`;
+    const contractId = `CC-${String(cuentaPublicId || cuenta.id || "").split("-")[0]}`;
     const fileName = sanitizePdfFileName(
       `CuentaCobro_${cuentaPublicId || cuenta.id}.pdf`,
       `CuentaCobro_${cuenta.id}.pdf`

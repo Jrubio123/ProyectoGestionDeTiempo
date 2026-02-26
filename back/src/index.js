@@ -2227,13 +2227,31 @@ function hLine(doc, x, y, w, color = COLOR.grisLinea, lineWidth = 0.5) {
 
 // Formatea fecha sin mostrar UTC — acepta string ISO o Date
 function fmtFecha(value) {
-  if (!value) return "-";
-  // Si viene como "2026-02-01" o "2026-02-01T00:00:00.000Z"
-  const str = String(value);
-  // Tomar solo la parte de fecha para evitar desfase de zona horaria
-  const soloFecha = str.slice(0, 10); // "2026-02-01"
-  const [year, month, day] = soloFecha.split("-").map(Number);
-  if (!year || !month || !day) return str;
+  if (value === undefined || value === null || value === "") return "-";
+
+  let year = 0;
+  let month = 0;
+  let day = 0;
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const iso = value.toISOString().slice(0, 10);
+    [year, month, day] = iso.split("-").map(Number);
+  } else {
+    const raw = String(value).trim();
+    const fromIso = raw.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (fromIso) {
+      year = Number(fromIso[1]);
+      month = Number(fromIso[2]);
+      day = Number(fromIso[3]);
+    } else {
+      const parsed = new Date(raw);
+      if (Number.isNaN(parsed.getTime())) return raw;
+      const iso = parsed.toISOString().slice(0, 10);
+      [year, month, day] = iso.split("-").map(Number);
+    }
+  }
+
+  if (!year || !month || !day) return String(value);
   const meses = [
     "Enero","Febrero","Marzo","Abril","Mayo","Junio",
     "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"
@@ -2314,9 +2332,10 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   };
 
   const totalNumeros = Number(cuenta.total_cuenta_cobro || 0);
-  const totalLetras  = cuenta.total_letras
-    || buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
+  const totalLetras  = buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
   const monedaSimbolo = String(cuenta.moneda_cobro || "COP").toUpperCase() === "USD" ? "USD" : "COP";
+  const nombreConsultor = cuenta.nombre_usuario || "Consultor";
+  const cedulaConsultor = cuenta.cedula || "-";
 
   // ══════════════════════════════════════════════
   // 1. HEADER — dos bloques separados sin solaparse
@@ -2400,7 +2419,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   doc.fontSize(20).font("Helvetica-Bold").fillColor(COLOR.azulMedio)
     .text(
-      `${monedaSimbolo} ${formatCuentaCobroCurrency(totalNumeros)}`,
+      `${monedaSimbolo}  ${formatCuentaCobroCurrency(totalNumeros)}`,
       ML + 14, curY + 8, { lineBreak: false }
     );
 
@@ -2426,7 +2445,27 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
       ML, curY, { width: PW, lineBreak: true }
     );
 
-  curY = doc.y + 14;
+  curY = doc.y + 8;
+  doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
+    .text(
+      `Yo, ${nombreConsultor} identificado con C.C. ${cedulaConsultor}, solicito me elaboren retención según:`,
+      ML,
+      curY,
+      { width: PW }
+    );
+  curY = doc.y + 4;
+  doc.text("Decreto 2499 de 2012 ( X )", ML + 10, curY);
+  curY = doc.y + 2;
+  doc.text("Depuración de renta bajo el artículo 383 (  )", ML + 10, curY);
+  curY = doc.y + 6;
+  doc.text(
+    "Manifiesto bajo la gravedad de juramento que en mi depuración del impuesto sobre la renta no usaré costos y sí la renta exenta del 25% contenida en el numeral 10 del artículo 206 del ET.",
+    ML,
+    curY,
+    { width: PW, align: "justify" }
+  );
+
+  curY = doc.y + 12;
 
   // ══════════════════════════════════════════════
   // 5. TABLA DE DETALLES
@@ -2511,51 +2550,30 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   doc.fontSize(8.5).font("Helvetica-Bold").fillColor(COLOR.azulMedio)
     .text(
-      `${monedaSimbolo} ${formatCuentaCobroCurrency(totalNumeros)}`,
+      `${monedaSimbolo}  ${formatCuentaCobroCurrency(totalNumeros)}`,
       cols[cols.length-1].x + 4, curY + 4,
       { width: cols[cols.length-1].w - 8, align: "right", lineBreak: false }
     );
 
-  curY += totalRowH + 18;
-
-  // ══════════════════════════════════════════════
-  // 6. TEXTO LEGAL DE RETENCIÓN
-  // ══════════════════════════════════════════════
-  // Si no cabe texto legal + firma, se pasa a la siguiente página.
-  if (curY > doc.page.height - 180) {
+  curY += totalRowH + 12;
+  if (curY > doc.page.height - 150) {
     addPage();
     curY = MARGIN.top;
   }
 
-  const nombreConsultor = cuenta.nombre_usuario || "Consultor";
-  const cedulaConsultor = cuenta.cedula || "-";
-
+  hLine(doc, ML, curY, PW);
+  curY += 8;
   doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
     .text(
-      `Yo, ${nombreConsultor} identificado con C.C. ${cedulaConsultor}, solicito me elaboren retención según:`,
-      ML,
-      curY,
-      { width: PW }
+      "Documento generado electrónicamente — Silver Consulting S.A.S.  ·  NIT 901.149.190-0  ·  Medellín, Colombia",
+      ML, curY, { width: PW, align: "center", lineBreak: false }
     );
-  curY = doc.y + 5;
-  doc.text("Decreto 2499 de 2012 ( X )", ML + 10, curY);
-  curY = doc.y + 3;
-  doc.text("Depuración de renta bajo el artículo 383 (  )", ML + 10, curY);
-  curY = doc.y + 8;
-  doc.text(
-    "Manifiesto bajo la gravedad de juramento que en mi depuración del impuesto sobre la renta no usaré costos y sí la renta exenta del 25% contenida en el numeral 10 del artículo 206 del ET.",
-    ML,
-    curY,
-    { width: PW, align: "justify" }
-  );
-  curY = doc.y + 15;
+  curY = doc.y + 10;
+  doc.fontSize(8).font("Helvetica").fillColor(COLOR.textoSec);
   doc.text("Cordialmente,", ML, curY);
 
-  // ══════════════════════════════════════════════
-  // 7. BLOQUE DE FIRMA
-  // ══════════════════════════════════════════════
   // Espacio reservado para que Click&Sign estampe la firma visual.
-  curY = doc.y + 60;
+  curY = doc.y + 48;
   const firmaW = 180;
   const firmaX = ML + PW / 2 - firmaW / 2;
   hLine(doc, firmaX, curY, firmaW, COLOR.azulOscuro, 0.8);
@@ -2578,17 +2596,6 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
     lineYPt: curY,
     lineWidthPt: firmaW
   };
-
-  // ══════════════════════════════════════════════
-  // 8. PIE DE PÁGINA
-  // ══════════════════════════════════════════════
-  const footerY = doc.page.height - 40;
-  hLine(doc, ML, footerY, PW);
-  doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
-    .text(
-      "Documento generado electrónicamente — Silver Consulting S.A.S.  ·  NIT 901.149.190-0  ·  Medellín, Colombia",
-      ML, footerY + 8, { width: PW, align: "center", lineBreak: false }
-    );
 }
 
 //--------------------------------------------------------------//

@@ -7,16 +7,36 @@ window.misCuentasApp = function () {
         cuentas: [],
         filtros: { inicio: "", fin: "" },
         modal: { open: false, data: null, detalles: [] },
+        syncFirmas: {
+            reconciling: false,
+            lastRunAt: 0,
+            cooldownMs: 15000,
+            maxPendientes: 4,
+            listenersReady: false
+        },
 
         async init() {
             if (window.auth) {
                 const u = window.auth.getUser();
                 if (u) this.usuario = u;
             }
-            await this.cargarHistorial();
+            this.inicializarAutoSyncFirmas();
+            await this.cargarHistorial({ reconciliar: true });
         },
 
-        async cargarHistorial() {
+        inicializarAutoSyncFirmas() {
+            if (this.syncFirmas.listenersReady) return;
+            const refreshFirmas = async () => {
+                await this.cargarHistorial({ reconciliar: true });
+            };
+            window.addEventListener("focus", refreshFirmas);
+            document.addEventListener("visibilitychange", () => {
+                if (document.visibilityState === "visible") refreshFirmas();
+            });
+            this.syncFirmas.listenersReady = true;
+        },
+
+        async cargarHistorial({ reconciliar = false } = {}) {
             try {
                 let url = `${API}/cuentas-cobro/historial/${this.usuario.id || ""}`;
                 if (this.filtros.inicio && this.filtros.fin) {
@@ -24,8 +44,69 @@ window.misCuentasApp = function () {
                 }
                 const res = await axios.get(url);
                 this.cuentas = res.data || [];
+                if (reconciliar) {
+                    await this.reconciliarFirmasPendientes();
+                }
             } catch (e) {
                 this.cuentas = [];
+            }
+        },
+
+        firmaPendiente(cuenta) {
+            const firmaEstado = String(cuenta?.datos_adjuntos?.firma?.estado || "").toLowerCase().trim();
+            if (["signed", "firmado", "completed", "aprobado"].includes(firmaEstado)) return false;
+            if (["pending", "in_progress", "en_firma", "started", "sent", "open", "created"].includes(firmaEstado)) return true;
+            const estadoCuenta = String(cuenta?.estado || "").toLowerCase().trim();
+            return ["en firma", "pendiente"].includes(estadoCuenta);
+        },
+
+        getFirmaReconcilePayload(cuenta) {
+            const firma = cuenta?.datos_adjuntos?.firma || {};
+            const payload = {};
+            if (firma.request_id) payload.request_id = firma.request_id;
+            if (firma.contract_id) payload.contract_id = firma.contract_id;
+            if (firma.signature_id) payload.signature_id = firma.signature_id;
+            if (firma.estado) payload.status = firma.estado;
+            return payload;
+        },
+
+        async reconciliarFirmasPendientes() {
+            if (this.syncFirmas.reconciling) return;
+            const now = Date.now();
+            if (now - this.syncFirmas.lastRunAt < this.syncFirmas.cooldownMs) return;
+
+            const pendientes = (this.cuentas || [])
+                .filter((cuenta) => this.firmaPendiente(cuenta))
+                .filter((cuenta) => {
+                    const firma = cuenta?.datos_adjuntos?.firma || {};
+                    return Boolean(firma.request_id || firma.contract_id || firma.signature_id);
+                })
+                .slice(0, this.syncFirmas.maxPendientes);
+
+            this.syncFirmas.lastRunAt = now;
+            if (pendientes.length === 0) return;
+
+            this.syncFirmas.reconciling = true;
+            let huboCambios = false;
+            try {
+                for (const cuenta of pendientes) {
+                    try {
+                        const payload = this.getFirmaReconcilePayload(cuenta);
+                        const res = await axios.post(`${API}/cuentas-cobro/${cuenta.id}/firma/reconciliar`, payload);
+                        const estadoFirma = String(res?.data?.estado_firma || "").toLowerCase().trim();
+                        if (["signed", "firmado", "completed", "aprobado"].includes(estadoFirma) || res?.data?.documento_firmado_url) {
+                            huboCambios = true;
+                        }
+                    } catch (e) {
+                        // Mantener silencioso para no interrumpir al usuario.
+                    }
+                }
+            } finally {
+                this.syncFirmas.reconciling = false;
+            }
+
+            if (huboCambios) {
+                await this.cargarHistorial({ reconciliar: false });
             }
         },
 
@@ -71,10 +152,12 @@ window.misCuentasApp = function () {
                 if (urlFirma) {
                     window.open(urlFirma, "_blank", "noopener");
                     alert("Proceso de firma iniciado. Completa la firma en la nueva pestana.");
+                    setTimeout(() => this.cargarHistorial({ reconciliar: true }), 10000);
+                    setTimeout(() => this.cargarHistorial({ reconciliar: true }), 25000);
                 } else {
                     alert("Se inicio el proceso, pero no se recibio una URL de firma.");
                 }
-                await this.cargarHistorial();
+                await this.cargarHistorial({ reconciliar: true });
             } catch (e) {
                 const msg = e?.response?.data?.error || "No se pudo iniciar la firma digital.";
                 alert(msg);
@@ -123,7 +206,7 @@ window.misCuentasApp = function () {
 
         limpiarFiltros() {
             this.filtros = { inicio: "", fin: "" };
-            this.cargarHistorial();
+            this.cargarHistorial({ reconciliar: true });
         },
 
         get totalAnual() {

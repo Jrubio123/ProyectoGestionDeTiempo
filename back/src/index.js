@@ -2534,12 +2534,33 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   doc.fontSize(8.5).font("Helvetica-Bold").fillColor(COLOR.azulOscuro)
     .text("TOTAL", ML + 4, curY + 4, { width: PW - cols[cols.length-1].w - 8, align: "right", lineBreak: false });
 
-  doc.fontSize(8.5).font("Helvetica-Bold").fillColor(COLOR.azulMedio)
-    .text(
-      `${monedaSimbolo}  ${formatCuentaCobroCurrency(totalNumeros)}`,
-      cols[cols.length-1].x + 4, curY + 4,
-      { width: cols[cols.length-1].w - 8, align: "right", lineBreak: false }
-    );
+  const totalColX = cols[cols.length - 1].x + 4;
+  const totalColY = curY + 4;
+  const totalColW = cols[cols.length - 1].w - 8;
+  const totalValue = formatCuentaCobroCurrency(totalNumeros);
+  const currencyGap = 3;
+  let totalFontSize = 8.5;
+  const minTotalFontSize = 7;
+  let valueWidth = 0;
+  let currencyWidth = 0;
+
+  doc.font("Helvetica-Bold").fillColor(COLOR.azulMedio);
+  while (true) {
+    doc.fontSize(totalFontSize);
+    valueWidth = doc.widthOfString(totalValue);
+    currencyWidth = doc.widthOfString(monedaSimbolo);
+    if (valueWidth + currencyWidth + currencyGap <= totalColW || totalFontSize <= minTotalFontSize) {
+      break;
+    }
+    totalFontSize = Math.max(minTotalFontSize, totalFontSize - 0.2);
+  }
+
+  const rightEdge = totalColX + totalColW;
+  const valueX = rightEdge - valueWidth;
+  const currencyX = Math.max(totalColX, valueX - currencyGap - currencyWidth);
+
+  doc.text(totalValue, valueX, totalColY, { lineBreak: false });
+  doc.text(monedaSimbolo, currencyX, totalColY, { lineBreak: false });
 
   curY += totalRowH + 12;
 

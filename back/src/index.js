@@ -2306,13 +2306,13 @@ function formatCuentaCobroDate(value) {
 
 const COLOR = {
   azulOscuro: "#20272F",
-  turquesa:   "#189FA9",
-  azulMedio:  "#1C61AB",
-  grisClaro:  "#F4F6F9",
-  grisLinea:  "#D5DCE8",
-  blanco:     "#FFFFFF",
-  textoPrin:  "#20272F",
-  textoSec:   "#4A5568",
+  turquesa: "#189FA9",
+  azulMedio: "#1C61AB",
+  grisClaro: "#F4F6F9",
+  grisLinea: "#D5DCE8",
+  blanco: "#FFFFFF",
+  textoPrin: "#20272F",
+  textoSec: "#4A5568",
 };
 
 const MARGIN = { top: 40, left: 40, right: 40, bottom: 50 };
@@ -2362,8 +2362,8 @@ function fmtFecha(value) {
 
   if (!year || !month || !day) return String(value);
   const meses = [
-    "Enero","Febrero","Marzo","Abril","Mayo","Junio",
-    "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
   ];
   return `${day} de ${meses[month - 1]} de ${year}`;
 }
@@ -2391,7 +2391,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const PW_TOTAL = doc.page.width; // ancho real de página
 
   const totalNumeros = Number(cuenta.total_cuenta_cobro || 0);
-  const totalLetras  = buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
+  const totalLetras = buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
   const monedaSimbolo = String(cuenta.moneda_cobro || "COP").toUpperCase() === "USD" ? "USD" : "COP";
   const nombreConsultor = cuenta.nombre_usuario || "Consultor";
   const cedulaConsultor = cuenta.cedula || "-";
@@ -2420,8 +2420,8 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   doc.fontSize(8).font("Helvetica").fillColor(COLOR.blanco)
     .text(`N° ${numCuenta}`, rightX, 30, { width: rightW, align: "right", lineBreak: false });
 
-  const fechaDoc   = fmtFecha(cuenta.created_at);
-  const ciudadDoc  = cuenta.ciudad_cobro || "";
+  const fechaDoc = fmtFecha(cuenta.created_at);
+  const ciudadDoc = cuenta.ciudad_cobro || "";
   doc.fontSize(8).fillColor(COLOR.blanco)
     .text(`${fechaDoc}  ·  ${ciudadDoc}`, rightX, 44, { width: rightW, align: "right", lineBreak: false });
 
@@ -2436,7 +2436,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   curY = sectionTitle(doc, "DEBE A", curY);
 
   const cardPad = 12;
-  const cardH   = 72;
+  const cardH = 72;
   doc.save()
     .roundedRect(ML, curY, PW, cardH, 5)
     .strokeColor(COLOR.grisLinea).lineWidth(0.8).stroke()
@@ -2444,23 +2444,23 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   const c1x = ML + cardPad;
   const c2x = ML + PW / 2 + cardPad;
-  const rh  = 15;
+  const rh = 15;
   let ry = curY + 10;
 
-  infoRow(doc, c1x, ry, "Nombre:",       cuenta.nombre_usuario || "-");
-  infoRow(doc, c2x, ry, "Teléfono:",     cuenta.telefono       || "-");
+  infoRow(doc, c1x, ry, "Nombre:", cuenta.nombre_usuario || "-");
+  infoRow(doc, c2x, ry, "Teléfono:", cuenta.telefono || "-");
   ry += rh;
 
   infoRow(doc, c1x, ry, "Documento:",
     `${cuenta.tipo_documento || "CC"}: ${cuenta.cedula || "-"}`);
-  infoRow(doc, c2x, ry, "Dirección:",    cuenta.direccion      || "-");
+  infoRow(doc, c2x, ry, "Dirección:", cuenta.direccion || "-");
   ry += rh;
 
-  infoRow(doc, c1x, ry, "Banco:",        cuenta.banco          || "-");
-  infoRow(doc, c2x, ry, "No. Cuenta:",   cuenta.nro_cuenta_bancaria || "-");
+  infoRow(doc, c1x, ry, "Banco:", cuenta.banco || "-");
+  infoRow(doc, c2x, ry, "No. Cuenta:", cuenta.nro_cuenta_bancaria || "-");
   ry += rh;
 
-  infoRow(doc, c1x, ry, "Tipo cuenta:",  cuenta.tipo_cuenta    || "-");
+  infoRow(doc, c1x, ry, "Tipo cuenta:", cuenta.tipo_cuenta || "-");
 
   curY += cardH + 14;
 
@@ -2495,7 +2495,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   curY = sectionTitle(doc, "CONCEPTO", curY);
 
   const periodoInicio = fmtFecha(cuenta.fecha_periodo_inicio);
-  const periodoFin    = fmtFecha(cuenta.fecha_periodo_fin);
+  const periodoFin = fmtFecha(cuenta.fecha_periodo_fin);
 
   doc.fontSize(8.5).font("Helvetica").fillColor(COLOR.textoSec)
     .text(
@@ -2522,24 +2522,24 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   curY = sectionTitle(doc, "DETALLE DE SERVICIOS", curY);
 
   const cols = [
-    { label: "Cliente",     key: "cliente",               w: 115 },
-    { label: "Consultor",   key: "consultor_responsable",  w: 110 },
-    { label: "Tipo",        key: "tipo_asignacion",        w: 85  },
-    { label: "Caso / Req.", key: "nro_caso_int_ext",       w: 70  },
-    { label: "Cant.",       key: "_cant",  w: 38, align: "right" },
-    { label: "Total",       key: "_total", w: 62, align: "right" },
+    { label: "Cliente", key: "cliente", w: 115 },
+    { label: "Consultor", key: "consultor_responsable", w: 110 },
+    { label: "Tipo", key: "tipo_asignacion", w: 85 },
+    { label: "Caso / Req.", key: "nro_caso_int_ext", w: 70 },
+    { label: "Cant.", key: "_cant", w: 38, align: "right" },
+    { label: "Total", key: "_total", w: 62, align: "right" },
   ];
 
   // Ajustar anchos para que sumen exactamente PW
   const totalW = cols.reduce((s, c) => s + c.w, 0);
-  const diff   = PW - totalW;
-  cols[0].w   += diff; // absorber diferencia en la primera columna
+  const diff = PW - totalW;
+  cols[0].w += diff; // absorber diferencia en la primera columna
 
   // Calcular X de cada columna
   let cx = ML;
   cols.forEach(c => { c.x = cx; cx += c.w; });
 
-  const ROW_H    = 16;
+  const ROW_H = 16;
   const HEADER_H = 18;
 
   function drawTableHeader(y) {
@@ -2568,11 +2568,11 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
       : `${Number(d.horas_reportadas || 0)} H`;
 
     const vals = {
-      cliente:               d.cliente               || "-",
+      cliente: d.cliente || "-",
       consultor_responsable: d.consultor_responsable || "-",
-      tipo_asignacion:       d.tipo_asignacion        || "-",
-      nro_caso_int_ext:      d.nro_caso_int_ext       || "-",
-      _cant:  cant,
+      tipo_asignacion: d.tipo_asignacion || "-",
+      nro_caso_int_ext: d.nro_caso_int_ext || "-",
+      _cant: cant,
       _total: formatCuentaCobroCurrency(d.total_cobrar),
     };
 
@@ -2600,7 +2600,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   // Valor — moneda + número como un solo string en la última columna
   const totalStr = `${monedaSimbolo} ${formatCuentaCobroCurrency(totalNumeros)}`;
-  const lastCol  = cols[cols.length - 1];
+  const lastCol = cols[cols.length - 1];
 
   // Reducir fuente si el string no cabe
   let fs = 8.5;
@@ -2618,13 +2618,13 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   // ══════════════════════════════════════════════
   // 6. PIE + FIRMA
   // ══════════════════════════════════════════════
-  if (curY > doc.page.height - 150) {
+  if (curY > doc.page.height - 120) {
     doc.addPage();
     curY = MARGIN.top;
   }
 
   hLine(doc, ML, curY, PW);
-  curY += 8;
+  curY += 10;
 
   doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
     .text(
@@ -2632,26 +2632,17 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
       ML, curY, { width: PW, align: "center", lineBreak: false }
     );
 
-  curY = doc.y + 10;
-  doc.fontSize(8).font("Helvetica").fillColor(COLOR.textoSec);
-  doc.text("Cordialmente,", ML, curY);
+  curY = doc.y + 16;
+  doc.fontSize(8).font("Helvetica").fillColor(COLOR.textoSec)
+    .text("Cordialmente,", ML, curY);
 
-  // Línea de firma
-  curY = doc.y + 48;
-  const firmaW = 180;
-  const firmaX = ML + PW / 2 - firmaW / 2;
-  hLine(doc, firmaX, curY, firmaW, COLOR.azulOscuro, 0.8);
-
+  curY = doc.y + 6;
   doc.fontSize(8).font("Helvetica-Bold").fillColor(COLOR.textoPrin)
-    .text(nombreConsultor, firmaX, curY + 5,
-      { width: firmaW, align: "center", lineBreak: false });
+    .text(nombreConsultor, ML, curY);
 
-  doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
-    .text(
-      `C.C. ${cedulaConsultor}`,
-      firmaX, curY + 16,
-      { width: firmaW, align: "center", lineBreak: false }
-    );
+  curY = doc.y + 2;
+  doc.fontSize(8).font("Helvetica").fillColor(COLOR.textoSec)
+    .text(`C.C. ${cedulaConsultor}`, ML, curY);
 }
 
 //--------------------------------------------------------------//
@@ -5914,9 +5905,9 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
 
     const firmaExistente =
       cuenta.datos_adjuntos &&
-      typeof cuenta.datos_adjuntos === "object" &&
-      cuenta.datos_adjuntos.firma &&
-      typeof cuenta.datos_adjuntos.firma === "object"
+        typeof cuenta.datos_adjuntos === "object" &&
+        cuenta.datos_adjuntos.firma &&
+        typeof cuenta.datos_adjuntos.firma === "object"
         ? cuenta.datos_adjuntos.firma
         : null;
     const forceRestart = String(req.body?.force || "").toLowerCase() === "true" || req.body?.force === true;
@@ -5991,11 +5982,10 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
     };
     const fallbackWebhookBase = getRequestPublicBaseUrl(req);
     const fallbackSignatureCbUrl = fallbackWebhookBase
-      ? `${fallbackWebhookBase}/webhooks/clicksign/signature${
-          CLICKSIGN_WEBHOOK_TOKEN
-            ? `?token=${encodeURIComponent(CLICKSIGN_WEBHOOK_TOKEN)}`
-            : ""
-        }`
+      ? `${fallbackWebhookBase}/webhooks/clicksign/signature${CLICKSIGN_WEBHOOK_TOKEN
+        ? `?token=${encodeURIComponent(CLICKSIGN_WEBHOOK_TOKEN)}`
+        : ""
+      }`
       : "";
     const signatureCbUrl = CLICKSIGN_SIGNATURE_CB_URL || fallbackSignatureCbUrl;
     const signatoryCbUrl = CLICKSIGN_SIGNATORY_CB_URL || signatureCbUrl;
@@ -7259,7 +7249,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
 // Ruta Default para SPA (Siempre al final)
 app.get("/", (req, res) => {
   //res.json({ ok: true, message: "API activo. Abre el frontend en http://localhost:3000" });
-  res.send("API activo. Abre el frontend en http://localhost:3000" );
+  res.send("API activo. Abre el frontend en http://localhost:3000");
 });
 
 /*const PORT = process.env.BACK_PORT || 4000;

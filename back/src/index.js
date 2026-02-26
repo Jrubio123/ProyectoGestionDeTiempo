@@ -344,8 +344,10 @@ function buildTotalLetras(numero, moneda = 'COP') {
 async function sendEmailSafe({ to, subject, text, html, cc, bcc, graphAccessToken, graphUserEmail }) {
   try {
     await sendEmail({ to, subject, text, html, cc, bcc, graphAccessToken, graphUserEmail });
+    return { ok: true };
   } catch (err) {
     console.error("Error enviando correo:", err.message);
+    return { ok: false, error: String(err?.message || "Error enviando correo") };
   }
 }
 
@@ -383,6 +385,10 @@ const CLICKSIGN_SIGNATURE_BASE_WIDTH_MM = Number(process.env.CLICKSIGN_SIGNATURE
 const CLICKSIGN_SIGNATURE_BASE_HEIGHT_MM = Number(process.env.CLICKSIGN_SIGNATURE_BASE_HEIGHT_MM || 20);
 const CLICKSIGN_SIGNATURE_SCALE_PERCENT = Number(process.env.CLICKSIGN_SIGNATURE_SCALE_PERCENT || 20);
 const CLICKSIGN_SIGNATURE_PAGE = String(process.env.CLICKSIGN_SIGNATURE_PAGE || "1").trim() || "1";
+const CLICKSIGN_SIGNED_NOTIFY_ENABLED = String(process.env.CLICKSIGN_SIGNED_NOTIFY_ENABLED || "true").toLowerCase() === "true";
+const CLICKSIGN_SIGNED_NOTIFY_TO = String(process.env.CLICKSIGN_SIGNED_NOTIFY_TO || "proveedores@silverconsulting.com.co").trim();
+const CLICKSIGN_SIGNED_NOTIFY_CC = String(process.env.CLICKSIGN_SIGNED_NOTIFY_CC || "").trim();
+const CLICKSIGN_SIGNED_NOTIFY_BCC = String(process.env.CLICKSIGN_SIGNED_NOTIFY_BCC || "").trim();
 const DEBUG_CLICKSIGN_TOKEN = String(process.env.DEBUG_CLICKSIGN_TOKEN || "").trim();
 let estadoCuentaCobroEnFirmaCache = null;
 let estadoCuentaCobroAprobadoCache = null;
@@ -462,6 +468,73 @@ function buildEmailLayout({ title, intro, blocks = [], ctaLabel, ctaUrl, closing
       <p style="margin:16px 0 0;color:#5b6678;">${closing || "Atentamente, Silver Consulting."}</p>
     </div>
   `;
+}
+
+function resolveCuentaCobroReference(cuenta = {}) {
+  const ref = String(cuenta.public_id || cuenta.id || "").trim();
+  return ref || "N/A";
+}
+
+function resolveCuentaCobroConsultorNombre(cuenta = {}) {
+  const nombre = String(cuenta.nombre_usuario || "").trim();
+  if (nombre) return nombre;
+  const email = String(cuenta.email || "").trim();
+  return email || "Consultor";
+}
+
+async function notifyCuentaCobroFirmadaToProveedores({
+  cuenta,
+  documentoFirmado,
+  prevNotification = null,
+  nowIso = new Date().toISOString(),
+  graphContext = {}
+} = {}) {
+  const prev = prevNotification && typeof prevNotification === "object" ? prevNotification : {};
+  if (!CLICKSIGN_SIGNED_NOTIFY_ENABLED || !CLICKSIGN_SIGNED_NOTIFY_TO) return prev;
+  if (!documentoFirmado?.url) return prev;
+  if (prev.enviada) return prev;
+
+  const cuentaRef = resolveCuentaCobroReference(cuenta);
+  const consultorNombre = resolveCuentaCobroConsultorNombre(cuenta);
+  const subject = `Cuenta de cobro firmada | ${consultorNombre} | ${cuentaRef}`;
+  const textoPlano =
+    `Se completó la firma digital de una cuenta de cobro.\n` +
+    `Consultor: ${consultorNombre}\n` +
+    `Cuenta de cobro: ${cuentaRef}\n` +
+    `Documento firmado: ${documentoFirmado.url}\n`;
+  const html = buildEmailLayout({
+    title: "Cuenta de cobro firmada",
+    intro: `Se completó la firma digital de la cuenta de cobro <strong>${cuentaRef}</strong>.`,
+    blocks: [
+      { label: "Consultor", value: consultorNombre },
+      { label: "Cuenta de cobro", value: cuentaRef },
+      { label: "Documento firmado", value: documentoFirmado.url }
+    ],
+    ctaLabel: "Abrir documento firmado",
+    ctaUrl: documentoFirmado.url,
+    closing: "Notificación automática del sistema de cuentas de cobro."
+  });
+
+  const sendResult = await sendEmailSafe({
+    ...graphContext,
+    to: CLICKSIGN_SIGNED_NOTIFY_TO,
+    cc: CLICKSIGN_SIGNED_NOTIFY_CC || null,
+    bcc: CLICKSIGN_SIGNED_NOTIFY_BCC || null,
+    subject,
+    text: textoPlano,
+    html
+  });
+
+  return {
+    ...prev,
+    enviada: Boolean(sendResult?.ok),
+    ultimo_intento_en: nowIso,
+    enviada_en: sendResult?.ok ? nowIso : prev.enviada_en || null,
+    destinatario: CLICKSIGN_SIGNED_NOTIFY_TO,
+    asunto: subject,
+    documento_url: documentoFirmado.url,
+    error: sendResult?.ok ? null : (sendResult?.error || "Error enviando correo")
+  };
 }
 
 function isRrhhEstadoNotificable(estado) {
@@ -2526,41 +2599,30 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   // Borde inferior tabla
   hLine(doc, ML, curY, PW, COLOR.azulOscuro, 1);
 
-  // Fila TOTAL
+  //Fila TOTAL
   curY += 1;
   const totalRowH = 18;
   fillRect(doc, ML, curY, PW, totalRowH, "#E8ECF4");
 
+  // Etiqueta "TOTAL" — ocupa todo el ancho menos la última columna
   doc.fontSize(8.5).font("Helvetica-Bold").fillColor(COLOR.azulOscuro)
-    .text("TOTAL", ML + 4, curY + 4, { width: PW - cols[cols.length-1].w - 8, align: "right", lineBreak: false });
+    .text("TOTAL", ML + 4, curY + 5,
+      { width: cols[cols.length - 1].x - ML - 8, align: "right", lineBreak: false });
 
-  const totalColX = cols[cols.length - 1].x + 4;
-  const totalColY = curY + 4;
-  const totalColW = cols[cols.length - 1].w - 8;
-  const totalValue = formatCuentaCobroCurrency(totalNumeros);
-  const currencyGap = 3;
-  let totalFontSize = 8.5;
-  const minTotalFontSize = 7;
-  let valueWidth = 0;
-  let currencyWidth = 0;
+  // Valor — moneda + número como un solo string en la última columna
+  const totalStr = `${monedaSimbolo} ${formatCuentaCobroCurrency(totalNumeros)}`;
+  const lastCol  = cols[cols.length - 1];
 
-  doc.font("Helvetica-Bold").fillColor(COLOR.azulMedio);
-  while (true) {
-    doc.fontSize(totalFontSize);
-    valueWidth = doc.widthOfString(totalValue);
-    currencyWidth = doc.widthOfString(monedaSimbolo);
-    if (valueWidth + currencyWidth + currencyGap <= totalColW || totalFontSize <= minTotalFontSize) {
-      break;
-    }
-    totalFontSize = Math.max(minTotalFontSize, totalFontSize - 0.2);
+  // Reducir fuente si el string no cabe
+  let fs = 8.5;
+  doc.font("Helvetica-Bold");
+  while (fs > 6.5 && doc.fontSize(fs).widthOfString(totalStr) > lastCol.w - 8) {
+    fs -= 0.3;
   }
 
-  const rightEdge = totalColX + totalColW;
-  const valueX = rightEdge - valueWidth;
-  const currencyX = Math.max(totalColX, valueX - currencyGap - currencyWidth);
-
-  doc.text(totalValue, valueX, totalColY, { lineBreak: false });
-  doc.text(monedaSimbolo, currencyX, totalColY, { lineBreak: false });
+  doc.fontSize(fs).font("Helvetica-Bold").fillColor(COLOR.azulMedio)
+    .text(totalStr, lastCol.x + 4, curY + 5,
+      { width: lastCol.w - 8, align: "right", lineBreak: false });
 
   curY += totalRowH + 12;
 
@@ -6212,6 +6274,19 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
     } else if (status === "signed" && prevFirma.documento_firmado_error) {
       firma.documento_firmado_error = null;
     }
+    if (status === "signed" && documentoFirmado?.url) {
+      const prevNotificacionProveedores =
+        prevFirma.notificacion_proveedores && typeof prevFirma.notificacion_proveedores === "object"
+          ? prevFirma.notificacion_proveedores
+          : {};
+      firma.notificacion_proveedores = await notifyCuentaCobroFirmadaToProveedores({
+        cuenta,
+        documentoFirmado,
+        prevNotification: prevNotificacionProveedores,
+        nowIso,
+        graphContext: getGraphContext(req)
+      });
+    }
 
     const adjuntos = {
       ...prevAdjuntos,
@@ -6419,6 +6494,19 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
       documento_firmado: documentoFirmado,
       documento_firmado_error: null
     };
+    if (documentoFirmado?.url) {
+      const prevNotificacionProveedores =
+        prevFirma.notificacion_proveedores && typeof prevFirma.notificacion_proveedores === "object"
+          ? prevFirma.notificacion_proveedores
+          : {};
+      firma.notificacion_proveedores = await notifyCuentaCobroFirmadaToProveedores({
+        cuenta,
+        documentoFirmado,
+        prevNotification: prevNotificacionProveedores,
+        nowIso,
+        graphContext: getGraphContext(req)
+      });
+    }
 
     const adjuntos = {
       ...prevAdjuntos,
@@ -6668,6 +6756,18 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
           firma.documento_firmado_error = documentoFirmadoError;
         } else if (status === "signed" && prevFirma.documento_firmado_error) {
           firma.documento_firmado_error = null;
+        }
+        if (status === "signed" && documentoFirmado?.url) {
+          const prevNotificacionProveedores =
+            prevFirma.notificacion_proveedores && typeof prevFirma.notificacion_proveedores === "object"
+              ? prevFirma.notificacion_proveedores
+              : {};
+          firma.notificacion_proveedores = await notifyCuentaCobroFirmadaToProveedores({
+            cuenta,
+            documentoFirmado,
+            prevNotification: prevNotificacionProveedores,
+            nowIso
+          });
         }
 
         const adjuntos = {

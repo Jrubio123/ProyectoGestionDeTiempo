@@ -2508,22 +2508,11 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   curY = doc.y + 8;
   doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
     .text(
-      `Yo, ${nombreConsultor} identificado con C.C. ${cedulaConsultor}, solicito me elaboren retención según:`,
+      "Manifiesto bajo la gravedad de juramento que en mi depuración del impuesto sobre la renta no usaré costos y sí la renta exenta del 25% contenida en el numeral 10 del artículo 206 del ET.",
       ML,
       curY,
-      { width: PW }
+      { width: PW, align: "justify" }
     );
-  curY = doc.y + 4;
-  doc.text("Decreto 2499 de 2012 ( )", ML + 10, curY);
-  curY = doc.y + 2;
-  doc.text("Depuración de renta bajo el artículo 383 (  )", ML + 10, curY);
-  curY = doc.y + 6;
-  doc.text(
-    "Manifiesto bajo la gravedad de juramento que en mi depuración del impuesto sobre la renta no usaré costos y sí la renta exenta del 25% contenida en el numeral 10 del artículo 206 del ET.",
-    ML,
-    curY,
-    { width: PW, align: "justify" }
-  );
 
   curY = doc.y + 12;
 

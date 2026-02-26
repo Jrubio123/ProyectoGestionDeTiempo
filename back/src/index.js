@@ -386,6 +386,7 @@ const CLICKSIGN_SIGNED_NOTIFY_TO = String(process.env.CLICKSIGN_SIGNED_NOTIFY_TO
 const CLICKSIGN_SIGNED_NOTIFY_CC = String(process.env.CLICKSIGN_SIGNED_NOTIFY_CC || "").trim();
 const CLICKSIGN_SIGNED_NOTIFY_BCC = String(process.env.CLICKSIGN_SIGNED_NOTIFY_BCC || "").trim();
 const DEBUG_CLICKSIGN_TOKEN = String(process.env.DEBUG_CLICKSIGN_TOKEN || "").trim();
+const providerNotificationInFlight = new Set();
 let estadoCuentaCobroEnFirmaCache = null;
 let estadoCuentaCobroAprobadoCache = null;
 
@@ -493,6 +494,10 @@ async function notifyCuentaCobroFirmadaToProveedores({
   const consultorNombre = resolveCuentaCobroConsultorNombre(cuenta);
   const subject = `Cuenta de cobro firmada | ${consultorNombre} | ${cuentaRef}`;
   const senderEmail = String(cuenta?.email || graphContext?.graphUserEmail || "").trim();
+  const notificationLockKey = String(cuenta?.id || cuenta?.public_id || cuentaRef || "").trim();
+  if (notificationLockKey && providerNotificationInFlight.has(notificationLockKey)) {
+    return null;
+  }
   const textoPlano =
     `Se completó la firma digital de una cuenta de cobro.\n` +
     `Consultor: ${consultorNombre}\n` +
@@ -511,28 +516,33 @@ async function notifyCuentaCobroFirmadaToProveedores({
     closing: "Notificación automática del sistema de cuentas de cobro."
   });
 
-  let sendResult = await sendEmailSafe({
-    graphUserEmail: senderEmail || null,
-    to: CLICKSIGN_SIGNED_NOTIFY_TO,
-    cc: CLICKSIGN_SIGNED_NOTIFY_CC || null,
-    bcc: CLICKSIGN_SIGNED_NOTIFY_BCC || null,
-    subject,
-    text: textoPlano,
-    html,
-    attachments
-  });
+  if (notificationLockKey) providerNotificationInFlight.add(notificationLockKey);
+  try {
+    let sendResult = await sendEmailSafe({
+      graphUserEmail: senderEmail || null,
+      to: CLICKSIGN_SIGNED_NOTIFY_TO,
+      cc: CLICKSIGN_SIGNED_NOTIFY_CC || null,
+      bcc: CLICKSIGN_SIGNED_NOTIFY_BCC || null,
+      subject,
+      text: textoPlano,
+      html,
+      attachments
+    });
 
-  return {
-    ...prev,
-    enviada: Boolean(sendResult?.ok),
-    ultimo_intento_en: nowIso,
-    enviada_en: sendResult?.ok ? nowIso : prev.enviada_en || null,
-    destinatario: CLICKSIGN_SIGNED_NOTIFY_TO,
-    asunto: subject,
-    documento_url: documentoFirmado.url,
-    adjuntos_enviados: Array.isArray(attachments) ? attachments.length : 0,
-    error: sendResult?.ok ? null : (sendResult?.error || "Error enviando correo")
-  };
+    return {
+      ...prev,
+      enviada: Boolean(sendResult?.ok),
+      ultimo_intento_en: nowIso,
+      enviada_en: sendResult?.ok ? nowIso : prev.enviada_en || null,
+      destinatario: CLICKSIGN_SIGNED_NOTIFY_TO,
+      asunto: subject,
+      documento_url: documentoFirmado.url,
+      adjuntos_enviados: Array.isArray(attachments) ? attachments.length : 0,
+      error: sendResult?.ok ? null : (sendResult?.error || "Error enviando correo")
+    };
+  } finally {
+    if (notificationLockKey) providerNotificationInFlight.delete(notificationLockKey);
+  }
 }
 
 function isRrhhEstadoNotificable(estado) {
@@ -6133,6 +6143,7 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
 
     let documentoFirmado = prevDocumentoFirmado;
     let documentoFirmadoError = "";
+    let documentosAdjuntosCorreo = [];
 
     let uploadedExtras = [];
     let catalogSource = null;
@@ -6148,6 +6159,14 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
       const resolvedPdf = artifacts?.signedPdf || null;
 
       if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
+        documentosAdjuntosCorreo = buildCuentaCobroEmailAttachments({
+          cuenta,
+          signedPdf: {
+            buffer: resolvedPdf.buffer,
+            fileName: resolvedPdf.fileName || ""
+          },
+          extraFiles: artifacts?.extraFiles || []
+        });
         try {
           const uploadResult = await uploadSignedPdfToOneDrive(
             cuenta,
@@ -6196,6 +6215,23 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
       firma.documento_firmado_error = documentoFirmadoError;
     } else if (status === "signed" && prevFirma.documento_firmado_error) {
       firma.documento_firmado_error = null;
+    }
+    if (status === "signed" && documentoFirmado?.url) {
+      const prevNotificacionProveedores =
+        prevFirma.notificacion_proveedores && typeof prevFirma.notificacion_proveedores === "object"
+          ? prevFirma.notificacion_proveedores
+          : {};
+      const notificacion = await notifyCuentaCobroFirmadaToProveedores({
+        cuenta,
+        documentoFirmado,
+        attachments: documentosAdjuntosCorreo,
+        prevNotification: prevNotificacionProveedores,
+        nowIso,
+        graphContext: getGraphContext(req)
+      });
+      if (notificacion) {
+        firma.notificacion_proveedores = notificacion;
+      }
     }
     const adjuntos = {
       ...prevAdjuntos,
@@ -6394,6 +6430,13 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
       origen: "manual_upload",
       actualizado_en: nowIso
     };
+    const documentosAdjuntosCorreo = buildCuentaCobroEmailAttachments({
+      cuenta,
+      signedPdf: {
+        buffer: pdfBuffer,
+        fileName: uploadName
+      }
+    });
     const firma = {
       ...prevFirma,
       estado: "signed",
@@ -6402,6 +6445,23 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
       documento_firmado: documentoFirmado,
       documento_firmado_error: null
     };
+    if (documentoFirmado?.url) {
+      const prevNotificacionProveedores =
+        prevFirma.notificacion_proveedores && typeof prevFirma.notificacion_proveedores === "object"
+          ? prevFirma.notificacion_proveedores
+          : {};
+      const notificacion = await notifyCuentaCobroFirmadaToProveedores({
+        cuenta,
+        documentoFirmado,
+        attachments: documentosAdjuntosCorreo,
+        prevNotification: prevNotificacionProveedores,
+        nowIso,
+        graphContext: getGraphContext(req)
+      });
+      if (notificacion) {
+        firma.notificacion_proveedores = notificacion;
+      }
+    }
     const adjuntos = {
       ...prevAdjuntos,
       firma,
@@ -6665,13 +6725,16 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
             prevFirma.notificacion_proveedores && typeof prevFirma.notificacion_proveedores === "object"
               ? prevFirma.notificacion_proveedores
               : {};
-          firma.notificacion_proveedores = await notifyCuentaCobroFirmadaToProveedores({
+          const notificacion = await notifyCuentaCobroFirmadaToProveedores({
             cuenta,
             documentoFirmado,
             attachments: documentosAdjuntosCorreo,
             prevNotification: prevNotificacionProveedores,
             nowIso
           });
+          if (notificacion) {
+            firma.notificacion_proveedores = notificacion;
+          }
         }
 
         const adjuntos = {

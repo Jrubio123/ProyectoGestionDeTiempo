@@ -1277,10 +1277,13 @@ async function resolveSignedPdfFromSource(source, preferredName = "CuentaCobroFi
   return null;
 }
 
-function buildClickSignLookupRequests({ requestId = "", contractId = "" } = {}) {
+function buildClickSignLookupRequests({ requestId = "", contractId = "", signatureId = "" } = {}) {
   const requests = [];
   const rid = String(requestId || "").trim();
   const cid = String(contractId || "").trim();
+  const sidRaw = String(signatureId || "").trim();
+  const sid = /^\d+$/.test(sidRaw) ? sidRaw : "";
+  const buildApiRequestId = (prefix) => `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
 
   if (rid) {
     requests.push(
@@ -1292,12 +1295,37 @@ function buildClickSignLookupRequests({ requestId = "", contractId = "" } = {}) 
       {
         method: "POST",
         path: "get_signature",
+        body: { request: "GET_SIGNATURE", request_id: buildApiRequestId("get-signature"), user: CLICKSIGN_USER, request_id_search: rid }
+      },
+      {
+        method: "POST",
+        path: "get_signature",
+        body: { request: "GET_SIGNATURE", request_id: buildApiRequestId("get-signature"), user: CLICKSIGN_USER, signature: { request_id: rid } }
+      },
+      {
+        method: "POST",
+        path: "get_signature",
         body: { request: "GET_SIGNATURE", request_id: rid, user: CLICKSIGN_USER }
       },
       {
         method: "POST",
         path: "signature_status",
+        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("signature-status"), user: CLICKSIGN_USER, request_id_search: rid }
+      },
+      {
+        method: "POST",
+        path: "signature_status",
+        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("signature-status"), user: CLICKSIGN_USER, signature: { request_id: rid } }
+      },
+      {
+        method: "POST",
+        path: "signature_status",
         body: { request: "GET_SIGNATURE_STATUS", request_id: rid, user: CLICKSIGN_USER }
+      },
+      {
+        method: "POST",
+        path: "get_signature_status",
+        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("get-signature-status"), user: CLICKSIGN_USER, request_id_search: rid }
       }
     );
   }
@@ -1310,7 +1338,55 @@ function buildClickSignLookupRequests({ requestId = "", contractId = "" } = {}) 
       {
         method: "POST",
         path: "get_signature",
-        body: { request: "GET_SIGNATURE", contract_id: cid, user: CLICKSIGN_USER }
+        body: { request: "GET_SIGNATURE", request_id: buildApiRequestId("get-signature"), contract_id: cid, user: CLICKSIGN_USER }
+      },
+      {
+        method: "POST",
+        path: "get_signature",
+        body: { request: "GET_SIGNATURE", request_id: buildApiRequestId("get-signature"), user: CLICKSIGN_USER, signature: { contract_id: cid } }
+      },
+      {
+        method: "POST",
+        path: "signature_status",
+        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("signature-status"), user: CLICKSIGN_USER, contract_id: cid }
+      },
+      {
+        method: "POST",
+        path: "signature_status",
+        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("signature-status"), user: CLICKSIGN_USER, signature: { contract_id: cid } }
+      },
+      {
+        method: "POST",
+        path: "get_signature_status",
+        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("get-signature-status"), user: CLICKSIGN_USER, contract_id: cid }
+      }
+    );
+  }
+
+  if (sid) {
+    requests.push(
+      { method: "GET", path: `get_signature?signature_id=${encodeURIComponent(sid)}` },
+      { method: "GET", path: `signature_status?signature_id=${encodeURIComponent(sid)}` },
+      { method: "GET", path: `get_signature_status?signature_id=${encodeURIComponent(sid)}` },
+      {
+        method: "POST",
+        path: "get_signature",
+        body: { request: "GET_SIGNATURE", request_id: buildApiRequestId("get-signature"), user: CLICKSIGN_USER, signature_id: sid }
+      },
+      {
+        method: "POST",
+        path: "get_signature",
+        body: { request: "GET_SIGNATURE", request_id: buildApiRequestId("get-signature"), user: CLICKSIGN_USER, signature: { signature_id: sid } }
+      },
+      {
+        method: "POST",
+        path: "signature_status",
+        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("signature-status"), user: CLICKSIGN_USER, signature_id: sid }
+      },
+      {
+        method: "POST",
+        path: "signature_status",
+        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("signature-status"), user: CLICKSIGN_USER, signature: { signature_id: sid } }
       }
     );
   }
@@ -1377,7 +1453,7 @@ async function uploadSignedPdfToOneDrive(cuenta, pdfBuffer, fileName, { accessTo
   };
 }
 
-async function resolveSignedPdfFromClickSign({ event, requestId, contractId, publicId }) {
+async function resolveSignedPdfFromClickSign({ event, requestId, contractId, publicId, signatureId }) {
   const defaultName = sanitizePdfFileName(
     `CuentaCobroFirmada_${publicId || requestId || "documento"}.pdf`,
     "CuentaCobroFirmada.pdf"
@@ -1412,7 +1488,7 @@ async function resolveSignedPdfFromClickSign({ event, requestId, contractId, pub
     }
   }
 
-  const lookupRequests = buildClickSignLookupRequests({ requestId, contractId });
+  const lookupRequests = buildClickSignLookupRequests({ requestId, contractId, signatureId });
   for (const lookup of lookupRequests) {
     try {
       const response = await jsonRequest({
@@ -1439,9 +1515,24 @@ async function resolveSignedPdfFromClickSign({ event, requestId, contractId, pub
 function extractClickSignSignatureId(source) {
   return pickStringByPaths(source, [
     "signature.signature_id",
+    "signature.signatureId",
+    "signature.id",
     "signature_id",
+    "signatureId",
+    "id",
+    "file_list.signature_id",
+    "file_list.signatureId",
     "data.signature.signature_id",
-    "data.signature_id"
+    "data.signature.signatureId",
+    "data.signature.id",
+    "data.signature_id",
+    "data.signatureId",
+    "data.file_list.signature_id",
+    "data.file_list.signatureId",
+    "result.signature.signature_id",
+    "result.signature.signatureId",
+    "result.signature_id",
+    "result.signatureId"
   ]);
 }
 
@@ -1478,8 +1569,8 @@ function normalizeClickSignFileEntries(source) {
 
 async function fetchClickSignFileListEntries({ requestId, contractId, signatureId }) {
   const signatureIdRaw = String(signatureId || "").trim();
-  const signatureIdNumeric = /^\d+$/.test(signatureIdRaw) ? Number(signatureIdRaw) : null;
-  if (!signatureIdNumeric && !requestId && !contractId) return [];
+  const signatureIdValue = /^\d+$/.test(signatureIdRaw) ? signatureIdRaw : "";
+  if (!signatureIdValue && !requestId && !contractId) return [];
 
   const basePayload = {
     request: "GET_FILE_LIST",
@@ -1487,16 +1578,23 @@ async function fetchClickSignFileListEntries({ requestId, contractId, signatureI
     user: CLICKSIGN_USER
   };
   const bodyCandidates = [];
-  if (signatureIdNumeric) {
-    bodyCandidates.push({ ...basePayload, signature_id: signatureIdNumeric });
+  if (signatureIdValue) {
+    bodyCandidates.push({ ...basePayload, signature_id: signatureIdValue });
+    bodyCandidates.push({ ...basePayload, password: CLICKSIGN_API_KEY, signature_id: signatureIdValue });
+    bodyCandidates.push({ ...basePayload, signature: { signature_id: signatureIdValue } });
+    bodyCandidates.push({ ...basePayload, password: CLICKSIGN_API_KEY, signature: { signature_id: signatureIdValue } });
   }
   if (requestId) {
     bodyCandidates.push({ ...basePayload, request_id_search: requestId });
     bodyCandidates.push({ ...basePayload, signature: { request_id: requestId } });
+    bodyCandidates.push({ ...basePayload, password: CLICKSIGN_API_KEY, request_id_search: requestId });
+    bodyCandidates.push({ ...basePayload, password: CLICKSIGN_API_KEY, signature: { request_id: requestId } });
   }
   if (contractId) {
     bodyCandidates.push({ ...basePayload, contract_id: contractId });
     bodyCandidates.push({ ...basePayload, signature: { contract_id: contractId } });
+    bodyCandidates.push({ ...basePayload, password: CLICKSIGN_API_KEY, contract_id: contractId });
+    bodyCandidates.push({ ...basePayload, password: CLICKSIGN_API_KEY, signature: { contract_id: contractId } });
   }
 
   for (const body of bodyCandidates) {
@@ -1531,7 +1629,7 @@ async function fetchClickSignFilesCatalog({ event, requestId, contractId, signat
   }
 
   const signatureIdRaw = String(signatureId || extractClickSignSignatureId(event) || "").trim();
-  const signatureIdNumeric = /^\d+$/.test(signatureIdRaw) ? Number(signatureIdRaw) : null;
+  const signatureIdValue = /^\d+$/.test(signatureIdRaw) ? signatureIdRaw : "";
   const bodies = [];
   if (requestId) {
     bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}`, user: CLICKSIGN_USER, signature: { request_id: requestId } });
@@ -1541,8 +1639,11 @@ async function fetchClickSignFilesCatalog({ event, requestId, contractId, signat
     bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-cid`, user: CLICKSIGN_USER, signature: { contract_id: contractId } });
     bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-cid2`, user: CLICKSIGN_USER, contract_id: contractId });
   }
-  if (signatureIdNumeric) {
-    bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-sid`, user: CLICKSIGN_USER, signature: { signature_id: signatureIdNumeric } });
+  if (signatureIdValue) {
+    bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-sid`, user: CLICKSIGN_USER, signature_id: signatureIdValue });
+    bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-sid2`, user: CLICKSIGN_USER, signature: { signature_id: signatureIdValue } });
+    bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-sid3`, user: CLICKSIGN_USER, password: CLICKSIGN_API_KEY, signature_id: signatureIdValue });
+    bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-sid4`, user: CLICKSIGN_USER, password: CLICKSIGN_API_KEY, signature: { signature_id: signatureIdValue } });
   }
   bodies.push({ request: "GET_SIGNATURE", request_id: `sig-${Date.now()}-fallback`, user: CLICKSIGN_USER, request_id: requestId || undefined, contract_id: contractId || undefined });
 
@@ -1567,9 +1668,13 @@ async function fetchClickSignFilesCatalog({ event, requestId, contractId, signat
 }
 
 async function fetchClickSignFileBuffer(fileId) {
+  const fileIdValue = String(fileId || "").trim();
+  if (!fileIdValue) return null;
   const bodyVariants = [
-    { request: "GET_FILE", request_id: `file-${Date.now()}`, user: CLICKSIGN_USER, file: { file_id: fileId } },
-    { request: "GET_FILE", request_id: `file-${Date.now()}-alt`, user: CLICKSIGN_USER, file_id: fileId }
+    { request: "GET_FILE", request_id: `file-${Date.now()}`, user: CLICKSIGN_USER, file_id: fileIdValue },
+    { request: "GET_FILE", request_id: `file-${Date.now()}-alt`, user: CLICKSIGN_USER, password: CLICKSIGN_API_KEY, file_id: fileIdValue },
+    { request: "GET_FILE", request_id: `file-${Date.now()}-legacy`, user: CLICKSIGN_USER, file: { file_id: fileIdValue } },
+    { request: "GET_FILE", request_id: `file-${Date.now()}-legacy2`, user: CLICKSIGN_USER, password: CLICKSIGN_API_KEY, file: { file_id: fileIdValue } }
   ];
 
   for (const body of bodyVariants) {
@@ -1602,7 +1707,6 @@ async function fetchClickSignFileBuffer(fileId) {
 }
 
 async function resolveClickSignArtifacts({ event, requestId, contractId, publicId, signatureId }) {
-  const signedByLegacy = await resolveSignedPdfFromClickSign({ event, requestId, contractId, publicId });
   const catalog = await fetchClickSignFilesCatalog({ event, requestId, contractId, signatureId });
   const byType = new Map();
   for (const entry of catalog.entries) {
@@ -1610,28 +1714,33 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
     byType.get(entry.fileType).push(entry);
   }
 
-  let signedPdf = signedByLegacy;
+  const hasCatalogEntries = Array.isArray(catalog.entries) && catalog.entries.length > 0;
+  let signedPdf = null;
   let signedFileId = "";
-  if (!signedPdf) {
-    const signedEntry =
-      byType.get("signed_contract")?.[0] ||
-      byType.get("signed")?.[0] ||
-      byType.get("contract_signed")?.[0] ||
-      byType.get("signed_once")?.[0] ||
-      byType.get("signature_stamp")?.[0] ||
-      byType.get("signatory_stamp")?.[0] ||
-      null;
-    if (signedEntry) {
-      signedFileId = String(signedEntry.fileId || "").trim();
-      const buffer = await fetchClickSignFileBuffer(signedEntry.fileId);
-      if (isPdfBuffer(buffer)) {
-        signedPdf = {
-          buffer,
-          fileName: sanitizePdfFileName(signedEntry.fileName || `CuentaCobroFirmada_${publicId || "documento"}.pdf`, "CuentaCobroFirmada.pdf"),
-          source: "get_file_signed_contract"
-        };
-      }
+  const signedEntry =
+    byType.get("signed_contract")?.[0] ||
+    byType.get("signed")?.[0] ||
+    byType.get("contract_signed")?.[0] ||
+    byType.get("signed_once")?.[0] ||
+    byType.get("signature_stamp")?.[0] ||
+    byType.get("signatory_stamp")?.[0] ||
+    null;
+
+  if (signedEntry) {
+    signedFileId = String(signedEntry.fileId || "").trim();
+    const buffer = await fetchClickSignFileBuffer(signedEntry.fileId);
+    if (isPdfBuffer(buffer)) {
+      signedPdf = {
+        buffer,
+        fileName: sanitizePdfFileName(signedEntry.fileName || `CuentaCobroFirmada_${publicId || "documento"}.pdf`, "CuentaCobroFirmada.pdf"),
+        source: "get_file_signed_contract"
+      };
     }
+  }
+
+  // Solo usa fallback legacy cuando no hay catálogo, para evitar confundir START_FILES/show_landing con firmado.
+  if (!signedPdf && !hasCatalogEntries) {
+    signedPdf = await resolveSignedPdfFromClickSign({ event, requestId, contractId, publicId, signatureId });
   }
 
   const extraFiles = [];
@@ -1661,6 +1770,22 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
         kind: "evidencia_firma",
         fileName: sanitizePdfFileName(evidenceEntry.fileName || `EvidenciaFirma_${publicId || "cuenta"}.pdf`, "EvidenciaFirma.pdf"),
         buffer: evidenceBuffer
+      });
+    }
+  }
+  const attachmentEntry =
+    byType.get("contract_files")?.[0] ||
+    byType.get("attachment_files")?.[0] ||
+    byType.get("attachments")?.[0] ||
+    byType.get("attachment")?.[0] ||
+    null;
+  if (attachmentEntry && String(attachmentEntry.fileId || "").trim() !== signedFileId) {
+    const attachmentBuffer = await fetchClickSignFileBuffer(attachmentEntry.fileId);
+    if (isPdfBuffer(attachmentBuffer)) {
+      extraFiles.push({
+        kind: "anexo_firma",
+        fileName: sanitizePdfFileName(attachmentEntry.fileName || `AnexoFirma_${publicId || "cuenta"}.pdf`, "AnexoFirma.pdf"),
+        buffer: attachmentBuffer
       });
     }
   }
@@ -1797,21 +1922,23 @@ async function getCuentaCobroEstadoAprobado() {
 function normalizeClickSignStatus(value) {
   const raw = String(value || "").trim().toLowerCase();
   if (!raw) return "";
-  if (["signed", "completed", "done", "success", "firmado", "aprobado"].includes(raw)) return "signed";
+  if (["signed", "completed", "done", "success", "firmado", "aprobado", "stamp_generated", "evidence_generated"].includes(raw)) return "signed";
   if (["rejected", "declined", "failed", "error", "cancelled", "canceled", "rechazado", "cancelado"].includes(raw)) return "rejected";
   if (["pending", "in_progress", "inprogress", "started", "sent", "created", "open", "en_firma", "start_signature", "start"].includes(raw)) return "pending";
   return raw;
 }
 
-async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = "" } = {}) {
-  const lookupRequests = buildClickSignLookupRequests({ requestId, contractId });
+async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = "", signatureId = "" } = {}) {
+  const lookupRequests = buildClickSignLookupRequests({ requestId, contractId, signatureId });
   const statusPaths = [
     "signature.status",
     "signature.signature_status",
     "signature_status",
+    "status",
     "data.signature.status",
     "data.signature.signature_status",
     "data.signature_status",
+    "data.status",
     "signature.signatories.0.status",
     "data.signatories.0.status"
   ];
@@ -1842,6 +1969,15 @@ async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = ""
 
       const rawStatus = pickStringByPaths(event, statusPaths);
       const status = normalizeClickSignStatus(rawStatus);
+      const resolvedSignatureId = String(extractClickSignSignatureId(event) || "").trim();
+      if (resolvedSignatureId && !pendingCandidate) {
+        pendingCandidate = {
+          event,
+          rawStatus: rawStatus || "pending",
+          status: status || "pending",
+          source: `lookup:${lookup.path}`
+        };
+      }
 
       if (status === "signed" || status === "rejected") {
         return {
@@ -5688,14 +5824,16 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
         }`
       : "";
     const signatureCbUrl = CLICKSIGN_SIGNATURE_CB_URL || fallbackSignatureCbUrl;
+    const signatoryCbUrl = CLICKSIGN_SIGNATORY_CB_URL || signatureCbUrl;
+    const signatoryEmailCbUrl = CLICKSIGN_SIGNATORY_EMAIL_CB_URL || signatureCbUrl;
     if (signatureCbUrl) {
       signaturePayload.signature.signature_cb_url = signatureCbUrl;
     }
-    if (CLICKSIGN_SIGNATORY_CB_URL) {
-      signaturePayload.signature.signatory_cb_url = CLICKSIGN_SIGNATORY_CB_URL;
+    if (signatoryCbUrl) {
+      signaturePayload.signature.signatory_cb_url = signatoryCbUrl;
     }
-    if (CLICKSIGN_SIGNATORY_EMAIL_CB_URL) {
-      signaturePayload.signature.signatory_email_cb_url = CLICKSIGN_SIGNATORY_EMAIL_CB_URL;
+    if (signatoryEmailCbUrl) {
+      signaturePayload.signature.signatory_email_cb_url = signatoryEmailCbUrl;
     }
 
     const clickSignRes = await jsonRequest({
@@ -5704,12 +5842,7 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       headers: buildClickSignAuthHeaders(),
       body: signaturePayload
     });
-    const signatureId = pickStringByPaths(clickSignRes.data, [
-      "signature.signature_id",
-      "signature_id",
-      "data.signature.signature_id",
-      "data.signature_id"
-    ]);
+    const signatureId = extractClickSignSignatureId(clickSignRes.data);
     const urlFirma = getClickSignLandingUrl(clickSignRes.data);
     if (!urlFirma) {
       return res.status(502).json({
@@ -5833,7 +5966,7 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
       });
     }
 
-    const snapshot = await fetchClickSignSignatureSnapshot({ requestId, contractId });
+    const snapshot = await fetchClickSignSignatureSnapshot({ requestId, contractId, signatureId });
     const event = snapshot.event && typeof snapshot.event === "object" ? snapshot.event : {};
     const signatureIdFromSnapshot = String(extractClickSignSignatureId(event) || "").trim();
     const effectiveSignatureId = signatureId || signatureIdFromSnapshot;
@@ -5855,6 +5988,7 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
     let documentoFirmadoError = "";
 
     let uploadedExtras = [];
+    let catalogSource = null;
     if (status === "signed" || !status || status === "pending") {
       const artifacts = await resolveClickSignArtifacts({
         event,
@@ -5863,6 +5997,7 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
         publicId: String(cuenta.public_id || ""),
         signatureId: effectiveSignatureId
       });
+      catalogSource = artifacts?.catalogSource || null;
       const resolvedPdf = artifacts?.signedPdf || null;
 
       if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
@@ -5937,6 +6072,7 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
       };
       const extraSeguridad = uploadedExtras.find((item) => item.kind === "seguridad_social_firma" && item.url);
       const extraEvidencia = uploadedExtras.find((item) => item.kind === "evidencia_firma" && item.url);
+      const extraAnexo = uploadedExtras.find((item) => item.kind === "anexo_firma" && item.url);
       const cuentaFirmadaUrl = nuevoSoporteCuentaFirmada.url || "";
       if (extraSeguridad && !sameResourceUrl(extraSeguridad.url, cuentaFirmadaUrl)) {
         adjuntos.soportes.seguridad_social_firma = {
@@ -5953,6 +6089,13 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
           id: extraEvidencia.id || null,
           nombre: extraEvidencia.nombre || "EvidenciaFirma.pdf",
           url: extraEvidencia.url || ""
+        };
+      }
+      if (extraAnexo && !sameResourceUrl(extraAnexo.url, cuentaFirmadaUrl)) {
+        adjuntos.soportes.anexo_firma = {
+          id: extraAnexo.id || null,
+          nombre: extraAnexo.nombre || "AnexoFirma.pdf",
+          url: extraAnexo.url || ""
         };
       }
     }
@@ -6001,7 +6144,9 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
       estado_cuenta: estadoDestino || null,
       documento_firmado_url: firma?.documento_firmado?.url || null,
       documento_firmado_error: firma?.documento_firmado_error || null,
-      origen_snapshot: snapshot.source || null
+      origen_snapshot: snapshot.source || null,
+      origen_catalogo: catalogSource,
+      extras_subidos: uploadedExtras.map((item) => ({ kind: item.kind, nombre: item.nombre, url: item.url }))
     });
   } catch (err) {
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {
@@ -6200,19 +6345,22 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
         const requestId = pickStringByPaths(event, [
           "request_id",
           "signature.request_id",
-          "data.request_id"
+          "signature.request.request_id",
+          "signature.requestId",
+          "data.request_id",
+          "data.signature.request_id",
+          "data.signature.request.request_id"
         ]);
         const contractId = pickStringByPaths(event, [
           "contract_id",
           "signature.contract_id",
-          "data.contract_id"
+          "signature.request.contract_id",
+          "signature.contractId",
+          "data.contract_id",
+          "data.signature.contract_id",
+          "data.signature.request.contract_id"
         ]);
-        const signatureId = pickStringByPaths(event, [
-          "signature.signature_id",
-          "signature_id",
-          "data.signature.signature_id",
-          "data.signature_id"
-        ]);
+        const signatureId = extractClickSignSignatureId(event);
         const rawStatus = pickStringByPaths(event, [
           "status",
           "signature_status",
@@ -6381,6 +6529,7 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
           };
           const extraSeguridad = uploadedExtras.find((item) => item.kind === "seguridad_social_firma" && item.url);
           const extraEvidencia = uploadedExtras.find((item) => item.kind === "evidencia_firma" && item.url);
+          const extraAnexo = uploadedExtras.find((item) => item.kind === "anexo_firma" && item.url);
           const cuentaFirmadaUrl = nuevoSoporteCuentaFirmada.url || "";
           if (extraSeguridad && !sameResourceUrl(extraSeguridad.url, cuentaFirmadaUrl)) {
             adjuntos.soportes.seguridad_social_firma = {
@@ -6397,6 +6546,13 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
               id: extraEvidencia.id || null,
               nombre: extraEvidencia.nombre || "EvidenciaFirma.pdf",
               url: extraEvidencia.url || ""
+            };
+          }
+          if (extraAnexo && !sameResourceUrl(extraAnexo.url, cuentaFirmadaUrl)) {
+            adjuntos.soportes.anexo_firma = {
+              id: extraAnexo.id || null,
+              nombre: extraAnexo.nombre || "AnexoFirma.pdf",
+              url: extraAnexo.url || ""
             };
           }
         }

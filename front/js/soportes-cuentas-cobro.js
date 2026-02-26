@@ -48,14 +48,16 @@ window.soportesCuentasCobroApp = function () {
             const cuentaUrl =
                 soporte?.cuenta_cobro_firmada?.url ||
                 item?.datos_adjuntos?.firma?.documento_firmado?.url ||
-                soporte?.cuenta_cobro?.url ||
-                soporte?.cuenta_cobro_original?.url ||
                 "";
             if (tipo === "cuenta") {
                 return cuentaUrl;
             }
             if (tipo === "seguridad") {
-                const seguridadUrl = soporte?.seguridad_social?.url || "";
+                const seguridadUrl =
+                    soporte?.seguridad_social?.url ||
+                    soporte?.seguridad_social_firma?.url ||
+                    soporte?.anexo_firma?.url ||
+                    "";
                 if (!seguridadUrl) return "";
                 return seguridadUrl === cuentaUrl ? "" : seguridadUrl;
             }

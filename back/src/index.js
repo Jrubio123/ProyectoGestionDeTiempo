@@ -2183,10 +2183,10 @@ function formatCuentaCobroDate(value) {
     }
   }
 }*/
+
 // ============================================================
 //  writeCuentaCobroPdf  —  versión corregida
-//  Fix: header sin solapamiento, fechas formateadas, espaciado,
-//       texto legal y footer posicionado abajo.
+//  Fix: header sin solapamiento, fechas formateadas, espaciado
 // ============================================================
 
 const COLOR = {
@@ -2201,12 +2201,6 @@ const COLOR = {
 };
 
 const MARGIN = { top: 40, left: 40, right: 40, bottom: 50 };
-const CLICKSIGN_SIGNATURE_DEFAULTS = Object.freeze({
-  fallbackXmm: 76.2,
-  fallbackYmm: 208,
-  heightMm: 20,
-  lineOffsetYmm: 16
-});
 
 function pageWidth(doc) {
   return doc.page.width - MARGIN.left - MARGIN.right;
@@ -2227,31 +2221,13 @@ function hLine(doc, x, y, w, color = COLOR.grisLinea, lineWidth = 0.5) {
 
 // Formatea fecha sin mostrar UTC — acepta string ISO o Date
 function fmtFecha(value) {
-  if (value === undefined || value === null || value === "") return "-";
-
-  let year = 0;
-  let month = 0;
-  let day = 0;
-
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    const iso = value.toISOString().slice(0, 10);
-    [year, month, day] = iso.split("-").map(Number);
-  } else {
-    const raw = String(value).trim();
-    const fromIso = raw.match(/(\d{4})-(\d{2})-(\d{2})/);
-    if (fromIso) {
-      year = Number(fromIso[1]);
-      month = Number(fromIso[2]);
-      day = Number(fromIso[3]);
-    } else {
-      const parsed = new Date(raw);
-      if (Number.isNaN(parsed.getTime())) return raw;
-      const iso = parsed.toISOString().slice(0, 10);
-      [year, month, day] = iso.split("-").map(Number);
-    }
-  }
-
-  if (!year || !month || !day) return String(value);
+  if (!value) return "-";
+  // Si viene como "2026-02-01" o "2026-02-01T00:00:00.000Z"
+  const str = String(value);
+  // Tomar solo la parte de fecha para evitar desfase de zona horaria
+  const soloFecha = str.slice(0, 10); // "2026-02-01"
+  const [year, month, day] = soloFecha.split("-").map(Number);
+  if (!year || !month || !day) return str;
   const meses = [
     "Enero","Febrero","Marzo","Abril","Mayo","Junio",
     "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"
@@ -2275,67 +2251,16 @@ function sectionTitle(doc, title, y) {
   return y + 20;
 }
 
-function roundMm(value) {
-  return Number(Number(value || 0).toFixed(2));
-}
-
-function pointsToMm(value) {
-  return Number(value || 0) * 25.4 / 72;
-}
-
-function buildClickSignSignaturePosition(layout, signatoryExternalId) {
-  const externalId = String(signatoryExternalId || "").trim();
-  if (!externalId) return null;
-
-  const fallback = {
-    signatory_external_id: externalId,
-    page: "last",
-    x: CLICKSIGN_SIGNATURE_DEFAULTS.fallbackXmm,
-    y: CLICKSIGN_SIGNATURE_DEFAULTS.fallbackYmm,
-    width: 63.5,
-    height: CLICKSIGN_SIGNATURE_DEFAULTS.heightMm
-  };
-
-  if (
-    !layout ||
-    !Number.isFinite(layout.lineXPt) ||
-    !Number.isFinite(layout.lineYPt) ||
-    !Number.isFinite(layout.lineWidthPt)
-  ) {
-    return fallback;
-  }
-
-  const lineXmm = pointsToMm(layout.lineXPt);
-  const lineYmm = pointsToMm(layout.lineYPt);
-  const lineWidthMm = Math.max(20, pointsToMm(layout.lineWidthPt));
-  const signatureYmm = Math.max(0, lineYmm - CLICKSIGN_SIGNATURE_DEFAULTS.lineOffsetYmm);
-
-  return {
-    signatory_external_id: externalId,
-    page: "last",
-    x: roundMm(lineXmm),
-    y: roundMm(signatureYmm),
-    width: roundMm(lineWidthMm),
-    height: CLICKSIGN_SIGNATURE_DEFAULTS.heightMm
-  };
-}
-
 // ── Función principal ─────────────────────────────────────────
 function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const PW = pageWidth(doc);
   const ML = MARGIN.left;
   const PW_TOTAL = doc.page.width; // ancho real de página
-  let currentPage = 1;
-  const addPage = () => {
-    doc.addPage();
-    currentPage += 1;
-  };
 
   const totalNumeros = Number(cuenta.total_cuenta_cobro || 0);
-  const totalLetras  = buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
+  const totalLetras  = cuenta.total_letras
+    || buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
   const monedaSimbolo = String(cuenta.moneda_cobro || "COP").toUpperCase() === "USD" ? "USD" : "COP";
-  const nombreConsultor = cuenta.nombre_usuario || "Consultor";
-  const cedulaConsultor = cuenta.cedula || "-";
 
   // ══════════════════════════════════════════════
   // 1. HEADER — dos bloques separados sin solaparse
@@ -2419,7 +2344,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   doc.fontSize(20).font("Helvetica-Bold").fillColor(COLOR.azulMedio)
     .text(
-      `${monedaSimbolo}  ${formatCuentaCobroCurrency(totalNumeros)}`,
+      `${monedaSimbolo} ${formatCuentaCobroCurrency(totalNumeros)}`,
       ML + 14, curY + 8, { lineBreak: false }
     );
 
@@ -2445,27 +2370,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
       ML, curY, { width: PW, lineBreak: true }
     );
 
-  curY = doc.y + 8;
-  doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
-    .text(
-      `Yo, ${nombreConsultor} identificado con C.C. ${cedulaConsultor}, solicito me elaboren retención según:`,
-      ML,
-      curY,
-      { width: PW }
-    );
-  curY = doc.y + 4;
-  doc.text("Decreto 2499 de 2012 ( X )", ML + 10, curY);
-  curY = doc.y + 2;
-  doc.text("Depuración de renta bajo el artículo 383 (  )", ML + 10, curY);
-  curY = doc.y + 6;
-  doc.text(
-    "Manifiesto bajo la gravedad de juramento que en mi depuración del impuesto sobre la renta no usaré costos y sí la renta exenta del 25% contenida en el numeral 10 del artículo 206 del ET.",
-    ML,
-    curY,
-    { width: PW, align: "justify" }
-  );
-
-  curY = doc.y + 12;
+  curY = doc.y + 14;
 
   // ══════════════════════════════════════════════
   // 5. TABLA DE DETALLES
@@ -2505,9 +2410,8 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   curY = drawTableHeader(curY);
 
   (detalles || []).forEach((d, i) => {
-    // Si la fila no cabe, pasamos a otra página
-    if (curY + ROW_H > doc.page.height - MARGIN.bottom - 40) {
-      addPage();
+    if (curY + ROW_H > doc.page.height - MARGIN.bottom) {
+      doc.addPage();
       curY = MARGIN.top;
       curY = drawTableHeader(curY);
     }
@@ -2550,52 +2454,46 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   doc.fontSize(8.5).font("Helvetica-Bold").fillColor(COLOR.azulMedio)
     .text(
-      `${monedaSimbolo}  ${formatCuentaCobroCurrency(totalNumeros)}`,
+      `${monedaSimbolo} ${formatCuentaCobroCurrency(totalNumeros)}`,
       cols[cols.length-1].x + 4, curY + 4,
       { width: cols[cols.length-1].w - 8, align: "right", lineBreak: false }
     );
 
-  curY += totalRowH + 12;
-  if (curY > doc.page.height - 150) {
-    addPage();
+  curY += totalRowH + 18;
+
+  // ══════════════════════════════════════════════
+  // 6. PIE DE PÁGINA
+  // ══════════════════════════════════════════════
+  if (curY > doc.page.height - 90) {
+    doc.addPage();
     curY = MARGIN.top;
   }
 
   hLine(doc, ML, curY, PW);
   curY += 8;
+
   doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
     .text(
       "Documento generado electrónicamente — Silver Consulting S.A.S.  ·  NIT 901.149.190-0  ·  Medellín, Colombia",
       ML, curY, { width: PW, align: "center", lineBreak: false }
     );
-  curY = doc.y + 10;
-  doc.fontSize(8).font("Helvetica").fillColor(COLOR.textoSec);
-  doc.text("Cordialmente,", ML, curY);
 
-  // Espacio reservado para que Click&Sign estampe la firma visual.
-  curY = doc.y + 48;
+  // Línea de firma
+  curY += 28;
   const firmaW = 180;
   const firmaX = ML + PW / 2 - firmaW / 2;
   hLine(doc, firmaX, curY, firmaW, COLOR.azulOscuro, 0.8);
 
   doc.fontSize(8).font("Helvetica-Bold").fillColor(COLOR.textoPrin)
-    .text(nombreConsultor, firmaX, curY + 5,
+    .text(cuenta.nombre_usuario || "Consultor", firmaX, curY + 5,
       { width: firmaW, align: "center", lineBreak: false });
 
   doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
     .text(
-      `C.C. ${cedulaConsultor}`,
+      `${cuenta.tipo_documento || "CC"}: ${cuenta.cedula || "-"}`,
       firmaX, curY + 16,
       { width: firmaW, align: "center", lineBreak: false }
     );
-
-  // Metadatos para ubicar signature_position en Click&Sign.
-  doc.__cuentaCobroFirmaLayout = {
-    page: currentPage,
-    lineXPt: firmaX,
-    lineYPt: curY,
-    lineWidthPt: firmaW
-  };
 }
 
 //--------------------------------------------------------------//
@@ -2604,10 +2502,7 @@ function generateCuentaCobroPdfBuffer(cuenta, detalles) {
     const chunks = [];
     const doc = new PDFDocument({ margin: 40 });
     doc.on("data", (chunk) => chunks.push(chunk));
-    doc.on("end", () => resolve({
-      buffer: Buffer.concat(chunks),
-      signatureLayout: doc.__cuentaCobroFirmaLayout || null
-    }));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
     writeCuentaCobroPdf(doc, cuenta, detalles);
     doc.end();
@@ -5883,23 +5778,10 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       });
     }
 
-    const pdfGenerated = await generateCuentaCobroPdfBuffer(cuenta, detalles);
-    const pdfBuffer = Buffer.isBuffer(pdfGenerated)
-      ? pdfGenerated
-      : pdfGenerated?.buffer;
-    if (!isPdfBuffer(pdfBuffer)) {
-      return res.status(500).json({ error: "No se pudo generar el PDF para firma." });
-    }
+    const pdfBuffer = await generateCuentaCobroPdfBuffer(cuenta, detalles);
     const cuentaPublicId = String(cuenta.public_id || "");
     const requestId = `CC-${cuentaPublicId || cuenta.id}-${Date.now()}`;
     const contractId = `CC-${cuentaPublicId || cuenta.id}`;
-    const signatoryExternalId = String(
-      cuenta.created_by || cuentaPublicId || cuenta.id || req.user?.id || "firmante"
-    );
-    const signaturePosition = buildClickSignSignaturePosition(
-      pdfGenerated?.signatureLayout || null,
-      signatoryExternalId
-    );
     const fileName = sanitizePdfFileName(
       `CuentaCobro_${cuentaPublicId || cuenta.id}.pdf`,
       `CuentaCobro_${cuenta.id}.pdf`
@@ -5920,7 +5802,7 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
               {
                 email: cuenta.email,
                 name: cuenta.nombre_usuario || cuenta.email,
-                external_id: signatoryExternalId
+                external_id: String(cuenta.created_by || "")
               }
             ]
           }
@@ -5934,9 +5816,6 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
         ]
       }
     };
-    if (signaturePosition) {
-      signaturePayload.signature.file[0].signature_position = [signaturePosition];
-    }
     const fallbackWebhookBase = getRequestPublicBaseUrl(req);
     const fallbackSignatureCbUrl = fallbackWebhookBase
       ? `${fallbackWebhookBase}/webhooks/clicksign/signature${
@@ -5988,7 +5867,6 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       contract_id: contractId,
       signature_id: signatureId || null,
       url_firma: urlFirma,
-      signature_position: signaturePosition || null,
       iniciado_en: ahoraIso,
       actualizado_en: ahoraIso,
       ultimo_evento: "START_SIGNATURE"
@@ -6015,8 +5893,7 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       request_id: requestId,
       contract_id: contractId,
       signature_id: signatureId || null,
-      url_firma: urlFirma,
-      signature_position: signaturePosition || null
+      url_firma: urlFirma
     });
   } catch (err) {
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {

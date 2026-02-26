@@ -2185,7 +2185,8 @@ function formatCuentaCobroDate(value) {
 }*/
 // ============================================================
 //  writeCuentaCobroPdf  —  versión corregida
-//  Fix: header sin solapamiento, fechas formateadas, espaciado
+//  Fix: header sin solapamiento, fechas formateadas, espaciado,
+//       texto legal y footer posicionado abajo.
 // ============================================================
 
 const COLOR = {
@@ -2200,6 +2201,12 @@ const COLOR = {
 };
 
 const MARGIN = { top: 40, left: 40, right: 40, bottom: 50 };
+const CLICKSIGN_SIGNATURE_DEFAULTS = Object.freeze({
+  fallbackXmm: 76.2,
+  fallbackYmm: 208,
+  heightMm: 20,
+  lineOffsetYmm: 16
+});
 
 function pageWidth(doc) {
   return doc.page.width - MARGIN.left - MARGIN.right;
@@ -2250,11 +2257,61 @@ function sectionTitle(doc, title, y) {
   return y + 20;
 }
 
+function roundMm(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
+
+function pointsToMm(value) {
+  return Number(value || 0) * 25.4 / 72;
+}
+
+function buildClickSignSignaturePosition(layout, signatoryExternalId) {
+  const externalId = String(signatoryExternalId || "").trim();
+  if (!externalId) return null;
+
+  const fallback = {
+    signatory_external_id: externalId,
+    page: "last",
+    x: CLICKSIGN_SIGNATURE_DEFAULTS.fallbackXmm,
+    y: CLICKSIGN_SIGNATURE_DEFAULTS.fallbackYmm,
+    width: 63.5,
+    height: CLICKSIGN_SIGNATURE_DEFAULTS.heightMm
+  };
+
+  if (
+    !layout ||
+    !Number.isFinite(layout.lineXPt) ||
+    !Number.isFinite(layout.lineYPt) ||
+    !Number.isFinite(layout.lineWidthPt)
+  ) {
+    return fallback;
+  }
+
+  const lineXmm = pointsToMm(layout.lineXPt);
+  const lineYmm = pointsToMm(layout.lineYPt);
+  const lineWidthMm = Math.max(20, pointsToMm(layout.lineWidthPt));
+  const signatureYmm = Math.max(0, lineYmm - CLICKSIGN_SIGNATURE_DEFAULTS.lineOffsetYmm);
+
+  return {
+    signatory_external_id: externalId,
+    page: "last",
+    x: roundMm(lineXmm),
+    y: roundMm(signatureYmm),
+    width: roundMm(lineWidthMm),
+    height: CLICKSIGN_SIGNATURE_DEFAULTS.heightMm
+  };
+}
+
 // ── Función principal ─────────────────────────────────────────
 function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const PW = pageWidth(doc);
   const ML = MARGIN.left;
   const PW_TOTAL = doc.page.width; // ancho real de página
+  let currentPage = 1;
+  const addPage = () => {
+    doc.addPage();
+    currentPage += 1;
+  };
 
   const totalNumeros = Number(cuenta.total_cuenta_cobro || 0);
   const totalLetras  = cuenta.total_letras
@@ -2409,8 +2466,9 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   curY = drawTableHeader(curY);
 
   (detalles || []).forEach((d, i) => {
-    if (curY + ROW_H > doc.page.height - MARGIN.bottom) {
-      doc.addPage();
+    // Si la fila no cabe, pasamos a otra página
+    if (curY + ROW_H > doc.page.height - MARGIN.bottom - 40) {
+      addPage();
       curY = MARGIN.top;
       curY = drawTableHeader(curY);
     }
@@ -2461,37 +2519,75 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   curY += totalRowH + 18;
 
   // ══════════════════════════════════════════════
-  // 6. PIE DE PÁGINA
+  // 6. TEXTO LEGAL DE RETENCIÓN
   // ══════════════════════════════════════════════
-  if (curY > doc.page.height - 90) {
-    doc.addPage();
+  // Si no cabe texto legal + firma, se pasa a la siguiente página.
+  if (curY > doc.page.height - 180) {
+    addPage();
     curY = MARGIN.top;
   }
 
-  hLine(doc, ML, curY, PW);
-  curY += 8;
+  const nombreConsultor = cuenta.nombre_usuario || "Consultor";
+  const cedulaConsultor = cuenta.cedula || "-";
 
   doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
     .text(
-      "Documento generado electrónicamente — Silver Consulting S.A.S.  ·  NIT 901.149.190-0  ·  Medellín, Colombia",
-      ML, curY, { width: PW, align: "center", lineBreak: false }
+      `Yo, ${nombreConsultor} identificado con C.C. ${cedulaConsultor}, solicito me elaboren retención según:`,
+      ML,
+      curY,
+      { width: PW }
     );
+  curY = doc.y + 5;
+  doc.text("Decreto 2499 de 2012 ( X )", ML + 10, curY);
+  curY = doc.y + 3;
+  doc.text("Depuración de renta bajo el artículo 383 (  )", ML + 10, curY);
+  curY = doc.y + 8;
+  doc.text(
+    "Manifiesto bajo la gravedad de juramento que en mi depuración del impuesto sobre la renta no usaré costos y sí la renta exenta del 25% contenida en el numeral 10 del artículo 206 del ET.",
+    ML,
+    curY,
+    { width: PW, align: "justify" }
+  );
+  curY = doc.y + 15;
+  doc.text("Cordialmente,", ML, curY);
 
-  // Línea de firma
-  curY += 28;
+  // ══════════════════════════════════════════════
+  // 7. BLOQUE DE FIRMA
+  // ══════════════════════════════════════════════
+  // Espacio reservado para que Click&Sign estampe la firma visual.
+  curY = doc.y + 60;
   const firmaW = 180;
   const firmaX = ML + PW / 2 - firmaW / 2;
   hLine(doc, firmaX, curY, firmaW, COLOR.azulOscuro, 0.8);
 
   doc.fontSize(8).font("Helvetica-Bold").fillColor(COLOR.textoPrin)
-    .text(cuenta.nombre_usuario || "Consultor", firmaX, curY + 5,
+    .text(nombreConsultor, firmaX, curY + 5,
       { width: firmaW, align: "center", lineBreak: false });
 
   doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
     .text(
-      `${cuenta.tipo_documento || "CC"}: ${cuenta.cedula || "-"}`,
+      `C.C. ${cedulaConsultor}`,
       firmaX, curY + 16,
       { width: firmaW, align: "center", lineBreak: false }
+    );
+
+  // Metadatos para ubicar signature_position en Click&Sign.
+  doc.__cuentaCobroFirmaLayout = {
+    page: currentPage,
+    lineXPt: firmaX,
+    lineYPt: curY,
+    lineWidthPt: firmaW
+  };
+
+  // ══════════════════════════════════════════════
+  // 8. PIE DE PÁGINA
+  // ══════════════════════════════════════════════
+  const footerY = doc.page.height - 40;
+  hLine(doc, ML, footerY, PW);
+  doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
+    .text(
+      "Documento generado electrónicamente — Silver Consulting S.A.S.  ·  NIT 901.149.190-0  ·  Medellín, Colombia",
+      ML, footerY + 8, { width: PW, align: "center", lineBreak: false }
     );
 }
 
@@ -2501,7 +2597,10 @@ function generateCuentaCobroPdfBuffer(cuenta, detalles) {
     const chunks = [];
     const doc = new PDFDocument({ margin: 40 });
     doc.on("data", (chunk) => chunks.push(chunk));
-    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("end", () => resolve({
+      buffer: Buffer.concat(chunks),
+      signatureLayout: doc.__cuentaCobroFirmaLayout || null
+    }));
     doc.on("error", reject);
     writeCuentaCobroPdf(doc, cuenta, detalles);
     doc.end();
@@ -5777,10 +5876,23 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       });
     }
 
-    const pdfBuffer = await generateCuentaCobroPdfBuffer(cuenta, detalles);
+    const pdfGenerated = await generateCuentaCobroPdfBuffer(cuenta, detalles);
+    const pdfBuffer = Buffer.isBuffer(pdfGenerated)
+      ? pdfGenerated
+      : pdfGenerated?.buffer;
+    if (!isPdfBuffer(pdfBuffer)) {
+      return res.status(500).json({ error: "No se pudo generar el PDF para firma." });
+    }
     const cuentaPublicId = String(cuenta.public_id || "");
     const requestId = `CC-${cuentaPublicId || cuenta.id}-${Date.now()}`;
     const contractId = `CC-${cuentaPublicId || cuenta.id}`;
+    const signatoryExternalId = String(
+      cuenta.created_by || cuentaPublicId || cuenta.id || req.user?.id || "firmante"
+    );
+    const signaturePosition = buildClickSignSignaturePosition(
+      pdfGenerated?.signatureLayout || null,
+      signatoryExternalId
+    );
     const fileName = sanitizePdfFileName(
       `CuentaCobro_${cuentaPublicId || cuenta.id}.pdf`,
       `CuentaCobro_${cuenta.id}.pdf`
@@ -5801,7 +5913,7 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
               {
                 email: cuenta.email,
                 name: cuenta.nombre_usuario || cuenta.email,
-                external_id: String(cuenta.created_by || "")
+                external_id: signatoryExternalId
               }
             ]
           }
@@ -5815,6 +5927,9 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
         ]
       }
     };
+    if (signaturePosition) {
+      signaturePayload.signature.file[0].signature_position = [signaturePosition];
+    }
     const fallbackWebhookBase = getRequestPublicBaseUrl(req);
     const fallbackSignatureCbUrl = fallbackWebhookBase
       ? `${fallbackWebhookBase}/webhooks/clicksign/signature${
@@ -5866,6 +5981,7 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       contract_id: contractId,
       signature_id: signatureId || null,
       url_firma: urlFirma,
+      signature_position: signaturePosition || null,
       iniciado_en: ahoraIso,
       actualizado_en: ahoraIso,
       ultimo_evento: "START_SIGNATURE"
@@ -5892,7 +6008,8 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
       request_id: requestId,
       contract_id: contractId,
       signature_id: signatureId || null,
-      url_firma: urlFirma
+      url_firma: urlFirma,
+      signature_position: signaturePosition || null
     });
   } catch (err) {
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {

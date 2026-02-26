@@ -431,6 +431,19 @@ function isClickSignSignaturePositionValidationError(err) {
   ].some((token) => raw.includes(token));
 }
 
+function stripClickSignSignaturePosition(payload = {}) {
+  return {
+    ...payload,
+    signature: {
+      ...(payload.signature || {}),
+      file: ((payload.signature && payload.signature.file) || []).map((item) => {
+        const { signature_position, ...rest } = item || {};
+        return rest;
+      })
+    }
+  };
+}
+
 function buildPortalUrl(hashRoute = "inicio") {
   const base = String(FRONT_PORTAL_BASE || "").trim();
   if (!base) return "#";
@@ -515,7 +528,7 @@ async function notifyCuentaCobroFirmadaToProveedores({
     closing: "Notificación automática del sistema de cuentas de cobro."
   });
 
-  const sendResult = await sendEmailSafe({
+  let sendResult = await sendEmailSafe({
     ...graphContext,
     to: CLICKSIGN_SIGNED_NOTIFY_TO,
     cc: CLICKSIGN_SIGNED_NOTIFY_CC || null,
@@ -524,6 +537,16 @@ async function notifyCuentaCobroFirmadaToProveedores({
     text: textoPlano,
     html
   });
+  if (!sendResult?.ok && graphContext?.graphAccessToken) {
+    sendResult = await sendEmailSafe({
+      to: CLICKSIGN_SIGNED_NOTIFY_TO,
+      cc: CLICKSIGN_SIGNED_NOTIFY_CC || null,
+      bcc: CLICKSIGN_SIGNED_NOTIFY_BCC || null,
+      subject,
+      text: textoPlano,
+      html
+    });
+  }
 
   return {
     ...prev,
@@ -2603,7 +2626,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const lastCol = cols[cols.length - 1];
 
   // Reducir fuente si el string no cabe
-  let fs = 8.5;
+  let fs = 10;
   doc.font("Helvetica-Bold");
   while (fs > 6.5 && doc.fontSize(fs).widthOfString(totalStr) > lastCol.w - 8) {
     fs -= 0.3;
@@ -5999,6 +6022,7 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
     if (signatoryEmailCbUrl) {
       signaturePayload.signature.signatory_email_cb_url = signatoryEmailCbUrl;
     }
+    const signaturePayloadWithoutPosition = stripClickSignSignaturePosition(signaturePayload);
 
     let clickSignRes;
     let signatureSizeApplied = true;
@@ -6014,27 +6038,47 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
         throw startErr;
       }
 
-      const fallbackPayload = {
-        ...signaturePayload,
-        signature: {
-          ...signaturePayload.signature,
-          file: (signaturePayload.signature.file || []).map((item) => {
-            const { signature_position, ...rest } = item;
-            return rest;
-          })
-        }
-      };
-
       signatureSizeApplied = false;
       clickSignRes = await jsonRequest({
         method: "POST",
         url: buildClickSignUrl("start_signature"),
         headers: buildClickSignAuthHeaders(),
-        body: fallbackPayload
+        body: signaturePayloadWithoutPosition
       });
     }
-    const signatureId = extractClickSignSignatureId(clickSignRes.data);
-    const urlFirma = getClickSignLandingUrl(clickSignRes.data);
+    let signatureId = extractClickSignSignatureId(clickSignRes.data);
+    let urlFirma = getClickSignLandingUrl(clickSignRes.data);
+    if (!urlFirma && signatureSizeApplied) {
+      try {
+        const snapshot = await fetchClickSignSignatureSnapshot({
+          requestId,
+          contractId,
+          signatureId
+        });
+        const snapshotEvent = snapshot?.event && typeof snapshot.event === "object"
+          ? snapshot.event
+          : {};
+        const snapshotUrl = getClickSignLandingUrl(snapshotEvent);
+        if (snapshotUrl) {
+          urlFirma = snapshotUrl;
+          const signatureIdFromSnapshot = String(extractClickSignSignatureId(snapshotEvent) || "").trim();
+          if (signatureIdFromSnapshot) signatureId = signatureIdFromSnapshot;
+        }
+      } catch (snapshotErr) {
+        // Se ignora y se intenta fallback de inicio sin signature_position.
+      }
+    }
+    if (!urlFirma && signatureSizeApplied) {
+      signatureSizeApplied = false;
+      clickSignRes = await jsonRequest({
+        method: "POST",
+        url: buildClickSignUrl("start_signature"),
+        headers: buildClickSignAuthHeaders(),
+        body: signaturePayloadWithoutPosition
+      });
+      signatureId = extractClickSignSignatureId(clickSignRes.data);
+      urlFirma = getClickSignLandingUrl(clickSignRes.data);
+    }
     if (!urlFirma) {
       return res.status(502).json({
         error: "Click&Sign no devolvio URL de firma.",

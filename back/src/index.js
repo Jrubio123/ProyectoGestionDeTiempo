@@ -5251,7 +5251,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
       SET nro_caso_interno = $1,
           nro_caso_cliente = $2,
           tipo_servicio = $3,
-          estado = $4,
+          estado = COALESCE($4::tipo_estado_asignacion, estado),
           observacion = $5,
           fecha_inicio = $6,
           fecha_fin = $7
@@ -5296,6 +5296,22 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
        LIMIT 1`,
       [registroId, reporteId || null]
     );
+    if (!reporteId) {
+      const existenteActivo = await pool.query(
+        `SELECT id
+         FROM reporte_horas
+         WHERE id_registro_asignacion = $1
+           AND estado_reporte IN ('Revisión', 'Rechazado', 'Pendiente')
+         ORDER BY updated_at DESC NULLS LAST, id DESC
+         LIMIT 1`,
+        [registroId]
+      );
+      if (existenteActivo.rows.length > 0) {
+        return res.status(400).json({
+          error: "Ya existe una solicitud para esta asignación. Debes editar la existente en lugar de crear otra."
+        });
+      }
+    }
     if (reporteId && editable.rows.length > 0) {
       await pool.query(
         `UPDATE reporte_horas
@@ -7003,6 +7019,25 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
     if (registroId) {
       try {
         const estados = await getEstadoAsignacionValues();
+        let estadoAprobadoDestino = estados.proceso;
+        const asignacionMeta = await pool.query(
+          `SELECT
+             con.id_tipo_asignacion,
+             ta.titulo AS tipo_asignacion_titulo
+           FROM registro_asignaciones ra
+           JOIN consultorias con ON con.id = ra.id_consultoria
+           LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
+           WHERE ra.id = $1`,
+          [registroId]
+        );
+        if (asignacionMeta.rows.length > 0) {
+          const meta = asignacionMeta.rows[0];
+          const scope = getMesaFabricaScope(meta.id_tipo_asignacion, meta.tipo_asignacion_titulo);
+          if (scope) {
+            // Mesa/Fabrica: al aprobar se cierra la asignacion para no permitir nuevos tickets.
+            estadoAprobadoDestino = estados.cerrado || estados.proceso;
+          }
+        }
         // Actualizar aprobación y estado en la asignación asociada
         await pool.query(
           `UPDATE registro_asignaciones
@@ -7013,7 +7048,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
                  ELSE estado
                END
            WHERE id = $2`,
-          [estado, registroId, estados.proceso, estados.abierto]
+          [estado, registroId, estadoAprobadoDestino, estados.abierto]
         );
       } catch (innerErr) {
         console.error("Error actualizando registro_asignaciones:", innerErr);
@@ -7144,7 +7179,7 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
            nro_caso_interno = $8,
            nro_caso_cliente = $9,
            tipo_servicio = $10,
-           estado = $11,
+           estado = COALESCE($11::tipo_estado_asignacion, estado),
            observacion = $12,
         total_pagar = $13
        WHERE id = $14

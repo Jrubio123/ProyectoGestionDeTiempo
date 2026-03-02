@@ -38,7 +38,7 @@
                         </div>
                         <button
                             @click="crearSolicitud(item)"
-                            :disabled="!isAsignacionOperable(item)"
+                            :disabled="!canCreateSolicitud(item)"
                             title="Crear nueva solicitud desde esta asignación"
                             class="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-gray-400 disabled:hover:bg-transparent"
                         >

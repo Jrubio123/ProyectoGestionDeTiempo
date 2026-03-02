@@ -70,8 +70,12 @@ window.mesaFabricaApp = function () {
         },
 
         crearSolicitud(item) {
-            if (!this.isAsignacionOperable(item)) {
-                alert("La asignacion esta cerrada y no permite nuevos reportes.");
+            if (!this.canCreateSolicitud(item)) {
+                if (!this.isAsignacionOperable(item)) {
+                    alert("La asignacion esta cerrada y no permite nuevos reportes.");
+                    return;
+                }
+                alert("Ya existe una solicitud para esta asignacion. Edita la existente en Gestionar.");
                 return;
             }
             const scope = this.getScope(item);
@@ -87,7 +91,7 @@ window.mesaFabricaApp = function () {
                 wricef: "",
                 requerimiento: "",
                 perfil_fabrica: "",
-                estado: "",
+                estado: item?.estado || "",
                 estado_ticket: "",
                 estado_mesa_servicio: "",
                 estado_fabrica: "",
@@ -263,8 +267,14 @@ window.mesaFabricaApp = function () {
         },
 
         isAsignacionOperable(item = null) {
-            const estado = this.normalizeEstadoAsignacion(item?.estado || this.form?.estado || "");
+            const id = item?.id || this.form?.id || null;
+            const estadoOrigen = item?.estado || this.form?.estado || (id ? (this.tickets || []).find((t) => t.id === id)?.estado : "");
+            const estado = this.normalizeEstadoAsignacion(estadoOrigen);
             return estado === "abierto" || estado === "proceso";
+        },
+
+        canCreateSolicitud(item) {
+            return this.isAsignacionOperable(item) && !Boolean(item?.reporte_id);
         },
 
         getScope(item) {

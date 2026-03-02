@@ -5374,7 +5374,16 @@ app.get("/horas-por-cobrar/:consultorId", requireAccess({ roles: ["Consultor", "
         LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
       WHERE rh.estado_reporte = 'Aprobado'
         AND rh.id_cuenta_cobro IS NULL
-        AND (rh.consultor_principal_id = $1 OR rh.consultor_responsable_id = $1)
+        AND (
+          rh.consultor_responsable_id = $1
+          OR rh.consultor_principal_id = $1
+          OR rh.consultor_responsable_id IN (
+            SELECT u.id
+            FROM usuarios u
+            WHERE u.activo = true
+              AND u.id_consultor_principal = $1
+          )
+        )
       ORDER BY rh.id DESC
       `,
       [consultorInternalId]
@@ -5422,7 +5431,16 @@ app.post("/cuentas-cobro/preview", requireAccess({ roles: ["Consultor", "Consult
       WHERE id = ANY($1)
         AND estado_reporte = 'Aprobado'
         AND id_cuenta_cobro IS NULL
-        AND (consultor_principal_id = $2 OR consultor_responsable_id = $2)`,
+        AND (
+          consultor_responsable_id = $2
+          OR consultor_principal_id = $2
+          OR consultor_responsable_id IN (
+            SELECT u.id
+            FROM usuarios u
+            WHERE u.activo = true
+              AND u.id_consultor_principal = $2
+          )
+        )`,
       [reporteIds, consultorId]
     );
 
@@ -5489,7 +5507,16 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
       WHERE id = ANY($1)
         AND estado_reporte = 'Aprobado'
         AND id_cuenta_cobro IS NULL
-        AND (consultor_principal_id = $2 OR consultor_responsable_id = $2)
+        AND (
+          consultor_responsable_id = $2
+          OR consultor_principal_id = $2
+          OR consultor_responsable_id IN (
+            SELECT u.id
+            FROM usuarios u
+            WHERE u.activo = true
+              AND u.id_consultor_principal = $2
+          )
+        )
       `,
       [reporteIds, consultorId]
     );

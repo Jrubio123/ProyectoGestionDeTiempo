@@ -4473,7 +4473,16 @@ app.get("/mis-asignaciones", requireAccess({ roles: ["Consultor", "Consultor Pri
           ORDER BY rh.created_at DESC
           LIMIT 1
         ) lr ON true
-      WHERE ($1::int IS NULL OR ra.consultor_responsable_id = $1)
+      WHERE (
+        $1::int IS NULL
+        OR ra.consultor_responsable_id = $1
+        OR ra.consultor_responsable_id IN (
+          SELECT u.id
+          FROM usuarios u
+          WHERE u.activo = true
+            AND u.id_consultor_principal = $1
+        )
+      )
         AND lr.estado_reporte = 'Aprobado'
       ORDER BY ra.id DESC
     `, [userId || null]);
@@ -4524,7 +4533,16 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
           ORDER BY rh.created_at DESC
           LIMIT 1
         ) lr ON true
-      WHERE ($1::int IS NULL OR ra.consultor_responsable_id = $1)
+      WHERE (
+        $1::int IS NULL
+        OR ra.consultor_responsable_id = $1
+        OR ra.consultor_responsable_id IN (
+          SELECT u.id
+          FROM usuarios u
+          WHERE u.activo = true
+            AND u.id_consultor_principal = $1
+        )
+      )
         AND (lr.estado_reporte IS NULL OR lr.estado_reporte = 'Rechazado')
         AND ra.estado IN ($2::tipo_estado_asignacion, $3::tipo_estado_asignacion)
         AND NOT (

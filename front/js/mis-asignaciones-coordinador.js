@@ -273,6 +273,36 @@ window.misAsignacionesApp = function () {
             }
         },
 
+
+        esAsignacionCerrable(asignacion) {
+            const estado = String(asignacion?.estado || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .trim();
+            return !["cerrado", "completado", "inactivo", "cancelado"].includes(estado);
+        },
+
+        async cerrarAsignacion(asignacion) {
+            if (!asignacion?.id) return;
+            if (!this.esAsignacionCerrable(asignacion)) {
+                this.toastMensaje("info", "La asignacion ya esta cerrada");
+                return;
+            }
+            if (!confirm("¿Cerrar esta asignacion? Esto bloqueara nuevos reportes para este consultor.")) return;
+            this.guardando = true;
+            try {
+                await axios.delete(`${API}/registro-asignaciones/${asignacion.id}`);
+                this.toastMensaje("success", "Asignacion cerrada correctamente");
+                await this.cargarAsignaciones();
+            } catch (e) {
+                const msg = e?.response?.data?.error || "Error al cerrar la asignacion";
+                this.toastMensaje("error", msg);
+            } finally {
+                this.guardando = false;
+            }
+        },
+
         enviarNotificacionTarifa() {
             this.toastMensaje("info", "Notificación enviada al administrador");
         },

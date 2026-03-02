@@ -148,6 +148,14 @@ function resolveEstadoAsignacionInput(value, estados) {
   return aliasMap.get(norm) || null;
 }
 
+function isAsignacionReportableEstado(estado, estados) {
+  const rawNorm = normalizeEnumLabel(estado);
+  if (!rawNorm) return false;
+  const abiertoNorm = normalizeEnumLabel(estados?.abierto);
+  const procesoNorm = normalizeEnumLabel(estados?.proceso);
+  return rawNorm === abiertoNorm || rawNorm === procesoNorm;
+}
+
 function normalizeTipoServicioInput(value) {
   const raw = String(value || "").trim();
   if (!raw) return null;
@@ -4597,6 +4605,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
     const meta = await pool.query(`
       SELECT
         ra.id,
+        ra.estado AS estado_asignacion,
         ra.id_modulo,
         ra.consultor_responsable_id,
         con.id_cliente,
@@ -4614,6 +4623,10 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
     }
 
     const info = meta.rows[0];
+    const estadosAsignacion = await getEstadoAsignacionValues();
+    if (!isAsignacionReportableEstado(info.estado_asignacion, estadosAsignacion)) {
+      return res.status(400).json({ error: "La asignación está cerrada y no permite nuevos reportes." });
+    }
     const tipoAsignacionId = Number(info.id_tipo_asignacion || 0);
     const tipoAsignacionTitulo = String(info.tipo_asignacion_titulo || "")
       .normalize("NFD")
@@ -4882,6 +4895,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       `
       SELECT
         ra.id,
+        ra.estado AS estado_asignacion,
         ra.id_modulo,
         ra.id_consultoria,
         ra.nro_caso_cliente,
@@ -4911,6 +4925,11 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     }
 
     const info = meta.rows[0];
+    const estadosAsignacion = await getEstadoAsignacionValues();
+    if (!isAsignacionReportableEstado(info.estado_asignacion, estadosAsignacion)) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "La asignación está cerrada y no permite nuevos reportes." });
+    }
     const consultorPrincipalId = info.consultor_principal_rel_id || null;
     const tipoAsignacionId = Number(info.id_tipo_asignacion || 0);
     const tipoAsignacionTitulo = String(info.tipo_asignacion_titulo || "")
@@ -5164,6 +5183,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
       SELECT
         con.id_tipo_asignacion,
         ta.titulo AS tipo_asignacion_titulo,
+        ra.estado AS estado_asignacion,
         ra.id_modulo,
         ra.id_consultoria,
         ra.valor_hora,
@@ -5180,6 +5200,13 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
       `,
       [registroId, req.user?.id]
     );
+    if (!tipoValido.rows.length) {
+      return res.status(404).json({ error: "Ticket no encontrado" });
+    }
+    const estadosAsignacion = await getEstadoAsignacionValues();
+    if (!isAsignacionReportableEstado(tipoValido.rows[0]?.estado_asignacion, estadosAsignacion)) {
+      return res.status(400).json({ error: "La asignación está cerrada y no permite nuevos reportes." });
+    }
     const tipoAsignacionId = Number(tipoValido.rows[0]?.id_tipo_asignacion || 0);
     const tipoAsignacionTitulo = String(tipoValido.rows[0]?.tipo_asignacion_titulo || "")
       .normalize("NFD")
@@ -7144,6 +7171,52 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
     }
     console.error(err);
     res.status(500).json({ error: "Error al actualizar asignación" });
+  }
+});
+
+// Cerrar asignación (soft delete operativo)
+app.delete("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const asignacionId = await resolveInternalId(pool, ID_TABLES.registroAsignaciones, id, { required: true });
+    const estados = await getEstadoAsignacionValues();
+    const role = normalizeValue(req.user?.rol);
+    let result;
+
+    if (role === "coordinador") {
+      result = await pool.query(
+        `UPDATE registro_asignaciones ra
+         SET estado = $1::tipo_estado_asignacion,
+             updated_at = CURRENT_TIMESTAMP
+         FROM consultorias con
+         WHERE ra.id = $2
+           AND con.id = ra.id_consultoria
+           AND con.coordinador_responsable_id = $3
+         RETURNING ra.*`,
+        [estados.cerrado, asignacionId, req.user?.id]
+      );
+    } else {
+      result = await pool.query(
+        `UPDATE registro_asignaciones
+         SET estado = $1::tipo_estado_asignacion,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2
+         RETURNING *`,
+        [estados.cerrado, asignacionId]
+      );
+    }
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Asignación no encontrada o sin permisos para cerrarla" });
+    }
+
+    res.json(withPublicId(result.rows[0]));
+  } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Asignación no encontrada" });
+    }
+    console.error(err);
+    res.status(500).json({ error: "Error al cerrar asignación" });
   }
 });
 

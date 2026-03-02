@@ -5619,13 +5619,20 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
     const estados = await getEstadoAsignacionValues();
     await client.query(
       `
-      UPDATE registro_asignaciones
+      UPDATE registro_asignaciones ra
       SET estado = $2::tipo_estado_asignacion
-      WHERE id IN (
-        SELECT id_registro_asignacion
-        FROM reporte_horas
-        WHERE id = ANY($1)
-      )
+      FROM consultorias con
+      LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
+      WHERE ra.id_consultoria = con.id
+        AND ra.id IN (
+          SELECT id_registro_asignacion
+          FROM reporte_horas
+          WHERE id = ANY($1)
+        )
+        AND NOT (
+          COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) IN ('mesa de servicio', 'fabrica', 'fábrica')
+        )
       `,
       [reporteIds, estados.cerrado]
     );

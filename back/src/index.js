@@ -7034,8 +7034,8 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
           const meta = asignacionMeta.rows[0];
           const scope = getMesaFabricaScope(meta.id_tipo_asignacion, meta.tipo_asignacion_titulo);
           if (scope) {
-            // Mesa/Fabrica: al aprobar se cierra la asignacion para no permitir nuevos tickets.
-            estadoAprobadoDestino = estados.cerrado || estados.proceso;
+            // Mesa/Fabrica: se cierra la solicitud (reporte), pero la asignacion base sigue activa.
+            estadoAprobadoDestino = estados.abierto || estados.proceso;
           }
         }
         // Actualizar aprobación y estado en la asignación asociada

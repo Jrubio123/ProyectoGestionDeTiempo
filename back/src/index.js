@@ -2679,6 +2679,8 @@ const hasAccess = (req, { roles = [], tipos = [] }) => {
   );
 };
 
+const isAsociadoUser = (req) => normalizeValue(req?.user?.tipo_consultor) === "asociado";
+
 const requireAccess = ({ roles = [], tipos = [] } = {}) => (req, res, next) => {
   if (!roles.length && !tipos.length) return next();
   if (!req.user) {
@@ -4754,6 +4756,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
 app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   try {
     const userId = req.user?.id;
+    const ocultarMonto = isAsociadoUser(req);
     const result = await pool.query(
       `
       SELECT
@@ -4806,7 +4809,15 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
       `,
       [userId]
     );
-    res.json(result.rows);
+    const rows = Array.isArray(result.rows) ? result.rows : [];
+    if (!ocultarMonto) {
+      return res.json(rows);
+    }
+    return res.json(rows.map((row) => ({
+      ...row,
+      total_cobrar: null,
+      valor_hora: null
+    })));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al obtener tickets" });
@@ -4834,6 +4845,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
   const client = await pool.connect();
   let txStarted = false;
   try {
+    const ocultarMonto = isAsociadoUser(req);
     const registroId = await resolveInternalId(
       client,
       ID_TABLES.registroAsignaciones,
@@ -4936,7 +4948,8 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     const finalObservacion = (observacion_mesa_fabrica || info.ra_observacion || "").toString().trim() || null;
     const finalFechaCierre = fecha_cierre_mesa_fab || info.fecha_fin || null;
     const finalHoras = horas_reportadas ?? null;
-    const finalTotal = total_cobrar ?? info.total_pagar ?? null;
+    const finalTotalInput = ocultarMonto ? null : total_cobrar;
+    const finalTotal = finalTotalInput ?? info.total_pagar ?? null;
     const finalRequerimiento = (requerimiento || "").toString().trim() || null;
     const finalPerfilFabrica = normalizePerfilFabricaInput(perfil_fabrica);
     const finalWricef = (wricef || "").toString().trim() || null;
@@ -5072,7 +5085,9 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       });
     }
 
-    res.json(withPublicId(saved.rows[0] || {}));
+    const savedRow = withPublicId(saved.rows[0] || {});
+    if (ocultarMonto) savedRow.total_cobrar = null;
+    res.json(savedRow);
   } catch (err) {
     if (txStarted) {
       await client.query("ROLLBACK");
@@ -5110,6 +5125,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
   } = req.body;
 
   try {
+    const ocultarMonto = isAsociadoUser(req);
     const registroId = await resolveInternalId(
       pool,
       ID_TABLES.registroAsignaciones,
@@ -5205,7 +5221,8 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     );
 
     const finalHoras = horas_reportadas ?? null;
-    const finalTotal = total_cobrar ??
+    const finalTotalInput = ocultarMonto ? null : total_cobrar;
+    const finalTotal = finalTotalInput ??
       ((finalHoras !== null && finalHoras !== undefined && tipoValido.rows[0]?.valor_hora !== null && tipoValido.rows[0]?.valor_hora !== undefined)
         ? Number(finalHoras) * Number(tipoValido.rows[0].valor_hora)
         : null);

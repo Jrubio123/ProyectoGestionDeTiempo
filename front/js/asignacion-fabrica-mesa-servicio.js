@@ -5,6 +5,7 @@ window.mesaFabricaApp = function () {
         tickets: [],
         modalOpen: false,
         solicitudesOpen: false,
+        esAsociado: false,
 
         form: {
             id: null,
@@ -29,6 +30,7 @@ window.mesaFabricaApp = function () {
         },
 
         async init() {
+            this.esAsociado = Boolean(window.auth?.isAsociado?.());
             await this.cargarTickets();
         },
 
@@ -59,7 +61,7 @@ window.mesaFabricaApp = function () {
                 requerimiento: item?.requerimiento || "",
                 perfil_fabrica: this.normalizePerfilFabrica(item?.perfil_fabrica) || "",
                 horas_reportadas: item?.horas_reportadas ?? null,
-                total_cobrar: item?.total_cobrar ?? null,
+                total_cobrar: this.esAsociado ? null : (item?.total_cobrar ?? null),
                 valor_hora: item?.valor_hora ?? tarifaInferida ?? null
             };
             this.recalcularTotalForm();
@@ -89,7 +91,7 @@ window.mesaFabricaApp = function () {
                 fecha_inicio: this.todayDate(),
                 fecha_cierre: "",
                 horas_reportadas: null,
-                total_cobrar: 0,
+                total_cobrar: this.esAsociado ? null : 0,
                 valor_hora: Number(item?.valor_hora || 0) || null
             };
             if (scope === "fabrica") {
@@ -123,7 +125,7 @@ window.mesaFabricaApp = function () {
                     nro_caso_int_ext: item.nro_caso_cliente || item.nro_caso_interno || null,
                     observacion_mesa_fabrica: item.observacion_mesa_fabrica || item.observacion || null,
                     fecha_cierre_mesa_fab: item.fecha_cierre_mesa_fab || item.fecha_fin || null,
-                    total_cobrar: item.total_cobrar || null,
+                    total_cobrar: this.esAsociado ? null : (item.total_cobrar || null),
                     horas_reportadas: item.horas_reportadas || null,
                     requerimiento: item.requerimiento || null,
                     perfil_fabrica: this.normalizePerfilFabrica(item.perfil_fabrica) || null,
@@ -155,6 +157,7 @@ window.mesaFabricaApp = function () {
                 }
                 const payload = {
                     ...this.form,
+                    total_cobrar: this.esAsociado ? null : (this.form.total_cobrar || null),
                     tipo_servicio: scope === "mesa" ? (this.form.tipo_servicio || null) : null,
                     estado_mesa_servicio: scope === "mesa" ? (this.form.estado_ticket || null) : null,
                     estado_fabrica: scope === "fabrica" ? (this.form.estado_ticket || null) : null,
@@ -293,6 +296,10 @@ window.mesaFabricaApp = function () {
         },
 
         recalcularTotalForm() {
+            if (this.esAsociado) {
+                this.form.total_cobrar = null;
+                return;
+            }
             const horas = Number(this.form?.horas_reportadas || 0);
             const tarifa = Number(this.form?.valor_hora || 0);
             if (horas > 0 && tarifa > 0) {

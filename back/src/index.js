@@ -4891,6 +4891,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
         ra.fecha_fin,
         ra.total_pagar,
         ra.consultor_responsable_id,
+        ucons.id_consultor_principal AS consultor_principal_rel_id,
         con.id_cliente,
         con.id_tipo_asignacion,
         con.coordinador_responsable_id,
@@ -4898,6 +4899,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       FROM registro_asignaciones ra
         JOIN consultorias con ON ra.id_consultoria = con.id
         LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
+        LEFT JOIN usuarios ucons ON ucons.id = ra.consultor_responsable_id
       WHERE ra.id = $1
         AND ra.consultor_responsable_id = $2
       `,
@@ -4909,6 +4911,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     }
 
     const info = meta.rows[0];
+    const consultorPrincipalId = info.consultor_principal_rel_id || null;
     const tipoAsignacionId = Number(info.id_tipo_asignacion || 0);
     const tipoAsignacionTitulo = String(info.tipo_asignacion_titulo || "")
       .normalize("NFD")
@@ -4996,7 +4999,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
              modulo_id = COALESCE(modulo_id, $14),
              coordinador_id = COALESCE(coordinador_id, $15),
              consultor_responsable_id = COALESCE(consultor_responsable_id, $16),
-             consultor_principal_id = COALESCE(consultor_principal_id, $17),
+             consultor_principal_id = COALESCE($17, consultor_principal_id),
              estado_reporte = 'Pendiente',
              motivo_rechazo = NULL,
              updated_at = CURRENT_TIMESTAMP
@@ -5019,7 +5022,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           info.id_modulo,
           info.coordinador_responsable_id,
           info.consultor_responsable_id,
-          info.consultor_responsable_id,
+          consultorPrincipalId,
           editableRow.id
         ]
       );
@@ -5053,7 +5056,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           info.id_modulo,
           info.coordinador_responsable_id,
           info.consultor_responsable_id,
-          info.consultor_responsable_id,
+          consultorPrincipalId,
           req.user?.id || info.consultor_responsable_id
         ]
       );
@@ -5166,10 +5169,12 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
         ra.valor_hora,
         con.id_cliente,
         con.coordinador_responsable_id,
-        ra.consultor_responsable_id
+        ra.consultor_responsable_id,
+        ucons.id_consultor_principal AS consultor_principal_rel_id
       FROM registro_asignaciones ra
         JOIN consultorias con ON con.id = ra.id_consultoria
         LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
+        LEFT JOIN usuarios ucons ON ucons.id = ra.consultor_responsable_id
       WHERE ra.id = $1
         AND ra.consultor_responsable_id = $2
       `,
@@ -5248,6 +5253,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     const finalRequerimiento = (requerimiento || "").toString().trim() || null;
     const finalPerfilFabrica = normalizePerfilFabricaInput(perfil_fabrica);
     const finalWricef = (wricef || "").toString().trim() || null;
+    const consultorPrincipalId = tipoValido.rows[0]?.consultor_principal_rel_id || null;
     if (scope === "fabrica" && perfil_fabrica && !finalPerfilFabrica) {
       return res.status(400).json({ error: "Perfil de fábrica inválido" });
     }
@@ -5271,12 +5277,13 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
              observacion_mesa_fabrica = COALESCE($5, observacion_mesa_fabrica),
              fecha_cierre_mesa_fab = COALESCE($6, fecha_cierre_mesa_fab),
              estado_mesa_servicio = COALESCE($7, estado_mesa_servicio),
-             estado_fabrica = COALESCE($8, estado_fabrica),
-             requerimiento = COALESCE($9, requerimiento),
-             perfil_fabrica = COALESCE($10, perfil_fabrica),
-             wricef = COALESCE($11, wricef),
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $12`,
+              estado_fabrica = COALESCE($8, estado_fabrica),
+              requerimiento = COALESCE($9, requerimiento),
+              perfil_fabrica = COALESCE($10, perfil_fabrica),
+              wricef = COALESCE($11, wricef),
+              consultor_principal_id = COALESCE($12, consultor_principal_id),
+              updated_at = CURRENT_TIMESTAMP
+         WHERE id = $13`,
         [
           finalHoras,
           finalTotal,
@@ -5289,6 +5296,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
           finalRequerimiento,
           finalPerfilFabrica,
           finalWricef,
+          consultorPrincipalId,
           editable.rows[0].id
         ]
       );
@@ -5320,7 +5328,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
           tipoValido.rows[0]?.id_modulo || null,
           tipoValido.rows[0]?.coordinador_responsable_id || null,
           tipoValido.rows[0]?.consultor_responsable_id || req.user?.id || null,
-          tipoValido.rows[0]?.consultor_responsable_id || req.user?.id || null,
+          consultorPrincipalId,
           req.user?.id || null
         ]
       );

@@ -6926,6 +6926,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
       `SELECT
          u.email AS consultor_email,
          u.nombre_usuario AS consultor_nombre,
+         u.tipo_consultor AS consultor_tipo,
          c.titulo AS cliente,
          ta.titulo AS tipo_asignacion,
          rh.horas_reportadas,
@@ -6940,6 +6941,11 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
     );
     const info = detalle.rows[0];
     if (info?.consultor_email) {
+      const esConsultorAsociado = normalizeValue(info.consultor_tipo) === "asociado";
+      const resumenData = esConsultorAsociado
+        ? { ...info, total_cobrar: null }
+        : info;
+      const resumenReporte = buildReporteResumen(resumenData);
       const esAprobado = estado === "Aprobado";
       const tipoNorm = String(info.tipo_asignacion || "")
         .normalize("NFD")
@@ -6962,7 +6968,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
           `Tu reporte fue ${estado}.\n` +
           `Cliente: ${info.cliente || "N/A"}\n` +
           `Tipo: ${info.tipo_asignacion || "N/A"}\n` +
-          `Detalle: ${buildReporteResumen(info)}\n` +
+          `Detalle: ${resumenReporte}\n` +
           (estado === "Rechazado" && motivo ? `Motivo: ${motivo}\n` : "") +
           `Portal: ${portalUrl}\n`,
         html: buildEmailLayout({
@@ -6973,7 +6979,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
           blocks: [
             { label: "Cliente", value: info.cliente || "N/A" },
             { label: "Tipo de asignación", value: info.tipo_asignacion || "N/A" },
-            { label: "Resumen", value: buildReporteResumen(info) },
+            { label: "Resumen", value: resumenReporte },
             ...(estado === "Rechazado" ? [{ label: "Motivo", value: motivo || "Sin detalle" }] : [])
           ],
           ctaLabel: esAprobado ? "Ver reporte" : "Corregir reporte",

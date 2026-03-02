@@ -99,25 +99,22 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                 </svg>
                 <p class="text-gray-500 font-medium">No hay asignaciones pendientes</p>
-                <p class="text-gray-400 text-sm mt-1">No hay asignaciones base ni solicitudes cerradas para mostrar</p>
+                <p class="text-gray-400 text-sm mt-1">Las asignaciones aprobadas o rechazadas no se muestran aquí</p>
             </div>
 
             <!-- Lista de Asignaciones -->
             <div class="divide-y divide-gray-100 max-h-[420px] md:max-h-[600px] overflow-y-auto">
                 <template x-for="asignacion in asignacionesFiltradas" :key="asignacion._key">
-                    <div
+                    <div 
                         class="grid grid-cols-8 gap-4 px-6 py-4 hover:bg-blue-50 transition cursor-pointer min-w-[980px]"
                         :class="{'bg-blue-50 ring-2 ring-blue-200': asignacionSeleccionada?._key === asignacion._key}"
                         @click="seleccionarAsignacion(asignacion)"
                     >
-                        <div>
-                            <div class="text-sm font-mono text-gray-600" x-text="asignacion.id"></div>
-                            <div class="text-[10px] text-gray-400" x-text="asignacion.tipo_registro || 'Asignación base'"></div>
-                        </div>
-                        <div class="text-sm font-medium text-gray-800" x-text="asignacion.cliente"></div>
+                        <div class="text-sm font-mono text-gray-600" x-text="asignacion.id"></div>
+                <div class="text-sm font-medium text-gray-800" x-text="asignacion.cliente"></div>
                         <div class="text-sm text-gray-600" x-text="asignacion.consultor_responsable"></div>
                         <div>
-                            <span
+                            <span 
                                 class="inline-flex px-2 py-1 text-xs font-semibold rounded-full"
                                 :class="{
                                     'bg-green-100 text-green-800': asignacion.estado === 'Abierto',
@@ -134,7 +131,6 @@
                         <div class="flex justify-center gap-1">
                             <button
                                 @click.stop="editarAsignacion(asignacion)"
-                                x-show="!asignacion.es_derivada"
                                 class="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition group"
                                 title="Editar asignación"
                             >
@@ -144,7 +140,7 @@
                             </button>
                             <button
                                 @click.stop="cerrarAsignacion(asignacion)"
-                                x-show="!asignacion.es_derivada && esMesaOFabrica(asignacion)"
+                                x-show="esMesaOFabrica(asignacion)"
                                 :disabled="guardando || !esAsignacionCerrable(asignacion)"
                                 class="p-2 text-red-600 hover:bg-red-100 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed"
                                 title="Cerrar asignación"
@@ -153,10 +149,6 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-8 0l1 12h8l1-12"/>
                                 </svg>
                             </button>
-                            <span
-                                x-show="asignacion.es_derivada"
-                                class="inline-flex items-center px-2 py-1 text-[10px] font-semibold rounded bg-gray-100 text-gray-600"
-                            >Solo lectura</span>
                         </div>
                     </div>
                 </template>
@@ -464,4 +456,3 @@
     </div>
 
 </div>
-

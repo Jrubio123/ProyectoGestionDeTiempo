@@ -4400,97 +4400,40 @@ app.get("/mis-asignaciones-coordinador", requireAccess({ roles: ["Coordinador"] 
   try {
     const userId = req.user?.id || req.query.coordinador_id;
     const result = await pool.query(`
-        WITH base AS (
-          SELECT
-            ra.public_id AS id,
-            con.public_id AS consultoria_id,
-            c.public_id AS cliente_id,
-            c.titulo AS cliente,
-            u.nombre_usuario AS consultor_responsable,
-            coord.nombre_usuario AS coordinador,
-            m.titulo AS modulo,
-            ta.titulo AS tipo_asignacion,
-            ta.public_id AS tipo_asignacion_id,
-            con.descripcion_consultoria,
-            u.public_id AS consultor_responsable_id,
-            m.public_id AS id_modulo,
-            ra.estado::text AS estado,
-            ra.tipo_servicio::text AS tipo_servicio,
-            ra.valor_hora,
-            ra.valor_dia,
-            ra.total_pagar,
-            ra.cantidad_dias,
-            ra.fecha_inicio,
-            ra.fecha_fin,
-            ra.nro_caso_interno,
-            ra.nro_caso_cliente,
-            ra.observacion,
-            false AS es_derivada,
-            'Asignación base'::text AS tipo_registro,
-            ra.created_at AS sort_created_at
-          FROM registro_asignaciones ra
-            JOIN consultorias con ON ra.id_consultoria = con.id
-            JOIN clientes c ON con.id_cliente = c.id
-            LEFT JOIN usuarios u ON ra.consultor_responsable_id = u.id
-            LEFT JOIN usuarios coord ON con.coordinador_responsable_id = coord.id
-            LEFT JOIN modulo m ON ra.id_modulo = m.id
-            LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
-          WHERE con.activo = true
-            AND ($1::int IS NULL OR con.coordinador_responsable_id = $1)
-        ),
-        derivadas AS (
-          SELECT
-            rh.public_id AS id,
-            con.public_id AS consultoria_id,
-            c.public_id AS cliente_id,
-            c.titulo AS cliente,
-            u.nombre_usuario AS consultor_responsable,
-            coord.nombre_usuario AS coordinador,
-            m.titulo AS modulo,
-            ta.titulo AS tipo_asignacion,
-            ta.public_id AS tipo_asignacion_id,
-            con.descripcion_consultoria,
-            u.public_id AS consultor_responsable_id,
-            m.public_id AS id_modulo,
-            'Cerrado'::text AS estado,
-            rh.tipo_servicio::text AS tipo_servicio,
-            rh.total_cobrar AS valor_hora,
-            NULL::numeric AS valor_dia,
-            rh.total_cobrar AS total_pagar,
-            rh.cantidad_dias_reportados AS cantidad_dias,
-            cc.fecha_periodo_inicio AS fecha_inicio,
-            cc.fecha_periodo_fin AS fecha_fin,
-            rh.nro_caso_int_ext AS nro_caso_interno,
-            rh.nro_caso_int_ext AS nro_caso_cliente,
-            rh.observacion_mesa_fabrica AS observacion,
-            true AS es_derivada,
-            'Solicitud cerrada'::text AS tipo_registro,
-            rh.created_at AS sort_created_at
-          FROM reporte_horas rh
-            JOIN registro_asignaciones ra ON ra.id = rh.id_registro_asignacion
-            JOIN consultorias con ON con.id = ra.id_consultoria
-            JOIN clientes c ON c.id = con.id_cliente
-            LEFT JOIN usuarios u ON u.id = rh.consultor_responsable_id
-            LEFT JOIN usuarios coord ON coord.id = con.coordinador_responsable_id
-            LEFT JOIN modulo m ON m.id = COALESCE(rh.modulo_id, ra.id_modulo)
-            LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
-            LEFT JOIN cuenta_cobro cc ON cc.id = rh.id_cuenta_cobro
-          WHERE con.activo = true
-            AND ($1::int IS NULL OR con.coordinador_responsable_id = $1)
-            AND rh.id_cuenta_cobro IS NOT NULL
-            AND rh.estado_reporte = 'Aprobado'
-            AND (
-              COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
-              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) IN ('mesa de servicio', 'fabrica', 'fábrica')
-            )
-        )
-        SELECT *
-        FROM (
-          SELECT * FROM base
-          UNION ALL
-          SELECT * FROM derivadas
-        ) x
-        ORDER BY x.sort_created_at DESC NULLS LAST
+        SELECT
+          ra.public_id AS id,
+          con.public_id AS consultoria_id,
+          c.public_id AS cliente_id,
+          c.titulo AS cliente,
+          u.nombre_usuario AS consultor_responsable,
+          coord.nombre_usuario AS coordinador,
+          m.titulo AS modulo,
+          ta.titulo AS tipo_asignacion,
+          ta.public_id AS tipo_asignacion_id,
+          con.descripcion_consultoria,
+          u.public_id AS consultor_responsable_id,
+          m.public_id AS id_modulo,
+          ra.estado,
+          ra.tipo_servicio,
+          ra.valor_hora,
+          ra.valor_dia,
+          ra.total_pagar,
+          ra.cantidad_dias,
+          ra.fecha_inicio,
+          ra.fecha_fin,
+          ra.nro_caso_interno,
+          ra.nro_caso_cliente,
+          ra.observacion
+        FROM registro_asignaciones ra
+          JOIN consultorias con ON ra.id_consultoria = con.id
+          JOIN clientes c ON con.id_cliente = c.id
+          LEFT JOIN usuarios u ON ra.consultor_responsable_id = u.id
+          LEFT JOIN usuarios coord ON con.coordinador_responsable_id = coord.id
+          LEFT JOIN modulo m ON ra.id_modulo = m.id
+          LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
+        WHERE con.activo = true
+          AND ($1::int IS NULL OR con.coordinador_responsable_id = $1)
+        ORDER BY ra.id DESC
       `, [userId || null]);
     res.json(result.rows);
   } catch (err) {
@@ -5676,20 +5619,13 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
     const estados = await getEstadoAsignacionValues();
     await client.query(
       `
-      UPDATE registro_asignaciones ra
+      UPDATE registro_asignaciones
       SET estado = $2::tipo_estado_asignacion
-      FROM consultorias con
-      LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
-      WHERE ra.id_consultoria = con.id
-        AND ra.id IN (
-          SELECT id_registro_asignacion
-          FROM reporte_horas
-          WHERE id = ANY($1)
-        )
-        AND NOT (
-          COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
-          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) IN ('mesa de servicio', 'fabrica', 'fábrica')
-        )
+      WHERE id IN (
+        SELECT id_registro_asignacion
+        FROM reporte_horas
+        WHERE id = ANY($1)
+      )
       `,
       [reporteIds, estados.cerrado]
     );

@@ -72,10 +72,7 @@ window.misAsignacionesApp = function () {
                     ...a,
                     _key: `${a.consultoria_id || "c"}-${a.id || "na"}-${idx}`,
                     valor_hora: Number(a.valor_hora || 0),
-                    valor_dia: Number(a.valor_dia || 0),
-                    total_pagar: Number(a.total_pagar || 0),
-                    cantidad_dias: Number(a.cantidad_dias || 0),
-                    es_derivada: Boolean(a.es_derivada)
+                    cantidad_dias: Number(a.cantidad_dias || 0)
                 }));
             } catch (e) {
                 this.asignaciones = [];
@@ -109,10 +106,6 @@ window.misAsignacionesApp = function () {
         },
 
         editarAsignacion(asignacion) {
-            if (asignacion?.es_derivada) {
-                this.toastMensaje("info", "La solicitud derivada es de solo lectura.");
-                return;
-            }
             this.asignacionSeleccionada = asignacion;
             this.consultoriaInfo = {
                 cliente: asignacion.cliente || "",
@@ -240,9 +233,6 @@ window.misAsignacionesApp = function () {
         },
 
         tarifaMostrar(asignacion) {
-            if (asignacion?.es_derivada) {
-                return Number(asignacion?.total_pagar || asignacion?.valor_hora || 0);
-            }
             const tipo = String(asignacion?.tipo_asignacion || "").toLowerCase();
             const esMensual = tipo.includes("full") || tipo.includes("part");
             if (esMensual) {
@@ -294,7 +284,6 @@ window.misAsignacionesApp = function () {
         },
 
         esAsignacionCerrable(asignacion) {
-            if (asignacion?.es_derivada) return false;
             const estado = String(asignacion?.estado || "")
                 .normalize("NFD")
                 .replace(/[\u0300-\u036f]/g, "")
@@ -305,10 +294,6 @@ window.misAsignacionesApp = function () {
 
         async cerrarAsignacion(asignacion) {
             if (!asignacion?.id) return;
-            if (asignacion?.es_derivada) {
-                this.toastMensaje("info", "La solicitud derivada ya está cerrada.");
-                return;
-            }
             if (!this.esMesaOFabrica(asignacion)) {
                 this.toastMensaje("info", "Solo aplica para asignaciones de Mesa/Fabrica");
                 return;

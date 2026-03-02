@@ -7181,30 +7181,37 @@ app.delete("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador"
     const asignacionId = await resolveInternalId(pool, ID_TABLES.registroAsignaciones, id, { required: true });
     const estados = await getEstadoAsignacionValues();
     const role = normalizeValue(req.user?.rol);
-    let result;
-
-    if (role === "coordinador") {
-      result = await pool.query(
-        `UPDATE registro_asignaciones ra
-         SET estado = $1::tipo_estado_asignacion,
-             updated_at = CURRENT_TIMESTAMP
-         FROM consultorias con
-         WHERE ra.id = $2
-           AND con.id = ra.id_consultoria
-           AND con.coordinador_responsable_id = $3
-         RETURNING ra.*`,
-        [estados.cerrado, asignacionId, req.user?.id]
-      );
-    } else {
-      result = await pool.query(
-        `UPDATE registro_asignaciones
-         SET estado = $1::tipo_estado_asignacion,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2
-         RETURNING *`,
-        [estados.cerrado, asignacionId]
-      );
+    const meta = await pool.query(
+      `SELECT
+         ra.id,
+         con.coordinador_responsable_id,
+         con.id_tipo_asignacion,
+         ta.titulo AS tipo_asignacion_titulo
+       FROM registro_asignaciones ra
+       JOIN consultorias con ON con.id = ra.id_consultoria
+       LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
+       WHERE ra.id = $1`,
+      [asignacionId]
+    );
+    if (!meta.rows.length) {
+      return res.status(404).json({ error: "Asignación no encontrada" });
     }
+    const info = meta.rows[0];
+    if (role === "coordinador" && String(info.coordinador_responsable_id || "") !== String(req.user?.id || "")) {
+      return res.status(404).json({ error: "Asignación no encontrada o sin permisos para cerrarla" });
+    }
+    const scope = getMesaFabricaScope(info.id_tipo_asignacion, info.tipo_asignacion_titulo);
+    if (!scope) {
+      return res.status(400).json({ error: "Solo se pueden cerrar asignaciones de Mesa/Fábrica." });
+    }
+    const result = await pool.query(
+      `UPDATE registro_asignaciones
+       SET estado = $1::tipo_estado_asignacion,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+       RETURNING *`,
+      [estados.cerrado, asignacionId]
+    );
 
     if (!result.rows.length) {
       return res.status(404).json({ error: "Asignación no encontrada o sin permisos para cerrarla" });

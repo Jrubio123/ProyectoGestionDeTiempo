@@ -274,17 +274,30 @@ window.misAsignacionesApp = function () {
         },
 
 
+        esMesaOFabrica(asignacion) {
+            const tipo = String(asignacion?.tipo_asignacion || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .trim();
+            return tipo.includes("mesa de servicio") || tipo.includes("fabrica");
+        },
+
         esAsignacionCerrable(asignacion) {
             const estado = String(asignacion?.estado || "")
                 .normalize("NFD")
                 .replace(/[\u0300-\u036f]/g, "")
                 .toLowerCase()
                 .trim();
-            return !["cerrado", "completado", "inactivo", "cancelado"].includes(estado);
+            return this.esMesaOFabrica(asignacion) && !["cerrado", "completado", "inactivo", "cancelado"].includes(estado);
         },
 
         async cerrarAsignacion(asignacion) {
             if (!asignacion?.id) return;
+            if (!this.esMesaOFabrica(asignacion)) {
+                this.toastMensaje("info", "Solo aplica para asignaciones de Mesa/Fabrica");
+                return;
+            }
             if (!this.esAsignacionCerrable(asignacion)) {
                 this.toastMensaje("info", "La asignacion ya esta cerrada");
                 return;

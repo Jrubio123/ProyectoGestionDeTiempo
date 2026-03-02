@@ -4788,6 +4788,7 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
   try {
     const userId = req.user?.id;
     const ocultarMonto = isAsociadoUser(req);
+    const estados = await getEstadoAsignacionValues();
     const result = await pool.query(
       `
       SELECT
@@ -4832,13 +4833,14 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
           ON rh.id_registro_asignacion = ra.id
          AND rh.estado_reporte IN ('Revisión', 'Rechazado', 'Pendiente')
       WHERE ra.consultor_responsable_id = $1
+        AND ra.estado IN ($2::tipo_estado_asignacion, $3::tipo_estado_asignacion)
         AND (
           COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
           OR LOWER(TRIM(COALESCE(ta.titulo, ''))) IN ('mesa de servicio', 'fabrica', 'fábrica')
         )
       ORDER BY ra.id DESC, rh.created_at DESC NULLS LAST, rh.id DESC
       `,
-      [userId]
+      [userId, estados.abierto, estados.proceso]
     );
     const rows = Array.isArray(result.rows) ? result.rows : [];
     if (!ocultarMonto) {

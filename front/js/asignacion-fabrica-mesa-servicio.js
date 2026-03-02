@@ -70,6 +70,10 @@ window.mesaFabricaApp = function () {
         },
 
         crearSolicitud(item) {
+            if (!this.isAsignacionOperable(item)) {
+                alert("La asignacion esta cerrada y no permite nuevos reportes.");
+                return;
+            }
             const scope = this.getScope(item);
             this.form = {
                 id: item.id,
@@ -106,6 +110,10 @@ window.mesaFabricaApp = function () {
         },
 
         async enviarTicket(item) {
+            if (!this.isAsignacionOperable(item)) {
+                alert("La asignacion esta cerrada y no permite nuevos reportes.");
+                return;
+            }
             if (item?.estado_reporte === "Pendiente" || item?.estado_reporte === "Aprobado") {
                 alert("Este ticket no se puede reenviar en este estado.");
                 return;
@@ -148,6 +156,10 @@ window.mesaFabricaApp = function () {
 
         async guardarCambios() {
             try {
+                if (!this.isAsignacionOperable(this.form)) {
+                    alert("La asignacion esta cerrada y no permite nuevos reportes.");
+                    return;
+                }
                 const scope = this.getScope(this.form);
                 const shouldClose = this.shouldShowFechaCierre();
                 const validacion = this.validarTicket(this.form);
@@ -174,7 +186,8 @@ window.mesaFabricaApp = function () {
                 this.modalOpen = false;
                 await this.cargarTickets();
             } catch (e) {
-                alert("Error guardando");
+                const msg = e?.response?.data?.error || "Error guardando";
+                alert(msg);
             }
         },
 
@@ -239,6 +252,19 @@ window.mesaFabricaApp = function () {
                 .replace(/[\u0300-\u036f]/g, "")
                 .toLowerCase()
                 .trim();
+        },
+
+        normalizeEstadoAsignacion(value) {
+            return String(value || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .trim();
+        },
+
+        isAsignacionOperable(item = null) {
+            const estado = this.normalizeEstadoAsignacion(item?.estado || this.form?.estado || "");
+            return estado === "abierto" || estado === "proceso";
         },
 
         getScope(item) {
@@ -367,12 +393,16 @@ window.mesaFabricaApp = function () {
 
         canEdit(item) {
             const estado = String(item?.estado_reporte || "").toLowerCase();
-            return Boolean(item?.reporte_id) && (estado === "rechazado" || estado === "revisión" || estado === "revision");
+            return this.isAsignacionOperable(item) &&
+                Boolean(item?.reporte_id) &&
+                (estado === "rechazado" || estado === "revisión" || estado === "revision");
         },
 
         canSend(item) {
             const estado = String(item?.estado_reporte || "").toLowerCase();
-            return Boolean(item?.reporte_id) && (estado === "rechazado" || estado === "revisión" || estado === "revision");
+            return this.isAsignacionOperable(item) &&
+                Boolean(item?.reporte_id) &&
+                (estado === "rechazado" || estado === "revisión" || estado === "revision");
         }
     };
 };

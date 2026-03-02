@@ -36,7 +36,12 @@
                             <h3 class="font-bold text-gray-800 text-lg leading-tight" x-text="item.nombre_cliente"></h3>
                             <p class="text-xs text-purple-600 font-medium" x-text="item.nombre_modulo"></p>
                         </div>
-                        <button @click="crearSolicitud(item)" title="Crear nueva solicitud desde esta asignación" class="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors">
+                        <button
+                            @click="crearSolicitud(item)"
+                            :disabled="!isAsignacionOperable(item)"
+                            title="Crear nueva solicitud desde esta asignación"
+                            class="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-gray-400 disabled:hover:bg-transparent"
+                        >
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                         </button>
                     </div>

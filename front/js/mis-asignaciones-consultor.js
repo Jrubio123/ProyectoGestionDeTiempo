@@ -47,6 +47,24 @@ window.misAsignacionesConsultorApp = function () {
             return Number(asignacion?.valor_hora || 0);
         },
 
+        totalMostrar(asignacion) {
+            const totalBackend = Number(asignacion?.total_pagar || 0);
+            if (totalBackend > 0) return totalBackend;
+
+            const tarifa = this.tarifaMostrar(asignacion);
+            if (!(tarifa > 0)) return 0;
+
+            const horas = Number(asignacion?.horas_asignadas || 0);
+            if (horas > 0) return tarifa * horas;
+
+            const dias = Number(asignacion?.cantidad_dias || 0);
+            if (dias > 0) return tarifa * dias;
+
+            const tipo = String(asignacion?.nombre_tipo_asignacion || "").toLowerCase();
+            const esMensual = tipo.includes("full") || tipo.includes("part");
+            return esMensual ? tarifa : 0;
+        },
+
         formatearDinero(valor) {
             return new Intl.NumberFormat("es-CO", {
                 style: "currency",

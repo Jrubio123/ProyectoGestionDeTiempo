@@ -42,7 +42,7 @@
                     <div class="text-sm text-gray-600" x-text="a.nombre_tipo_asignacion || '-'"></div>
                     <div class="text-sm text-gray-600" x-text="a.nombre_modulo || '-'"></div>
                     <div class="text-sm font-semibold text-right text-indigo-700" x-show="!$data.esAsociado" x-cloak x-text="formatearDinero(tarifaMostrar(a))"></div>
-                    <div class="text-sm font-semibold text-right text-green-700" x-show="!$data.esAsociado" x-cloak x-text="formatearDinero(a.total_pagar || 0)"></div>
+                    <div class="text-sm font-semibold text-right text-green-700" x-show="!$data.esAsociado" x-cloak x-text="formatearDinero(totalMostrar(a))"></div>
                     <div class="flex justify-center" x-show="!$data.esAsociado" x-cloak>
                         <button @click="verDetalle(a)" class="p-2 text-indigo-600 hover:bg-indigo-100 rounded-lg" title="Ver detalle">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -98,7 +98,7 @@
                 </div>
                 <div x-show="!$data.esAsociado" x-cloak>
                     <span class="text-gray-500">Total:</span>
-                    <div class="font-medium" x-text="formatearDinero(detalle.total_pagar || 0)"></div>
+                    <div class="font-medium" x-text="formatearDinero(totalMostrar(detalle))"></div>
                 </div>
                 <div class="sm:col-span-2">
                     <span class="text-gray-500">Observación:</span>

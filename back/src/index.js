@@ -4491,7 +4491,6 @@ app.get("/mis-asignaciones", requireAccess({ roles: ["Consultor", "Consultor Pri
             AND u.id_consultor_principal = $1
         )
       )
-        AND lr.estado_reporte = 'Aprobado'
       ORDER BY ra.id DESC
     `, [userId || null]);
     res.json(result.rows);

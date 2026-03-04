@@ -194,7 +194,7 @@ function normalizeEstadoMesaInput(value) {
   const norm = normalizeEnumLabel(raw);
   const map = new Map([
     ["cerrado", "Cerrado"],
-    ["enproceso", "En Proceso"],
+    ["enproceso", "En proceso"],
     ["transferidosilver", "Transferido Silver"],
     ["transferidocorona", "Transferido Corona"]
   ]);
@@ -206,8 +206,8 @@ function normalizeEstadoFabricaInput(value) {
   if (!raw) return null;
   const norm = normalizeEnumLabel(raw);
   const map = new Map([
-    ["endesarrollo", "En Proceso"],
-    ["enproceso", "En Proceso"],
+    ["endesarrollo", "En desarrollo"],
+    ["enproceso", "En desarrollo"],
     ["finalizado", "Finalizado"]
   ]);
   return map.get(norm) || null;
@@ -240,7 +240,7 @@ async function getEnumLabels(typeName, fallback = []) {
 
 async function getEstadoMesaValues() {
   if (estadoMesaCache) return estadoMesaCache;
-  const { labels, fromDb } = await getEnumLabels("tipo_estado_mesa", ["Cerrado", "En Proceso", "Transferido Silver", "Transferido Corona"]);
+  const { labels, fromDb } = await getEnumLabels("tipo_estado_mesa", ["Cerrado", "En proceso", "Transferido Silver", "Transferido Corona"]);
   const byNorm = new Map(labels.map((label) => [normalizeEnumLabel(label), label]));
   const pick = (...candidates) => {
     for (const candidate of candidates) {
@@ -252,7 +252,7 @@ async function getEstadoMesaValues() {
   const resolved = {
     labels,
     cerrado: pick("Cerrado"),
-    proceso: pick("En Proceso", "EnProceso"),
+    proceso: pick("En proceso", "En Proceso", "EnProceso"),
     transferidoSilver: pick("Transferido Silver", "TransferidoSilver"),
     transferidoCorona: pick("Transferido Corona", "TransferidoCorona")
   };
@@ -277,7 +277,7 @@ function resolveEstadoMesaInput(value, estadosMesa) {
 
 async function getEstadoFabricaValues() {
   if (estadoFabricaCache) return estadoFabricaCache;
-  const { labels, fromDb } = await getEnumLabels("tipo_estado_fabrica", ["En Proceso", "Finalizado"]);
+  const { labels, fromDb } = await getEnumLabels("tipo_estado_fabrica", ["En desarrollo", "Finalizado"]);
   const byNorm = new Map(labels.map((label) => [normalizeEnumLabel(label), label]));
   const pick = (...candidates) => {
     for (const candidate of candidates) {
@@ -288,7 +288,7 @@ async function getEstadoFabricaValues() {
   };
   const resolved = {
     labels,
-    proceso: pick("En Proceso", "EnProceso"),
+    proceso: pick("En desarrollo", "En Desarrollo", "En Proceso", "EnProceso"),
     finalizado: pick("Finalizado")
   };
   if (fromDb) {

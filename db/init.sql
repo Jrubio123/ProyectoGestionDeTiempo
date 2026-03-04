@@ -18,8 +18,9 @@ IF NOT EXISTS "pg_trgm";
 CREATE TYPE tipo_aprobacion AS ENUM
 (
     'Aprobado',
+    'Pendiente',
     'Rechazado',
-    'Pendiente'
+    'Revisión'
 );
 
 -- Estados de Asignación
@@ -38,6 +39,12 @@ CREATE TYPE tipo_servicio AS ENUM
     'Requerimiento'
 );
 
+-- Tipos de Permiso de Administrador
+CREATE TYPE tipo_permiso_admin AS ENUM
+(
+    'Crear Asignación'
+);
+
 -- Estados de Reporte
 CREATE TYPE tipo_estado_reporte AS ENUM
 (
@@ -51,10 +58,8 @@ CREATE TYPE tipo_estado_reporte AS ENUM
 -- Estados de Mesa de Servicio
 CREATE TYPE tipo_estado_mesa AS ENUM
 (
-    'Abierto',
     'Cerrado',
-    'En Proceso',
-    'Suspendido',
+    'En proceso',
     'Transferido Silver',
     'Transferido Corona'
 );
@@ -62,10 +67,8 @@ CREATE TYPE tipo_estado_mesa AS ENUM
 -- Estados de Fábrica
 CREATE TYPE tipo_estado_fabrica AS ENUM
 (
-    'Finalizado',
-    'En Proceso',
-    'Pendiente',
-    'Cancelado'
+    'En desarrollo',
+    'Finalizado'
 );
 
 -- Tipos de Persona
@@ -548,7 +551,7 @@ CREATE TABLE permisos_administrador
 
     coordinador_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
 
-    tipo_servicio tipo_servicio,
+    tipo_permiso tipo_permiso_admin,
     permiso_activo BOOLEAN DEFAULT true,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -558,7 +561,7 @@ CREATE TABLE permisos_administrador
 CREATE INDEX idx_permisos_coordinador ON permisos_administrador(coordinador_id);
 CREATE INDEX idx_permisos_activo ON permisos_administrador(permiso_activo);
 
-COMMENT ON TABLE permisos_administrador IS 'Permisos de coordinadores para tipos de servicio';
+COMMENT ON TABLE permisos_administrador IS 'Permisos de coordinadores para acciones administrativas';
 
 CREATE TABLE solicitudes_rrhh (
     id SERIAL PRIMARY KEY,

@@ -197,8 +197,9 @@ window.mesaFabricaApp = function () {
 
         mapEstadoTicketToUi(item, value) {
             const scope = this.getScope(item);
-            if (scope === "fabrica" && String(value || "").trim() === "En Proceso") {
-                return "En Desarrollo";
+            const estadoNorm = this.normalizeTipo(value);
+            if (scope === "fabrica" && (estadoNorm === "enproceso" || estadoNorm === "endesarrollo")) {
+                return "En desarrollo";
             }
             return value || "";
         },
@@ -314,8 +315,8 @@ window.mesaFabricaApp = function () {
 
         estadoOptions() {
             const scope = this.getScope(this.form);
-            if (scope === "fabrica") return ["En Desarrollo", "Finalizado"];
-            return ["Cerrado", "En Proceso", "Transferido Silver", "Transferido Corona"];
+            if (scope === "fabrica") return ["En desarrollo", "Finalizado"];
+            return ["Cerrado", "En proceso", "Transferido Silver", "Transferido Corona"];
         },
 
         shouldShowFechaCierre() {

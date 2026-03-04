@@ -31,6 +31,13 @@ CREATE TYPE tipo_estado_asignacion AS ENUM
     'Proceso'
 );
 
+-- Estados de Asignación de Mesa/Fábrica
+CREATE TYPE tipo_estado_asignacion_mesa AS ENUM
+(
+    'Activo',
+    'Inactivo'
+);
+
 -- Tipos de Servicio
 CREATE TYPE tipo_servicio AS ENUM
 (
@@ -531,7 +538,7 @@ CREATE TABLE asignaciones_consultoria_mesa_fabrica
     consultor_responsable_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
 
     valor_hora DECIMAL(15, 2),
-    estado_asignacion tipo_estado_asignacion DEFAULT 'Abierto',
+    estado_asignacion tipo_estado_asignacion_mesa DEFAULT 'Activo',
     id_modulo INTEGER REFERENCES modulo(id) ON DELETE SET NULL,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

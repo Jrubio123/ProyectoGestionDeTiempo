@@ -1,0 +1,114 @@
+﻿<div x-data="onboardingThApp()" class="rrhh-page max-w-7xl mx-auto space-y-0">
+    <section class="rrhh-hero relative overflow-hidden bg-white/40 backdrop-blur-xl border-b border-white/20 p-8 rounded-b-3xl shadow-sm">
+        <div class="absolute -top-24 -right-24 w-64 h-64 bg-[#5a189a]/20 rounded-full blur-3xl"></div>
+        <div class="rrhh-hero-content relative flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+            <div>
+                <h1 class="rrhh-title">Onboarding — Talento Humano</h1>
+                <p class="rrhh-subtitle">Revisión, aprobación y creación de usuarios.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <button @click="filtro='Todos'" class="rrhh-btn-ghost px-3 py-1.5 text-xs">Todos</button>
+                <button @click="filtro='Pendiente Coordinador'" class="rrhh-btn-ghost px-3 py-1.5 text-xs">Pendiente Coordinador</button>
+                <button @click="filtro='Pendiente Revision TH'" class="rrhh-btn-primary px-3 py-1.5 text-xs">Pendiente Revision TH</button>
+                <button @click="filtro='Pendiente Correo Silver'" class="px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-[#5a189a]">Pendiente Correo Silver</button>
+                <button @click="filtro='Completado'" class="rrhh-btn-ghost px-3 py-1.5 text-xs">Completado</button>
+                <button @click="filtro='Anulado'" class="rrhh-btn-ghost px-3 py-1.5 text-xs">Anulado</button>
+            </div>
+        </div>
+    </section>
+
+    <section class="rrhh-panel">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <template x-for="p in preregistrosFiltrados" :key="p.id">
+                <div class="rrhh-glass-card p-4 border-l-4" :class="estadoClass(p.estado)">
+                    <h3 class="font-bold text-[#20272f]" x-text="`${p.nombre || ''} ${p.apellidos || ''}`.trim() || '-' "></h3>
+                    <p class="text-sm text-[#5b6678] mt-1"><span class="font-semibold">Perfil:</span> <span x-text="p.solicitud?.perfil || '-' "></span></p>
+                    <p class="text-sm text-[#5b6678]"><span class="font-semibold">Cliente:</span> <span x-text="p.solicitud?.cliente?.nombre || '-' "></span></p>
+                    <span class="rrhh-badge mt-2" :class="badgeClass(p.estado)" x-text="p.estado"></span>
+                    <p class="text-xs text-[#6f7b8e] mt-2">
+                        S2:
+                        <span x-text="p.completado_coordinador_por ? `Completada por ${p.completado_coordinador_por_nombre || 'Coordinador'} · ${formatFecha(p.fecha_completado_coordinador)}` : 'Pendiente' "></span>
+                    </p>
+
+                    <div class="mt-4 flex gap-2">
+                        <button
+                            @click="abrirDetalle(p, p.estado === 'Pendiente Correo Silver')"
+                            class="flex-1 py-2 text-sm rounded-xl font-semibold"
+                            :class="accionPrincipalClass(p)"
+                            x-text="accionPrincipalLabel(p)">
+                        </button>
+                        <button @click="abrirDetalle(p)" class="rrhh-btn-ghost px-3 py-2 text-xs">Ver</button>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </section>
+
+    <div x-show="modalDetalle" class="fixed inset-0 z-50 flex items-start justify-center bg-black/50 px-3 pt-14 pb-4">
+        <div class="rrhh-glass-card w-full max-w-5xl p-6 max-h-[92vh] overflow-y-auto no-scrollbar relative">
+            <div class="flex items-start justify-between mb-4">
+                <div>
+                    <h3 class="text-xl font-bold text-[#20272f]">Detalle de preregistro</h3>
+                    <p class="text-sm text-[#5b6678]" x-text="itemActivo?.estado || '-' "></p>
+                </div>
+                <button @click="cerrarDetalle" class="rrhh-btn-ghost px-3 py-2 text-sm">Cerrar</button>
+            </div>
+
+            <div class="space-y-5">
+                <section>
+                    <p class="text-xs font-semibold uppercase text-[#6f7b8e] mb-2">Sección 1 — Datos Personales (solo lectura)</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Nombre completo</p><p class="font-semibold" x-text="`${itemActivo?.nombre || ''} ${itemActivo?.apellidos || ''}`.trim() || '-' "></p></div>
+                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Documento</p><p class="font-semibold" x-text="`${itemActivo?.tipo_documento || '-'} · ${itemActivo?.numero_documento || '-'}`"></p></div>
+                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Teléfono</p><p class="font-semibold" x-text="itemActivo?.telefono || '-' "></p></div>
+                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Correo personal</p><p class="font-semibold" x-text="itemActivo?.correo_personal || '-' "></p></div>
+                    </div>
+                </section>
+
+                <section>
+                    <p class="text-xs font-semibold uppercase text-[#6f7b8e] mb-2">Sección 2 — Datos del Puesto (solo lectura)</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Cliente</p><p class="font-semibold" x-text="itemActivo?.solicitud?.cliente?.nombre || '-' "></p></div>
+                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Perfil / Nivel</p><p class="font-semibold" x-text="`${itemActivo?.solicitud?.perfil || '-'} · ${itemActivo?.solicitud?.nivel || '-'}`"></p></div>
+                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Moneda</p><p class="font-semibold" x-text="itemActivo?.moneda || '-' "></p></div>
+                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Supervisor</p><p class="font-semibold" x-text="itemActivo?.responsable_supervisor || '-' "></p></div>
+                    </div>
+                </section>
+
+                <section>
+                    <p class="text-xs font-semibold uppercase text-[#6f7b8e] mb-2">Sección 3 — Datos Legales</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3" :class="{ 'opacity-80': !seccion3Editable }">
+                        <input class="rrhh-input text-sm md:col-span-2" x-model="formS3.direccion" :disabled="!seccion3Editable" placeholder="Dirección completa *">
+                        <select class="rrhh-input text-sm" x-model="formS3.tipo_persona" :disabled="!seccion3Editable"><option value="Natural">Natural</option><option value="Juridica">Jurídica</option></select>
+                        <select class="rrhh-input text-sm" x-model="formS3.banco_id" :disabled="!seccion3Editable">
+                            <option value="">Banco *</option>
+                            <template x-for="b in bancos" :key="b.id"><option :value="b.id" x-text="b.titulo"></option></template>
+                        </select>
+                        <select class="rrhh-input text-sm" x-model="formS3.tipo_cuenta" :disabled="!seccion3Editable"><option value="Ahorros">Ahorros</option><option value="Corriente">Corriente</option></select>
+                        <input class="rrhh-input text-sm" x-model="formS3.numero_cuenta" :disabled="!seccion3Editable" placeholder="Número de cuenta *">
+                        <input id="thCorreoSilver" class="rrhh-input text-sm md:col-span-2" x-model="formS3.correo_silver" :disabled="!seccion3Editable" placeholder="Correo Silver (requerido para aprobar)">
+                    </div>
+                </section>
+            </div>
+
+            <div class="mt-6 flex flex-wrap justify-end gap-2">
+                <button @click="cerrarDetalle" class="rrhh-btn-ghost px-4 py-2 text-sm">Cancelar</button>
+                <button x-show="seccion3Editable" @click="guardarS3" :disabled="guardandoS3" class="rrhh-btn-ghost px-4 py-2 text-sm disabled:opacity-60">Guardar</button>
+                <button x-show="seccion3Editable" @click="aprobarPreregistro" :disabled="!puedeAprobar || aprobando" class="rrhh-btn-primary px-4 py-2 text-sm disabled:opacity-60">Aprobar</button>
+                <button x-show="itemActivo?.estado !== 'Completado' && itemActivo?.estado !== 'Anulado'" @click="abrirModalAnular" class="px-4 py-2 text-sm rounded-xl font-semibold text-red-600 border border-red-200 hover:bg-red-50">Anular preregistro</button>
+            </div>
+
+            <div x-show="modalAnular" class="absolute inset-0 bg-black/40 flex items-center justify-center p-4">
+                <div class="bg-white rounded-2xl p-5 w-full max-w-md shadow-2xl">
+                    <h4 class="font-bold text-[#20272f]">Confirmar anulación</h4>
+                    <p class="text-sm text-[#5b6678] mt-1">¿Estás seguro de anular este preregistro? Esta acción no se puede deshacer.</p>
+                    <textarea rows="4" class="rrhh-input text-sm mt-3" x-model="motivoAnulacion" placeholder="Motivo (mínimo 20 caracteres)"></textarea>
+                    <div class="mt-4 flex justify-end gap-2">
+                        <button @click="modalAnular=false" class="rrhh-btn-ghost px-3 py-2 text-sm">Cancelar</button>
+                        <button @click="confirmarAnulacion" :disabled="anulando" class="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-60">Confirmar Anulación</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

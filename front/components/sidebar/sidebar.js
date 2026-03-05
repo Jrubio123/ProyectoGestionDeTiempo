@@ -1,4 +1,4 @@
-function initSidebar() {
+﻿function initSidebar() {
     const sidebar = document.querySelector(".sidebar");
     const toggleBtn = document.getElementById("sidebarToggle");
     const mobileBackdrop = document.getElementById("sidebarMobileBackdrop");
@@ -77,7 +77,7 @@ function initSidebar() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "solicitudesRecl", "soportes-cuentas-cobro"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -103,10 +103,8 @@ function initSidebar() {
             "registro-horas-consultor",
             "asignacion-fabrica-mesa-servicio"
         ],
-        reclutador: [
-            "inicio",
-            "solicitudesRecl"
-        ]
+        reclutador: ["inicio", "solicitudesRecl"],
+        talento_humano: ["inicio", "onboardingTH"]
     };
 
     const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
@@ -171,8 +169,8 @@ function initSidebar() {
 
     if (logoutBtn) {
         logoutBtn.addEventListener("click", function () {
-            if (confirm("¿Estás seguro de que quieres cerrar sesión?")) {
-                console.log("Cerrando sesión...");
+            if (confirm("Â¿EstÃ¡s seguro de que quieres cerrar sesiÃ³n?")) {
+                console.log("Cerrando sesiÃ³n...");
                 window.location.href = "/login";
             }
         });
@@ -186,3 +184,4 @@ if (document.readyState === "loading") {
 } else {
     initSidebar();
 }
+

@@ -1,4 +1,4 @@
-async function loadView(view) {
+﻿async function loadView(view) {
     try {
         const res = await fetch(`/views/${view}.html`);
         if (!res.ok) throw new Error("Error HTTP: " + res.status);
@@ -8,7 +8,7 @@ async function loadView(view) {
 
         container.innerHTML = html;
 
-        // Re-inicializar Alpine para el contenido cargado dinámicamente
+        // Re-inicializar Alpine para el contenido cargado dinÃ¡micamente
         if (window.Alpine) {
             Alpine.initTree(container);
         }
@@ -36,7 +36,8 @@ const routes = {
     "generar-cuenta-cobro": "generar-cuenta-cobro",
     "asignacion-fabrica-mesa-servicio": "asignacion-fabrica-mesa-servicio",
     solicitudesCoord: "solicitudesCoord",
-    solicitudesRecl: "solicitudesRecl"
+    solicitudesRecl: "solicitudesRecl",
+    onboardingTH: "onboardingTH"
 };
 
 function router() {
@@ -49,7 +50,7 @@ function router() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador","asociar-subconsultores", "tarifas", "solicitudesCoord", "solicitudesRecl", "soportes-cuentas-cobro"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador","asociar-subconsultores", "tarifas", "solicitudesCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -75,10 +76,8 @@ function router() {
             "registro-horas-consultor",
             "asignacion-fabrica-mesa-servicio"
         ],
-        reclutador: [
-            "inicio",
-            "solicitudesRecl"
-        ]
+        reclutador: ["inicio", "solicitudesRecl"],
+        talento_humano: ["inicio", "onboardingTH"]
     };
     const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
     if (view && !allowed.has(view)) {
@@ -95,3 +94,4 @@ function router() {
 
 window.addEventListener("hashchange", router);
 document.addEventListener("DOMContentLoaded", router);
+

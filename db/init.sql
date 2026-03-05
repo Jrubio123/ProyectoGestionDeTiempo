@@ -1,29 +1,29 @@
--- ============================================================================
--- Script de Inicialización - Base de Datos Gestión de Tiempo y Consultorías
+﻿-- ============================================================================
+-- Script de InicializaciÃ³n - Base de Datos GestiÃ³n de Tiempo y ConsultorÃ­as
 -- PostgreSQL 16
--- Migración desde SharePoint/PowerApps
+-- MigraciÃ³n desde SharePoint/PowerApps
 -- ============================================================================
 
--- Extensiones útiles
+-- Extensiones Ãºtiles
 CREATE EXTENSION
 IF NOT EXISTS "pg_trgm";
--- Para búsquedas de texto
+-- Para bÃºsquedas de texto
 
 
 -- ============================================================================
 -- TIPOS ENUMERADOS (Reemplazo de Choice de SharePoint)
 -- ============================================================================
 
--- Estados de Aprobación
+-- Estados de AprobaciÃ³n
 CREATE TYPE tipo_aprobacion AS ENUM
 (
     'Aprobado',
     'Pendiente',
     'Rechazado',
-    'Revisión'
+    'RevisiÃ³n'
 );
 
--- Estados de Asignación
+-- Estados de AsignaciÃ³n
 CREATE TYPE tipo_estado_asignacion AS ENUM
 (
     'Abierto',
@@ -31,7 +31,7 @@ CREATE TYPE tipo_estado_asignacion AS ENUM
     'Proceso'
 );
 
--- Estados de Asignación de Mesa/Fábrica
+-- Estados de AsignaciÃ³n de Mesa/FÃ¡brica
 CREATE TYPE tipo_estado_asignacion_mesa AS ENUM
 (
     'Activo',
@@ -49,7 +49,7 @@ CREATE TYPE tipo_servicio AS ENUM
 -- Tipos de Permiso de Administrador
 CREATE TYPE tipo_permiso_admin AS ENUM
 (
-    'Crear Asignación'
+    'Crear AsignaciÃ³n'
 );
 
 -- Estados de Reporte
@@ -59,7 +59,7 @@ CREATE TYPE tipo_estado_reporte AS ENUM
     'En_Firma',
     'Pendiente',
     'Rechazado',
-    'Revisión'
+    'RevisiÃ³n'
 );
 
 -- Estados de Mesa de Servicio
@@ -71,7 +71,7 @@ CREATE TYPE tipo_estado_mesa AS ENUM
     'Transferido Corona'
 );
 
--- Estados de Fábrica
+-- Estados de FÃ¡brica
 CREATE TYPE tipo_estado_fabrica AS ENUM
 (
     'En desarrollo',
@@ -82,7 +82,7 @@ CREATE TYPE tipo_estado_fabrica AS ENUM
 CREATE TYPE tipo_persona AS ENUM
 (
     'Natural',
-    'Jurídica'
+    'JurÃ­dica'
 );
 
 -- Monedas
@@ -100,8 +100,85 @@ CREATE TYPE tipo_consultor_enum AS ENUM
     'Asociado'
 );
 
+-- Grupo de usuario para onboarding
+CREATE TYPE grupo_usuario_tipo AS ENUM
+(
+    'ADMIN',
+    'COORDINADOR',
+    'CONSULTOR',
+    'CONTABILIDAD',
+    'COMERCIAL',
+    'Otro'
+);
+
+-- Grupo de distribucion para onboarding
+CREATE TYPE grupo_distribucion_tipo AS ENUM
+(
+    'Todos Silver',
+    'Vinculados',
+    'Responsable'
+);
+
+-- Cargos/perfiles para onboarding
+CREATE TYPE cargo_tipo AS ENUM
+(
+    'Analista Comercial',
+    'Analista de Soporte',
+    'Auxiliar Administrativa',
+    'Auxiliar Administrativa y de Talento Humano',
+    'Auxiliar Contable',
+    'Consultor .Net',
+    'Consultor ABAP',
+    'Consultor ABAP CPI',
+    'Consultor ABAP FIORI',
+    'Consultor ABAP ISH',
+    'Consultor ABAP TM',
+    'Consultor ABAP WORKFLOW',
+    'Consultor Basis',
+    'Consultor BI',
+    'Consultor BPC',
+    'Consultor Business One',
+    'Consultor CO',
+    'Consultor CS',
+    'Consultor DS',
+    'Consultor EWM',
+    'Consultor FI',
+    'Consultor FICO',
+    'Consultor FM',
+    'Consultor GRC',
+    'Consultor HCM',
+    'Consultor Integración',
+    'Consultor ISH',
+    'Consultor LETRA',
+    'Consultor MM',
+    'Consultor PM',
+    'Consultor PP',
+    'Consultor PP QM',
+    'Consultor PS',
+    'Consultor QM',
+    'Consultor RE',
+    'Consultor SD',
+    'Consultor SD LETRA',
+    'Consultor SQL',
+    'Consultor TM',
+    'Consultor TRM',
+    'Consultor WM',
+    'Consultor Workflow',
+    'Coordinadora de mesa de servicios',
+    'Coordinadora de Proyectos',
+    'Coordinadora de Servicios',
+    'Gerente Comercial',
+    'Gerente de Estrategia e Innovación',
+    'Gerente de Servicios',
+    'Líder Administrativa y de Talento Humano',
+    'Líder de Fabrica',
+    'Líder de Reclutamiento',
+    'Consultor Power BI',
+    'Consultor IBP'
+);
+
 -- ============================================================================
--- TABLAS DE CATÁLOGO (Tablas maestras sin dependencias)
+-- TABLAS DE CATÃLOGO (Tablas maestras sin dependencias)
 -- ============================================================================
 
 -- Tabla: Bancos
@@ -119,7 +196,7 @@ CREATE TABLE bancos
 
 CREATE INDEX idx_bancos_activo ON bancos(activo);
 
-COMMENT ON TABLE bancos IS 'Catálogo de bancos para cuentas de cobro';
+COMMENT ON TABLE bancos IS 'CatÃ¡logo de bancos para cuentas de cobro';
 
 -- Tabla: Roles
 CREATE TABLE roles
@@ -178,7 +255,7 @@ CREATE TABLE clientes
     correlativo INTEGER,
     activo BOOLEAN DEFAULT true,
 
-    -- Información adicional
+    -- InformaciÃ³n adicional
     direccion TEXT,
     telefono VARCHAR(50),
     email VARCHAR(255),
@@ -191,9 +268,9 @@ CREATE INDEX idx_clientes_nit ON clientes(nit);
 CREATE INDEX idx_clientes_activo ON clientes(activo);
 CREATE INDEX idx_clientes_prefijo ON clientes(prefijo);
 
-COMMENT ON TABLE clientes IS 'Catálogo de clientes de la empresa';
+COMMENT ON TABLE clientes IS 'CatÃ¡logo de clientes de la empresa';
 COMMENT ON COLUMN clientes.titulo IS 'Nombre de la empresa cliente';
-COMMENT ON COLUMN clientes.nit IS 'Número de identificación tributaria';
+COMMENT ON COLUMN clientes.nit IS 'NÃºmero de identificaciÃ³n tributaria';
 
 -- Tabla: TipoAsignacion
 CREATE TABLE tipo_asignacion
@@ -201,7 +278,7 @@ CREATE TABLE tipo_asignacion
     id SERIAL PRIMARY KEY,
     public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     titulo VARCHAR(255) NOT NULL UNIQUE,
-    -- Full Time, Part Time, Mesa Fábrica, etc
+    -- Full Time, Part Time, Mesa FÃ¡brica, etc
     descripcion TEXT,
     activo BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -210,7 +287,7 @@ CREATE TABLE tipo_asignacion
 
 CREATE INDEX idx_tipo_asignacion_activo ON tipo_asignacion(activo);
 
-COMMENT ON TABLE tipo_asignacion IS 'Tipos de asignación de consultores';
+COMMENT ON TABLE tipo_asignacion IS 'Tipos de asignaciÃ³n de consultores';
 
 -- Tabla: Modulo
 CREATE TABLE modulo
@@ -228,9 +305,9 @@ CREATE TABLE modulo
 
 CREATE INDEX idx_modulo_activo ON modulo(activo);
 
-COMMENT ON TABLE modulo IS 'Módulos de consultoría (IT, AT, FI, etc)';
+COMMENT ON TABLE modulo IS 'MÃ³dulos de consultorÃ­a (IT, AT, FI, etc)';
 
--- Tablas auxiliares para conversión de números a letras
+-- Tablas auxiliares para conversiÃ³n de nÃºmeros a letras
 CREATE TABLE period_1
 (
     id SERIAL PRIMARY KEY,
@@ -239,7 +316,7 @@ CREATE TABLE period_1
     titulo VARCHAR(50) NOT NULL
 );
 
-COMMENT ON TABLE period_1 IS 'Periodos para conversión de números a letras (Mil, Millón, Billón)';
+COMMENT ON TABLE period_1 IS 'Periodos para conversiÃ³n de nÃºmeros a letras (Mil, MillÃ³n, BillÃ³n)';
 
 CREATE TABLE place_value_1
 (
@@ -250,7 +327,7 @@ CREATE TABLE place_value_1
     column_value INTEGER NOT NULL
 );
 
-COMMENT ON TABLE place_value_1 IS 'Valores de lugar para conversión de números a letras';
+COMMENT ON TABLE place_value_1 IS 'Valores de lugar para conversiÃ³n de nÃºmeros a letras';
 
 -- ============================================================================
 -- TABLA DE USUARIOS (Reemplazo de campos Person/Group de SharePoint)
@@ -261,7 +338,7 @@ CREATE TABLE usuarios
     id SERIAL PRIMARY KEY,
     public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
 
-    -- Información de usuario (Person/Group de SharePoint)
+    -- InformaciÃ³n de usuario (Person/Group de SharePoint)
     nombre_usuario VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash TEXT,
@@ -277,22 +354,22 @@ CREATE TABLE usuarios
     banco_id INTEGER REFERENCES bancos(id),
     tipo_cuenta_id INTEGER REFERENCES tipo_cuenta_bancaria(id),
 
-    -- Información personal
+    -- InformaciÃ³n personal
     tipo_documento_id INTEGER REFERENCES documento_identidad(id),
     cedula VARCHAR(50),
     direccion TEXT,
     telefono VARCHAR(50),
     ciudad VARCHAR(100),
 
-    -- Clasificación (antes eran Choice en SharePoint)
+    -- ClasificaciÃ³n (antes eran Choice en SharePoint)
     tipo_persona tipo_persona,
     moneda_cobro tipo_moneda DEFAULT 'COP',
     tipo_consultor tipo_consultor_enum,
 
-    -- Relación jerárquica (auto-referencia)
+    -- RelaciÃ³n jerÃ¡rquica (auto-referencia)
     id_consultor_principal INTEGER REFERENCES usuarios(id),
 
-    -- Información adicional
+    -- InformaciÃ³n adicional
     foto_url TEXT,
     observaciones TEXT,
 
@@ -303,7 +380,7 @@ CREATE TABLE usuarios
 
 CREATE UNIQUE INDEX idx_usuarios_azure_oid ON usuarios(azure_oid);
 
--- Índices para usuarios
+-- Ãndices para usuarios
 CREATE INDEX idx_usuarios_email ON usuarios(email);
 CREATE INDEX idx_usuarios_rol ON usuarios(rol_usuario_id);
 CREATE INDEX idx_usuarios_activo ON usuarios(activo);
@@ -311,11 +388,11 @@ CREATE INDEX idx_usuarios_sharepoint_id ON usuarios(sharepoint_user_id);
 CREATE INDEX idx_usuarios_tipo_consultor ON usuarios(tipo_consultor);
 
 COMMENT ON TABLE usuarios IS 'Usuarios del sistema - Reemplaza campos Person/Group de SharePoint';
-COMMENT ON COLUMN usuarios.sharepoint_user_id IS 'ID del usuario en SharePoint para migración';
+COMMENT ON COLUMN usuarios.sharepoint_user_id IS 'ID del usuario en SharePoint para migraciÃ³n';
 COMMENT ON COLUMN usuarios.email IS 'Email del usuario - usado para mapear Person/Group';
 
 -- ============================================================================
--- TABLAS DE GESTIÓN DE CONSULTORÍAS
+-- TABLAS DE GESTIÃ“N DE CONSULTORÃAS
 -- ============================================================================
 
 -- Tabla: Consultorias
@@ -352,7 +429,7 @@ CREATE INDEX idx_consultorias_coordinador ON consultorias(coordinador_responsabl
 CREATE INDEX idx_consultorias_activo ON consultorias(activo);
 CREATE INDEX idx_consultorias_tipo ON consultorias(id_tipo_asignacion);
 
-COMMENT ON TABLE consultorias IS 'Proyectos de consultoría para clientes';
+COMMENT ON TABLE consultorias IS 'Proyectos de consultorÃ­a para clientes';
 
 -- Tabla: TarifaConsultor
 CREATE TABLE tarifa_consultor
@@ -384,7 +461,7 @@ CREATE INDEX idx_tarifa_consultor ON tarifa_consultor(consultor_id);
 CREATE INDEX idx_tarifa_modulo ON tarifa_consultor(modulo_id);
 CREATE INDEX idx_tarifa_activo ON tarifa_consultor(activo);
 
-COMMENT ON TABLE tarifa_consultor IS 'Tarifas por consultor, cliente y tipo de asignación';
+COMMENT ON TABLE tarifa_consultor IS 'Tarifas por consultor, cliente y tipo de asignaciÃ³n';
 
 -- Tabla: RegistroAsignaciones
 CREATE TABLE registro_asignaciones
@@ -398,7 +475,7 @@ CREATE TABLE registro_asignaciones
     -- Consultor (antes Person/Group, ahora FK a usuarios)
     consultor_responsable_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
 
-    -- Aprobación y estado (antes Choice en SharePoint)
+    -- AprobaciÃ³n y estado (antes Choice en SharePoint)
     aprobar_coordinador tipo_aprobacion DEFAULT 'Pendiente',
     estado tipo_estado_asignacion DEFAULT 'Abierto',
 
@@ -414,7 +491,7 @@ CREATE TABLE registro_asignaciones
     valor_dia DECIMAL(15, 2),
     total_pagar DECIMAL(15, 2),
 
-    -- Información del caso
+    -- InformaciÃ³n del caso
     nro_caso_interno TEXT,
     nro_caso_cliente TEXT,
     tipo_servicio tipo_servicio,
@@ -473,12 +550,12 @@ CREATE TABLE reporte_horas
     id_registro_asignacion INTEGER NOT NULL REFERENCES registro_asignaciones(id) ON DELETE CASCADE,
     id_cuenta_cobro INTEGER REFERENCES cuenta_cobro(id) ON DELETE SET NULL,
 
-    -- Horas y días
+    -- Horas y dÃ­as
     horas_reportadas DECIMAL(10, 2),
     cantidad_dias_reportados INTEGER,
     total_cobrar DECIMAL(15, 2),
 
-    -- Información del reporte
+    -- InformaciÃ³n del reporte
     requerimiento TEXT,
     perfil_fabrica VARCHAR(100),
     wricef VARCHAR(120),
@@ -495,7 +572,7 @@ CREATE TABLE reporte_horas
     consultor_responsable_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
     consultor_principal_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
 
-    -- Información de servicio
+    -- InformaciÃ³n de servicio
     tipo_servicio VARCHAR(100),
     -- Texto libre por ahora
 
@@ -549,7 +626,7 @@ CREATE INDEX idx_asig_mesa_consultoria ON asignaciones_consultoria_mesa_fabrica(
 CREATE INDEX idx_asig_mesa_consultor ON asignaciones_consultoria_mesa_fabrica(consultor_responsable_id);
 CREATE INDEX idx_asig_mesa_estado ON asignaciones_consultoria_mesa_fabrica(estado_asignacion);
 
-COMMENT ON TABLE asignaciones_consultoria_mesa_fabrica IS 'Asignaciones específicas de mesa de fábrica';
+COMMENT ON TABLE asignaciones_consultoria_mesa_fabrica IS 'Asignaciones especÃ­ficas de mesa de fÃ¡brica';
 
 CREATE TABLE permisos_administrador
 (
@@ -584,14 +661,14 @@ CREATE TABLE solicitudes_rrhh (
     
     tiempo VARCHAR(100),
     ubicacion VARCHAR(50) NOT NULL DEFAULT 'Remoto' 
-        CHECK (ubicacion IN ('En sitio', 'Remoto', 'Híbrido')),
+        CHECK (ubicacion IN ('En sitio', 'Remoto', 'HÃ­brido')),
     modalidad VARCHAR(50) NOT NULL DEFAULT 'Full time'
         CHECK (modalidad IN ('Full time', 'Medio tiempo', 'Por horas')),
     
     fecha_inicio_esperada DATE,
     
     tipo_proyecto VARCHAR(50)
-        CHECK (tipo_proyecto IN ('Soporte', 'Roll out', 'Implementación', 'Mantenimiento', 'Migración')),
+        CHECK (tipo_proyecto IN ('Soporte', 'Roll out', 'ImplementaciÃ³n', 'Mantenimiento', 'MigraciÃ³n')),
     
     experiencia TEXT,
     
@@ -611,12 +688,92 @@ CREATE TABLE solicitudes_rrhh (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
-COMMENT ON TABLE solicitudes_rrhh IS 'Gestión de solicitudes de vacantes';
+COMMENT ON TABLE solicitudes_rrhh IS 'GestiÃ³n de solicitudes de vacantes';
 COMMENT ON COLUMN solicitudes_rrhh.presupuesto IS 'Rango salarial o presupuesto estimado (Texto libre)';
 
 CREATE INDEX idx_rrhh_estado ON solicitudes_rrhh(estado);
 CREATE INDEX idx_rrhh_coordinador ON solicitudes_rrhh(coordinador_id);
 CREATE INDEX idx_rrhh_cliente ON solicitudes_rrhh(cliente_id);
+
+CREATE TABLE preregistro_personas (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+
+    id_solicitud_rrhh INT NOT NULL REFERENCES solicitudes_rrhh(id),
+
+    nombre VARCHAR(100) NOT NULL,
+    apellidos VARCHAR(100) NOT NULL,
+    tipo_documento_id INT NOT NULL REFERENCES documento_identidad(id),
+    numero_documento VARCHAR(50) NOT NULL,
+    telefono VARCHAR(30),
+    correo_personal VARCHAR(150) NOT NULL,
+    pais_ubicacion VARCHAR(100),
+    ciudad VARCHAR(100),
+
+    cargo cargo_tipo,
+    responsable_supervisor_id INT REFERENCES usuarios(id),
+    fecha_fin DATE,
+    moneda tipo_moneda,
+    pais_pago VARCHAR(100),
+    tarifa_hora NUMERIC(15,2),
+    tarifa_mes NUMERIC(15,2),
+    tarifa_medio_tiempo NUMERIC(15,2),
+    tarifa_capacitacion NUMERIC(15,2),
+    vpn_corona BOOLEAN DEFAULT FALSE,
+    necesita_s_user BOOLEAN DEFAULT FALSE,
+    grupo_usuario grupo_usuario_tipo,
+    grupo_usuario_otro VARCHAR(150),
+    grupo_distribucion grupo_distribucion_tipo,
+    observaciones TEXT,
+
+    direccion TEXT,
+    tipo_persona tipo_persona,
+    banco_id INT REFERENCES bancos(id),
+    tipo_cuenta_id INT REFERENCES tipo_cuenta_bancaria(id),
+    numero_cuenta VARCHAR(50),
+    correo_silver VARCHAR(150) UNIQUE,
+
+    estado VARCHAR(50) NOT NULL DEFAULT 'Pendiente Coordinador'
+        CHECK (estado IN (
+            'Pendiente Coordinador',
+            'Pendiente Revision TH',
+            'Pendiente Correo Silver',
+            'Completado',
+            'Anulado'
+        )),
+
+    creado_por INT NOT NULL REFERENCES usuarios(id),
+    completado_coordinador_por INT REFERENCES usuarios(id),
+    completado_th_por INT REFERENCES usuarios(id),
+    aprobado_por INT REFERENCES usuarios(id),
+    anulado_por INT REFERENCES usuarios(id),
+
+    motivo_anulacion TEXT,
+    id_usuario_creado INT REFERENCES usuarios(id),
+
+    fecha_completado_coordinador TIMESTAMP,
+    fecha_completado_th TIMESTAMP,
+    fecha_aprobacion TIMESTAMP,
+    fecha_anulacion TIMESTAMP,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+
+    CHECK (
+      (grupo_usuario = 'Otro' AND grupo_usuario_otro IS NOT NULL)
+      OR (grupo_usuario IS NULL)
+      OR (grupo_usuario <> 'Otro' AND grupo_usuario_otro IS NULL)
+    )
+);
+
+CREATE INDEX idx_preregistro_solicitud ON preregistro_personas(id_solicitud_rrhh);
+CREATE INDEX idx_preregistro_estado ON preregistro_personas(estado);
+CREATE INDEX idx_preregistro_documento ON preregistro_personas(numero_documento);
+CREATE INDEX idx_preregistro_correo_personal ON preregistro_personas(correo_personal);
+CREATE INDEX idx_preregistro_correo_silver ON preregistro_personas(correo_silver) WHERE correo_silver IS NOT NULL;
+CREATE INDEX idx_preregistro_usuario_creado ON preregistro_personas(id_usuario_creado) WHERE id_usuario_creado IS NOT NULL;
+CREATE INDEX idx_preregistro_updated ON preregistro_personas(updated_at DESC);
+CREATE UNIQUE INDEX uq_preregistro_solicitud_activa ON preregistro_personas(id_solicitud_rrhh) WHERE estado <> 'Anulado';
 
 -- ============================================================================
 -- COMPAT: PUBLIC ID FOR EXISTING DATABASES
@@ -644,7 +801,8 @@ DECLARE
     'reporte_horas',
     'asignaciones_consultoria_mesa_fabrica',
     'permisos_administrador',
-    'solicitudes_rrhh'
+    'solicitudes_rrhh',
+    'preregistro_personas'
   ];
 BEGIN
   FOREACH t IN ARRAY tables
@@ -677,7 +835,7 @@ END $$;
 -- FUNCIONES Y TRIGGERS
 -- ============================================================================
 
--- Función para actualizar el campo updated_at automáticamente
+-- FunciÃ³n para actualizar el campo updated_at automÃ¡ticamente
 CREATE OR REPLACE FUNCTION update_updated_at_column
 ()
 RETURNS TRIGGER AS $$
@@ -719,7 +877,7 @@ $$;
 -- ============================================================================
 
 
--- Insertar roles básicos
+-- Insertar roles bÃ¡sicos
 INSERT INTO roles
     (titulo, descripcion, activo)
 VALUES
@@ -727,25 +885,35 @@ VALUES
     ('Coordinador', 'Coordinador de proyectos', true),
     ('Consultor', 'Consultor externo o interno', true),
     ('Contabilidad', 'equipo contable', true),
-    ('Reclutador', 'Usuario encargado de reclutar y gestionar candidatos y consultores', true);
+    ('Reclutador', 'Usuario encargado de reclutar y gestionar candidatos y consultores', true),
+    ('Talento Humano', 'Usuario de Talento Humano para onboarding y aprobacion de preregistros', true);
+
+INSERT INTO documento_identidad
+    (titulo, codigo, activo)
+VALUES
+    ('Cédula de Ciudadanía', 'CC', true),
+    ('Cédula de Extranjería', 'CE', true),
+    ('Pasaporte', 'PA', true),
+    ('NIT', 'NIT', true)
+ON CONFLICT (titulo) DO NOTHING;
 
 
--- Insertar tipos de asignación (actualizado según tu lista)
+-- Insertar tipos de asignaciÃ³n (actualizado segÃºn tu lista)
 INSERT INTO tipo_asignacion
     (titulo, descripcion, activo)
 VALUES
-    ('Full time', 'Asignación de tiempo completo (40 horas/semana)', true),
-    ('Part Time', 'Asignación de medio tiempo', true),
+    ('Full time', 'AsignaciÃ³n de tiempo completo (40 horas/semana)', true),
+    ('Part Time', 'AsignaciÃ³n de medio tiempo', true),
     ('Tiempo y costo fijo', 'Proyectos con tiempo y costo definidos desde el inicio', true),
-    ('Horas por demanda', 'Horas asignadas según demanda del cliente', true),
+    ('Horas por demanda', 'Horas asignadas segÃºn demanda del cliente', true),
     ('Mesa de servicio', 'Soporte continuo por mesa de servicio/service desk', true),
-    ('Fábrica', 'Modelo de fábrica para desarrollo y soporte', true);
+    ('FÃ¡brica', 'Modelo de fÃ¡brica para desarrollo y soporte', true);
 
 -- ============================================================================
--- VISTAS ÚTILES
+-- VISTAS ÃšTILES
 -- ============================================================================
 
--- Vista: Asignaciones activas con información completa
+-- Vista: Asignaciones activas con informaciÃ³n completa
 CREATE OR REPLACE VIEW v_asignaciones_activas AS
 SELECT
     ra.id,
@@ -776,7 +944,7 @@ FROM registro_asignaciones ra
     LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
 WHERE ra.estado IN ('Abierto', 'Proceso');
 
-COMMENT ON VIEW v_asignaciones_activas IS 'Vista de asignaciones activas con toda la información relacionada';
+COMMENT ON VIEW v_asignaciones_activas IS 'Vista de asignaciones activas con toda la informaciÃ³n relacionada';
 
 -- Vista: Reporte de horas pendientes de aprobar
 CREATE OR REPLACE VIEW v_reportes_pendientes AS
@@ -804,7 +972,7 @@ WHERE rh.estado_reporte = 'Pendiente';
 
 COMMENT ON VIEW v_reportes_pendientes IS 'Vista de reportes de horas pendientes de aprobar';
 
--- Vista: Consultores activos con su información completa
+-- Vista: Consultores activos con su informaciÃ³n completa
 CREATE OR REPLACE VIEW v_consultores_activos AS
 SELECT
     u.id,
@@ -828,9 +996,9 @@ FROM usuarios u
 WHERE u.activo = true
     AND r.titulo IN ('Consultor', 'Consultor Principal');
 
-COMMENT ON VIEW v_consultores_activos IS 'Vista de consultores activos con información completa';
+COMMENT ON VIEW v_consultores_activos IS 'Vista de consultores activos con informaciÃ³n completa';
 
--- Vista: Resumen de facturación por cliente
+-- Vista: Resumen de facturaciÃ³n por cliente
 CREATE OR REPLACE VIEW v_facturacion_por_cliente AS
 SELECT
     c.id as cliente_id,
@@ -846,7 +1014,7 @@ FROM clientes c
     LEFT JOIN cuenta_cobro cc ON rh.id_cuenta_cobro = cc.id
 GROUP BY c.id, c.titulo, c.nit;
 
-COMMENT ON VIEW v_facturacion_por_cliente IS 'Resumen de facturación por cliente';
+COMMENT ON VIEW v_facturacion_por_cliente IS 'Resumen de facturaciÃ³n por cliente';
 
 -- Vista: Tarifas vigentes
 CREATE OR REPLACE VIEW v_tarifas_vigentes AS
@@ -872,10 +1040,10 @@ WHERE tc.activo = true
 COMMENT ON VIEW v_tarifas_vigentes IS 'Tarifas vigentes de consultores';
 
 -- ============================================================================
--- FUNCIONES ÚTILES
+-- FUNCIONES ÃšTILES
 -- ============================================================================
 
--- Función para obtener la tarifa de un consultor
+-- FunciÃ³n para obtener la tarifa de un consultor
 CREATE OR REPLACE FUNCTION obtener_tarifa_consultor
 (
     p_consultor_id INTEGER,
@@ -906,21 +1074,21 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION obtener_tarifa_consultor IS 'Obtiene la tarifa vigente de un consultor para un cliente';
 
--- Función para convertir número a letras (simplificada)
+-- FunciÃ³n para convertir nÃºmero a letras (simplificada)
 CREATE OR REPLACE FUNCTION numero_a_letras
 (numero DECIMAL)
 RETURNS TEXT AS $$
 BEGIN
-    -- Implementación simplificada
-    -- En producción, implementar lógica completa usando las tablas period_1 y place_value_1
+    -- ImplementaciÃ³n simplificada
+    -- En producciÃ³n, implementar lÃ³gica completa usando las tablas period_1 y place_value_1
     RETURN TRIM(TO_CHAR(numero, '999,999,999,999.99')) || ' pesos';
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION numero_a_letras IS 'Convierte un número a su representación en letras (simplificado)';
+COMMENT ON FUNCTION numero_a_letras IS 'Convierte un nÃºmero a su representaciÃ³n en letras (simplificado)';
 
 -- ============================================================================
--- POLÍTICAS DE SEGURIDAD (RLS - Row Level Security)
+-- POLÃTICAS DE SEGURIDAD (RLS - Row Level Security)
 -- ============================================================================
 
 -- Habilitar RLS en tablas sensibles
@@ -928,19 +1096,19 @@ ALTER TABLE usuarios ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reporte_horas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cuenta_cobro ENABLE ROW LEVEL SECURITY;
 
--- Política: Los usuarios solo pueden ver sus propios reportes
+-- PolÃ­tica: Los usuarios solo pueden ver sus propios reportes
 CREATE POLICY reporte_horas_consultor_policy ON reporte_horas
     FOR
 SELECT
     USING (consultor_responsable_id = current_setting('app.current_user_id')::INTEGER);
 
--- Política: Los coordinadores pueden ver reportes de sus consultorías
+-- PolÃ­tica: Los coordinadores pueden ver reportes de sus consultorÃ­as
 CREATE POLICY reporte_horas_coordinador_policy ON reporte_horas
     FOR
 SELECT
     USING (coordinador_id = current_setting('app.current_user_id')::INTEGER);
 
--- Política: Admins pueden ver todo
+-- PolÃ­tica: Admins pueden ver todo
 CREATE POLICY reporte_horas_admin_policy ON reporte_horas
     FOR ALL
     USING
@@ -957,16 +1125,16 @@ WHERE u.id = current_setting('app.current_user_id')
     );
 
 -- ============================================================================
--- ÍNDICES ADICIONALES PARA OPTIMIZACIÓN
+-- ÃNDICES ADICIONALES PARA OPTIMIZACIÃ“N
 -- ============================================================================
 
--- Índices de texto para búsquedas
+-- Ãndices de texto para bÃºsquedas
 CREATE INDEX idx_clientes_titulo_trgm ON clientes USING gin
 (titulo gin_trgm_ops);
 CREATE INDEX idx_usuarios_nombre_trgm ON usuarios USING gin
 (nombre_usuario gin_trgm_ops);
 
--- Índices compuestos para queries frecuentes
+-- Ãndices compuestos para queries frecuentes
 CREATE INDEX idx_reporte_horas_compuesto ON reporte_horas(
     estado_reporte, consultor_responsable_id, created_at DESC
 );
@@ -981,67 +1149,68 @@ CREATE INDEX idx_registro_asignaciones_compuesto ON registro_asignaciones(
 
 
 
--- Insertar datos de módulos SAP con descripciones detalladas
+-- Insertar datos de mÃ³dulos SAP con descripciones detalladas
 INSERT INTO modulo
     (titulo, nombre_completo, descripcion, activo)
 VALUES
-    ('IT', 'Infraestructura Tecnológica', 'SAP Basis: Administración de sistemas, monitoreo, transporte y optimización de rendimiento SAP', true),
-    ('AT', 'Automatizaciones', 'Automatización de procesos en SAP mediante workflows, BAdIs y enhancements', true),
+    ('IT', 'Infraestructura TecnolÃ³gica', 'SAP Basis: AdministraciÃ³n de sistemas, monitoreo, transporte y optimizaciÃ³n de rendimiento SAP', true),
+    ('AT', 'Automatizaciones', 'AutomatizaciÃ³n de procesos en SAP mediante workflows, BAdIs y enhancements', true),
     ('FI', 'Finanzas', 'SAP FI (Financial Accounting): Contabilidad general, cuentas por cobrar/pagar, activos fijos, closing', true),
     ('CO', 'Controlling', 'SAP CO (Controlling): Cost center accounting, internal orders, product costing, profitability analysis', true),
-    ('TR', 'Tesorería', 'SAP TR (Treasury): Gestión de tesorería, cash management, gestión de riesgos financieros', true),
-    ('SD', 'Ventas', 'SAP SD (Sales & Distribution): Gestión de pedidos, entregas, facturación, pricing y shipping', true),
-    ('MM', 'Gestión de materiales', 'SAP MM (Materials Management): Compras, gestión de inventarios, valuation, invoice verification', true),
-    ('PP', 'Planificación de Producción', 'SAP PP (Production Planning): MRP, production orders, capacity planning, shop floor control', true),
-    ('QM', 'Gestión de calidad', 'SAP QM (Quality Management): Planificación de calidad, inspection, certificates, notification processing', true),
-    ('PM', 'Mantenimiento', 'SAP PM (Plant Maintenance): Mantenimiento preventivo/correctivo, órdenes de mantenimiento, gestión de equipos', true),
-    ('WF', 'Workflow', 'SAP Workflow: Automatización de procesos de negocio con aprobaciones y routing', true),
-    ('PS', 'Proyectos', 'SAP PS (Project System): Gestión de proyectos, WBS, networks, budgeting, settlement', true),
-    ('ABAP', 'Abap Developer', 'Desarrollo ABAP: Programación en ABAP, reports, interfaces, enhancements y forms', true),
-    ('ABAP TM', 'Abap TM', 'ABAP para Transportation Management: Desarrollo específico para módulo TM', true),
-    ('TM', 'Transportation management', 'SAP TM (Transportation Management): Planificación, ejecución y facturación de transporte', true),
-    ('HCM', 'Recursos Humanos', 'SAP HCM (Human Capital Management): Administración de personal, nómina, organización y tiempo', true),
+    ('TR', 'TesorerÃ­a', 'SAP TR (Treasury): GestiÃ³n de tesorerÃ­a, cash management, gestiÃ³n de riesgos financieros', true),
+    ('SD', 'Ventas', 'SAP SD (Sales & Distribution): GestiÃ³n de pedidos, entregas, facturaciÃ³n, pricing y shipping', true),
+    ('MM', 'GestiÃ³n de materiales', 'SAP MM (Materials Management): Compras, gestiÃ³n de inventarios, valuation, invoice verification', true),
+    ('PP', 'PlanificaciÃ³n de ProducciÃ³n', 'SAP PP (Production Planning): MRP, production orders, capacity planning, shop floor control', true),
+    ('QM', 'GestiÃ³n de calidad', 'SAP QM (Quality Management): PlanificaciÃ³n de calidad, inspection, certificates, notification processing', true),
+    ('PM', 'Mantenimiento', 'SAP PM (Plant Maintenance): Mantenimiento preventivo/correctivo, Ã³rdenes de mantenimiento, gestiÃ³n de equipos', true),
+    ('WF', 'Workflow', 'SAP Workflow: AutomatizaciÃ³n de procesos de negocio con aprobaciones y routing', true),
+    ('PS', 'Proyectos', 'SAP PS (Project System): GestiÃ³n de proyectos, WBS, networks, budgeting, settlement', true),
+    ('ABAP', 'Abap Developer', 'Desarrollo ABAP: ProgramaciÃ³n en ABAP, reports, interfaces, enhancements y forms', true),
+    ('ABAP TM', 'Abap TM', 'ABAP para Transportation Management: Desarrollo especÃ­fico para mÃ³dulo TM', true),
+    ('TM', 'Transportation management', 'SAP TM (Transportation Management): PlanificaciÃ³n, ejecuciÃ³n y facturaciÃ³n de transporte', true),
+    ('HCM', 'Recursos Humanos', 'SAP HCM (Human Capital Management): AdministraciÃ³n de personal, nÃ³mina, organizaciÃ³n y tiempo', true),
     ('BO', 'Business Objects', 'SAP BusinessObjects: Suite de business intelligence, reporting y dashboarding', true),
     ('BW', 'Business Warehouse', 'SAP BW (Business Warehouse): Data warehousing, ETL, modeling, reporting y BEx', true),
-    ('Fiori', 'Fiori', 'SAP Fiori: UX para aplicaciones SAP basada en diseño responsive y user-friendly', true),
-    ('CPI', 'Cloud', 'SAP CPI (Cloud Platform Integration): Integración en la nube, middlewares y APIs', true),
+    ('Fiori', 'Fiori', 'SAP Fiori: UX para aplicaciones SAP basada en diseÃ±o responsive y user-friendly', true),
+    ('CPI', 'Cloud', 'SAP CPI (Cloud Platform Integration): IntegraciÃ³n en la nube, middlewares y APIs', true),
     ('BPC', 'Business Planning and Consolidation', 'SAP BPC: Planning, budgeting, forecasting y financial consolidation', true),
-    ('EWM', 'Extended Warehouse Manager', 'SAP EWM: Gestión avanzada de almacenes, cross-docking y yard management', true),
+    ('EWM', 'Extended Warehouse Manager', 'SAP EWM: GestiÃ³n avanzada de almacenes, cross-docking y yard management', true),
     ('DS', 'Data Services', 'SAP Data Services: ETL, data quality, profiling y integration', true),
-    ('FM', 'Funds Management', 'SAP FM (Funds Management): Budgeting público, fondos y commitment management', true),
-    ('LETRA', 'Logistics (LE) Transportation (TRA)', 'Logística y transporte en SAP LE-TRA', true),
-    ('GRC', 'Governance Risk and Compliance', 'SAP GRC: Gestión de riesgos, controles de acceso y compliance', true),
-    ('SQL', 'MS SQL', 'Administración de bases de datos SQL Server para entornos SAP', true),
-    ('ISH', 'Gestión Hospitalaria', 'SAP IS-H (Industry Solution Healthcare): Soluciones para el sector salud', true),
+    ('FM', 'Funds Management', 'SAP FM (Funds Management): Budgeting pÃºblico, fondos y commitment management', true),
+    ('LETRA', 'Logistics (LE) Transportation (TRA)', 'LogÃ­stica y transporte en SAP LE-TRA', true),
+    ('GRC', 'Governance Risk and Compliance', 'SAP GRC: GestiÃ³n de riesgos, controles de acceso y compliance', true),
+    ('SQL', 'MS SQL', 'AdministraciÃ³n de bases de datos SQL Server para entornos SAP', true),
+    ('ISH', 'GestiÃ³n Hospitalaria', 'SAP IS-H (Industry Solution Healthcare): Soluciones para el sector salud', true),
     ('SAC', 'SAP Analytic Cloud', 'SAP SAC: Analytics en la nube, planning y business intelligence', true),
-    ('BTP', 'SAP Business Technology Platform', 'SAP BTP: Plataforma para desarrollo, integración y extensión de aplicaciones', true),
-    ('WM', 'Gestión de Almacenes', 'SAP WM (Warehouse Management): Gestión básica de almacenes, picking y putaway', true),
-    ('PBI', 'Power BI', 'Integración de Power BI con SAP para reporting y visualizaciones', true),
+    ('BTP', 'SAP Business Technology Platform', 'SAP BTP: Plataforma para desarrollo, integraciÃ³n y extensiÃ³n de aplicaciones', true),
+    ('WM', 'GestiÃ³n de Almacenes', 'SAP WM (Warehouse Management): GestiÃ³n bÃ¡sica de almacenes, picking y putaway', true),
+    ('PBI', 'Power BI', 'IntegraciÃ³n de Power BI con SAP para reporting y visualizaciones', true),
     ('.NET', '.NET', 'Desarrollo .NET para integraciones con SAP y aplicaciones complementarias', true),
     ('B2B', 'B2B', 'Integraciones B2B con SAP mediante IDOCs, EDIs y middlewares', true),
-    ('MDG', 'NetWeaver Master Data Management', 'SAP MDG (Master Data Governance): Gestión y gobierno de datos maestros', true),
-    ('SLCM', 'Student Lifecycle Management', 'SAP SLCM: Solución para gestión del ciclo de vida estudiantil en educación', true),
+    ('MDG', 'NetWeaver Master Data Management', 'SAP MDG (Master Data Governance): GestiÃ³n y gobierno de datos maestros', true),
+    ('SLCM', 'Student Lifecycle Management', 'SAP SLCM: SoluciÃ³n para gestiÃ³n del ciclo de vida estudiantil en educaciÃ³n', true),
     ('Gerente', 'Gerente de proyectos', 'Project Management Office (PMO) para implementaciones SAP', true),
-    ('Datos', 'Ingeniero de datos', 'Data engineering, arquitectura de datos y gestión de data lakes para SAP', true),
-    ('TRM', 'Treasury and Risk Management', 'SAP TRM: Treasury avanzado y gestión de riesgos financieros', true),
+    ('Datos', 'Ingeniero de datos', 'Data engineering, arquitectura de datos y gestiÃ³n de data lakes para SAP', true),
+    ('TRM', 'Treasury and Risk Management', 'SAP TRM: Treasury avanzado y gestiÃ³n de riesgos financieros', true),
     ('IBP', 'Integrated Business Planning', 'SAP IBP: Planning de ventas y operaciones en tiempo real', true),
-    ('BASIS', 'BASIS', 'Administración SAP Basis: Instalación, configuración, monitoreo y performance tuning', true),
+    ('BASIS', 'BASIS', 'AdministraciÃ³n SAP Basis: InstalaciÃ³n, configuraciÃ³n, monitoreo y performance tuning', true),
     ('PI/PO', 'PI/PO', 'SAP Process Integration/Process Orchestration: Middleware para integraciones', true),
     ('ARIBA', 'ARIBA', 'SAP Ariba: Procurement, sourcing y supply chain collaboration', true),
-    ('Cambio', 'Gestión del cambio', 'Change Management para implementaciones y transformaciones SAP', true),
-    ('CS', 'CS', 'SAP CS (Customer Service): Gestión de servicios post-venta y mantenimiento', true),
-    ('BCS', 'BCS', 'SAP BCS (Business Consolidation System): Consolidación financiera', true),
-    ('UIPath', 'UIPath', 'Automatización robótica de procesos (RPA) para SAP con UIPath', true),
-    ('DATOS', 'Datos maestros', 'Gestión y mantenimiento de datos maestros en SAP (materiales, clientes, proveedores)', true),
-    ('VMS', 'VMS', 'Vendor Management System para gestión de proveedores', true),
-    ('RE', 'Bienes Inmuebles', 'SAP RE (Real Estate): Gestión de activos inmobiliarios y leasing', true),
+    ('Cambio', 'GestiÃ³n del cambio', 'Change Management para implementaciones y transformaciones SAP', true),
+    ('CS', 'CS', 'SAP CS (Customer Service): GestiÃ³n de servicios post-venta y mantenimiento', true),
+    ('BCS', 'BCS', 'SAP BCS (Business Consolidation System): ConsolidaciÃ³n financiera', true),
+    ('UIPath', 'UIPath', 'AutomatizaciÃ³n robÃ³tica de procesos (RPA) para SAP con UIPath', true),
+    ('DATOS', 'Datos maestros', 'GestiÃ³n y mantenimiento de datos maestros en SAP (materiales, clientes, proveedores)', true),
+    ('VMS', 'VMS', 'Vendor Management System para gestiÃ³n de proveedores', true),
+    ('RE', 'Bienes Inmuebles', 'SAP RE (Real Estate): GestiÃ³n de activos inmobiliarios y leasing', true),
     ('LBN', 'LBN', 'Logistics Business Network de SAP', true),
-    ('B1', 'Business One', 'SAP Business One: ERP para pequeñas y medianas empresas', true),
+    ('B1', 'Business One', 'SAP Business One: ERP para pequeÃ±as y medianas empresas', true),
     ('CML', 'CML', 'SAP Commercial Project Management', true),
-    ('SSF', 'SUCCESS FACTOR', 'SAP SuccessFactors: Solución completa de gestión del talento en la nube', true),
+    ('SSF', 'SUCCESS FACTOR', 'SAP SuccessFactors: SoluciÃ³n completa de gestiÃ³n del talento en la nube', true),
     ('FICA', 'FI CONTRATOS', 'SAP FICA (Financial Contract Accounting): Contabilidad de contratos para utilities', true),
-    ('SSFF', 'Success Factor', 'SAP SuccessFactors especializado en áreas específicas', true),
+    ('SSFF', 'Success Factor', 'SAP SuccessFactors especializado en Ã¡reas especÃ­ficas', true),
     ('C4C', 'C4C', 'SAP Cloud for Customer: CRM en la nube para ventas y servicio', true),
     ('FRONTEND', 'FRONTEND', 'Desarrollo frontend para interfaces SAP: Fiori, WebDynpro, interfaces web', true);
+
 
 

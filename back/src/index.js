@@ -13,6 +13,7 @@ const PDFDocument = require("pdfkit");
 const { NumerosALetras } = require("numero-a-letras");
 const { sendEmail, getGraphAccessToken } = require("./email");
 const { pool, getPoolStats, isTransientDbError } = require("./db");
+const registerPreregistroRoutes = require("./preregistro-routes");
 
 
 const app = express();
@@ -691,7 +692,8 @@ const ID_TABLES = Object.freeze({
   registroAsignaciones: "registro_asignaciones",
   cuentaCobro: "cuenta_cobro",
   reporteHoras: "reporte_horas",
-  solicitudesRrhh: "solicitudes_rrhh"
+  solicitudesRrhh: "solicitudes_rrhh",
+  preregistroPersonas: "preregistro_personas"
 });
 
 const ALLOWED_PUBLIC_ID_TABLES = new Set(Object.values(ID_TABLES));
@@ -3081,6 +3083,22 @@ app.get("/tipos-asignacion", requireAuthenticated, async (req, res) => {
   }
 });
 
+// Bancos activos
+app.get("/bancos", requireAuthenticated, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT public_id AS id, titulo
+      FROM bancos
+      WHERE activo = true
+      ORDER BY titulo ASC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener bancos" });
+  }
+});
+
 
 /* ===============================
    API - RRHH SOLICITUDES
@@ -3354,6 +3372,9 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
     }
 
     const before = solicitudInfo.rows[0];
+    if (before.estado_actual === "Contratado" && estado && estado !== "Contratado") {
+      return res.status(422).json({ error: "Una solicitud en estado Contratado no puede volver a estados anteriores" });
+    }
     const fields = [];
     const values = [];
     let idx = 1;
@@ -3453,6 +3474,18 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
     console.error(err);
     res.status(500).json({ error: "Error al actualizar solicitud" });
   }
+});
+
+registerPreregistroRoutes({
+  app,
+  pool,
+  resolveInternalId,
+  ID_TABLES,
+  normalizeValue,
+  requireAccess,
+  getGraphContext,
+  sendEmailSafe,
+  buildEmailLayout
 });
 /* ===============================
    AUTH

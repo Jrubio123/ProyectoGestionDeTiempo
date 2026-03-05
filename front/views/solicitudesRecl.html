@@ -47,7 +47,11 @@
 
                     <div class="mt-3 pt-3 border-t border-[#eef2f7]" @click.stop>
                         <label class="text-xs text-[#20272f] block mb-1 font-semibold">Estado Actual</label>
-                        <select @change="cambiarEstado(s.id, $event.target.value)" class="rrhh-input text-sm">
+                        <select
+                            @change="manejarCambioEstado(s, $event.target.value, $event.target)"
+                            class="rrhh-input text-sm"
+                            :disabled="esSolicitudBloqueada(s)"
+                            :class="{ 'opacity-60 cursor-not-allowed': esSolicitudBloqueada(s) }">
                             <option value="Pendiente" :selected="s.estado == 'Pendiente'">Pendiente</option>
                             <option value="Reclutamiento" :selected="s.estado == 'Reclutamiento'">Reclutamiento</option>
                             <option value="Entrevistas" :selected="s.estado == 'Entrevistas'">Entrevistas</option>
@@ -55,6 +59,14 @@
                             <option value="Cancelado" :selected="s.estado == 'Cancelado'">Cancelado</option>
                         </select>
                     </div>
+
+                    <template x-if="puedeEditarDatosPersonales(s)">
+                        <button
+                            @click.stop="abrirModalSeccion1Editar(s)"
+                            class="mt-2 w-full text-center text-xs font-semibold text-[#1c61ab] hover:text-[#174f8c] transition-colors">
+                            Editar datos personales
+                        </button>
+                    </template>
 
                     <button @click.stop="abrirNotas(s)" class="mt-3 w-full text-center text-xs font-semibold text-[#5a189a] hover:text-[#1c61ab] transition-colors">
                         Ver descripción / Agregar notas
@@ -152,6 +164,48 @@
 
             <div class="mt-4 flex justify-end">
                 <button @click="guardarNotas" class="rrhh-btn-primary px-4 py-2 text-sm">Guardar Notas</button>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="modalSeccion1" class="fixed inset-0 z-50 flex items-start justify-center bg-black/50 px-3 pt-16 pb-4">
+        <div class="rrhh-glass-card w-full max-w-3xl p-6 md:p-8 overflow-y-auto no-scrollbar">
+            <div class="flex items-start justify-between gap-3 mb-4">
+                <div>
+                    <h3 class="font-bold text-xl text-[#20272f]">Datos de la persona contratada</h3>
+                    <p class="text-sm text-[#5b6678]">
+                        <span class="font-semibold" x-text="solicitudObjetivo?.perfil || '-'"></span>
+                        ·
+                        <span x-text="solicitudObjetivo?.cliente || '-'"></span>
+                    </p>
+                </div>
+                <button @click="cerrarModalSeccion1" class="rrhh-btn-ghost px-3 py-2 text-sm">Cancelar</button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <input class="rrhh-input text-sm" x-model="formS1.nombre" placeholder="Nombre *">
+                <input class="rrhh-input text-sm" x-model="formS1.apellidos" placeholder="Apellidos *">
+                <select class="rrhh-input text-sm" x-model="formS1.tipo_documento">
+                    <option value="Cedula de Ciudadania">Cédula de Ciudadanía</option>
+                    <option value="Cedula de Extranjeria">Cédula de Extranjería</option>
+                    <option value="Pasaporte">Pasaporte</option>
+                    <option value="NIT">NIT</option>
+                </select>
+                <input class="rrhh-input text-sm" x-model="formS1.numero_documento" placeholder="Número de documento *">
+                <input class="rrhh-input text-sm" x-model="formS1.telefono" placeholder="Teléfono">
+                <input class="rrhh-input text-sm" x-model="formS1.correo_personal" placeholder="Correo personal *">
+                <input class="rrhh-input text-sm" x-model="formS1.pais_ubicacion" placeholder="País de ubicación">
+                <input class="rrhh-input text-sm" x-model="formS1.ciudad" placeholder="Ciudad">
+            </div>
+
+            <div class="mt-6 flex justify-end gap-3">
+                <button @click="cerrarModalSeccion1" class="rrhh-btn-ghost px-4 py-2 text-sm">Cancelar</button>
+                <button
+                    @click="guardarSeccion1"
+                    :disabled="guardandoSeccion1"
+                    class="rrhh-btn-primary px-4 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                    x-text="modoSeccion1 === 'crear' ? 'Guardar y Confirmar Contratación' : 'Guardar cambios'">
+                </button>
             </div>
         </div>
     </div>

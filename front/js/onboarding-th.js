@@ -2,6 +2,32 @@
 window.onboardingThApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
 
+    const STATE_BY_STATUS = Object.freeze({
+        "Pendiente Coordinador": "coord",
+        "Pendiente Revision TH": "th",
+        "Pendiente Correo Silver": "silver",
+        Completado: "done",
+        Anulado: "voided"
+    });
+
+    const FILTER_LABELS = Object.freeze({
+        all: "Mostrando todos",
+        coord: "Filtrando: Pendiente Coordinador",
+        th: "Filtrando: Pendiente Revision TH",
+        silver: "Filtrando: Pendiente Correo Silver",
+        done: "Filtrando: Completado",
+        voided: "Filtrando: Anulado"
+    });
+
+    const PILL_TEXT = Object.freeze({
+        coord: "P. COORD",
+        th: "P. TH",
+        silver: "P. SILVER",
+        done: "COMPLETADO",
+        voided: "ANULADO",
+        all: "REGISTRO"
+    });
+
     const emptyS3 = () => ({
         direccion: "",
         tipo_persona: "Natural",
@@ -14,7 +40,8 @@ window.onboardingThApp = function () {
     return {
         preregistros: [],
         bancos: [],
-        filtro: "Todos",
+        filtro: "all",
+        busqueda: "",
         modalDetalle: false,
         modalAnular: false,
         guardandoS3: false,
@@ -23,6 +50,14 @@ window.onboardingThApp = function () {
         itemActivo: null,
         formS3: emptyS3(),
         motivoAnulacion: "",
+        estadoCards: [
+            { key: "all", label: "Todos", tone: "tone-all" },
+            { key: "coord", label: "Pendiente Coordinador", tone: "tone-coord" },
+            { key: "th", label: "Pendiente Revision TH", tone: "tone-th" },
+            { key: "silver", label: "Pendiente Correo Silver", tone: "tone-silver" },
+            { key: "done", label: "Completado", tone: "tone-done" },
+            { key: "voided", label: "Anulado", tone: "tone-voided" }
+        ],
 
         getAuthConfig() {
             const token = window.auth?.getToken?.();
@@ -51,26 +86,67 @@ window.onboardingThApp = function () {
             }
         },
 
+        normalizar(value) {
+            return String(value || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .trim();
+        },
+
+        setFiltro(key) {
+            this.filtro = key;
+        },
+
+        estadoToKey(estado) {
+            return STATE_BY_STATUS[String(estado || "")] || "all";
+        },
+
+        cardTone(estado) {
+            const key = this.estadoToKey(estado);
+            return `estado-${key}`;
+        },
+
+        pillClass(key) {
+            return `tone-${key}`;
+        },
+
+        pillText(estado) {
+            const key = this.estadoToKey(estado);
+            return PILL_TEXT[key] || "REGISTRO";
+        },
+
+        contarPorKey(key) {
+            if (key === "all") return this.preregistros.length;
+            return this.preregistros.filter((p) => this.estadoToKey(p?.estado) === key).length;
+        },
+
+        coincideBusqueda(p) {
+            if (!this.busqueda) return true;
+            const q = this.normalizar(this.busqueda);
+            const campos = [
+                `${p?.nombre || ""} ${p?.apellidos || ""}`,
+                p?.solicitud?.perfil || "",
+                p?.solicitud?.cliente?.nombre || "",
+                p?.numero_documento || "",
+                p?.correo_personal || ""
+            ].map((x) => this.normalizar(x));
+            return campos.some((c) => c.includes(q));
+        },
+
         get preregistrosFiltrados() {
-            if (this.filtro === "Todos") return this.preregistros;
-            return this.preregistros.filter((p) => p.estado === this.filtro);
+            let items = this.preregistros;
+            if (this.filtro !== "all") {
+                items = items.filter((p) => this.estadoToKey(p?.estado) === this.filtro);
+            }
+            if (this.busqueda) {
+                items = items.filter((p) => this.coincideBusqueda(p));
+            }
+            return items;
         },
 
-        estadoClass(estado) {
-            if (estado === "Pendiente Coordinador") return "border-[#ff6000]";
-            if (estado === "Pendiente Revision TH") return "border-[#189fa9]";
-            if (estado === "Pendiente Correo Silver") return "border-[#5a189a]";
-            if (estado === "Completado") return "border-[#1c9b65]";
-            if (estado === "Anulado") return "border-slate-300";
-            return "border-slate-300";
-        },
-
-        badgeClass(estado) {
-            if (estado === "Pendiente Coordinador") return "rrhh-badge-attention";
-            if (estado === "Pendiente Revision TH") return "rrhh-badge-progress";
-            if (estado === "Pendiente Correo Silver") return "rrhh-badge-structure";
-            if (estado === "Completado") return "rrhh-badge-progress";
-            return "rrhh-badge-neutral";
+        get tituloFiltro() {
+            return FILTER_LABELS[this.filtro] || FILTER_LABELS.all;
         },
 
         accionPrincipalLabel(p) {
@@ -80,9 +156,9 @@ window.onboardingThApp = function () {
         },
 
         accionPrincipalClass(p) {
-            if (p.estado === "Pendiente Correo Silver") return "bg-[#5a189a] text-white hover:bg-[#4a137f]";
-            if (p.estado === "Pendiente Revision TH") return "rrhh-btn-primary";
-            return "rrhh-btn-ghost";
+            if (p.estado === "Pendiente Correo Silver") return "prereg-btn prereg-btn-purple";
+            if (p.estado === "Pendiente Revision TH") return "prereg-btn prereg-btn-teal";
+            return "prereg-btn prereg-btn-ghost";
         },
 
         abrirDetalle(p, focoCorreo = false) {
@@ -97,7 +173,7 @@ window.onboardingThApp = function () {
             };
             this.modalDetalle = true;
             if (focoCorreo) {
-                setTimeout(() => document.getElementById("thCorreoSilver")?.focus(), 80);
+                setTimeout(() => document.getElementById("thCorreoSilver")?.focus(), 90);
             }
         },
 

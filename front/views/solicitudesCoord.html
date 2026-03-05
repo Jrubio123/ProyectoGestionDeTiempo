@@ -1,117 +1,156 @@
-﻿<div x-data="solicitudesCoordApp()" class="rrhh-page max-w-7xl mx-auto space-y-0">
-    <section class="rrhh-hero relative overflow-hidden bg-white/40 backdrop-blur-xl border-b border-white/20 p-8 rounded-b-3xl shadow-sm">
-        <div class="absolute -top-24 -right-24 w-64 h-64 bg-[#189fa9]/20 rounded-full blur-3xl"></div>
-        <div class="rrhh-hero-content relative flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+﻿<div x-data="solicitudesCoordApp()" class="rrhh-page max-w-7xl mx-auto space-y-6">
+    <section class="relative overflow-hidden bg-white/40 backdrop-blur-xl border-b border-white/20 p-8 rounded-b-3xl shadow-sm">
+        <div class="absolute -top-24 -right-24 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl"></div>
+
+        <div class="relative flex items-start justify-between gap-4">
             <div>
-                <h1 class="rrhh-title">Onboarding — Por completar</h1>
-                <p class="rrhh-subtitle">Personas contratadas que necesitan datos de proyecto y tarifas.</p>
+                <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Gestión de Talento</h1>
+                <p class="text-slate-600 mt-1 text-sm font-medium">
+                    Solicitudes de personal para RRHH con seguimiento claro por prioridad y estado.
+                </p>
             </div>
-            <div class="flex flex-wrap gap-2">
-                <button @click="filtro='Todos'" class="rrhh-btn-ghost px-3 py-1.5 text-xs">Todos</button>
-                <button @click="filtro='Pendiente Coordinador'" class="rrhh-btn-primary px-3 py-1.5 text-xs">Pendiente Coordinador</button>
-                <button @click="filtro='Pendiente Revision TH'" class="rrhh-btn-ghost px-3 py-1.5 text-xs">Pendiente Revision TH</button>
-                <button @click="filtro='Completado'" class="rrhh-btn-ghost px-3 py-1.5 text-xs">Completado</button>
-                <button @click="filtro='Anulado'" class="rrhh-btn-ghost px-3 py-1.5 text-xs">Anulado</button>
-            </div>
+            <button @click="resetForm(); modalNueva = true"
+                    class="bg-indigo-600/90 hover:bg-indigo-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow-lg shadow-indigo-200 transition-all active:scale-95">
+                + Nueva Solicitud
+            </button>
         </div>
     </section>
 
-    <section class="rrhh-panel">
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <template x-for="p in preregistrosFiltrados" :key="p.id">
-                <div class="rrhh-glass-card p-4 border-l-4" :class="estadoClass(p.estado)">
-                    <h3 class="font-bold text-[#20272f]" x-text="`${p.nombre || ''} ${p.apellidos || ''}`.trim() || '-' "></h3>
-                    <p class="text-sm text-[#5b6678] mt-1"><span class="font-semibold">Perfil:</span> <span x-text="p.solicitud?.perfil || '-' "></span> · <span x-text="p.solicitud?.nivel || '-' "></span></p>
-                    <p class="text-sm text-[#5b6678]"><span class="font-semibold">Cliente:</span> <span x-text="p.solicitud?.cliente?.nombre || '-' "></span></p>
-                    <span class="rrhh-badge mt-2" :class="badgeClass(p.estado)" x-text="p.estado"></span>
-                    <p class="text-xs text-[#6f7b8e] mt-2">Creado: <span x-text="formatFecha(p.created_at)"></span></p>
-
-                    <div class="mt-4">
-                        <button
-                            x-show="requiereAccionCoord(p)"
-                            @click="abrirDetalle(p)"
-                            class="rrhh-btn-primary w-full py-2 text-sm">
-                            Completar datos
-                        </button>
-                        <button
-                            x-show="!requiereAccionCoord(p)"
-                            @click="abrirDetalle(p)"
-                            class="rrhh-btn-ghost w-full py-2 text-sm">
-                            Ver detalle
-                        </button>
-                    </div>
-                </div>
-            </template>
+    <section class="px-4 pb-8">
+        <div class="bg-white/30 backdrop-blur-md border border-white/20 rounded-3xl shadow-sm overflow-hidden">
+            <table class="w-full text-left text-sm">
+                <thead class="bg-slate-50/50 text-slate-500 font-bold uppercase tracking-wide text-xs border-b border-slate-100">
+                    <tr>
+                        <th class="p-4">Fecha</th>
+                        <th class="p-4">Cliente / Proyecto</th>
+                        <th class="p-4">Perfil Solicitado</th>
+                        <th class="p-4">Prioridad</th>
+                        <th class="p-4 text-center">Estado (RRHH)</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 text-slate-700">
+                    <template x-for="s in misSolicitudes" :key="s.id">
+                        <tr class="hover:bg-white/40 transition-colors">
+                            <td class="p-4" x-text="formatDate(s.created_at)"></td>
+                            <td class="p-4">
+                                <p class="font-bold text-slate-800" x-text="s.cliente"></p>
+                                <p class="text-xs text-slate-500" x-text="s.modulo"></p>
+                            </td>
+                            <td class="p-4" x-text="s.perfil"></td>
+                            <td class="p-4">
+                                <span class="px-3 py-1 rounded-full text-xs font-semibold"
+                                    :class="{
+                                        'bg-red-100 text-red-600': s.prioridad === 'Alta',
+                                        'bg-amber-100 text-amber-600': s.prioridad === 'Media',
+                                        'bg-blue-100 text-blue-600': s.prioridad === 'Baja'
+                                    }" x-text="s.prioridad"></span>
+                            </td>
+                            <td class="p-4 text-center">
+                                <span class="px-3 py-1 rounded-full text-xs font-semibold"
+                                    :class="{
+                                        'bg-orange-100 text-orange-600': s.estado === 'Pendiente',
+                                        'bg-green-100 text-green-600': ['Reclutamiento','Entrevistas','Contratado'].includes(s.estado),
+                                        'bg-slate-100 text-slate-500': s.estado === 'Cancelado'
+                                    }"
+                                    x-text="s.estado">
+                                </span>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
         </div>
     </section>
 
-    <div x-show="modalDetalle" class="fixed inset-0 z-50 flex items-start justify-center bg-black/50 px-3 pt-14 pb-4">
-        <div class="rrhh-glass-card w-full max-w-5xl p-6 max-h-[92vh] overflow-y-auto no-scrollbar">
-            <div class="flex items-start justify-between mb-4">
+    <div x-show="modalNueva" 
+         x-transition:enter="transition ease-out duration-300"
+         x-transition:enter-start="opacity-0 scale-95"
+         x-transition:enter-end="opacity-100 scale-100"
+         class="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/20 backdrop-blur-sm px-3 pt-16 pb-4">
+        
+        <div class="bg-white/80 backdrop-blur-2xl border border-white/40 w-full max-w-3xl max-h-[88vh] overflow-y-auto no-scrollbar p-8 rounded-[2.5rem] shadow-2xl">
+            <div class="flex items-start justify-between gap-4 mb-6">
                 <div>
-                    <h3 class="text-xl font-bold text-[#20272f]">Detalle de preregistro</h3>
-                    <p class="text-sm text-[#5b6678]" x-text="itemActivo?.estado || '-' "></p>
+                    <h2 class="text-2xl font-bold text-slate-800">Requerir Nuevo Consultor</h2>
+                    <p class="text-sm text-slate-500 mt-1">Completa la solicitud para enviarla al flujo de Talento Humano.</p>
                 </div>
-                <button @click="cerrarDetalle" class="rrhh-btn-ghost px-3 py-2 text-sm">Cerrar</button>
-            </div>
-
-            <div class="space-y-5">
-                <section>
-                    <p class="text-xs font-semibold uppercase text-[#6f7b8e] mb-2">Sección 1 — Datos Personales (solo lectura)</p>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Nombre completo</p><p class="font-semibold" x-text="`${itemActivo?.nombre || ''} ${itemActivo?.apellidos || ''}`.trim() || '-' "></p></div>
-                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Documento</p><p class="font-semibold" x-text="`${itemActivo?.tipo_documento || '-'} · ${itemActivo?.numero_documento || '-'}`"></p></div>
-                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Teléfono</p><p class="font-semibold" x-text="itemActivo?.telefono || '-' "></p></div>
-                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Correo personal</p><p class="font-semibold" x-text="itemActivo?.correo_personal || '-' "></p></div>
-                    </div>
-                </section>
-
-                <section>
-                    <p class="text-xs font-semibold uppercase text-[#6f7b8e] mb-2">Sección 2 — Datos del Puesto</p>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Cliente</p><p class="font-semibold" x-text="itemActivo?.solicitud?.cliente?.nombre || '-' "></p></div>
-                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Módulo</p><p class="font-semibold" x-text="itemActivo?.solicitud?.modulo?.nombre || '-' "></p></div>
-                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Perfil / Nivel</p><p class="font-semibold" x-text="`${itemActivo?.solicitud?.perfil || '-'} · ${itemActivo?.solicitud?.nivel || '-'}`"></p></div>
-                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Modalidad / Ubicación</p><p class="font-semibold" x-text="`${itemActivo?.solicitud?.modalidad || '-'} · ${itemActivo?.solicitud?.ubicacion || '-'}`"></p></div>
-                    </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3" :class="{ 'opacity-80': !seccion2Editable }">
-                        <input class="rrhh-input text-sm" x-model="formS2.responsable_supervisor" :disabled="!seccion2Editable" placeholder="Responsable / Supervisor *">
-                        <input type="date" class="rrhh-input text-sm" x-model="formS2.fecha_fin" :disabled="!seccion2Editable">
-                        <select class="rrhh-input text-sm" x-model="formS2.moneda" :disabled="!seccion2Editable"><option value="COP">COP</option><option value="USD">USD</option></select>
-                        <input class="rrhh-input text-sm" x-model="formS2.pais_pago" :disabled="!seccion2Editable" placeholder="País de pago (opcional)">
-                        <input type="number" step="0.01" class="rrhh-input text-sm" x-model="formS2.tarifa_hora" :disabled="!seccion2Editable" placeholder="Tarifa Hora">
-                        <input type="number" step="0.01" class="rrhh-input text-sm" x-model="formS2.tarifa_mes" :disabled="!seccion2Editable" placeholder="Tarifa Mes">
-                        <input type="number" step="0.01" class="rrhh-input text-sm" x-model="formS2.tarifa_medio_tiempo" :disabled="!seccion2Editable" placeholder="Tarifa Medio Tiempo">
-                        <input type="number" step="0.01" class="rrhh-input text-sm" x-model="formS2.tarifa_capacitacion" :disabled="!seccion2Editable" placeholder="Tarifa Capacitación">
-                        <label class="flex items-center gap-2 text-sm"><input type="checkbox" x-model="formS2.vpn_corona" :disabled="!seccion2Editable"> VPN Corona</label>
-                        <label class="flex items-center gap-2 text-sm"><input type="checkbox" x-model="formS2.necesita_s_user" :disabled="!seccion2Editable"> Necesita S User</label>
-                        <input class="rrhh-input text-sm md:col-span-2" x-model="formS2.grupo_usuario" :disabled="!seccion2Editable" placeholder="Grupo de Usuario">
-                        <input class="rrhh-input text-sm md:col-span-2" x-model="formS2.grupo_distribucion" :disabled="!seccion2Editable" placeholder="Grupo de Distribución">
-                        <textarea rows="3" class="rrhh-input text-sm md:col-span-2" x-model="formS2.observaciones" :disabled="!seccion2Editable" placeholder="Observaciones"></textarea>
-                    </div>
-                </section>
-
-                <section>
-                    <p class="text-xs font-semibold uppercase text-[#6f7b8e] mb-2">Sección 3 — Datos Legales (solo lectura)</p>
-                    <div x-show="!itemActivo?.direccion && !itemActivo?.tipo_persona" class="bg-[#f8fafd] border border-dashed border-[#d7dde7] rounded-xl p-3 text-sm text-[#6f7b8e]">Pendiente de Talento Humano.</div>
-                    <div x-show="itemActivo?.direccion || itemActivo?.tipo_persona" class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Dirección</p><p class="font-semibold" x-text="itemActivo?.direccion || '-' "></p></div>
-                        <div class="bg-[#f8fafd] border border-[#edf1f6] rounded-xl p-3"><p class="text-xs text-[#6f7b8e]">Tipo de persona</p><p class="font-semibold" x-text="itemActivo?.tipo_persona || '-' "></p></div>
-                    </div>
-                </section>
-            </div>
-
-            <div class="mt-6 flex justify-end gap-3">
-                <button @click="cerrarDetalle" class="rrhh-btn-ghost px-4 py-2 text-sm" x-text="seccion2Editable ? 'Cancelar' : 'Cerrar'"></button>
-                <button
-                    x-show="seccion2Editable"
-                    @click="guardarS2"
-                    :disabled="guardandoS2"
-                    class="rrhh-btn-primary px-4 py-2 text-sm disabled:opacity-60">
-                    Guardar y Enviar a Talento Humano
+                <button type="button" @click="modalNueva = false; resetForm()" class="text-slate-400 hover:text-slate-600 transition-colors">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
+
+            <form @submit.prevent="enviarSolicitud" class="space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <select x-model="form.cliente_id" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                        <option value="">Selecciona Cliente...</option>
+                        <template x-for="c in clientes" :key="c.id"><option :value="c.id" x-text="c.titulo"></option></template>
+                    </select>
+
+                    <select x-model="form.modulo_id" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                        <option value="">Tecnología / Módulo...</option>
+                        <template x-for="m in modulos" :key="m.id"><option :value="m.id" x-text="m.titulo"></option></template>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input type="text" x-model="form.perfil" placeholder="Perfil (Ej: ABAP)" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                    <select x-model="form.nivel" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                        <option value="Junior">Junior</option>
+                        <option value="Semi-senior">Semi-senior</option>
+                        <option value="Senior">Senior</option>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input type="text" x-model="form.tiempo" placeholder="Tiempo estimado (Ej: 6 meses)" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                    <select x-model="form.modalidad" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                        <option value="Full time">Full time</option>
+                        <option value="Medio tiempo">Medio tiempo</option>
+                        <option value="Por horas">Por horas</option>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <select x-model="form.ubicacion" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                        <option value="Remoto">Remoto</option>
+                        <option value="Híbrido">Híbrido</option>
+                        <option value="En sitio">En sitio</option>
+                    </select>
+                    <input type="date" x-model="form.fecha_inicio_esperada" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <select x-model="form.tipo_proyecto" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                        <option value="">Tipo de proyecto (opcional)</option>
+                        <option value="Soporte">Soporte</option>
+                        <option value="Roll out">Roll out</option>
+                        <option value="Implementación">Implementación</option>
+                        <option value="Mantenimiento">Mantenimiento</option>
+                        <option value="Migración">Migración</option>
+                    </select>
+                    <select x-model="form.prioridad" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                        <option value="Alta">Alta</option>
+                        <option value="Media">Media</option>
+                        <option value="Baja">Baja</option>
+                    </select>
+                </div>
+
+                <input type="text" x-model="form.presupuesto" placeholder="Presupuesto (Ej: 9M - 12M COP)" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+
+                <textarea x-model="form.experiencia" rows="3" placeholder="Experiencia requerida" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"></textarea>
+                <textarea x-model="form.descripcion" rows="4" placeholder="Descripción de la solicitud" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"></textarea>
+                <textarea x-model="form.informacion_adicional" rows="3" placeholder="Información adicional (opcional)" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"></textarea>
+
+                <div x-show="touched && !formValido" class="rounded-2xl border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-700">
+                    <span class="font-semibold">Campos faltantes:</span>
+                    <span x-text="camposFaltantes.join(', ')"></span>
+                </div>
+
+                <div class="mt-8 flex justify-end gap-3">
+                    <button type="button" @click="modalNueva = false; resetForm()" class="px-6 py-2.5 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100 transition-all">Cancelar</button>
+                    <button type="submit" class="bg-indigo-600 text-white px-8 py-2.5 rounded-xl text-sm font-semibold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all">Enviar a RRHH</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>

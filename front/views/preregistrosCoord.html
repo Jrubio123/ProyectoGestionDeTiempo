@@ -1,13 +1,13 @@
-﻿<div x-data="onboardingThApp()" class="prereg-screen max-w-7xl mx-auto">
+﻿<div x-data="preregistrosCoordApp()" class="prereg-screen max-w-7xl mx-auto">
     <div class="prereg-frame">
         <section class="prereg-hero">
             <div class="prereg-hero-inner">
                 <div>
                     <div class="flex items-center gap-3">
                         <h1 class="prereg-title">Onboarding</h1>
-                        <span class="prereg-role-badge">● TALENTO HUMANO</span>
+                        <span class="prereg-role-badge">● COORDINADOR</span>
                     </div>
-                    <p class="prereg-subtitle">Revisión, aprobación y creación de usuarios.</p>
+                    <p class="prereg-subtitle">Personas contratadas que necesitan datos de proyecto y tarifas.</p>
                 </div>
             </div>
         </section>
@@ -47,26 +47,26 @@
                         <div class="prereg-card-top">
                             <div>
                                 <div class="prereg-card-name" x-text="`${p.nombre || ''} ${p.apellidos || ''}`.trim() || '-' "></div>
-                                <div class="prereg-card-cargo" x-text="`${p.solicitud?.perfil || '-'} · ${p.solicitud?.cliente?.nombre || '-'}`"></div>
+                                <div class="prereg-card-cargo" x-text="`${p.solicitud?.perfil || '-'} · ${p.solicitud?.nivel || '-'}`"></div>
                             </div>
                             <span class="prereg-pill" :class="pillClass(estadoToKey(p.estado))" x-text="pillText(p.estado)"></span>
                         </div>
 
                         <div class="prereg-meta">
                             <div>
-                                <div class="prereg-meta-label">Estado</div>
-                                <div class="prereg-meta-val" x-text="p.estado || '-' "></div>
+                                <div class="prereg-meta-label">Cliente</div>
+                                <div class="prereg-meta-val" x-text="p.solicitud?.cliente?.nombre || '-' "></div>
                             </div>
                             <div>
-                                <div class="prereg-meta-label">S2</div>
-                                <div class="prereg-meta-val" x-text="p.completado_coordinador_por ? `Por ${p.completado_coordinador_por_nombre || 'Coordinador'}` : 'Pendiente' "></div>
+                                <div class="prereg-meta-label">Estado</div>
+                                <div class="prereg-meta-val" x-text="p.estado || '-' "></div>
                             </div>
                         </div>
 
                         <div class="prereg-card-footer">
-                            <span class="prereg-time" x-text="`Actualizado: ${formatFecha(p.updated_at || p.created_at)}`"></span>
-                            <button type="button" :class="accionPrincipalClass(p)" @click="abrirDetalle(p, p.estado === 'Pendiente Correo Silver')" x-text="accionPrincipalLabel(p)"></button>
-                            <button type="button" class="prereg-btn prereg-btn-ghost" @click="abrirDetalle(p)">Ver</button>
+                            <span class="prereg-time" x-text="`Creado: ${formatFecha(p.created_at)}`"></span>
+                            <button type="button" class="prereg-btn prereg-btn-orange" x-show="requiereAccionCoord(p)" @click="abrirDetalle(p)">Completar datos</button>
+                            <button type="button" class="prereg-btn prereg-btn-ghost" x-show="!requiereAccionCoord(p)" @click="abrirDetalle(p)">Ver detalle</button>
                         </div>
                     </article>
                 </template>
@@ -95,47 +95,43 @@
             </section>
 
             <section class="prereg-section">
-                <p class="prereg-section-title">Sección 2 - Datos del Puesto (solo lectura)</p>
-                <div class="prereg-info-grid">
+                <p class="prereg-section-title">Sección 2 - Datos del Puesto</p>
+                <div class="prereg-info-grid mb-3">
                     <div class="prereg-info-card"><p class="prereg-info-label">Cliente</p><p class="prereg-info-value" x-text="itemActivo?.solicitud?.cliente?.nombre || '-' "></p></div>
+                    <div class="prereg-info-card"><p class="prereg-info-label">Módulo</p><p class="prereg-info-value" x-text="itemActivo?.solicitud?.modulo?.nombre || '-' "></p></div>
                     <div class="prereg-info-card"><p class="prereg-info-label">Perfil / Nivel</p><p class="prereg-info-value" x-text="`${itemActivo?.solicitud?.perfil || '-'} · ${itemActivo?.solicitud?.nivel || '-'}`"></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Moneda</p><p class="prereg-info-value" x-text="itemActivo?.moneda || '-' "></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Supervisor</p><p class="prereg-info-value" x-text="itemActivo?.responsable_supervisor || '-' "></p></div>
+                    <div class="prereg-info-card"><p class="prereg-info-label">Modalidad / Ubicación</p><p class="prereg-info-value" x-text="`${itemActivo?.solicitud?.modalidad || '-'} · ${itemActivo?.solicitud?.ubicacion || '-'}`"></p></div>
+                </div>
+
+                <div class="prereg-form-grid" :class="{ 'opacity-70': !seccion2Editable }">
+                    <input class="prereg-input" x-model="formS2.responsable_supervisor" :disabled="!seccion2Editable" placeholder="Responsable / Supervisor *">
+                    <input type="date" class="prereg-input" x-model="formS2.fecha_fin" :disabled="!seccion2Editable">
+                    <select class="prereg-input" x-model="formS2.moneda" :disabled="!seccion2Editable"><option value="COP">COP</option><option value="USD">USD</option></select>
+                    <input class="prereg-input" x-model="formS2.pais_pago" :disabled="!seccion2Editable" placeholder="País de pago (opcional)">
+                    <input type="number" step="0.01" class="prereg-input" x-model="formS2.tarifa_hora" :disabled="!seccion2Editable" placeholder="Tarifa Hora">
+                    <input type="number" step="0.01" class="prereg-input" x-model="formS2.tarifa_mes" :disabled="!seccion2Editable" placeholder="Tarifa Mes">
+                    <input type="number" step="0.01" class="prereg-input" x-model="formS2.tarifa_medio_tiempo" :disabled="!seccion2Editable" placeholder="Tarifa Medio Tiempo">
+                    <input type="number" step="0.01" class="prereg-input" x-model="formS2.tarifa_capacitacion" :disabled="!seccion2Editable" placeholder="Tarifa Capacitación">
+                    <label class="prereg-check"><input type="checkbox" x-model="formS2.vpn_corona" :disabled="!seccion2Editable"> VPN Corona</label>
+                    <label class="prereg-check"><input type="checkbox" x-model="formS2.necesita_s_user" :disabled="!seccion2Editable"> Necesita S User</label>
+                    <input class="prereg-input md:col-span-2" x-model="formS2.grupo_usuario" :disabled="!seccion2Editable" placeholder="Grupo de Usuario">
+                    <input class="prereg-input md:col-span-2" x-model="formS2.grupo_distribucion" :disabled="!seccion2Editable" placeholder="Grupo de Distribución">
+                    <textarea class="prereg-input md:col-span-2" x-model="formS2.observaciones" :disabled="!seccion2Editable" placeholder="Observaciones"></textarea>
                 </div>
             </section>
 
             <section class="prereg-section">
-                <p class="prereg-section-title">Sección 3 - Datos Legales</p>
-                <div class="prereg-form-grid" :class="{ 'opacity-70': !seccion3Editable }">
-                    <input class="prereg-input md:col-span-2" x-model="formS3.direccion" :disabled="!seccion3Editable" placeholder="Dirección completa *">
-                    <select class="prereg-input" x-model="formS3.tipo_persona" :disabled="!seccion3Editable"><option value="Natural">Natural</option><option value="Juridica">Jurídica</option></select>
-                    <select class="prereg-input" x-model="formS3.banco_id" :disabled="!seccion3Editable">
-                        <option value="">Banco *</option>
-                        <template x-for="b in bancos" :key="b.id"><option :value="b.id" x-text="b.titulo"></option></template>
-                    </select>
-                    <select class="prereg-input" x-model="formS3.tipo_cuenta" :disabled="!seccion3Editable"><option value="Ahorros">Ahorros</option><option value="Corriente">Corriente</option></select>
-                    <input class="prereg-input" x-model="formS3.numero_cuenta" :disabled="!seccion3Editable" placeholder="Número de cuenta *">
-                    <input id="thCorreoSilver" class="prereg-input md:col-span-2" x-model="formS3.correo_silver" :disabled="!seccion3Editable" placeholder="Correo Silver (requerido para aprobar)">
+                <p class="prereg-section-title">Sección 3 - Datos Legales (solo lectura)</p>
+                <div x-show="!itemActivo?.direccion && !itemActivo?.tipo_persona" class="prereg-placeholder">Pendiente de Talento Humano.</div>
+                <div x-show="itemActivo?.direccion || itemActivo?.tipo_persona" class="prereg-info-grid">
+                    <div class="prereg-info-card"><p class="prereg-info-label">Dirección</p><p class="prereg-info-value" x-text="itemActivo?.direccion || '-' "></p></div>
+                    <div class="prereg-info-card"><p class="prereg-info-label">Tipo de persona</p><p class="prereg-info-value" x-text="itemActivo?.tipo_persona || '-' "></p></div>
                 </div>
             </section>
 
             <div class="prereg-modal-footer">
-                <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarDetalle">Cancelar</button>
-                <button type="button" x-show="seccion3Editable" @click="guardarS3" :disabled="guardandoS3" class="prereg-btn prereg-btn-ghost">Guardar</button>
-                <button type="button" x-show="seccion3Editable" @click="aprobarPreregistro" :disabled="!puedeAprobar || aprobando" class="prereg-btn prereg-btn-teal">Aprobar</button>
-                <button type="button" x-show="itemActivo?.estado !== 'Completado' && itemActivo?.estado !== 'Anulado'" @click="abrirModalAnular" class="prereg-btn prereg-btn-danger">Anular preregistro</button>
-            </div>
-
-            <div x-show="modalAnular" class="prereg-mini-backdrop">
-                <div class="prereg-mini-modal">
-                    <h4 class="prereg-mini-title">Confirmar anulación</h4>
-                    <p class="prereg-mini-subtitle">¿Estás seguro de anular este preregistro? Esta acción no se puede deshacer.</p>
-                    <textarea rows="4" class="prereg-input mt-3" x-model="motivoAnulacion" placeholder="Motivo (mínimo 20 caracteres)"></textarea>
-                    <div class="prereg-mini-footer">
-                        <button type="button" @click="modalAnular=false" class="prereg-btn prereg-btn-ghost">Cancelar</button>
-                        <button type="button" @click="confirmarAnulacion" :disabled="anulando" class="prereg-btn prereg-btn-danger">Confirmar Anulación</button>
-                    </div>
-                </div>
+                <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarDetalle" x-text="seccion2Editable ? 'Cancelar' : 'Cerrar'"></button>
+                <button type="button" x-show="seccion2Editable" @click="guardarS2" :disabled="guardandoS2" class="prereg-btn prereg-btn-orange">Guardar y Enviar a TH</button>
             </div>
         </div>
     </div>

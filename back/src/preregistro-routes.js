@@ -23,27 +23,90 @@
   const TIPOS_PERSONA = new Set(["Natural", "Juridica"]);
   const MONEDAS = new Set(["COP", "USD"]);
 
+  function normalizeEnumKey(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/gi, "")
+      .toLowerCase()
+      .trim();
+  }
+
   function isValidEmail(value) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
   }
 
-  function normalizeDocTipoForCatalog(value) {
-    const raw = normalizeValue(value);
-    if (raw.includes("ciudadania")) return "Cédula de Ciudadanía";
-    if (raw.includes("extranjeria")) return "Cédula de Extranjería";
-    if (raw.includes("pasaporte")) return "Pasaporte";
-    if (raw === "nit") return "NIT";
+  function normalizeDocKey(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/gi, "")
+      .toLowerCase()
+      .trim();
+  }
+
+  function classifyTipoDocumento(value) {
+    const key = normalizeDocKey(value);
+    if (!key) return null;
+    if (key === "cc" || key.includes("ciudadania") || key === "cedula" || key.includes("ceduladeciudadania")) return "cc";
+    if (key === "ce" || key.includes("extranjeria") || key.includes("ceduladeextranjeria")) return "ce";
+    if (key === "nit") return "nit";
+    if (key === "pa" || key.includes("pasaporte")) return "pasaporte";
     return null;
   }
 
   async function resolveDocumentoIdentidadId(db, tipoDocumentoInput) {
-    const titulo = normalizeDocTipoForCatalog(tipoDocumentoInput);
-    if (!titulo) return null;
+    const tipo = classifyTipoDocumento(tipoDocumentoInput);
+    if (!tipo) return null;
+
     const result = await db.query(
-      `SELECT id FROM documento_identidad WHERE LOWER(titulo) = LOWER($1) AND activo = true LIMIT 1`,
-      [titulo]
+      `SELECT id, titulo
+       FROM documento_identidad
+       WHERE activo = true
+       ORDER BY id ASC`
     );
-    return result.rows[0]?.id || null;
+    const rows = Array.isArray(result.rows) ? result.rows : [];
+    if (!rows.length) return null;
+
+    const byTypeMatchers = {
+      cc: [/^cedula$/, /ceduladeciudadania/, /ciudadania/, /cedula/],
+      ce: [/ceduladeextranjeria/, /extranjeria/],
+      nit: [/^nit$/],
+      pasaporte: [/pasaporte/]
+    };
+
+    const matchers = byTypeMatchers[tipo] || [];
+    for (const row of rows) {
+      const titleKey = normalizeDocKey(row.titulo);
+      if (matchers.some((re) => re.test(titleKey))) {
+        return row.id;
+      }
+    }
+
+    return null;
+  }
+
+  function normalizeGrupoUsuarioInput(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    const key = normalizeEnumKey(raw);
+    if (["admin", "administrador", "administracion"].includes(key)) return "ADMIN";
+    if (["coordinador", "coordinacion"].includes(key)) return "COORDINADOR";
+    if (["consultor", "consultoria", "consulting", "consultant"].includes(key)) return "CONSULTOR";
+    if (["contabilidad", "contable", "finanzas"].includes(key)) return "CONTABILIDAD";
+    if (["comercial", "ventas"].includes(key)) return "COMERCIAL";
+    if (["otro", "otros"].includes(key)) return "Otro";
+    return "Otro";
+  }
+
+  function normalizeGrupoDistribucionInput(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    const key = normalizeEnumKey(raw);
+    if (["todossilver", "todos", "all"].includes(key)) return "Todos Silver";
+    if (["vinculado", "vinculados"].includes(key)) return "Vinculados";
+    if (["responsable", "responsables"].includes(key)) return "Responsable";
+    return null;
   }
 
   function normalizeTipoPersonaForUsuarios(value) {
@@ -185,7 +248,7 @@
         `SELECT s.id, s.estado, su.email AS coordinador_email, su.nombre_usuario AS coordinador_nombre, s.perfil
          FROM solicitudes_rrhh s
          LEFT JOIN usuarios su ON su.id = s.coordinador_id
-         WHERE s.id = $1 FOR UPDATE`,
+         WHERE s.id = $1 FOR UPDATE OF s`,
         [solicitudId]
       );
       const solicitud = solicitudRes.rows[0];
@@ -329,6 +392,8 @@
       if (String(current.solicitud_coordinador_id) !== String(req.user?.id || "")) {
         return res.status(403).json({ error: "No eres el coordinador dueno de esta solicitud" });
       }
+      const grupoUsuarioNorm = normalizeGrupoUsuarioInput(grupo_usuario);
+      const grupoDistribucionNorm = normalizeGrupoDistribucionInput(grupo_distribucion);
 
       await client.query(
         `UPDATE preregistro_personas
@@ -352,7 +417,7 @@
         [
           responsable_supervisor, fecha_fin || null, String(moneda).trim(), pais_pago || null,
           tarifa_hora ?? null, tarifa_mes ?? null, tarifa_medio_tiempo ?? null, tarifa_capacitacion ?? null,
-          vpn_corona, necesita_s_user, grupo_usuario || null, grupo_distribucion || null, observaciones || null,
+          vpn_corona, necesita_s_user, grupoUsuarioNorm, grupoDistribucionNorm, observaciones || null,
           ESTADOS.pendienteRevisionTh, req.user?.id, id
         ]
       );
@@ -428,6 +493,16 @@
         if (req.body?.[field] === undefined) continue;
         if (field === "moneda" && !MONEDAS.has(String(req.body[field] || "").trim())) {
           return res.status(400).json({ error: "moneda no valida" });
+        }
+        if (field === "grupo_usuario") {
+          sets.push(`${field} = $${idx++}`);
+          vals.push(normalizeGrupoUsuarioInput(req.body[field]));
+          continue;
+        }
+        if (field === "grupo_distribucion") {
+          sets.push(`${field} = $${idx++}`);
+          vals.push(normalizeGrupoDistribucionInput(req.body[field]));
+          continue;
         }
         sets.push(`${field} = $${idx++}`);
         vals.push(req.body[field]);

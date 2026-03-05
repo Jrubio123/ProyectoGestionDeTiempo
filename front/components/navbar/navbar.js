@@ -1,6 +1,6 @@
 ﻿function getRoleRoutes() {
     return {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -10,6 +10,7 @@
             "asociar-subconsultores",
             "tarifas",
             "solicitudesCoord",
+            "preregistrosCoord",
             "soportes-cuentas-cobro"
         ],
         consultor_principal: [
@@ -49,8 +50,9 @@ function getAllSearchViews() {
         { label: "Soportes Cuentas Cobro", hash: "#soportes-cuentas-cobro" },
         { label: "Generar Cuenta Cobro", hash: "#generar-cuenta-cobro" },
         { label: "Solicitudes RRHH", hash: "#solicitudesCoord" },
+        { label: "Preregistros Coordinador", hash: "#preregistrosCoord" },
         { label: "Pool de Solicitudes", hash: "#solicitudesRecl" },
-        { label: "Onboarding TH", hash: "#onboardingTH" }
+        { label: "Preregistros TH", hash: "#onboardingTH" }
     ];
 }
 

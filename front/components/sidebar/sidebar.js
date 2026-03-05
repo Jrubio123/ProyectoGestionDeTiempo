@@ -77,7 +77,7 @@
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -87,6 +87,7 @@
             "asociar-subconsultores",
             "tarifas",
             "solicitudesCoord",
+            "preregistrosCoord",
             "soportes-cuentas-cobro"
         ],
         consultor_principal: [
@@ -169,8 +170,8 @@
 
     if (logoutBtn) {
         logoutBtn.addEventListener("click", function () {
-            if (confirm("Â¿EstÃ¡s seguro de que quieres cerrar sesiÃ³n?")) {
-                console.log("Cerrando sesiÃ³n...");
+            if (confirm("¿Estás seguro de que quieres cerrar sesión?")) {
+                console.log("Cerrando sesión...");
                 window.location.href = "/login";
             }
         });

@@ -41,7 +41,7 @@ const corsOptions = {
   credentials: true,
   allowedHeaders: ["Content-Type", "Authorization", "X-Graph-Access-Token"],
   exposedHeaders: ["Authorization"],
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 };
 
 app.use(cors(corsOptions));
@@ -7497,7 +7497,7 @@ app.listen(PORT, () => {
 
 // 1. Usar process.env.PORT (Obligatorio para Azure)
 // 2. Mantener 4000 como fallback para tu entorno local
-const port = process.env.PORT || 4000;
+const port = process.env.PORT || process.env.BACK_PORT || 4000;
 
 // 3. Añadir "0.0.0.0" asegura que el contenedor acepte conexiones externas
 const server = app.listen(port, "0.0.0.0", () => {

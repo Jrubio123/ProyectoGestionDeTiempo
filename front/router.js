@@ -8,7 +8,7 @@
 
         container.innerHTML = html;
 
-        // Re-inicializar Alpine para el contenido cargado dinÃ¡micamente
+        // Re-inicializar Alpine para el contenido cargado dinámicamente
         if (window.Alpine) {
             Alpine.initTree(container);
         }
@@ -36,6 +36,7 @@ const routes = {
     "generar-cuenta-cobro": "generar-cuenta-cobro",
     "asignacion-fabrica-mesa-servicio": "asignacion-fabrica-mesa-servicio",
     solicitudesCoord: "solicitudesCoord",
+    preregistrosCoord: "preregistrosCoord",
     solicitudesRecl: "solicitudesRecl",
     onboardingTH: "onboardingTH"
 };
@@ -50,7 +51,7 @@ function router() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador","asociar-subconsultores", "tarifas", "solicitudesCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador","asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -60,6 +61,7 @@ function router() {
             "asociar-subconsultores",
             "tarifas",
             "solicitudesCoord",
+            "preregistrosCoord",
             "soportes-cuentas-cobro"
         ],
         consultor_principal: [

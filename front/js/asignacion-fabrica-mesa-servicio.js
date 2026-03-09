@@ -214,7 +214,9 @@ window.mesaFabricaApp = function () {
         validarTicket(item) {
             const scope = this.getScope(item);
             const estado = String(item?.estado_ticket || this.getEstadoTicket(item) || "").trim();
-            const fechaIngreso = String(item?.fecha_inicio || "").trim();
+            const fechaIngreso = this.toDateInputValue(
+                item?.fecha_inicio || item?.fecha_ingreso_reporte || item?.created_at
+            );
             const fechaCierre = String(item?.fecha_cierre || item?.fecha_cierre_mesa_fab || "").trim();
             const horas = Number(item?.horas_reportadas || 0);
 

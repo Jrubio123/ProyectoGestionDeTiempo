@@ -191,12 +191,8 @@
                         </div>
                         <div>
                             <label class="text-xs font-bold text-gray-500 uppercase">Perfil</label>
-                            <select x-model="form.perfil_fabrica" class="w-full mt-1 p-2 border rounded-lg text-sm bg-white">
-                                <option value="">Seleccione...</option>
-                                <template x-for="opt in perfilFabricaOptions()" :key="`perfil-${opt}`">
-                                    <option :value="opt" x-text="opt"></option>
-                                </template>
-                            </select>
+                            <div class="w-full mt-1 p-2 rounded-lg text-sm border bg-gray-50 text-gray-700" x-text="getPerfilFabricaAsignado(form) || 'Sin perfil asignado'"></div>
+                            <input type="hidden" x-model="form.perfil_fabrica">
                         </div>
                     </div>
                 </template>

@@ -189,6 +189,32 @@ function normalizePerfilFabricaInput(value) {
   return map.get(norm) || null;
 }
 
+async function getAssignedPerfilFabrica(db, registroAsignacionId, reporteId = null) {
+  const reporteInternalId = Number(reporteId || 0);
+  if (reporteInternalId > 0) {
+    const specific = await db.query(
+      `SELECT perfil_fabrica
+       FROM reporte_horas
+       WHERE id = $1
+         AND id_registro_asignacion = $2
+       LIMIT 1`,
+      [reporteInternalId, registroAsignacionId]
+    );
+    const specificPerfil = normalizePerfilFabricaInput(specific.rows[0]?.perfil_fabrica);
+    if (specificPerfil) return specificPerfil;
+  }
+  const latest = await db.query(
+    `SELECT perfil_fabrica
+     FROM reporte_horas
+     WHERE id_registro_asignacion = $1
+       AND NULLIF(BTRIM(perfil_fabrica), '') IS NOT NULL
+     ORDER BY updated_at DESC NULLS LAST, id DESC
+     LIMIT 1`,
+    [registroAsignacionId]
+  );
+  return normalizePerfilFabricaInput(latest.rows[0]?.perfil_fabrica);
+}
+
 function normalizeEstadoMesaInput(value) {
   const raw = String(value || "").trim();
   if (!raw) return null;
@@ -5615,7 +5641,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     }
 
     const editable = await client.query(
-      `SELECT id, estado_reporte, nro_caso_int_ext
+      `SELECT id, estado_reporte, nro_caso_int_ext, perfil_fabrica
        FROM reporte_horas
        WHERE id_registro_asignacion = $1
          AND ($2::int IS NULL OR id = $2::int)
@@ -5656,12 +5682,26 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     const finalTotalInput = ocultarMonto ? null : toNullableNumber(total_cobrar);
     const finalTotal = finalTotalInput ?? info.total_pagar ?? null;
     const finalRequerimiento = (requerimiento || "").toString().trim() || null;
-    const finalPerfilFabrica = normalizePerfilFabricaInput(perfil_fabrica);
-    const finalWricef = (wricef || "").toString().trim() || null;
-    if (scope === "fabrica" && perfil_fabrica && !finalPerfilFabrica) {
+    const perfilInputRaw = String(perfil_fabrica || "").trim();
+    const perfilInputNormalizado = normalizePerfilFabricaInput(perfil_fabrica);
+    const perfilEditable = normalizePerfilFabricaInput(editableRow?.perfil_fabrica);
+    const perfilAsignado = scope === "fabrica"
+      ? (perfilEditable || await getAssignedPerfilFabrica(client, registroId, reporteId || null))
+      : null;
+    if (scope === "fabrica" && perfilInputRaw && !perfilInputNormalizado) {
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "Perfil de fábrica inválido" });
     }
+    if (scope === "fabrica" && perfilAsignado && perfilInputNormalizado && perfilAsignado !== perfilInputNormalizado) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "El perfil de fábrica ya está asignado y no puede modificarse." });
+    }
+    const finalPerfilFabrica = scope === "fabrica" ? (perfilAsignado || perfilInputNormalizado) : null;
+    if (scope === "fabrica" && !finalPerfilFabrica) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "No hay perfil de fábrica asignado para este ticket. Contacta al coordinador." });
+    }
+    const finalWricef = (wricef || "").toString().trim() || null;
 
     let saved;
     if (reporteId && editableRow) {
@@ -5951,14 +5991,10 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
         ? Number(finalHoras) * Number(tipoValido.rows[0].valor_hora)
         : null);
     const finalRequerimiento = (requerimiento || "").toString().trim() || null;
-    const finalPerfilFabrica = normalizePerfilFabricaInput(perfil_fabrica);
     const finalWricef = (wricef || "").toString().trim() || null;
     const consultorPrincipalId = tipoValido.rows[0]?.consultor_principal_rel_id || null;
-    if (scope === "fabrica" && perfil_fabrica && !finalPerfilFabrica) {
-      return res.status(400).json({ error: "Perfil de fábrica inválido" });
-    }
     const editable = await pool.query(
-      `SELECT id, nro_caso_int_ext
+      `SELECT id, nro_caso_int_ext, perfil_fabrica
        FROM reporte_horas
        WHERE id_registro_asignacion = $1
          AND ($2::int IS NULL OR id = $2::int)
@@ -5986,6 +6022,22 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
       return res.status(400).json({
         error: "Debes indicar Nro Caso Interno y Nro Caso Cliente para Mesa de servicio"
       });
+    }
+    const perfilInputRaw = String(perfil_fabrica || "").trim();
+    const perfilInputNormalizado = normalizePerfilFabricaInput(perfil_fabrica);
+    const perfilEditable = normalizePerfilFabricaInput(editable.rows[0]?.perfil_fabrica);
+    const perfilAsignado = scope === "fabrica"
+      ? (perfilEditable || await getAssignedPerfilFabrica(pool, registroId, reporteId || null))
+      : null;
+    if (scope === "fabrica" && perfilInputRaw && !perfilInputNormalizado) {
+      return res.status(400).json({ error: "Perfil de fábrica inválido" });
+    }
+    if (scope === "fabrica" && perfilAsignado && perfilInputNormalizado && perfilAsignado !== perfilInputNormalizado) {
+      return res.status(400).json({ error: "El perfil de fábrica ya está asignado y no puede modificarse." });
+    }
+    const finalPerfilFabrica = scope === "fabrica" ? (perfilAsignado || perfilInputNormalizado) : null;
+    if (scope === "fabrica" && !finalPerfilFabrica) {
+      return res.status(400).json({ error: "No hay perfil de fábrica asignado para este ticket. Contacta al coordinador." });
     }
     if (!reporteId) {
       const totalTickets = await pool.query(

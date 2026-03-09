@@ -49,6 +49,7 @@ window.mesaFabricaApp = function () {
             const horasBase = Number(item?.horas_reportadas || 0);
             const totalBase = Number(item?.total_cobrar || 0);
             const tarifaInferida = horasBase > 0 ? (totalBase / horasBase) : 0;
+            const perfilAsignado = this.getPerfilFabricaAsignado(item);
             this.form = {
                 ...item,
                 reporte_id: item?.reporte_id || null,
@@ -59,7 +60,7 @@ window.mesaFabricaApp = function () {
                 observacion: item?.observacion_mesa_fabrica || item?.observacion || "",
                 wricef: item?.wricef || "",
                 requerimiento: item?.requerimiento || "",
-                perfil_fabrica: this.normalizePerfilFabrica(item?.perfil_fabrica) || "",
+                perfil_fabrica: perfilAsignado || "",
                 horas_reportadas: item?.horas_reportadas ?? null,
                 total_cobrar: this.esAsociado ? null : (item?.total_cobrar ?? null),
                 valor_hora: item?.valor_hora ?? tarifaInferida ?? null
@@ -79,6 +80,7 @@ window.mesaFabricaApp = function () {
                 return;
             }
             const scope = this.getScope(item);
+            const perfilAsignado = this.getPerfilFabricaAsignado(item);
             this.form = {
                 id: item.id,
                 reporte_id: null,
@@ -90,7 +92,7 @@ window.mesaFabricaApp = function () {
                 tipo_servicio: "Servicio",
                 wricef: "",
                 requerimiento: "",
-                perfil_fabrica: "",
+                perfil_fabrica: perfilAsignado || "",
                 estado: item?.estado || "",
                 estado_ticket: "",
                 estado_mesa_servicio: "",
@@ -131,6 +133,7 @@ window.mesaFabricaApp = function () {
             try {
                 const scope = this.getScope(item);
                 const estadoTicket = this.getEstadoTicket(item);
+                const perfilAsignado = scope === "fabrica" ? this.getPerfilFabricaAsignado(item) : "";
                 await axios.post(`${this.API}/mesa-fabrica/${item.id}/enviar-aprobacion`, {
                     reporte_id: item.reporte_id || null,
                     tipo_servicio: item.tipo_servicio || null,
@@ -142,7 +145,7 @@ window.mesaFabricaApp = function () {
                     total_cobrar: this.esAsociado ? null : (item.total_cobrar || null),
                     horas_reportadas: item.horas_reportadas || null,
                     requerimiento: item.requerimiento || null,
-                    perfil_fabrica: this.normalizePerfilFabrica(item.perfil_fabrica) || null,
+                    perfil_fabrica: scope === "fabrica" ? (perfilAsignado || null) : null,
                     wricef: item.wricef || null,
                     estado_mesa_servicio: scope === "mesa" ? (estadoTicket || null) : null,
                     estado_fabrica: scope === "fabrica" ? (estadoTicket || null) : null
@@ -173,6 +176,7 @@ window.mesaFabricaApp = function () {
                     alert(validacion.error);
                     return;
                 }
+                const perfilAsignado = scope === "fabrica" ? this.getPerfilFabricaAsignado(this.form) : "";
                 const payload = {
                     ...this.form,
                     total_cobrar: this.esAsociado ? null : (this.form.total_cobrar || null),
@@ -183,7 +187,7 @@ window.mesaFabricaApp = function () {
                     nro_caso_interno: scope === "mesa" ? (this.form.nro_caso_interno || null) : null,
                     wricef: scope === "fabrica" ? (this.form.wricef || null) : null,
                     requerimiento: scope === "fabrica" ? (this.form.requerimiento || null) : null,
-                    perfil_fabrica: scope === "fabrica" ? (this.normalizePerfilFabrica(this.form.perfil_fabrica) || null) : null,
+                    perfil_fabrica: scope === "fabrica" ? (perfilAsignado || null) : null,
                     fecha_inicio: this.form.fecha_inicio || null,
                     fecha_cierre: shouldClose ? (this.form.fecha_cierre || null) : null
                 };
@@ -239,11 +243,9 @@ window.mesaFabricaApp = function () {
                 if (!String(item?.requerimiento || "").trim()) {
                     return { ok: false, error: "Debes indicar el nombre del requerimiento." };
                 }
-                if (!String(item?.perfil_fabrica || "").trim()) {
-                    return { ok: false, error: "Debes indicar el perfil." };
-                }
-                if (!this.normalizePerfilFabrica(item?.perfil_fabrica)) {
-                    return { ok: false, error: "Perfil inválido para Fábrica." };
+                const perfilAsignado = this.getPerfilFabricaAsignado(item);
+                if (!perfilAsignado) {
+                    return { ok: false, error: "No hay perfil de fábrica asignado para este ticket. Contacta al coordinador." };
                 }
                 if (estado === "Finalizado" && !fechaCierre) {
                     return { ok: false, error: "Debes indicar fecha de cierre cuando el estado es Finalizado." };
@@ -321,6 +323,19 @@ window.mesaFabricaApp = function () {
 
         perfilFabricaOptions() {
             return ["ABAP", "ABAP TM", "PI/PO", "CPI", "FIORI", "WF", "DATASERVICE", "DATASPHERE"];
+        },
+
+        getPerfilFabricaAsignado(item = null) {
+            const actual = this.normalizePerfilFabrica(item?.perfil_fabrica || this.form?.perfil_fabrica);
+            if (actual) return actual;
+            const asignacionId = item?.id || this.form?.id;
+            if (!asignacionId) return "";
+            for (const ticket of this.tickets || []) {
+                if (String(ticket?.id || "") !== String(asignacionId)) continue;
+                const perfil = this.normalizePerfilFabrica(ticket?.perfil_fabrica);
+                if (perfil) return perfil;
+            }
+            return "";
         },
 
         normalizePerfilFabrica(value) {

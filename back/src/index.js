@@ -315,13 +315,6 @@ function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, hints = {})
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
-
-  if (Number(tipoAsignacionId) === 5) return "mesa";
-  if (Number(tipoAsignacionId) === 6) return "fabrica";
-
-  const hasMesaByTitle = tituloNorm.includes("mesa de servicio");
-  const hasFabricaByTitle = tituloNorm.includes("fabrica");
-
   const hasMesaHints = [
     hints?.estado_mesa_servicio,
     hints?.tipo_servicio,
@@ -336,6 +329,20 @@ function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, hints = {})
     hints?.perfil_fabrica,
     hints?.wricef
   ].some((v) => String(v || "").trim() !== "");
+  const tipoAsignacionNumeric = Number(tipoAsignacionId || 0);
+  // Dato maestro preferido: si el tipo de asignacion es mesa/fabrica,
+  // usamos ese valor salvo que el ticket traiga pistas claras del otro flujo.
+  if (tipoAsignacionNumeric === 5) {
+    if (hasFabricaHints && !hasMesaHints) return "fabrica";
+    return "mesa";
+  }
+  if (tipoAsignacionNumeric === 6) {
+    if (hasMesaHints && !hasFabricaHints) return "mesa";
+    return "fabrica";
+  }
+
+  const hasMesaByTitle = tituloNorm.includes("mesa de servicio");
+  const hasFabricaByTitle = tituloNorm.includes("fabrica");
 
   if (hasFabricaHints && !hasMesaHints) return "fabrica";
   if (hasMesaHints && !hasFabricaHints) return "mesa";

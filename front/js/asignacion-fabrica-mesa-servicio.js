@@ -134,9 +134,10 @@ window.mesaFabricaApp = function () {
                 const scope = this.getScope(item);
                 const estadoTicket = this.getEstadoTicket(item);
                 const perfilAsignado = scope === "fabrica" ? this.getPerfilFabricaAsignado(item) : "";
+                const fechaIngreso = this.resolveFechaIngreso(item, scope === "fabrica");
                 await axios.post(`${this.API}/mesa-fabrica/${item.id}/enviar-aprobacion`, {
                     reporte_id: item.reporte_id || null,
-                    fecha_inicio: this.toDateInputValue(item.fecha_ingreso_reporte || item.fecha_inicio),
+                    fecha_inicio: fechaIngreso || null,
                     tipo_servicio: item.tipo_servicio || null,
                     nro_caso_cliente: item.nro_caso_cliente || null,
                     nro_caso_interno: item.nro_caso_interno || null,
@@ -189,7 +190,7 @@ window.mesaFabricaApp = function () {
                     wricef: scope === "fabrica" ? (this.form.wricef || null) : null,
                     requerimiento: scope === "fabrica" ? (this.form.requerimiento || null) : null,
                     perfil_fabrica: scope === "fabrica" ? (perfilAsignado || null) : null,
-                    fecha_inicio: this.toDateInputValue(this.form.fecha_inicio),
+                    fecha_inicio: this.resolveFechaIngreso(this.form, scope === "fabrica"),
                     fecha_cierre: shouldClose ? this.toDateInputValue(this.form.fecha_cierre) : null
                 };
                 await axios.put(`${this.API}/mesa-fabrica/${this.form.id}`, payload);
@@ -214,9 +215,7 @@ window.mesaFabricaApp = function () {
         validarTicket(item) {
             const scope = this.getScope(item);
             const estado = String(item?.estado_ticket || this.getEstadoTicket(item) || "").trim();
-            const fechaIngreso = this.toDateInputValue(
-                item?.fecha_inicio || item?.fecha_ingreso_reporte || item?.created_at
-            );
+            const fechaIngreso = this.resolveFechaIngreso(item, scope === "fabrica");
             const fechaCierre = String(item?.fecha_cierre || item?.fecha_cierre_mesa_fab || "").trim();
             const horas = Number(item?.horas_reportadas || 0);
 
@@ -401,6 +400,19 @@ window.mesaFabricaApp = function () {
 
         formatDate(d) {
             return d ? String(d).split("T")[0] : "";
+        },
+
+        resolveFechaIngreso(item, fallbackToday = false) {
+            const candidatos = [
+                item?.fecha_inicio,
+                item?.fecha_ingreso_reporte,
+                item?.created_at
+            ];
+            for (const valor of candidatos) {
+                const parsed = this.toDateInputValue(valor);
+                if (parsed) return parsed;
+            }
+            return fallbackToday ? this.todayDate() : "";
         },
 
         toDateInputValue(value) {

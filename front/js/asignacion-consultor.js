@@ -108,7 +108,7 @@ window.asignacionConsultorApp = function () {
                     this.alertaTarifa = {
                         mostrar: true,
                         tipo: "error",
-                        mensaje: "No existe tarifa para esta combinación.",
+                        mensaje: "No existe tarifa para esta combinacion.",
                         valor: 0
                     };
                 }
@@ -151,9 +151,16 @@ window.asignacionConsultorApp = function () {
             }
         },
 
+        normalizeTipo(tipo) {
+            return String(tipo || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .trim();
+        },
+
         get esMensual() {
-            const tipo = this.proyectoSelected?.tipo_asignacion || "";
-            const t = String(tipo).toLowerCase();
+            const t = this.normalizeTipo(this.proyectoSelected?.tipo_asignacion || "");
             return t.includes("full") || t.includes("part");
         },
 
@@ -179,14 +186,20 @@ window.asignacionConsultorApp = function () {
             return !this.esMensual;
         },
 
+        get esHorasPorDemanda() {
+            const t = this.normalizeTipo(this.proyectoSelected?.tipo_asignacion || "");
+            return t.includes("horas por demanda");
+        },
+
         get esMesaServicio() {
-            const tipo = this.proyectoSelected?.tipo_asignacion || "";
-            return ["Mesa de servicio", "Fábrica"].includes(tipo);
+            const t = this.normalizeTipo(this.proyectoSelected?.tipo_asignacion || "");
+            return t.includes("mesa de servicio") || t.includes("fabrica");
         },
 
         get formValido() {
             if (!this.form.consultor_id || !this.form.modulo_id || !(this.alertaTarifa.valor > 0)) return false;
             if (this.esMesaServicio) return true;
+            if (this.esHorasPorDemanda) return true;
             if (this.esPorHora) {
                 return (this.form.horas_asignadas || 0) > 0;
             }
@@ -196,7 +209,9 @@ window.asignacionConsultorApp = function () {
         calcularTotal() {
             const tarifa = this.alertaTarifa.valor || 0;
             let total = 0;
-            if (this.esMensual) {
+            if (this.esMesaServicio || this.esHorasPorDemanda) {
+                total = 0;
+            } else if (this.esMensual) {
                 const dias = this.calcularDiasMensual(
                     this.form.fecha_inicio,
                     this.form.fecha_fin
@@ -213,15 +228,18 @@ window.asignacionConsultorApp = function () {
             if (!this.proyectoSelected) return;
             const tarifa = this.alertaTarifa.valor || 0;
             const esMesaOFabrica = this.esMesaServicio;
+            const esHorasDemanda = this.esHorasPorDemanda;
             const diasMensual = this.esMensual
                 ? this.calcularDiasMensual(this.form.fecha_inicio, this.form.fecha_fin) || 20
                 : 0;
             const meses = this.esMensual ? (diasMensual / 20) : 0;
             const total = esMesaOFabrica
                 ? null
-                : this.esMensual
-                ? tarifa * (meses || 1)
-                : tarifa * (this.form.horas_asignadas || 0);
+                : esHorasDemanda
+                    ? 0
+                    : this.esMensual
+                        ? tarifa * (meses || 1)
+                        : tarifa * (this.form.horas_asignadas || 0);
             const valorDia = esMesaOFabrica ? null : (this.esMensual ? (tarifa / 20) : null);
             const payload = {
                 id_consultoria: this.proyectoSelected.consultoria_id || this.proyectoSelected.id,
@@ -230,7 +248,7 @@ window.asignacionConsultorApp = function () {
                 fecha_inicio: esMesaOFabrica ? null : (this.form.fecha_inicio || null),
                 fecha_fin: esMesaOFabrica ? null : (this.form.fecha_fin || null),
                 cantidad_dias: esMesaOFabrica ? null : (this.esMensual ? diasMensual : (this.form.cantidad_dias || null)),
-                horas_asignadas: esMesaOFabrica ? null : (this.esMensual ? null : (this.form.horas_asignadas || null)),
+                horas_asignadas: esMesaOFabrica ? null : (this.esMensual || esHorasDemanda ? null : (this.form.horas_asignadas || null)),
                 valor_hora: esMesaOFabrica ? tarifa || null : (this.esMensual ? null : tarifa || null),
                 valor_dia: valorDia,
                 total_pagar: total,
@@ -239,7 +257,7 @@ window.asignacionConsultorApp = function () {
 
             try {
                 await axios.post(`${API}/registro-asignaciones`, payload);
-                alert("Asignación creada exitosamente");
+                alert("Asignacion creada exitosamente");
                 this.proyectoSelected = null;
                 await this.cargarProyectos();
             } catch (e) {

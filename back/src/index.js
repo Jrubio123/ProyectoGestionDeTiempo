@@ -309,14 +309,40 @@ function resolveEstadoFabricaInput(value, estadosFabrica) {
   return null;
 }
 
-function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo) {
+function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, hints = {}) {
   const tituloNorm = String(tipoAsignacionTitulo || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
-  if (Number(tipoAsignacionId) === 5 || tituloNorm.includes("mesa de servicio")) return "mesa";
-  if (Number(tipoAsignacionId) === 6 || tituloNorm.includes("fabrica")) return "fabrica";
+
+  if (Number(tipoAsignacionId) === 5) return "mesa";
+  if (Number(tipoAsignacionId) === 6) return "fabrica";
+
+  const hasMesaByTitle = tituloNorm.includes("mesa de servicio");
+  const hasFabricaByTitle = tituloNorm.includes("fabrica");
+
+  const hasMesaHints = [
+    hints?.estado_mesa_servicio,
+    hints?.tipo_servicio,
+    hints?.nro_caso_cliente,
+    hints?.nro_caso_interno,
+    hints?.nro_caso_int_ext
+  ].some((v) => String(v || "").trim() !== "");
+
+  const hasFabricaHints = [
+    hints?.estado_fabrica,
+    hints?.requerimiento,
+    hints?.perfil_fabrica,
+    hints?.wricef
+  ].some((v) => String(v || "").trim() !== "");
+
+  if (hasFabricaHints && !hasMesaHints) return "fabrica";
+  if (hasMesaHints && !hasFabricaHints) return "mesa";
+  if (hasFabricaByTitle && !hasMesaByTitle) return "fabrica";
+  if (hasMesaByTitle && !hasFabricaByTitle) return "mesa";
+  if (hasFabricaByTitle) return "fabrica";
+  if (hasMesaByTitle) return "mesa";
   return null;
 }
 
@@ -778,6 +804,21 @@ async function resolveInternalIds(db, tableName, values = []) {
   }
 
   return normalized.map((raw) => (isNumericId(raw) ? Number(raw) : byPublicId.get(raw)));
+}
+
+const MAX_TICKETS_POR_ASIGNACION = 10;
+
+function toNullableNumber(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toNullableInteger(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.trunc(parsed);
 }
 
 function buildUserResponse(userRow) {
@@ -3067,6 +3108,421 @@ app.get("/modulos", requireAuthenticated, async (req, res) => {
   }
 });
 
+/* ===============================
+   API - CATÁLOGOS ADMIN
+=============================== */
+
+// Módulos (admin)
+app.get("/admin/modulos", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        public_id AS id,
+        titulo,
+        nombre_completo,
+        descripcion,
+        activo,
+        created_at,
+        updated_at
+      FROM modulo
+      ORDER BY titulo ASC
+      `
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al listar módulos" });
+  }
+});
+
+app.post("/admin/modulos", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const titulo = String(req.body?.titulo || "").trim();
+  const nombreCompleto = String(req.body?.nombre_completo || "").trim() || null;
+  const descripcion = String(req.body?.descripcion || "").trim() || null;
+  const activo = req.body?.activo === undefined ? true : Boolean(req.body?.activo);
+  try {
+    if (!titulo) return res.status(400).json({ error: "El título es obligatorio" });
+    const dup = await pool.query(
+      "SELECT id FROM modulo WHERE LOWER(TRIM(titulo)) = LOWER(TRIM($1)) LIMIT 1",
+      [titulo]
+    );
+    if (dup.rows.length > 0) {
+      return res.status(400).json({ error: "Ya existe un módulo con ese título" });
+    }
+    const result = await pool.query(
+      `
+      INSERT INTO modulo (titulo, nombre_completo, descripcion, activo)
+      VALUES ($1, $2, $3, $4)
+      RETURNING public_id AS id, titulo, nombre_completo, descripcion, activo, created_at, updated_at
+      `,
+      [titulo, nombreCompleto, descripcion, activo]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al crear módulo" });
+  }
+});
+
+app.put("/admin/modulos/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const { id } = req.params;
+  const titulo = String(req.body?.titulo || "").trim();
+  const nombreCompleto = String(req.body?.nombre_completo || "").trim() || null;
+  const descripcion = String(req.body?.descripcion || "").trim() || null;
+  const activo = req.body?.activo;
+  try {
+    if (!titulo) return res.status(400).json({ error: "El título es obligatorio" });
+    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, id, { required: true });
+    const dup = await pool.query(
+      "SELECT id FROM modulo WHERE LOWER(TRIM(titulo)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1",
+      [titulo, moduloId]
+    );
+    if (dup.rows.length > 0) {
+      return res.status(400).json({ error: "Ya existe un módulo con ese título" });
+    }
+    const result = await pool.query(
+      `
+      UPDATE modulo
+      SET titulo = $1,
+          nombre_completo = $2,
+          descripcion = $3,
+          activo = COALESCE($4::boolean, activo),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $5
+      RETURNING public_id AS id, titulo, nombre_completo, descripcion, activo, created_at, updated_at
+      `,
+      [titulo, nombreCompleto, descripcion, activo === undefined ? null : Boolean(activo), moduloId]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Módulo no encontrado" });
+    }
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar módulo" });
+  }
+});
+
+app.delete("/admin/modulos/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, id, { required: true });
+    const result = await pool.query(
+      `
+      UPDATE modulo
+      SET activo = false,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING public_id AS id
+      `,
+      [moduloId]
+    );
+    res.json(result.rows[0] || { ok: true });
+  } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Módulo no encontrado" });
+    }
+    console.error(err);
+    res.status(500).json({ error: "Error al eliminar módulo" });
+  }
+});
+
+// Roles (admin)
+app.get("/admin/roles", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        public_id AS id,
+        titulo,
+        descripcion,
+        activo,
+        created_at,
+        updated_at
+      FROM roles
+      ORDER BY titulo ASC
+      `
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al listar roles" });
+  }
+});
+
+app.post("/admin/roles", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const titulo = String(req.body?.titulo || "").trim();
+  const descripcion = String(req.body?.descripcion || "").trim() || null;
+  const activo = req.body?.activo === undefined ? true : Boolean(req.body?.activo);
+  try {
+    if (!titulo) return res.status(400).json({ error: "El título es obligatorio" });
+    const dup = await pool.query(
+      "SELECT id FROM roles WHERE LOWER(TRIM(titulo)) = LOWER(TRIM($1)) LIMIT 1",
+      [titulo]
+    );
+    if (dup.rows.length > 0) {
+      return res.status(400).json({ error: "Ya existe un rol con ese título" });
+    }
+    const result = await pool.query(
+      `
+      INSERT INTO roles (titulo, descripcion, activo)
+      VALUES ($1, $2, $3)
+      RETURNING public_id AS id, titulo, descripcion, activo, created_at, updated_at
+      `,
+      [titulo, descripcion, activo]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al crear rol" });
+  }
+});
+
+app.put("/admin/roles/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const { id } = req.params;
+  const titulo = String(req.body?.titulo || "").trim();
+  const descripcion = String(req.body?.descripcion || "").trim() || null;
+  const activo = req.body?.activo;
+  try {
+    if (!titulo) return res.status(400).json({ error: "El título es obligatorio" });
+    const rolId = await resolveInternalId(pool, ID_TABLES.roles, id, { required: true });
+    const dup = await pool.query(
+      "SELECT id FROM roles WHERE LOWER(TRIM(titulo)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1",
+      [titulo, rolId]
+    );
+    if (dup.rows.length > 0) {
+      return res.status(400).json({ error: "Ya existe un rol con ese título" });
+    }
+    const result = await pool.query(
+      `
+      UPDATE roles
+      SET titulo = $1,
+          descripcion = $2,
+          activo = COALESCE($3::boolean, activo),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $4
+      RETURNING public_id AS id, titulo, descripcion, activo, created_at, updated_at
+      `,
+      [titulo, descripcion, activo === undefined ? null : Boolean(activo), rolId]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Rol no encontrado" });
+    }
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar rol" });
+  }
+});
+
+app.delete("/admin/roles/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const rolId = await resolveInternalId(pool, ID_TABLES.roles, id, { required: true });
+    const inUse = await pool.query(
+      "SELECT id FROM usuarios WHERE rol_usuario_id = $1 LIMIT 1",
+      [rolId]
+    );
+    if (inUse.rows.length > 0) {
+      return res.status(400).json({ error: "No se puede eliminar: el rol está asignado a usuarios" });
+    }
+    const result = await pool.query(
+      `
+      UPDATE roles
+      SET activo = false,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING public_id AS id
+      `,
+      [rolId]
+    );
+    res.json(result.rows[0] || { ok: true });
+  } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Rol no encontrado" });
+    }
+    console.error(err);
+    res.status(500).json({ error: "Error al eliminar rol" });
+  }
+});
+
+// Bancos (admin)
+app.get("/admin/bancos", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        public_id AS id,
+        titulo,
+        codigo_bancolombia,
+        codigo_conversor,
+        activo,
+        created_at,
+        updated_at
+      FROM bancos
+      ORDER BY titulo ASC
+      `
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al listar bancos" });
+  }
+});
+
+app.post("/admin/bancos", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const titulo = String(req.body?.titulo || "").trim();
+  const codigoBancolombia = String(req.body?.codigo_bancolombia || "").trim() || null;
+  const codigoConversor = String(req.body?.codigo_conversor || "").trim() || null;
+  const activo = req.body?.activo === undefined ? true : Boolean(req.body?.activo);
+  try {
+    if (!titulo) return res.status(400).json({ error: "El título es obligatorio" });
+    const dup = await pool.query(
+      "SELECT id FROM bancos WHERE LOWER(TRIM(titulo)) = LOWER(TRIM($1)) LIMIT 1",
+      [titulo]
+    );
+    if (dup.rows.length > 0) {
+      return res.status(400).json({ error: "Ya existe un banco con ese título" });
+    }
+    const result = await pool.query(
+      `
+      INSERT INTO bancos (titulo, codigo_bancolombia, codigo_conversor, activo)
+      VALUES ($1, $2, $3, $4)
+      RETURNING public_id AS id, titulo, codigo_bancolombia, codigo_conversor, activo, created_at, updated_at
+      `,
+      [titulo, codigoBancolombia, codigoConversor, activo]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al crear banco" });
+  }
+});
+
+app.put("/admin/bancos/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const { id } = req.params;
+  const titulo = String(req.body?.titulo || "").trim();
+  const codigoBancolombia = String(req.body?.codigo_bancolombia || "").trim() || null;
+  const codigoConversor = String(req.body?.codigo_conversor || "").trim() || null;
+  const activo = req.body?.activo;
+  try {
+    if (!titulo) return res.status(400).json({ error: "El título es obligatorio" });
+    const bancoId = await resolveInternalId(pool, ID_TABLES.bancos, id, { required: true });
+    const dup = await pool.query(
+      "SELECT id FROM bancos WHERE LOWER(TRIM(titulo)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1",
+      [titulo, bancoId]
+    );
+    if (dup.rows.length > 0) {
+      return res.status(400).json({ error: "Ya existe un banco con ese título" });
+    }
+    const result = await pool.query(
+      `
+      UPDATE bancos
+      SET titulo = $1,
+          codigo_bancolombia = $2,
+          codigo_conversor = $3,
+          activo = COALESCE($4::boolean, activo),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $5
+      RETURNING public_id AS id, titulo, codigo_bancolombia, codigo_conversor, activo, created_at, updated_at
+      `,
+      [titulo, codigoBancolombia, codigoConversor, activo === undefined ? null : Boolean(activo), bancoId]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Banco no encontrado" });
+    }
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar banco" });
+  }
+});
+
+app.delete("/admin/bancos/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const bancoId = await resolveInternalId(pool, ID_TABLES.bancos, id, { required: true });
+    const inUse = await pool.query(
+      "SELECT id FROM usuarios WHERE banco_id = $1 LIMIT 1",
+      [bancoId]
+    );
+    if (inUse.rows.length > 0) {
+      return res.status(400).json({ error: "No se puede eliminar: el banco está asignado a usuarios" });
+    }
+    const result = await pool.query(
+      `
+      UPDATE bancos
+      SET activo = false,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING public_id AS id
+      `,
+      [bancoId]
+    );
+    res.json(result.rows[0] || { ok: true });
+  } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Banco no encontrado" });
+    }
+    console.error(err);
+    res.status(500).json({ error: "Error al eliminar banco" });
+  }
+});
+
+// Roles por usuario (admin)
+app.get("/admin/usuarios-roles", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        u.public_id AS id,
+        u.nombre_usuario,
+        u.email,
+        u.activo,
+        r.public_id AS rol_id,
+        r.titulo AS rol
+      FROM usuarios u
+      LEFT JOIN roles r ON r.id = u.rol_usuario_id
+      WHERE u.activo = true
+      ORDER BY u.nombre_usuario ASC
+      `
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al listar usuarios" });
+  }
+});
+
+app.put("/admin/usuarios/:id/rol", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const { id } = req.params;
+  const { rol_id } = req.body || {};
+  try {
+    if (!rol_id) return res.status(400).json({ error: "Falta rol_id" });
+    const userId = await resolveInternalId(pool, ID_TABLES.usuarios, id, { required: true });
+    const rolId = await resolveInternalId(pool, ID_TABLES.roles, rol_id, { required: true });
+    const result = await pool.query(
+      `
+      UPDATE usuarios
+      SET rol_usuario_id = $1,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      RETURNING public_id AS id, nombre_usuario, email
+      `,
+      [rolId, userId]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: "Usuario no encontrado" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Usuario o rol no encontrado" });
+    }
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar rol de usuario" });
+  }
+});
+
 // Tipos de asignación activos
 app.get("/tipos-asignacion", requireAuthenticated, async (req, res) => {
   try {
@@ -4549,6 +5005,14 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
         ta.titulo AS nombre_tipo_asignacion,
         ra.horas_asignadas,
         ra.cantidad_dias,
+        CASE
+          WHEN ra.horas_asignadas IS NULL THEN NULL
+          ELSE GREATEST(ra.horas_asignadas - COALESCE(uso.horas_aprobadas, 0), 0)
+        END AS horas_disponibles,
+        CASE
+          WHEN ra.cantidad_dias IS NULL THEN NULL
+          ELSE GREATEST(ra.cantidad_dias - COALESCE(uso.dias_aprobados, 0), 0)
+        END AS dias_disponibles,
         ra.valor_hora,
         ra.valor_dia,
         ra.total_pagar,
@@ -4573,6 +5037,13 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
           ORDER BY rh.created_at DESC
           LIMIT 1
         ) lr ON true
+        LEFT JOIN LATERAL (
+          SELECT
+            COALESCE(SUM(CASE WHEN rh.estado_reporte = 'Aprobado' THEN rh.horas_reportadas ELSE 0 END), 0) AS horas_aprobadas,
+            COALESCE(SUM(CASE WHEN rh.estado_reporte = 'Aprobado' THEN rh.cantidad_dias_reportados ELSE 0 END), 0) AS dias_aprobados
+          FROM reporte_horas rh
+          WHERE rh.id_registro_asignacion = ra.id
+        ) uso ON true
       WHERE (
         $1::int IS NULL
         OR ra.consultor_responsable_id = $1
@@ -4583,11 +5054,28 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
             AND u.id_consultor_principal = $1
         )
       )
-        AND (lr.estado_reporte IS NULL OR lr.estado_reporte = 'Rechazado')
+        AND (lr.estado_reporte IS NULL OR lr.estado_reporte IN ('Rechazado', 'Aprobado'))
         AND ra.estado IN ($2::tipo_estado_asignacion, $3::tipo_estado_asignacion)
         AND NOT (
           COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
           OR LOWER(TRIM(COALESCE(ta.titulo, ''))) IN ('mesa de servicio', 'fabrica', 'fábrica')
+        )
+        AND (
+          LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%horas por demanda%'
+          OR (
+            (
+              LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%full%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%part%'
+            )
+            AND (ra.cantidad_dias IS NULL OR ra.cantidad_dias > COALESCE(uso.dias_aprobados, 0))
+          )
+          OR (
+            NOT (
+              LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%full%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%part%'
+            )
+            AND (ra.horas_asignadas IS NULL OR ra.horas_asignadas > COALESCE(uso.horas_aprobadas, 0))
+          )
         )
       ORDER BY ra.id DESC
     `, [userId || null, estados.abierto, estados.proceso]);
@@ -4610,6 +5098,10 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
   } = req.body;
 
   try {
+    const horasReportadasNum = toNullableNumber(horas_reportadas);
+    const diasReportadosNum = toNullableInteger(cantidad_dias_reportados);
+    const totalCobrarNum = toNullableNumber(total_cobrar);
+
     if (!id_registro_asignacion) {
       return res.status(400).json({ error: "Falta id_registro_asignacion" });
     }
@@ -4639,6 +5131,8 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
         ra.id,
         ra.estado AS estado_asignacion,
         ra.id_modulo,
+        ra.horas_asignadas,
+        ra.cantidad_dias,
         ra.consultor_responsable_id,
         con.id_cliente,
         con.id_tipo_asignacion,
@@ -4674,6 +5168,48 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
       });
     }
 
+    const esMensual =
+      tipoAsignacionTitulo.includes("full") ||
+      tipoAsignacionTitulo.includes("part");
+    const esHorasPorDemanda = tipoAsignacionTitulo.includes("horas por demanda");
+    const cantidadSolicitada = esMensual
+      ? Number(diasReportadosNum || 0)
+      : Number(horasReportadasNum || 0);
+
+    if (!(cantidadSolicitada > 0)) {
+      return res.status(400).json({ error: esMensual ? "Debes reportar días mayores a 0" : "Debes reportar horas mayores a 0" });
+    }
+
+    if (!esHorasPorDemanda) {
+      const uso = await pool.query(
+        `
+        SELECT
+          COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN horas_reportadas ELSE 0 END), 0) AS horas_aprobadas,
+          COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN cantidad_dias_reportados ELSE 0 END), 0) AS dias_aprobados
+        FROM reporte_horas
+        WHERE id_registro_asignacion = $1
+        `,
+        [registroAsignacionId]
+      );
+      const horasAprobadas = Number(uso.rows[0]?.horas_aprobadas || 0);
+      const diasAprobadas = Number(uso.rows[0]?.dias_aprobadas || 0);
+      const horasAsignadas = toNullableNumber(info.horas_asignadas);
+      const diasAsignados = toNullableNumber(info.cantidad_dias);
+
+      if (esMensual && diasAsignados !== null) {
+        const disponibles = Math.max(diasAsignados - diasAprobadas, 0);
+        if (cantidadSolicitada > disponibles) {
+          return res.status(400).json({ error: `Excede días disponibles de la asignación (${disponibles})` });
+        }
+      }
+      if (!esMensual && horasAsignadas !== null) {
+        const disponibles = Math.max(horasAsignadas - horasAprobadas, 0);
+        if (cantidadSolicitada > disponibles) {
+          return res.status(400).json({ error: `Excede horas disponibles de la asignación (${disponibles})` });
+        }
+      }
+    }
+
     const consultorId = info.consultor_responsable_id || req.user?.id || null;
     let consultorPrincipalId = null;
     if (consultorId) {
@@ -4707,9 +5243,9 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
            WHERE id = $12
            RETURNING *`,
         [
-          horas_reportadas || null,
-          cantidad_dias_reportados || null,
-          total_cobrar || null,
+          horasReportadasNum,
+          diasReportadosNum,
+          totalCobrarNum,
           tipo_servicio || null,
           nro_caso_int_ext || null,
           info.id_cliente,
@@ -4731,9 +5267,9 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
            RETURNING *`,
         [
           registroAsignacionId,
-          horas_reportadas || null,
-          cantidad_dias_reportados || null,
-          total_cobrar || null,
+          horasReportadasNum,
+          diasReportadosNum,
+          totalCobrarNum,
           tipo_servicio || null,
           nro_caso_int_ext || null,
           info.id_cliente,
@@ -4785,7 +5321,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
           `El consultor ${correoRow.consultor_nombre || ""} reportó horas.\n` +
           `Cliente: ${correoRow.cliente}\n` +
           `Tipo: ${correoRow.tipo_asignacion || "N/A"}\n` +
-          `Detalle: ${buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total_cobrar })}\n` +
+          `Detalle: ${buildReporteResumen({ horas_reportadas: horasReportadasNum, cantidad_dias_reportados: diasReportadosNum, total_cobrar: totalCobrarNum })}\n` +
           `Revisar: ${portalUrl}\n`,
         html: buildEmailLayout({
           title: "Aprobación pendiente de reporte",
@@ -4793,7 +5329,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
           blocks: [
             { label: "Cliente", value: correoRow.cliente || "N/A" },
             { label: "Tipo de asignación", value: correoRow.tipo_asignacion || "N/A" },
-            { label: "Resumen", value: buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total_cobrar }) }
+            { label: "Resumen", value: buildReporteResumen({ horas_reportadas: horasReportadasNum, cantidad_dias_reportados: diasReportadosNum, total_cobrar: totalCobrarNum }) }
           ],
           ctaLabel: "Revisar y aprobar",
           ctaUrl: portalUrl
@@ -4978,7 +5514,15 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "Solo Mesa/Fábrica se envía desde este módulo." });
     }
-    const scope = getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo);
+    const scope = getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, {
+      estado_mesa_servicio,
+      estado_fabrica,
+      tipo_servicio,
+      nro_caso_int_ext,
+      requerimiento,
+      perfil_fabrica,
+      wricef
+    });
     const estadosMesa = await getEstadoMesaValues();
     const estadosFabrica = await getEstadoFabricaValues();
     const estadoMesaNormalizado = resolveEstadoMesaInput(estado_mesa_servicio, estadosMesa);
@@ -4992,19 +5536,6 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       return res.status(400).json({ error: "Estado de fábrica inválido" });
     }
 
-    const last = await client.query(
-      `SELECT id, estado_reporte
-       FROM reporte_horas
-       WHERE id_registro_asignacion = $1
-       ORDER BY updated_at DESC NULLS LAST, id DESC
-       LIMIT 1`,
-      [registroId]
-    );
-    const lastRow = last.rows[0];
-    if (lastRow?.estado_reporte === "Pendiente") {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Este ticket ya está pendiente de aprobación." });
-    }
     const editable = await client.query(
       `SELECT id, estado_reporte
        FROM reporte_horas
@@ -5021,8 +5552,8 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     const finalNroCaso = (nro_caso_int_ext || info.nro_caso_cliente || info.nro_caso_interno || "").toString().trim() || null;
     const finalObservacion = (observacion_mesa_fabrica || info.ra_observacion || "").toString().trim() || null;
     const finalFechaCierre = fecha_cierre_mesa_fab || info.fecha_fin || null;
-    const finalHoras = horas_reportadas ?? null;
-    const finalTotalInput = ocultarMonto ? null : total_cobrar;
+    const finalHoras = toNullableNumber(horas_reportadas);
+    const finalTotalInput = ocultarMonto ? null : toNullableNumber(total_cobrar);
     const finalTotal = finalTotalInput ?? info.total_pagar ?? null;
     const finalRequerimiento = (requerimiento || "").toString().trim() || null;
     const finalPerfilFabrica = normalizePerfilFabricaInput(perfil_fabrica);
@@ -5083,6 +5614,17 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Solicitud no editable o no encontrada" });
     } else {
+      const totalTickets = await client.query(
+        `SELECT COUNT(1) AS total FROM reporte_horas WHERE id_registro_asignacion = $1`,
+        [registroId]
+      );
+      const cantidadTickets = Number(totalTickets.rows[0]?.total || 0);
+      if (cantidadTickets >= MAX_TICKETS_POR_ASIGNACION) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          error: `Máximo de ${MAX_TICKETS_POR_ASIGNACION} tickets por asignación alcanzado`
+        });
+      }
       saved = await client.query(
         `INSERT INTO reporte_horas
           (id_registro_asignacion, horas_reportadas, total_cobrar, tipo_servicio, nro_caso_int_ext,
@@ -5253,7 +5795,16 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     if (!esMesaOFabrica) {
       return res.status(400).json({ error: "Solo se permite actualizar tickets de Mesa/Fábrica en este módulo." });
     }
-    const scope = getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo);
+    const scope = getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, {
+      estado_mesa_servicio,
+      estado_fabrica,
+      tipo_servicio,
+      nro_caso_cliente,
+      nro_caso_interno,
+      requerimiento,
+      perfil_fabrica,
+      wricef
+    });
 
     const estados = await getEstadoAsignacionValues();
     const estadoNormalizado = resolveEstadoAsignacionInput(estado, estados);
@@ -5304,8 +5855,8 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
       ]
     );
 
-    const finalHoras = horas_reportadas ?? null;
-    const finalTotalInput = ocultarMonto ? null : total_cobrar;
+    const finalHoras = toNullableNumber(horas_reportadas);
+    const finalTotalInput = ocultarMonto ? null : toNullableNumber(total_cobrar);
     const finalTotal = finalTotalInput ??
       ((finalHoras !== null && finalHoras !== undefined && tipoValido.rows[0]?.valor_hora !== null && tipoValido.rows[0]?.valor_hora !== undefined)
         ? Number(finalHoras) * Number(tipoValido.rows[0].valor_hora)
@@ -5329,18 +5880,16 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
       [registroId, reporteId || null]
     );
     if (!reporteId) {
-      const existenteActivo = await pool.query(
-        `SELECT id
+      const totalTickets = await pool.query(
+        `SELECT COUNT(1) AS total
          FROM reporte_horas
-         WHERE id_registro_asignacion = $1
-           AND estado_reporte IN ('Revisión', 'Rechazado', 'Pendiente')
-         ORDER BY updated_at DESC NULLS LAST, id DESC
-         LIMIT 1`,
+         WHERE id_registro_asignacion = $1`,
         [registroId]
       );
-      if (existenteActivo.rows.length > 0) {
+      const cantidadTickets = Number(totalTickets.rows[0]?.total || 0);
+      if (cantidadTickets >= MAX_TICKETS_POR_ASIGNACION) {
         return res.status(400).json({
-          error: "Ya existe una solicitud para esta asignación. Debes editar la existente en lugar de crear otra."
+          error: `Máximo de ${MAX_TICKETS_POR_ASIGNACION} tickets por asignación alcanzado`
         });
       }
     }
@@ -7062,7 +7611,9 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
         const asignacionMeta = await pool.query(
           `SELECT
              con.id_tipo_asignacion,
-             ta.titulo AS tipo_asignacion_titulo
+             ta.titulo AS tipo_asignacion_titulo,
+             ra.horas_asignadas,
+             ra.cantidad_dias
            FROM registro_asignaciones ra
            JOIN consultorias con ON con.id = ra.id_consultoria
            LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
@@ -7075,6 +7626,35 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
           if (scope) {
             // Mesa/Fabrica: se cierra la solicitud (reporte), pero la asignacion base sigue activa.
             estadoAprobadoDestino = estados.abierto || estados.proceso;
+          } else {
+            const tipoNorm = String(meta.tipo_asignacion_titulo || "")
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .toLowerCase()
+              .trim();
+            const esMensual = tipoNorm.includes("full") || tipoNorm.includes("part");
+            const esHorasPorDemanda = tipoNorm.includes("horas por demanda");
+            if (!esHorasPorDemanda) {
+              const uso = await pool.query(
+                `
+                SELECT
+                  COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN horas_reportadas ELSE 0 END), 0) AS horas_aprobadas,
+                  COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN cantidad_dias_reportados ELSE 0 END), 0) AS dias_aprobados
+                FROM reporte_horas
+                WHERE id_registro_asignacion = $1
+                `,
+                [registroId]
+              );
+              const horasAsignadas = toNullableNumber(meta.horas_asignadas);
+              const diasAsignados = toNullableNumber(meta.cantidad_dias);
+              const horasAprobadas = Number(uso.rows[0]?.horas_aprobadas || 0);
+              const diasAprobadas = Number(uso.rows[0]?.dias_aprobadas || 0);
+              const agotadoPorHoras = !esMensual && horasAsignadas !== null && horasAprobadas >= horasAsignadas;
+              const agotadoPorDias = esMensual && diasAsignados !== null && diasAprobadas >= diasAsignados;
+              if (agotadoPorHoras || agotadoPorDias) {
+                estadoAprobadoDestino = estados.cerrado || estados.proceso;
+              }
+            }
           }
         }
         // Actualizar aprobación y estado en la asignación asociada
@@ -7194,6 +7774,10 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
   } = req.body;
 
   try {
+    const cantidadDiasNum = toNullableInteger(cantidad_dias);
+    const valorHoraNum = toNullableNumber(valor_hora);
+    const valorDiaNum = toNullableNumber(valor_dia);
+    const totalPagarNum = toNullableNumber(total_pagar);
     const asignacionId = await resolveInternalId(pool, ID_TABLES.registroAsignaciones, id, { required: true });
     const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_responsable_id, { required: false });
     const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, id_modulo, { required: false });
@@ -7228,15 +7812,15 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
         moduloId || null,
         fecha_inicio || null,
         fecha_fin || null,
-        cantidad_dias || null,
-        valor_hora || null,
-        valor_dia || null,
+        cantidadDiasNum,
+        valorHoraNum,
+        valorDiaNum,
         nro_caso_interno || null,
         nro_caso_cliente || null,
         tipoServicioNormalizado,
         estadoNormalizado,
         observacion || null,
-        total_pagar || null,
+        totalPagarNum,
         asignacionId
       ]
     );
@@ -7320,6 +7904,11 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
   } = req.body;
 
   try {
+    const cantidadDiasNum = toNullableInteger(cantidad_dias);
+    const horasAsignadasNum = toNullableNumber(horas_asignadas);
+    const valorHoraInput = toNullableNumber(valor_hora);
+    const valorDiaInput = toNullableNumber(valor_dia);
+    const totalPagarInput = toNullableNumber(total_pagar);
     const estados = await getEstadoAsignacionValues();
     if (!id_consultoria || !consultor_responsable_id || !id_modulo) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
@@ -7373,10 +7962,14 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     const esMesaOFabrica =
       [5, 6].includes(Number(tipoAsignacionId || 0)) ||
       ["mesa de servicio", "fabrica"].includes(tipoAsigNorm);
+    const esMensual = tipoAsigNorm.includes("full") || tipoAsigNorm.includes("part");
+    const esHorasPorDemanda = tipoAsigNorm.includes("horas por demanda");
 
-    let valorHoraFinal = valor_hora || null;
-    let valorDiaFinal = valor_dia || null;
-    let totalPagarFinal = total_pagar || null;
+    let valorHoraFinal = valorHoraInput;
+    let valorDiaFinal = valorDiaInput;
+    let totalPagarFinal = totalPagarInput;
+    let horasAsignadasFinal = horasAsignadasNum;
+    let cantidadDiasFinal = cantidadDiasNum;
 
     if (esMesaOFabrica) {
       const tarifaRes = await pool.query(
@@ -7392,9 +7985,17 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
       valorHoraFinal = tarifaVigente;
       valorDiaFinal = null;
       totalPagarFinal =
-        total_pagar !== undefined && total_pagar !== null
-          ? Number(total_pagar)
-          : (horas_asignadas ? Number(horas_asignadas) * tarifaVigente : null);
+        totalPagarInput !== null
+          ? totalPagarInput
+          : (horasAsignadasNum !== null ? horasAsignadasNum * tarifaVigente : null);
+    }
+
+    if (esHorasPorDemanda) {
+      horasAsignadasFinal = null;
+      cantidadDiasFinal = null;
+      totalPagarFinal = 0;
+    } else if (!esMensual && totalPagarFinal === null && valorHoraFinal !== null && horasAsignadasFinal !== null) {
+      totalPagarFinal = valorHoraFinal * horasAsignadasFinal;
     }
 
     const result = await pool.query(
@@ -7409,8 +8010,8 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
         consultorId,
         fecha_inicio || null,
         fecha_fin || null,
-        cantidad_dias || null,
-        horas_asignadas || null,
+        cantidadDiasFinal,
+        horasAsignadasFinal,
         valorHoraFinal,
         valorDiaFinal,
         tipoServicioNormalizado,

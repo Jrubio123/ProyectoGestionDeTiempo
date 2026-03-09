@@ -87,9 +87,13 @@ window.registroHorasApp = function () {
             const tipo = String(item?.nombre_tipo_asignacion || "").toLowerCase();
             const esDias = tipo.includes("full") || tipo.includes("part");
             if (esDias) {
-                return item.cantidad_dias > 0 && reportado > item.cantidad_dias;
+                const disponible = item?.dias_disponibles;
+                if (disponible === null || disponible === undefined || Number.isNaN(Number(disponible))) return false;
+                return reportado > Number(disponible);
             }
-            return item.horas_asignadas > 0 && reportado > item.horas_asignadas;
+            const disponible = item?.horas_disponibles;
+            if (disponible === null || disponible === undefined || Number.isNaN(Number(disponible))) return false;
+            return reportado > Number(disponible);
         },
 
         verDetalle(item) {
@@ -105,12 +109,14 @@ window.registroHorasApp = function () {
             const tipo = item.nombre_tipo_asignacion;
             const tipoLower = String(tipo || "").toLowerCase();
             const esDias = tipoLower.includes("full") || tipoLower.includes("part");
-            const unidad = esDias ? "Días" : "Horas";
+            const unidad = esDias ? "Dias" : "Horas";
             const cantidad = parseFloat(item.input_cantidad) || 0;
 
             if (this.esExceso(item)) {
-                const maximo = esDias ? (item.cantidad_dias || 0) : (item.horas_asignadas || 0);
-                alert(`No puedes reportar ${cantidad} ${unidad}. Máximo permitido: ${maximo}.`);
+                const maximo = esDias
+                    ? Number(item?.dias_disponibles ?? item?.cantidad_dias ?? 0)
+                    : Number(item?.horas_disponibles ?? item?.horas_asignadas ?? 0);
+                alert(`No puedes reportar ${cantidad} ${unidad}. Maximo permitido: ${maximo}.`);
                 return;
             }
 

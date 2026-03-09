@@ -35,6 +35,7 @@ const routes = {
     "soportes-cuentas-cobro": "soportes-cuentas-cobro",
     "generar-cuenta-cobro": "generar-cuenta-cobro",
     "asignacion-fabrica-mesa-servicio": "asignacion-fabrica-mesa-servicio",
+    "catalogos-admin": "catalogos-admin",
     solicitudesCoord: "solicitudesCoord",
     preregistrosCoord: "preregistrosCoord",
     solicitudesRecl: "solicitudesRecl",
@@ -51,7 +52,7 @@ function router() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador","asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador","asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro", "catalogos-admin"],
         coordinador: [
             "inicio",
             "asignacion-consultor",

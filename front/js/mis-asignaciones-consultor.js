@@ -48,20 +48,28 @@ window.misAsignacionesConsultorApp = function () {
         },
 
         totalMostrar(asignacion) {
-            const totalBackend = Number(asignacion?.total_pagar || 0);
-            if (totalBackend > 0) return totalBackend;
+            const tipo = String(asignacion?.nombre_tipo_asignacion || "").toLowerCase();
+            const esMensual = tipo.includes("full") || tipo.includes("part");
+            const esHorasDemanda = tipo.includes("horas por demanda");
+            if (esHorasDemanda) return 0;
 
+            const totalBackend = Number(asignacion?.total_pagar || 0);
             const tarifa = this.tarifaMostrar(asignacion);
             if (!(tarifa > 0)) return 0;
 
             const horas = Number(asignacion?.horas_asignadas || 0);
-            if (horas > 0) return tarifa * horas;
-
             const dias = Number(asignacion?.cantidad_dias || 0);
-            if (dias > 0) return tarifa * dias;
+            const valorDia = Number(asignacion?.valor_dia || 0);
 
-            const tipo = String(asignacion?.nombre_tipo_asignacion || "").toLowerCase();
-            const esMensual = tipo.includes("full") || tipo.includes("part");
+            if (esMensual) {
+                if (dias > 0 && valorDia > 0) return valorDia * dias;
+                if (dias > 0) return (tarifa / 20) * dias;
+                return totalBackend > 0 ? totalBackend : 0;
+            }
+
+            if (totalBackend > 0) return totalBackend;
+            if (horas > 0) return tarifa * horas;
+            if (dias > 0) return tarifa * dias;
             return esMensual ? tarifa : 0;
         },
 

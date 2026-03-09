@@ -113,9 +113,15 @@
                                 <input type="number" x-model="form.cantidad_dias" readonly class="w-full mt-1 p-2 bg-gray-100 border rounded-lg text-sm font-mono text-gray-600">
                             </div>
                             
-                            <div x-show="esPorHora">
+                            <div x-show="esPorHora && !esHorasPorDemanda">
                                 <label class="text-xs font-bold text-gray-500 uppercase">Horas Asignadas</label>
                                 <input type="number" x-model="form.horas_asignadas" class="w-full mt-1 p-2 border rounded-lg text-sm font-mono focus:border-indigo-500 outline-none">
+                            </div>
+
+                            <div x-show="esHorasPorDemanda" class="col-span-1 sm:col-span-2">
+                                <div class="p-2 mt-6 text-xs rounded-lg border border-blue-200 bg-blue-50 text-blue-700">
+                                    En Horas por demanda no se asignan horas base. El consultor reporta las horas reales en Registro de Horas.
+                                </div>
                             </div>
 
                             <div class="col-span-1" :class="esPorHora ? '' : 'col-span-2'">

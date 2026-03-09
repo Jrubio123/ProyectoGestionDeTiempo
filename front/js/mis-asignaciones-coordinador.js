@@ -197,16 +197,16 @@ window.misAsignacionesApp = function () {
         },
 
         calcularTotalPagar() {
-            if (!this.form.valor_hora) return 0;
+            const valorHora = Number(this.form.valor_hora || 0);
+            const valorDiaCalculado = Number(this.form.valor_dia || 0) || (valorHora > 0 ? (valorHora / 20) : 0);
             if (this.esMensualTipo()) {
                 const dias = this.calcularDiasMensual(this.form.fecha_inicio, this.form.fecha_fin) || this.form.cantidad_dias || 20;
-                const meses = dias / 20;
-                return this.form.valor_hora * (meses || 1);
+                return valorDiaCalculado * (dias || 0);
             }
             if (this.consultoriaInfo.tipo_asignacion === "Tiempo y costo fijo") {
-                return this.form.valor_hora * (this.form.cantidad_dias || 0);
+                return valorHora * (this.form.cantidad_dias || 0);
             }
-            return this.form.valor_hora * (this.form.cantidad_dias || 0);
+            return valorHora * (this.form.cantidad_dias || 0);
         },
 
         esMensualTipo() {
@@ -247,20 +247,30 @@ window.misAsignacionesApp = function () {
             if (!this.form.id) return;
             this.guardando = true;
             try {
+                const cantidadDias = this.form.cantidad_dias === "" || this.form.cantidad_dias === null || this.form.cantidad_dias === undefined
+                    ? null
+                    : Number(this.form.cantidad_dias);
+                const valorHora = this.form.valor_hora === "" || this.form.valor_hora === null || this.form.valor_hora === undefined
+                    ? null
+                    : Number(this.form.valor_hora);
+                const valorDia = this.form.valor_dia === "" || this.form.valor_dia === null || this.form.valor_dia === undefined
+                    ? null
+                    : Number(this.form.valor_dia);
+                const totalPagar = Number(this.calcularTotalPagar());
                 const payload = {
                     consultor_responsable_id: this.form.consultor_responsable_id,
                     id_modulo: this.form.id_modulo,
                     fecha_inicio: this.form.fecha_inicio || null,
                     fecha_fin: this.form.fecha_fin || null,
-                    cantidad_dias: this.form.cantidad_dias || null,
-                    valor_hora: this.form.valor_hora || null,
-                    valor_dia: this.form.valor_dia || null,
+                    cantidad_dias: Number.isFinite(cantidadDias) ? cantidadDias : null,
+                    valor_hora: Number.isFinite(valorHora) ? valorHora : null,
+                    valor_dia: Number.isFinite(valorDia) ? valorDia : null,
                     nro_caso_interno: this.form.nro_caso_interno || null,
                     nro_caso_cliente: this.form.nro_caso_cliente || null,
                     tipo_servicio: this.form.tipo_servicio || null,
                     estado: this.form.estado || null,
                     observacion: this.form.observacion || null,
-                    total_pagar: this.calcularTotalPagar() || null
+                    total_pagar: Number.isFinite(totalPagar) ? totalPagar : null
                 };
                 await axios.put(`${API}/registro-asignaciones/${this.form.id}`, payload);
                 this.toastMensaje("success", "Asignación actualizada");

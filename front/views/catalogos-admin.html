@@ -1,0 +1,245 @@
+<div x-data="catalogosAdminApp()" x-init="init()" class="max-w-7xl mx-auto space-y-6 animate-fade-in-up">
+    <div class="bg-white/80 backdrop-blur-md p-4 md:p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between md:items-center gap-4">
+        <div>
+            <h1 class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-slate-700 to-blue-700">
+                Catálogos de Administración
+            </h1>
+            <p class="text-gray-500 text-sm mt-1">Gestiona módulos, roles, bancos y asignación de rol a usuarios.</p>
+        </div>
+        <button @click="recargarTodo()" class="p-2 bg-white border border-gray-200 rounded-full hover:rotate-180 transition-transform duration-500 text-slate-600 shadow-sm" title="Recargar">
+            <svg class="w-6 h-6" :class="{'animate-spin': cargando}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+        </button>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-2 md:p-3">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <button @click="setTab('modulos')" class="px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+                :class="tabActiva === 'modulos' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'">Módulos</button>
+            <button @click="setTab('roles')" class="px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+                :class="tabActiva === 'roles' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'">Roles</button>
+            <button @click="setTab('bancos')" class="px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+                :class="tabActiva === 'bancos' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'">Bancos</button>
+            <button @click="setTab('usuarios')" class="px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+                :class="tabActiva === 'usuarios' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'">Roles por Usuario</button>
+        </div>
+    </div>
+
+    <div x-show="tabActiva === 'modulos'" x-cloak class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+            <h3 class="text-lg font-bold text-gray-800">Formulario Módulo</h3>
+            <div>
+                <label class="text-xs font-bold text-gray-500 uppercase">Título</label>
+                <input type="text" x-model="formModulo.titulo" class="w-full mt-1 p-2 border rounded-lg text-sm">
+            </div>
+            <div>
+                <label class="text-xs font-bold text-gray-500 uppercase">Nombre completo</label>
+                <input type="text" x-model="formModulo.nombre_completo" class="w-full mt-1 p-2 border rounded-lg text-sm">
+            </div>
+            <div>
+                <label class="text-xs font-bold text-gray-500 uppercase">Descripción</label>
+                <textarea x-model="formModulo.descripcion" rows="3" class="w-full mt-1 p-2 border rounded-lg text-sm"></textarea>
+            </div>
+            <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" x-model="formModulo.activo">
+                Activo
+            </label>
+            <div class="flex gap-2">
+                <button @click="guardarModulo()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700">Guardar</button>
+                <button @click="resetFormModulo()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-200">Nuevo</button>
+            </div>
+        </div>
+        <div class="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
+                        <tr>
+                            <th class="px-4 py-3 text-left">Título</th>
+                            <th class="px-4 py-3 text-left">Nombre completo</th>
+                            <th class="px-4 py-3 text-left">Estado</th>
+                            <th class="px-4 py-3 text-right">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        <template x-for="item in modulos" :key="item.id">
+                            <tr>
+                                <td class="px-4 py-3 font-semibold text-gray-800" x-text="item.titulo"></td>
+                                <td class="px-4 py-3 text-gray-600" x-text="item.nombre_completo || '-'"></td>
+                                <td class="px-4 py-3">
+                                    <span class="px-2 py-1 rounded-full text-xs font-semibold"
+                                        :class="item.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'"
+                                        x-text="item.activo ? 'Activo' : 'Inactivo'"></span>
+                                </td>
+                                <td class="px-4 py-3 text-right">
+                                    <div class="inline-flex gap-2">
+                                        <button @click="editarModulo(item)" class="px-3 py-1 bg-slate-100 rounded-md text-xs font-semibold hover:bg-slate-200">Editar</button>
+                                        <button @click="eliminarModulo(item)" class="px-3 py-1 bg-red-100 text-red-700 rounded-md text-xs font-semibold hover:bg-red-200">Eliminar</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="tabActiva === 'roles'" x-cloak class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+            <h3 class="text-lg font-bold text-gray-800">Formulario Rol</h3>
+            <div>
+                <label class="text-xs font-bold text-gray-500 uppercase">Título</label>
+                <input type="text" x-model="formRol.titulo" class="w-full mt-1 p-2 border rounded-lg text-sm">
+            </div>
+            <div>
+                <label class="text-xs font-bold text-gray-500 uppercase">Descripción</label>
+                <textarea x-model="formRol.descripcion" rows="3" class="w-full mt-1 p-2 border rounded-lg text-sm"></textarea>
+            </div>
+            <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" x-model="formRol.activo">
+                Activo
+            </label>
+            <div class="flex gap-2">
+                <button @click="guardarRol()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700">Guardar</button>
+                <button @click="resetFormRol()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-200">Nuevo</button>
+            </div>
+        </div>
+        <div class="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
+                        <tr>
+                            <th class="px-4 py-3 text-left">Rol</th>
+                            <th class="px-4 py-3 text-left">Descripción</th>
+                            <th class="px-4 py-3 text-left">Estado</th>
+                            <th class="px-4 py-3 text-right">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        <template x-for="item in roles" :key="item.id">
+                            <tr>
+                                <td class="px-4 py-3 font-semibold text-gray-800" x-text="item.titulo"></td>
+                                <td class="px-4 py-3 text-gray-600" x-text="item.descripcion || '-'"></td>
+                                <td class="px-4 py-3">
+                                    <span class="px-2 py-1 rounded-full text-xs font-semibold"
+                                        :class="item.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'"
+                                        x-text="item.activo ? 'Activo' : 'Inactivo'"></span>
+                                </td>
+                                <td class="px-4 py-3 text-right">
+                                    <div class="inline-flex gap-2">
+                                        <button @click="editarRol(item)" class="px-3 py-1 bg-slate-100 rounded-md text-xs font-semibold hover:bg-slate-200">Editar</button>
+                                        <button @click="eliminarRol(item)" class="px-3 py-1 bg-red-100 text-red-700 rounded-md text-xs font-semibold hover:bg-red-200">Eliminar</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="tabActiva === 'bancos'" x-cloak class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+            <h3 class="text-lg font-bold text-gray-800">Formulario Banco</h3>
+            <div>
+                <label class="text-xs font-bold text-gray-500 uppercase">Nombre</label>
+                <input type="text" x-model="formBanco.titulo" class="w-full mt-1 p-2 border rounded-lg text-sm">
+            </div>
+            <div>
+                <label class="text-xs font-bold text-gray-500 uppercase">Código Bancolombia</label>
+                <input type="text" x-model="formBanco.codigo_bancolombia" class="w-full mt-1 p-2 border rounded-lg text-sm">
+            </div>
+            <div>
+                <label class="text-xs font-bold text-gray-500 uppercase">Código conversor</label>
+                <input type="text" x-model="formBanco.codigo_conversor" class="w-full mt-1 p-2 border rounded-lg text-sm">
+            </div>
+            <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" x-model="formBanco.activo">
+                Activo
+            </label>
+            <div class="flex gap-2">
+                <button @click="guardarBanco()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700">Guardar</button>
+                <button @click="resetFormBanco()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-200">Nuevo</button>
+            </div>
+        </div>
+        <div class="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
+                        <tr>
+                            <th class="px-4 py-3 text-left">Banco</th>
+                            <th class="px-4 py-3 text-left">Cod. Bancolombia</th>
+                            <th class="px-4 py-3 text-left">Cod. Conversor</th>
+                            <th class="px-4 py-3 text-left">Estado</th>
+                            <th class="px-4 py-3 text-right">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        <template x-for="item in bancos" :key="item.id">
+                            <tr>
+                                <td class="px-4 py-3 font-semibold text-gray-800" x-text="item.titulo"></td>
+                                <td class="px-4 py-3 text-gray-600" x-text="item.codigo_bancolombia || '-'"></td>
+                                <td class="px-4 py-3 text-gray-600" x-text="item.codigo_conversor || '-'"></td>
+                                <td class="px-4 py-3">
+                                    <span class="px-2 py-1 rounded-full text-xs font-semibold"
+                                        :class="item.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'"
+                                        x-text="item.activo ? 'Activo' : 'Inactivo'"></span>
+                                </td>
+                                <td class="px-4 py-3 text-right">
+                                    <div class="inline-flex gap-2">
+                                        <button @click="editarBanco(item)" class="px-3 py-1 bg-slate-100 rounded-md text-xs font-semibold hover:bg-slate-200">Editar</button>
+                                        <button @click="eliminarBanco(item)" class="px-3 py-1 bg-red-100 text-red-700 rounded-md text-xs font-semibold hover:bg-red-200">Eliminar</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="tabActiva === 'usuarios'" x-cloak class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div class="p-4 border-b border-gray-100 bg-gray-50">
+            <label class="text-xs font-bold text-gray-500 uppercase">Buscar usuario</label>
+            <input type="text" x-model="filtroUsuario" placeholder="Nombre, email o rol" class="w-full mt-1 p-2 border rounded-lg text-sm">
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-white text-gray-500 uppercase text-xs border-b border-gray-100">
+                    <tr>
+                        <th class="px-4 py-3 text-left">Usuario</th>
+                        <th class="px-4 py-3 text-left">Email</th>
+                        <th class="px-4 py-3 text-left">Rol Actual</th>
+                        <th class="px-4 py-3 text-left">Nuevo Rol</th>
+                        <th class="px-4 py-3 text-right">Acción</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    <template x-for="u in usuariosFiltrados" :key="u.id">
+                        <tr>
+                            <td class="px-4 py-3 font-semibold text-gray-800" x-text="u.nombre_usuario"></td>
+                            <td class="px-4 py-3 text-gray-600" x-text="u.email"></td>
+                            <td class="px-4 py-3">
+                                <span class="px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold" x-text="u.rol || 'Sin rol'"></span>
+                            </td>
+                            <td class="px-4 py-3">
+                                <select x-model="u.rol_id_edit" class="w-full p-2 border rounded-lg text-sm bg-white">
+                                    <option value="">Seleccione...</option>
+                                    <template x-for="r in roles" :key="r.id">
+                                        <option :value="r.id" x-text="r.titulo"></option>
+                                    </template>
+                                </select>
+                            </td>
+                            <td class="px-4 py-3 text-right">
+                                <button @click="guardarRolUsuario(u)" class="px-3 py-1 bg-blue-600 text-white rounded-md text-xs font-semibold hover:bg-blue-700">Guardar rol</button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>

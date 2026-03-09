@@ -1,4 +1,4 @@
-﻿// js/asignacion-fabrica-mesa-servicio.js
+// js/asignacion-fabrica-mesa-servicio.js
 window.mesaFabricaApp = function () {
     return {
         API: window.API_BASE || "http://localhost:4000",
@@ -75,7 +75,7 @@ window.mesaFabricaApp = function () {
                     alert("La asignacion esta cerrada y no permite nuevos reportes.");
                     return;
                 }
-                alert("Ya existe una solicitud para esta asignacion. Edita la existente en Gestionar.");
+                alert("Se alcanzo el maximo de tickets para esta asignacion.");
                 return;
             }
             const scope = this.getScope(item);
@@ -199,7 +199,7 @@ window.mesaFabricaApp = function () {
             const scope = this.getScope(item);
             const estadoNorm = this.normalizeTipo(value);
             if (scope === "fabrica" && (estadoNorm === "enproceso" || estadoNorm === "endesarrollo")) {
-                return "En desarrollo";
+                return "En Desarrollo";
             }
             return value || "";
         },
@@ -275,13 +275,37 @@ window.mesaFabricaApp = function () {
         },
 
         canCreateSolicitud(item) {
-            return this.isAsignacionOperable(item) && !Boolean(item?.reporte_id);
+            return this.isAsignacionOperable(item) && this.countTicketsByAsignacion(item) < 10;
+        },
+
+        countTicketsByAsignacion(item) {
+            const id = item?.id;
+            if (!id) return 0;
+            return (this.tickets || []).filter((t) => t.id === id && Boolean(t?.reporte_id)).length;
         },
 
         getScope(item) {
             const tipo = this.normalizeTipo(item?.tipo_asignacion || this.form?.tipo_asignacion || "");
-            if (tipo.includes("mesa de servicio")) return "mesa";
-            if (tipo.includes("fabrica")) return "fabrica";
+            const hasMesaByTipo = tipo.includes("mesa de servicio");
+            const hasFabricaByTipo = tipo.includes("fabrica");
+            if (hasFabricaByTipo && !hasMesaByTipo) return "fabrica";
+            if (hasMesaByTipo && !hasFabricaByTipo) return "mesa";
+
+            const hasFabricaHints = Boolean(
+                String(item?.estado_fabrica || "").trim() ||
+                String(item?.wricef || "").trim() ||
+                String(item?.requerimiento || "").trim() ||
+                String(item?.perfil_fabrica || "").trim()
+            );
+            const hasMesaHints = Boolean(
+                String(item?.estado_mesa_servicio || "").trim() ||
+                String(item?.nro_caso_cliente || "").trim() ||
+                String(item?.nro_caso_interno || "").trim() ||
+                String(item?.tipo_servicio || "").trim()
+            );
+            if (hasFabricaHints && !hasMesaHints) return "fabrica";
+            if (hasMesaHints && !hasFabricaHints) return "mesa";
+            if (hasFabricaHints) return "fabrica";
             return "mesa";
         },
 
@@ -315,8 +339,8 @@ window.mesaFabricaApp = function () {
 
         estadoOptions() {
             const scope = this.getScope(this.form);
-            if (scope === "fabrica") return ["En desarrollo", "Finalizado"];
-            return ["Cerrado", "En proceso", "Transferido Silver", "Transferido Corona"];
+            if (scope === "fabrica") return ["En Desarrollo", "Finalizado"];
+            return ["Cerrado", "En Proceso", "Transferido Silver", "Transferido Corona"];
         },
 
         shouldShowFechaCierre() {
@@ -357,6 +381,16 @@ window.mesaFabricaApp = function () {
 
         formatDate(d) {
             return d ? String(d).split("T")[0] : "";
+        },
+
+        codigoTicket(item) {
+            const scope = this.getScope(item);
+            const base = String(item?.reporte_id || item?.id || "")
+                .replace(/-/g, "")
+                .toUpperCase()
+                .slice(0, 8);
+            const prefijo = scope === "fabrica" ? "FB" : "MS";
+            return `${prefijo}-${base || "SINCOD"}`;
         },
 
         todayDate() {

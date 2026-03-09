@@ -72,10 +72,10 @@ window.mesaFabricaApp = function () {
         crearSolicitud(item) {
             if (!this.canCreateSolicitud(item)) {
                 if (!this.isAsignacionOperable(item)) {
-                    alert("La asignacion esta cerrada y no permite nuevos reportes.");
+                    alert("La asignación está cerrada y no permite nuevos reportes.");
                     return;
                 }
-                alert("Se alcanzo el maximo de tickets para esta asignacion.");
+                alert("Se alcanzó el máximo de tickets para esta asignación.");
                 return;
             }
             const scope = this.getScope(item);
@@ -115,7 +115,7 @@ window.mesaFabricaApp = function () {
 
         async enviarTicket(item) {
             if (!this.isAsignacionOperable(item)) {
-                alert("La asignacion esta cerrada y no permite nuevos reportes.");
+                alert("La asignación está cerrada y no permite nuevos reportes.");
                 return;
             }
             if (item?.estado_reporte === "Pendiente" || item?.estado_reporte === "Aprobado") {
@@ -161,7 +161,7 @@ window.mesaFabricaApp = function () {
         async guardarCambios() {
             try {
                 if (!this.isAsignacionOperable(this.form)) {
-                    alert("La asignacion esta cerrada y no permite nuevos reportes.");
+                    alert("La asignación está cerrada y no permite nuevos reportes.");
                     return;
                 }
                 const scope = this.getScope(this.form);
@@ -199,7 +199,7 @@ window.mesaFabricaApp = function () {
             const scope = this.getScope(item);
             const estadoNorm = this.normalizeTipo(value);
             if (scope === "fabrica" && (estadoNorm === "enproceso" || estadoNorm === "endesarrollo")) {
-                return "En Desarrollo";
+                return "En desarrollo";
             }
             return value || "";
         },
@@ -339,8 +339,8 @@ window.mesaFabricaApp = function () {
 
         estadoOptions() {
             const scope = this.getScope(this.form);
-            if (scope === "fabrica") return ["En Desarrollo", "Finalizado"];
-            return ["Cerrado", "En Proceso", "Transferido Silver", "Transferido Corona"];
+            if (scope === "fabrica") return ["En desarrollo", "Finalizado"];
+            return ["Cerrado", "En proceso", "Transferido Silver", "Transferido Corona"];
         },
 
         shouldShowFechaCierre() {

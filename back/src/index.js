@@ -6096,7 +6096,7 @@ app.post("/cuentas-cobro/preview", requireAccess({ roles: ["Consultor", "Consult
     if (error?.code === "PUBLIC_ID_NOT_FOUND") {
       return res.status(400).json({ error: "Consultor o reportes inválidos para previsualizar" });
     }
-    console.error('âŒ Error en /cuentas-cobro/preview:', error);
+    console.error('[ERROR] Error en /cuentas-cobro/preview:', error);
     res.status(500).json({ error: "Error al calcular preview" });
   }
 });
@@ -8088,7 +8088,7 @@ app.get("/", (req, res) => {
 
 /*const PORT = process.env.BACK_PORT || 4000;
 app.listen(PORT, () => {
-  console.log(`âœ… Backend listo en http://localhost:${PORT}`);
+  console.log(`[OK] Backend listo en http://localhost:${PORT}`);
 });
 */
 

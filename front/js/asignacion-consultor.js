@@ -108,7 +108,7 @@ window.asignacionConsultorApp = function () {
                     this.alertaTarifa = {
                         mostrar: true,
                         tipo: "error",
-                        mensaje: "No existe tarifa para esta combinacion.",
+                        mensaje: "No existe tarifa para esta combinación.",
                         valor: 0
                     };
                 }
@@ -257,7 +257,7 @@ window.asignacionConsultorApp = function () {
 
             try {
                 await axios.post(`${API}/registro-asignaciones`, payload);
-                alert("Asignacion creada exitosamente");
+                alert("Asignación creada exitosamente");
                 this.proyectoSelected = null;
                 await this.cargarProyectos();
             } catch (e) {

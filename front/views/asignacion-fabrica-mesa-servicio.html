@@ -35,7 +35,6 @@
                             <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400" x-text="item.tipo_asignacion"></span>
                             <h3 class="font-bold text-gray-800 text-lg leading-tight" x-text="item.nombre_cliente"></h3>
                             <p class="text-xs text-purple-600 font-medium" x-text="item.nombre_modulo"></p>
-                            <p class="text-[11px] text-gray-500 mt-1">Codigo: <span class="font-mono font-semibold" x-text="codigoTicket(item)"></span></p>
                         </div>
                         <button
                             @click="crearSolicitud(item)"
@@ -48,6 +47,10 @@
                     </div>
 
                     <div class="bg-gray-50 rounded-xl p-3 space-y-2 text-sm">
+                        <div class="flex justify-between">
+                            <span class="text-gray-500 text-xs">Código Ticket:</span>
+                            <span class="font-mono font-bold text-gray-700" x-text="codigoTicket(item)"></span>
+                        </div>
                         <div class="flex justify-between">
                             <span class="text-gray-500 text-xs">Caso Cliente:</span>
                             <span class="font-mono font-bold text-gray-700" x-text="item.nro_caso_cliente || '---'"></span>
@@ -105,6 +108,7 @@
                                     <div>
                                         <p class="font-semibold text-gray-800" x-text="`${item.nombre_cliente} - ${item.nombre_modulo || 'Sin módulo'}`"></p>
                                         <p class="text-xs text-gray-500" x-text="`Caso: ${item.nro_caso_cliente || item.nro_caso_interno || '---'}`"></p>
+                                        <p class="text-xs text-gray-500" x-text="`Código: ${codigoTicket(item)}`"></p>
                                         <p class="text-xs text-gray-500" x-text="`Coord: ${item.nombre_coordinador || 'N/A'}`"></p>
                                     </div>
                                     <span class="px-2 py-1 rounded-full border text-xs font-bold" :class="estadoBadgeClass(item)" x-text="estadoAprobacionLabel(item)"></span>
@@ -128,6 +132,7 @@
                                     <div>
                                         <p class="font-semibold text-gray-800" x-text="`${item.nombre_cliente} - ${item.nombre_modulo || 'Sin módulo'}`"></p>
                                         <p class="text-xs text-gray-500" x-text="`Caso: ${item.nro_caso_cliente || item.nro_caso_interno || '---'}`"></p>
+                                        <p class="text-xs text-gray-500" x-text="`Código: ${codigoTicket(item)}`"></p>
                                         <p class="text-xs text-gray-500" x-text="`Coord: ${item.nombre_coordinador || 'N/A'}`"></p>
                                     </div>
                                     <span class="px-2 py-1 rounded-full border text-xs font-bold" :class="estadoBadgeClass(item)" x-text="estadoAprobacionLabel(item)"></span>
@@ -216,18 +221,15 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     <div>
                         <label class="text-xs font-bold text-gray-500 uppercase">Fecha Ingreso</label>
                         <input type="date" x-model="form.fecha_inicio" class="w-full mt-1 p-2 border rounded-lg text-sm">
                     </div>
-                    <div>
+                    <div x-show="shouldShowFechaCierre()">
                         <label class="text-xs font-bold text-gray-500 uppercase">Fecha Cierre</label>
-                        <input type="date" x-model="form.fecha_cierre" :disabled="!shouldShowFechaCierre()" class="w-full mt-1 p-2 border rounded-lg text-sm disabled:bg-gray-100 disabled:text-gray-400">
+                        <input type="date" x-model="form.fecha_cierre" class="w-full mt-1 p-2 border rounded-lg text-sm">
                     </div>
-                </div>
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                         <label class="text-xs font-bold text-gray-500 uppercase">Horas</label>
                         <input type="number" min="0" step="0.01" x-model.number="form.horas_reportadas" @input="recalcularTotalForm()" class="w-full mt-1 p-2 border rounded-lg text-sm">

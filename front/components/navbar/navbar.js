@@ -37,19 +37,19 @@ function getAllSearchViews() {
         { label: "Inicio", hash: "#inicio" },
         { label: "Clientes", hash: "#cliente" },
         { label: "Tarifas", hash: "#tarifas" },
-        { label: "Asignacion Coordinador", hash: "#asignacion-coordinador" },
+        { label: "Asignación Coordinador", hash: "#asignacion-coordinador" },
         { label: "Permisos Coordinador", hash: "#permisos-coordinador" },
         { label: "Asociar Subconsultores", hash: "#asociar-subconsultores" },
-        { label: "Asignacion Consultor", hash: "#asignacion-consultor" },
+        { label: "Asignación Consultor", hash: "#asignacion-consultor" },
         { label: "Mis Asignaciones Coordinador", hash: "#mis-asignaciones-coordinador" },
         { label: "Mis Asignaciones Consultor", hash: "#mis-asignaciones-consultor" },
-        { label: "Asignacion Fabrica Mesa Servicio", hash: "#asignacion-fabrica-mesa-servicio" },
+        { label: "Asignación Fábrica Mesa Servicio", hash: "#asignacion-fabrica-mesa-servicio" },
         { label: "Registro Horas Consultor", hash: "#registro-horas-consultor" },
         { label: "Aprobar/Rechazar Coordinador", hash: "#aprobar-rechazar-coordinador" },
         { label: "Mis Cuentas Cobros", hash: "#mis-cuentas-cobros" },
         { label: "Soportes Cuentas Cobro", hash: "#soportes-cuentas-cobro" },
         { label: "Generar Cuenta Cobro", hash: "#generar-cuenta-cobro" },
-        { label: "Catalogos Admin", hash: "#catalogos-admin" },
+        { label: "Catálogos Admin", hash: "#catalogos-admin" },
         { label: "Solicitudes RRHH", hash: "#solicitudesCoord" },
         { label: "Preregistros Coordinador", hash: "#preregistrosCoord" },
         { label: "Pool de Solicitudes", hash: "#solicitudesRecl" },
@@ -269,4 +269,3 @@ if (document.readyState === "loading") {
 } else {
     initNavbar();
 }
-

@@ -26,10 +26,12 @@ window.aprobacionApp = function () {
                 const matchCli = !f.cliente || r.nombre_cliente === f.cliente;
                 const matchTipo = !f.tipo || r.nombre_tipo_asignacion === f.tipo;
                 const search = (f.search || "").toLowerCase();
+                const codigo = this.codigoTicket(r).toLowerCase();
                 const matchSearch =
                     !search ||
                     (r.nombre_consultor || "").toLowerCase().includes(search) ||
-                    (r.nro_caso_int_ext || "").toLowerCase().includes(search);
+                    (r.nro_caso_int_ext || "").toLowerCase().includes(search) ||
+                    codigo.includes(search);
                 return matchCli && matchTipo && matchSearch;
             });
         },
@@ -99,6 +101,26 @@ window.aprobacionApp = function () {
 
         formatDate(d) {
             return d ? d.split("T")[0] : "";
+        },
+
+        normalizeTipo(tipo) {
+            return String(tipo || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .trim();
+        },
+
+        codigoTicket(item) {
+            const tipo = this.normalizeTipo(item?.nombre_tipo_asignacion || "");
+            const esFabrica = tipo.includes("fabrica");
+            const esMesa = tipo.includes("mesa de servicio");
+            const prefijo = esFabrica ? "FB" : (esMesa ? "MS" : "RH");
+            const base = String(item?.id || "")
+                .replace(/-/g, "")
+                .toUpperCase()
+                .slice(0, 8);
+            return `${prefijo}-${base || "SINCOD"}`;
         }
     };
 };

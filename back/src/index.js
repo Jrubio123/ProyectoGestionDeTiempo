@@ -346,6 +346,72 @@ function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, hints = {})
   return null;
 }
 
+function normalizeCaseValue(value) {
+  const text = String(value ?? "").trim();
+  return text || null;
+}
+
+function parseTicketCaseFields(rawValue) {
+  const text = String(rawValue ?? "").trim();
+  if (!text) {
+    return {
+      nro_caso_cliente: null,
+      nro_caso_interno: null,
+      legacy: null
+    };
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object") {
+      const cliente = normalizeCaseValue(
+        parsed.nro_caso_cliente ?? parsed.cliente ?? parsed.caso_cliente
+      );
+      const interno = normalizeCaseValue(
+        parsed.nro_caso_interno ?? parsed.interno ?? parsed.caso_interno
+      );
+      if (cliente || interno) {
+        return {
+          nro_caso_cliente: cliente,
+          nro_caso_interno: interno,
+          legacy: text
+        };
+      }
+    }
+  } catch {
+    // Compatibilidad con registros previos donde nro_caso_int_ext era texto plano.
+  }
+  return {
+    nro_caso_cliente: text,
+    nro_caso_interno: text,
+    legacy: text
+  };
+}
+
+function serializeTicketCaseFields({
+  nroCasoCliente,
+  nroCasoInterno,
+  nroCasoIntExtFallback
+} = {}) {
+  const cliente = normalizeCaseValue(nroCasoCliente);
+  const interno = normalizeCaseValue(nroCasoInterno);
+  if (!cliente && !interno) {
+    return normalizeCaseValue(nroCasoIntExtFallback);
+  }
+  return JSON.stringify({
+    nro_caso_cliente: cliente,
+    nro_caso_interno: interno
+  });
+}
+
+function applyTicketCaseFields(row = {}) {
+  const parsed = parseTicketCaseFields(row?.nro_caso_int_ext);
+  return {
+    ...row,
+    nro_caso_cliente: parsed.nro_caso_cliente || row?.nro_caso_cliente || null,
+    nro_caso_interno: parsed.nro_caso_interno || row?.nro_caso_interno || null
+  };
+}
+
 function buildTotalLetras(numero, moneda = 'COP') {
   const parteEntera = Math.floor(numero);
   const centavos = Math.round((numero - parteEntera) * 100);
@@ -5411,10 +5477,11 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
       [userId, estados.abierto, estados.proceso]
     );
     const rows = Array.isArray(result.rows) ? result.rows : [];
+    const ticketRows = rows.map((row) => applyTicketCaseFields(row));
     if (!ocultarMonto) {
-      return res.json(rows);
+      return res.json(ticketRows);
     }
-    return res.json(rows.map((row) => ({
+    return res.json(ticketRows.map((row) => ({
       ...row,
       total_cobrar: null,
       valor_hora: null
@@ -5434,6 +5501,8 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     total_cobrar,
     tipo_servicio,
     nro_caso_int_ext,
+    nro_caso_cliente,
+    nro_caso_interno,
     observacion_mesa_fabrica,
     fecha_cierre_mesa_fab,
     estado_mesa_servicio,
@@ -5518,6 +5587,8 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       estado_mesa_servicio,
       estado_fabrica,
       tipo_servicio,
+      nro_caso_cliente,
+      nro_caso_interno,
       nro_caso_int_ext,
       requerimiento,
       perfil_fabrica,
@@ -5537,7 +5608,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     }
 
     const editable = await client.query(
-      `SELECT id, estado_reporte
+      `SELECT id, estado_reporte, nro_caso_int_ext
        FROM reporte_horas
        WHERE id_registro_asignacion = $1
          AND ($2::int IS NULL OR id = $2::int)
@@ -5547,9 +5618,31 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       [registroId, reporteId || null]
     );
     const editableRow = editable.rows[0];
+    const bodyCases = parseTicketCaseFields(nro_caso_int_ext);
+    const editableCases = parseTicketCaseFields(editableRow?.nro_caso_int_ext);
+    const finalNroCasoCliente =
+      normalizeCaseValue(nro_caso_cliente) ||
+      bodyCases.nro_caso_cliente ||
+      editableCases.nro_caso_cliente ||
+      normalizeCaseValue(info.nro_caso_cliente);
+    const finalNroCasoInterno =
+      normalizeCaseValue(nro_caso_interno) ||
+      bodyCases.nro_caso_interno ||
+      editableCases.nro_caso_interno ||
+      normalizeCaseValue(info.nro_caso_interno);
+    const finalNroCaso = serializeTicketCaseFields({
+      nroCasoCliente: scope === "mesa" ? finalNroCasoCliente : null,
+      nroCasoInterno: scope === "mesa" ? finalNroCasoInterno : null,
+      nroCasoIntExtFallback: bodyCases.legacy
+    });
+    if (scope === "mesa" && (!finalNroCasoCliente || !finalNroCasoInterno)) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        error: "Debes indicar Nro Caso Interno y Nro Caso Cliente para Mesa de servicio"
+      });
+    }
 
     const finalTipoServicio = normalizeTipoServicioInput(tipo_servicio || info.ra_tipo_servicio || "Servicio") || null;
-    const finalNroCaso = (nro_caso_int_ext || info.nro_caso_cliente || info.nro_caso_interno || "").toString().trim() || null;
     const finalObservacion = (observacion_mesa_fabrica || info.ra_observacion || "").toString().trim() || null;
     const finalFechaCierre = fecha_cierre_mesa_fab || info.fecha_fin || null;
     const finalHoras = toNullableNumber(horas_reportadas);
@@ -5723,6 +5816,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
   const { id } = req.params;
   const {
     reporte_id,
+    nro_caso_int_ext,
     nro_caso_interno,
     nro_caso_cliente,
     tipo_servicio,
@@ -5831,25 +5925,13 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     const result = await pool.query(
       `
       UPDATE registro_asignaciones
-      SET nro_caso_interno = $1,
-          nro_caso_cliente = $2,
-          tipo_servicio = $3,
-          estado = COALESCE($4::tipo_estado_asignacion, estado),
-          observacion = $5,
-          fecha_inicio = $6,
-          fecha_fin = $7
-      WHERE id = $8
-        AND consultor_responsable_id = $9
+      SET estado = COALESCE($1::tipo_estado_asignacion, estado)
+      WHERE id = $2
+        AND consultor_responsable_id = $3
       RETURNING *
       `,
       [
-        nro_caso_interno || null,
-        nro_caso_cliente || null,
-        tipoServicioNormalizado,
         estadoNormalizado,
-        observacion || null,
-        fecha_inicio || null,
-        fecha_cierre || null,
         registroId,
         req.user?.id
       ]
@@ -5861,7 +5943,6 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
       ((finalHoras !== null && finalHoras !== undefined && tipoValido.rows[0]?.valor_hora !== null && tipoValido.rows[0]?.valor_hora !== undefined)
         ? Number(finalHoras) * Number(tipoValido.rows[0].valor_hora)
         : null);
-    const finalNroCaso = (nro_caso_cliente || nro_caso_interno || "").toString().trim() || null;
     const finalRequerimiento = (requerimiento || "").toString().trim() || null;
     const finalPerfilFabrica = normalizePerfilFabricaInput(perfil_fabrica);
     const finalWricef = (wricef || "").toString().trim() || null;
@@ -5870,15 +5951,35 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
       return res.status(400).json({ error: "Perfil de fábrica inválido" });
     }
     const editable = await pool.query(
-      `SELECT id
+      `SELECT id, nro_caso_int_ext
        FROM reporte_horas
        WHERE id_registro_asignacion = $1
          AND ($2::int IS NULL OR id = $2::int)
          AND estado_reporte IN ('Revisión', 'Rechazado')
        ORDER BY updated_at DESC NULLS LAST, id DESC
-       LIMIT 1`,
+      LIMIT 1`,
       [registroId, reporteId || null]
     );
+    const bodyCases = parseTicketCaseFields(nro_caso_int_ext);
+    const editableCases = parseTicketCaseFields(editable.rows[0]?.nro_caso_int_ext);
+    const finalNroCasoCliente =
+      normalizeCaseValue(nro_caso_cliente) ||
+      bodyCases.nro_caso_cliente ||
+      editableCases.nro_caso_cliente;
+    const finalNroCasoInterno =
+      normalizeCaseValue(nro_caso_interno) ||
+      bodyCases.nro_caso_interno ||
+      editableCases.nro_caso_interno;
+    const finalNroCaso = serializeTicketCaseFields({
+      nroCasoCliente: scope === "mesa" ? finalNroCasoCliente : null,
+      nroCasoInterno: scope === "mesa" ? finalNroCasoInterno : null,
+      nroCasoIntExtFallback: bodyCases.legacy
+    });
+    if (scope === "mesa" && (!finalNroCasoCliente || !finalNroCasoInterno)) {
+      return res.status(400).json({
+        error: "Debes indicar Nro Caso Interno y Nro Caso Cliente para Mesa de servicio"
+      });
+    }
     if (!reporteId) {
       const totalTickets = await pool.query(
         `SELECT COUNT(1) AS total

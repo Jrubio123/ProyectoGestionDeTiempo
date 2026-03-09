@@ -134,6 +134,8 @@ window.mesaFabricaApp = function () {
                 await axios.post(`${this.API}/mesa-fabrica/${item.id}/enviar-aprobacion`, {
                     reporte_id: item.reporte_id || null,
                     tipo_servicio: item.tipo_servicio || null,
+                    nro_caso_cliente: item.nro_caso_cliente || null,
+                    nro_caso_interno: item.nro_caso_interno || null,
                     nro_caso_int_ext: item.nro_caso_cliente || item.nro_caso_interno || null,
                     observacion_mesa_fabrica: item.observacion_mesa_fabrica || item.observacion || null,
                     fecha_cierre_mesa_fab: item.fecha_cierre_mesa_fab || item.fecha_fin || null,

@@ -107,7 +107,7 @@
                                 <div class="flex justify-between items-start gap-3">
                                     <div>
                                         <p class="font-semibold text-gray-800" x-text="`${item.nombre_cliente} - ${item.nombre_modulo || 'Sin módulo'}`"></p>
-                                        <p class="text-xs text-gray-500" x-text="`Caso: ${item.nro_caso_cliente || item.nro_caso_interno || '---'}`"></p>
+                                        <p class="text-xs text-gray-500" x-text="`Caso: ${ticketCasoTexto(item)}`"></p>
                                         <p class="text-xs text-gray-500" x-text="`Código: ${codigoTicket(item)}`"></p>
                                         <p class="text-xs text-gray-500" x-text="`Coord: ${item.nombre_coordinador || 'N/A'}`"></p>
                                     </div>
@@ -131,7 +131,7 @@
                                 <div class="flex justify-between items-start gap-3">
                                     <div>
                                         <p class="font-semibold text-gray-800" x-text="`${item.nombre_cliente} - ${item.nombre_modulo || 'Sin módulo'}`"></p>
-                                        <p class="text-xs text-gray-500" x-text="`Caso: ${item.nro_caso_cliente || item.nro_caso_interno || '---'}`"></p>
+                                        <p class="text-xs text-gray-500" x-text="`Caso: ${ticketCasoTexto(item)}`"></p>
                                         <p class="text-xs text-gray-500" x-text="`Código: ${codigoTicket(item)}`"></p>
                                         <p class="text-xs text-gray-500" x-text="`Coord: ${item.nombre_coordinador || 'N/A'}`"></p>
                                     </div>

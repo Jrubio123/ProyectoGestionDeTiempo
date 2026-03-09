@@ -55,8 +55,8 @@ window.mesaFabricaApp = function () {
                 reporte_id: item?.reporte_id || null,
                 estado_ticket: estadoTicket,
                 tipo_asignacion: item?.tipo_asignacion || "",
-                fecha_inicio: item?.fecha_inicio || "",
-                fecha_cierre: item?.fecha_cierre_mesa_fab || item?.fecha_fin || "",
+                fecha_inicio: this.toDateInputValue(item?.fecha_ingreso_reporte || item?.fecha_inicio),
+                fecha_cierre: this.toDateInputValue(item?.fecha_cierre_mesa_fab || item?.fecha_fin),
                 observacion: item?.observacion_mesa_fabrica || item?.observacion || "",
                 wricef: item?.wricef || "",
                 requerimiento: item?.requerimiento || "",
@@ -136,12 +136,13 @@ window.mesaFabricaApp = function () {
                 const perfilAsignado = scope === "fabrica" ? this.getPerfilFabricaAsignado(item) : "";
                 await axios.post(`${this.API}/mesa-fabrica/${item.id}/enviar-aprobacion`, {
                     reporte_id: item.reporte_id || null,
+                    fecha_inicio: this.toDateInputValue(item.fecha_ingreso_reporte || item.fecha_inicio),
                     tipo_servicio: item.tipo_servicio || null,
                     nro_caso_cliente: item.nro_caso_cliente || null,
                     nro_caso_interno: item.nro_caso_interno || null,
                     nro_caso_int_ext: item.nro_caso_cliente || item.nro_caso_interno || null,
                     observacion_mesa_fabrica: item.observacion_mesa_fabrica || item.observacion || null,
-                    fecha_cierre_mesa_fab: item.fecha_cierre_mesa_fab || item.fecha_fin || null,
+                    fecha_cierre_mesa_fab: this.toDateInputValue(item.fecha_cierre_mesa_fab || item.fecha_fin),
                     total_cobrar: this.esAsociado ? null : (item.total_cobrar || null),
                     horas_reportadas: item.horas_reportadas || null,
                     requerimiento: item.requerimiento || null,
@@ -188,8 +189,8 @@ window.mesaFabricaApp = function () {
                     wricef: scope === "fabrica" ? (this.form.wricef || null) : null,
                     requerimiento: scope === "fabrica" ? (this.form.requerimiento || null) : null,
                     perfil_fabrica: scope === "fabrica" ? (perfilAsignado || null) : null,
-                    fecha_inicio: this.form.fecha_inicio || null,
-                    fecha_cierre: shouldClose ? (this.form.fecha_cierre || null) : null
+                    fecha_inicio: this.toDateInputValue(this.form.fecha_inicio),
+                    fecha_cierre: shouldClose ? this.toDateInputValue(this.form.fecha_cierre) : null
                 };
                 await axios.put(`${this.API}/mesa-fabrica/${this.form.id}`, payload);
                 alert("Ticket actualizado");
@@ -400,6 +401,16 @@ window.mesaFabricaApp = function () {
             return d ? String(d).split("T")[0] : "";
         },
 
+        toDateInputValue(value) {
+            const raw = String(value || "").trim();
+            if (!raw) return "";
+            const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+            if (match && match[1]) return match[1];
+            const parsed = new Date(raw);
+            if (Number.isNaN(parsed.getTime())) return "";
+            return parsed.toISOString().slice(0, 10);
+        },
+
         codigoTicket(item) {
             const scope = this.getScope(item);
             const base = String(item?.reporte_id || item?.id || "")
@@ -408,6 +419,14 @@ window.mesaFabricaApp = function () {
                 .slice(0, 8);
             const prefijo = scope === "fabrica" ? "FB" : "MS";
             return `${prefijo}-${base || "SINCOD"}`;
+        },
+
+        ticketCasoTexto(item) {
+            const caso = String(item?.nro_caso_cliente || item?.nro_caso_interno || "").trim();
+            if (caso) return caso;
+            const refFabrica = String(item?.wricef || item?.requerimiento || "").trim();
+            if (refFabrica) return refFabrica;
+            return "---";
         },
 
         todayDate() {

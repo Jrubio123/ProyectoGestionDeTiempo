@@ -189,6 +189,16 @@ function normalizePerfilFabricaInput(value) {
   return map.get(norm) || null;
 }
 
+function normalizeDateOnlyInput(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match?.[1]) return match[1];
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
 async function getAssignedPerfilFabrica(db, registroAsignacionId, reporteId = null) {
   const reporteInternalId = Number(reporteId || 0);
   if (reporteInternalId > 0) {
@@ -5482,6 +5492,7 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         rh.horas_reportadas,
         rh.nro_caso_int_ext,
         rh.public_id AS reporte_id,
+        rh.created_at AS fecha_ingreso_reporte,
         rh.estado_mesa_servicio,
         rh.estado_fabrica,
         rh.observacion_mesa_fabrica,
@@ -5532,6 +5543,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     reporte_id,
     horas_reportadas,
     total_cobrar,
+    fecha_inicio,
     tipo_servicio,
     nro_caso_int_ext,
     nro_caso_cliente,
@@ -5574,6 +5586,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
         ra.nro_caso_interno,
         ra.tipo_servicio AS ra_tipo_servicio,
         ra.observacion AS ra_observacion,
+        ra.fecha_inicio AS ra_fecha_inicio,
         ra.fecha_fin,
         ra.total_pagar,
         ra.consultor_responsable_id,
@@ -5641,7 +5654,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     }
 
     const editable = await client.query(
-      `SELECT id, estado_reporte, nro_caso_int_ext, perfil_fabrica
+      `SELECT id, estado_reporte, nro_caso_int_ext, perfil_fabrica, created_at
        FROM reporte_horas
        WHERE id_registro_asignacion = $1
          AND ($2::int IS NULL OR id = $2::int)
@@ -5677,6 +5690,11 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
 
     const finalTipoServicio = normalizeTipoServicioInput(tipo_servicio || info.ra_tipo_servicio || "Servicio") || null;
     const finalObservacion = (observacion_mesa_fabrica || info.ra_observacion || "").toString().trim() || null;
+    const finalFechaInicio =
+      normalizeDateOnlyInput(fecha_inicio) ||
+      normalizeDateOnlyInput(editableRow?.created_at) ||
+      normalizeDateOnlyInput(info.ra_fecha_inicio) ||
+      null;
     const finalFechaCierre = fecha_cierre_mesa_fab || info.fecha_fin || null;
     const finalHoras = toNullableNumber(horas_reportadas);
     const finalTotalInput = ocultarMonto ? null : toNullableNumber(total_cobrar);
@@ -5718,16 +5736,17 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
              requerimiento = COALESCE($9, requerimiento),
              perfil_fabrica = COALESCE($10, perfil_fabrica),
              wricef = COALESCE($11, wricef),
-             cliente_id = COALESCE(cliente_id, $12),
-             tipo_asignacion_id = COALESCE(tipo_asignacion_id, $13),
-             modulo_id = COALESCE(modulo_id, $14),
-             coordinador_id = COALESCE(coordinador_id, $15),
-             consultor_responsable_id = COALESCE(consultor_responsable_id, $16),
-             consultor_principal_id = COALESCE($17, consultor_principal_id),
+             created_at = COALESCE($12::timestamp, created_at),
+             cliente_id = COALESCE(cliente_id, $13),
+             tipo_asignacion_id = COALESCE(tipo_asignacion_id, $14),
+             modulo_id = COALESCE(modulo_id, $15),
+             coordinador_id = COALESCE(coordinador_id, $16),
+             consultor_responsable_id = COALESCE(consultor_responsable_id, $17),
+             consultor_principal_id = COALESCE($18, consultor_principal_id),
              estado_reporte = 'Pendiente',
              motivo_rechazo = NULL,
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = $18
+         WHERE id = $19
          RETURNING *`,
         [
           finalHoras,
@@ -5741,6 +5760,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           finalRequerimiento,
           finalPerfilFabrica,
           finalWricef,
+          finalFechaInicio,
           info.id_cliente,
           info.id_tipo_asignacion,
           info.id_modulo,
@@ -5770,9 +5790,9 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           (id_registro_asignacion, horas_reportadas, total_cobrar, tipo_servicio, nro_caso_int_ext,
            observacion_mesa_fabrica, fecha_cierre_mesa_fab, estado_mesa_servicio, estado_fabrica,
            requerimiento, perfil_fabrica, wricef, cliente_id, tipo_asignacion_id, modulo_id, coordinador_id,
-           consultor_responsable_id, consultor_principal_id, created_by, estado_reporte)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'Pendiente')
-          RETURNING *`,
+           consultor_responsable_id, consultor_principal_id, created_by, created_at, estado_reporte)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,'Pendiente')
+           RETURNING *`,
         [
           registroId,
           finalHoras,
@@ -5792,7 +5812,8 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           info.coordinador_responsable_id,
           info.consultor_responsable_id,
           consultorPrincipalId,
-          req.user?.id || info.consultor_responsable_id
+          req.user?.id || info.consultor_responsable_id,
+          finalFechaInicio
         ]
       );
     }
@@ -5901,6 +5922,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
         con.id_tipo_asignacion,
         ta.titulo AS tipo_asignacion_titulo,
         ra.estado AS estado_asignacion,
+        ra.fecha_inicio,
         ra.id_modulo,
         ra.id_consultoria,
         ra.valor_hora,
@@ -5994,7 +6016,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     const finalWricef = (wricef || "").toString().trim() || null;
     const consultorPrincipalId = tipoValido.rows[0]?.consultor_principal_rel_id || null;
     const editable = await pool.query(
-      `SELECT id, nro_caso_int_ext, perfil_fabrica
+      `SELECT id, nro_caso_int_ext, perfil_fabrica, created_at
        FROM reporte_horas
        WHERE id_registro_asignacion = $1
          AND ($2::int IS NULL OR id = $2::int)
@@ -6039,6 +6061,11 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     if (scope === "fabrica" && !finalPerfilFabrica) {
       return res.status(400).json({ error: "No hay perfil de fábrica asignado para este ticket. Contacta al coordinador." });
     }
+    const finalFechaInicio =
+      normalizeDateOnlyInput(fecha_inicio) ||
+      normalizeDateOnlyInput(editable.rows[0]?.created_at) ||
+      normalizeDateOnlyInput(tipoValido.rows[0]?.fecha_inicio) ||
+      null;
     if (!reporteId) {
       const totalTickets = await pool.query(
         `SELECT COUNT(1) AS total
@@ -6068,8 +6095,9 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
               perfil_fabrica = COALESCE($10, perfil_fabrica),
               wricef = COALESCE($11, wricef),
               consultor_principal_id = COALESCE($12, consultor_principal_id),
+              created_at = COALESCE($13::timestamp, created_at),
               updated_at = CURRENT_TIMESTAMP
-         WHERE id = $13`,
+         WHERE id = $14`,
         [
           finalHoras,
           finalTotal,
@@ -6083,6 +6111,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
           finalPerfilFabrica,
           finalWricef,
           consultorPrincipalId,
+          finalFechaInicio,
           editable.rows[0].id
         ]
       );
@@ -6094,8 +6123,8 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
           (id_registro_asignacion, horas_reportadas, total_cobrar, tipo_servicio, nro_caso_int_ext,
            observacion_mesa_fabrica, fecha_cierre_mesa_fab, estado_mesa_servicio, estado_fabrica,
            requerimiento, perfil_fabrica, wricef, cliente_id, tipo_asignacion_id, modulo_id, coordinador_id,
-           consultor_responsable_id, consultor_principal_id, created_by, estado_reporte)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'Revisión')`,
+           consultor_responsable_id, consultor_principal_id, created_by, created_at, estado_reporte)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,'Revisión')`,
         [
           registroId,
           finalHoras,
@@ -6115,7 +6144,8 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
           tipoValido.rows[0]?.coordinador_responsable_id || null,
           tipoValido.rows[0]?.consultor_responsable_id || req.user?.id || null,
           consultorPrincipalId,
-          req.user?.id || null
+          req.user?.id || null,
+          finalFechaInicio
         ]
       );
     }

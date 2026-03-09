@@ -36,6 +36,10 @@
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
   }
 
+  function isValidSilverEmail(value) {
+    return /^[^\s@]+@silverconsulting\.com\.co$/i.test(String(value || "").trim());
+  }
+
   function normalizeDocKey(value) {
     return String(value || "")
       .normalize("NFD")
@@ -531,8 +535,8 @@
     if (!TIPOS_CUENTA.has(String(tipo_cuenta || "").trim())) {
       return res.status(400).json({ error: "tipo_cuenta no valido" });
     }
-    if (correo_silver && !isValidEmail(correo_silver)) {
-      return res.status(400).json({ error: "correo_silver no tiene formato valido" });
+    if (correo_silver && !isValidSilverEmail(correo_silver)) {
+      return res.status(400).json({ error: "correo_silver debe pertenecer al dominio @silverconsulting.com.co" });
     }
 
     const client = await pool.connect();
@@ -578,8 +582,8 @@
 
   app.patch("/api/preregistros/:public_id/correo-silver", requireAccess({ roles: ["Talento Humano"] }), async (req, res) => {
     const correoSilver = String(req.body?.correo_silver || "").trim().toLowerCase();
-    if (!correoSilver || !isValidEmail(correoSilver)) {
-      return res.status(400).json({ error: "correo_silver es obligatorio y debe ser valido" });
+    if (!correoSilver || !isValidSilverEmail(correoSilver)) {
+      return res.status(400).json({ error: "correo_silver es obligatorio y debe pertenecer al dominio @silverconsulting.com.co" });
     }
 
     const client = await pool.connect();
@@ -630,6 +634,10 @@
       if (!correoSilver) {
         await client.query("ROLLBACK");
         return res.status(422).json({ error: "Debe existir correo_silver para aprobar" });
+      }
+      if (!isValidSilverEmail(correoSilver)) {
+        await client.query("ROLLBACK");
+        return res.status(422).json({ error: "correo_silver debe pertenecer al dominio @silverconsulting.com.co" });
       }
 
       const dup = await client.query(`SELECT id FROM usuarios WHERE LOWER(email) = LOWER($1) LIMIT 1`, [correoSilver]);

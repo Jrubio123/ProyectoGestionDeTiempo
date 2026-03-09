@@ -132,16 +132,17 @@ window.mesaFabricaApp = function () {
             if (!confirm("¿Enviar ticket a aprobación del coordinador?")) return;
             try {
                 const scope = this.getScope(item);
+                const esMesa = scope === "mesa";
                 const estadoTicket = this.getEstadoTicket(item);
                 const perfilAsignado = scope === "fabrica" ? this.getPerfilFabricaAsignado(item) : "";
                 const fechaIngreso = this.resolveFechaIngreso(item, scope === "fabrica");
                 await axios.post(`${this.API}/mesa-fabrica/${item.id}/enviar-aprobacion`, {
                     reporte_id: item.reporte_id || null,
                     fecha_inicio: fechaIngreso || null,
-                    tipo_servicio: item.tipo_servicio || null,
-                    nro_caso_cliente: item.nro_caso_cliente || null,
-                    nro_caso_interno: item.nro_caso_interno || null,
-                    nro_caso_int_ext: item.nro_caso_cliente || item.nro_caso_interno || null,
+                    tipo_servicio: esMesa ? (item.tipo_servicio || null) : null,
+                    nro_caso_cliente: esMesa ? (item.nro_caso_cliente || null) : null,
+                    nro_caso_interno: esMesa ? (item.nro_caso_interno || null) : null,
+                    nro_caso_int_ext: esMesa ? (item.nro_caso_cliente || item.nro_caso_interno || null) : null,
                     observacion_mesa_fabrica: item.observacion_mesa_fabrica || item.observacion || null,
                     fecha_cierre_mesa_fab: this.toDateInputValue(item.fecha_cierre_mesa_fab || item.fecha_fin),
                     total_cobrar: this.esAsociado ? null : (item.total_cobrar || null),

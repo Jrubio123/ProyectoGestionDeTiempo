@@ -64,6 +64,32 @@ window.onboardingThApp = function () {
             return token ? { headers: { Authorization: `Bearer ${token}` } } : null;
         },
 
+        async requestWithApiFallback(method, path, payload) {
+            const normalizedPath = String(path || "").startsWith("/") ? String(path) : `/${String(path || "")}`;
+            const candidates = [normalizedPath];
+            if (normalizedPath.startsWith("/api/")) {
+                candidates.push(normalizedPath.replace(/^\/api/, ""));
+            } else {
+                candidates.push(`/api${normalizedPath}`);
+            }
+
+            let lastError = null;
+            for (const routePath of [...new Set(candidates)]) {
+                try {
+                    return await axios({
+                        method,
+                        url: `${API}${routePath}`,
+                        data: payload,
+                        ...(this.getAuthConfig() || {})
+                    });
+                } catch (e) {
+                    lastError = e;
+                    if (e?.response?.status !== 404) throw e;
+                }
+            }
+            throw lastError;
+        },
+
         async init() {
             await Promise.all([this.cargarBancos(), this.cargarPreregistros()]);
         },
@@ -79,7 +105,7 @@ window.onboardingThApp = function () {
 
         async cargarPreregistros() {
             try {
-                const res = await axios.get(`${API}/api/preregistros?limit=400&page=1`, this.getAuthConfig());
+                const res = await this.requestWithApiFallback("get", "/api/preregistros?limit=400&page=1");
                 this.preregistros = Array.isArray(res?.data?.data) ? res.data.data : [];
             } catch (e) {
                 this.preregistros = [];
@@ -215,8 +241,9 @@ window.onboardingThApp = function () {
             }
             this.guardandoS3 = true;
             try {
-                await axios.patch(
-                    `${API}/api/preregistros/${this.itemActivo.id}/seccion-3`,
+                await this.requestWithApiFallback(
+                    "patch",
+                    `/api/preregistros/${this.itemActivo.id}/seccion-3`,
                     {
                         direccion: String(this.formS3.direccion || "").trim(),
                         tipo_persona: String(this.formS3.tipo_persona || "").trim(),
@@ -224,8 +251,7 @@ window.onboardingThApp = function () {
                         tipo_cuenta: String(this.formS3.tipo_cuenta || "").trim(),
                         numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
                         correo_silver: String(this.formS3.correo_silver || "").trim() || null
-                    },
-                    this.getAuthConfig()
+                    }
                 );
                 await this.cargarPreregistros();
                 this.cerrarDetalle();
@@ -241,7 +267,7 @@ window.onboardingThApp = function () {
             if (!this.itemActivo?.id || !this.puedeAprobar) return;
             this.aprobando = true;
             try {
-                await axios.post(`${API}/api/preregistros/${this.itemActivo.id}/aprobar`, {}, this.getAuthConfig());
+                await this.requestWithApiFallback("post", `/api/preregistros/${this.itemActivo.id}/aprobar`, {});
                 await this.cargarPreregistros();
                 this.cerrarDetalle();
             } catch (e) {
@@ -265,10 +291,10 @@ window.onboardingThApp = function () {
             }
             this.anulando = true;
             try {
-                await axios.post(
-                    `${API}/api/preregistros/${this.itemActivo.id}/anular`,
-                    { motivo_anulacion: String(this.motivoAnulacion || "").trim() },
-                    this.getAuthConfig()
+                await this.requestWithApiFallback(
+                    "post",
+                    `/api/preregistros/${this.itemActivo.id}/anular`,
+                    { motivo_anulacion: String(this.motivoAnulacion || "").trim() }
                 );
                 await this.cargarPreregistros();
                 this.cerrarDetalle();

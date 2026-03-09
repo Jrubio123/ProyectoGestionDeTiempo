@@ -64,13 +64,39 @@ window.preregistrosCoordApp = function () {
             return token ? { headers: { Authorization: `Bearer ${token}` } } : null;
         },
 
+        async requestWithApiFallback(method, path, payload) {
+            const normalizedPath = String(path || "").startsWith("/") ? String(path) : `/${String(path || "")}`;
+            const candidates = [normalizedPath];
+            if (normalizedPath.startsWith("/api/")) {
+                candidates.push(normalizedPath.replace(/^\/api/, ""));
+            } else {
+                candidates.push(`/api${normalizedPath}`);
+            }
+
+            let lastError = null;
+            for (const routePath of [...new Set(candidates)]) {
+                try {
+                    return await axios({
+                        method,
+                        url: `${API}${routePath}`,
+                        data: payload,
+                        ...(this.getAuthConfig() || {})
+                    });
+                } catch (e) {
+                    lastError = e;
+                    if (e?.response?.status !== 404) throw e;
+                }
+            }
+            throw lastError;
+        },
+
         async init() {
             await this.cargarPreregistros();
         },
 
         async cargarPreregistros() {
             try {
-                const res = await axios.get(`${API}/api/preregistros?limit=300&page=1`, this.getAuthConfig());
+                const res = await this.requestWithApiFallback("get", "/api/preregistros?limit=300&page=1");
                 this.preregistros = Array.isArray(res?.data?.data) ? res.data.data : [];
             } catch (e) {
                 this.preregistros = [];
@@ -206,7 +232,7 @@ window.preregistrosCoordApp = function () {
             };
 
             try {
-                await axios.patch(`${API}/api/preregistros/${this.itemActivo.id}/seccion-2`, payload, this.getAuthConfig());
+                await this.requestWithApiFallback("patch", `/api/preregistros/${this.itemActivo.id}/seccion-2`, payload);
                 await this.cargarPreregistros();
                 this.cerrarDetalle();
             } catch (e) {

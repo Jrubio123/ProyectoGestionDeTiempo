@@ -32,6 +32,32 @@ window.solicitudesReclApp = function () {
             return token ? { headers: { Authorization: `Bearer ${token}` } } : null;
         },
 
+        async requestWithApiFallback(method, path, payload) {
+            const normalizedPath = String(path || "").startsWith("/") ? String(path) : `/${String(path || "")}`;
+            const candidates = [normalizedPath];
+            if (normalizedPath.startsWith("/api/")) {
+                candidates.push(normalizedPath.replace(/^\/api/, ""));
+            } else {
+                candidates.push(`/api${normalizedPath}`);
+            }
+
+            let lastError = null;
+            for (const routePath of [...new Set(candidates)]) {
+                try {
+                    return await axios({
+                        method,
+                        url: `${API}${routePath}`,
+                        data: payload,
+                        ...(this.getAuthConfig() || {})
+                    });
+                } catch (e) {
+                    lastError = e;
+                    if (e?.response?.status !== 404) throw e;
+                }
+            }
+            throw lastError;
+        },
+
         async init() {
             await this.cargarSolicitudes();
             await this.cargarPreregistros();
@@ -49,7 +75,7 @@ window.solicitudesReclApp = function () {
 
         async cargarPreregistros() {
             try {
-                const res = await axios.get(`${API}/api/preregistros?limit=300&page=1`, this.getAuthConfig());
+                const res = await this.requestWithApiFallback("get", "/api/preregistros?limit=300&page=1");
                 const rows = Array.isArray(res?.data?.data) ? res.data.data : [];
                 const map = {};
                 rows.forEach((p) => {
@@ -179,19 +205,19 @@ window.solicitudesReclApp = function () {
 
             try {
                 if (this.modoSeccion1 === "crear") {
-                    await axios.post(
-                        `${API}/api/solicitudes-rrhh/${this.solicitudObjetivo.id}/contratar`,
-                        payload,
-                        this.getAuthConfig()
+                    await this.requestWithApiFallback(
+                        "post",
+                        `/api/solicitudes-rrhh/${this.solicitudObjetivo.id}/contratar`,
+                        payload
                     );
                     this.solicitudes = this.solicitudes.map((s) => (
                         s.id === this.solicitudObjetivo.id ? { ...s, estado: "Contratado" } : s
                     ));
                 } else {
-                    await axios.patch(
-                        `${API}/api/preregistros/${this.preregistroObjetivo.id}/seccion-1`,
-                        payload,
-                        this.getAuthConfig()
+                    await this.requestWithApiFallback(
+                        "patch",
+                        `/api/preregistros/${this.preregistroObjetivo.id}/seccion-1`,
+                        payload
                     );
                 }
 

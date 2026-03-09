@@ -5858,7 +5858,18 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           `Cliente: ${correoRow.cliente}\n` +
           `Tipo: ${correoRow.tipo_asignacion || "N/A"}\n` +
           `Detalle: ${buildReporteResumen(saved.rows[0] || {})}\n` +
-          `Revisar: ${portalUrl}\n`
+          `Revisar: ${portalUrl}\n`,
+        html: buildEmailLayout({
+          title: "Ticket enviado a aprobación",
+          intro: `Hola <strong>${correoRow.coordinador_nombre || "Coordinador"}</strong>, el consultor <strong>${correoRow.consultor_nombre || "N/A"}</strong> envió un ticket de Mesa/Fábrica para validación.`,
+          blocks: [
+            { label: "Cliente", value: correoRow.cliente || "N/A" },
+            { label: "Tipo de asignación", value: correoRow.tipo_asignacion || "N/A" },
+            { label: "Resumen", value: buildReporteResumen(saved.rows[0] || {}) }
+          ],
+          ctaLabel: "Revisar ticket",
+          ctaUrl: portalUrl
+        })
       });
     }
 

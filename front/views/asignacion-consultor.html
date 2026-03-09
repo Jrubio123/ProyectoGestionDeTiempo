@@ -63,22 +63,32 @@
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Consultor <span class="text-red-500">*</span></label>
-                            <select x-model="form.consultor_id" @change="buscarTarifa" class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-indigo-500 transition-colors">
-                                <option value="">Seleccione...</option>
+                            <input type="text"
+                                   x-model="formDisplay.consultor"
+                                   list="asigConsultoresList"
+                                   placeholder="Seleccione Consultor..."
+                                   @change="setConsultorId"
+                                   class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-indigo-500 transition-colors">
+                            <datalist id="asigConsultoresList">
                                 <template x-for="c in cat.consultores" :key="c.id">
-                                    <option :value="c.id" x-text="c.nombre"></option>
+                                    <option :value="c.nombre"></option>
                                 </template>
-                            </select>
+                            </datalist>
                         </div>
                         
                         <div>
                             <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Módulo SAP <span class="text-red-500">*</span></label>
-                            <select x-model="form.modulo_id" @change="buscarTarifa" class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-indigo-500 transition-colors">
-                                <option value="">Seleccione...</option>
+                            <input type="text"
+                                   x-model="formDisplay.modulo"
+                                   list="asigModulosList"
+                                   placeholder="Seleccione Módulo SAP..."
+                                   @change="setModuloId"
+                                   class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-indigo-500 transition-colors">
+                            <datalist id="asigModulosList">
                                 <template x-for="m in cat.modulos" :key="m.id">
-                                    <option :value="m.id" x-text="m.titulo"></option>
+                                    <option :value="m.titulo"></option>
                                 </template>
-                            </select>
+                            </datalist>
                         </div>
                     </div>
 

@@ -17,6 +17,11 @@ window.asignacionConsultorApp = function () {
             horas_asignadas: 0
         },
 
+        formDisplay: {
+            consultor: "",
+            modulo: ""
+        },
+
         async init() {
             await Promise.all([this.cargarCatalogos(), this.cargarProyectos()]);
         },
@@ -77,14 +82,65 @@ window.asignacionConsultorApp = function () {
             this.alertaTarifa = { mostrar: false, tipo: "", mensaje: "", valor: 0 };
             this.form.consultor_id = "";
             this.form.modulo_id = "";
+            this.formDisplay.consultor = "";
+            this.formDisplay.modulo = "";
             this.form.fecha_inicio = "";
             this.form.fecha_fin = "";
             this.form.cantidad_dias = this.esMensual ? 20 : 0;
             this.form.horas_asignadas = 0;
         },
 
+        resetAlertaTarifa() {
+            this.alertaTarifa = { mostrar: false, tipo: "", mensaje: "", valor: 0 };
+        },
+
+        findConsultorByInput(value) {
+            const q = String(value || "").trim().toLowerCase();
+            if (!q) return null;
+            return this.cat.consultores.find((c) => {
+                const nombre = String(c?.nombre || "").trim().toLowerCase();
+                const id = String(c?.id || "").trim().toLowerCase();
+                return nombre === q || id === q;
+            }) || null;
+        },
+
+        findModuloByInput(value) {
+            const q = String(value || "").trim().toLowerCase();
+            if (!q) return null;
+            return this.cat.modulos.find((m) => {
+                const titulo = String(m?.titulo || "").trim().toLowerCase();
+                const id = String(m?.id || "").trim().toLowerCase();
+                return titulo === q || id === q;
+            }) || null;
+        },
+
+        setConsultorId() {
+            const match = this.findConsultorByInput(this.formDisplay.consultor);
+            this.form.consultor_id = match ? match.id : "";
+            if (match) {
+                this.formDisplay.consultor = match.nombre || this.formDisplay.consultor;
+            } else {
+                this.resetAlertaTarifa();
+            }
+            this.buscarTarifa();
+        },
+
+        setModuloId() {
+            const match = this.findModuloByInput(this.formDisplay.modulo);
+            this.form.modulo_id = match ? match.id : "";
+            if (match) {
+                this.formDisplay.modulo = match.titulo || this.formDisplay.modulo;
+            } else {
+                this.resetAlertaTarifa();
+            }
+            this.buscarTarifa();
+        },
+
         async buscarTarifa() {
-            if (!this.form.consultor_id || !this.form.modulo_id || !this.proyectoSelected) return;
+            if (!this.form.consultor_id || !this.form.modulo_id || !this.proyectoSelected) {
+                this.resetAlertaTarifa();
+                return;
+            }
 
             try {
                 const res = await axios.get(`${API}/tarifa-consultor`, {

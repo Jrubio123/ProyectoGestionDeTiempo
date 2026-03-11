@@ -19,6 +19,7 @@ window.mesaFabricaApp = function () {
             estado: "",
             estado_ticket: "",
             tipo_asignacion: "",
+            scope_mesa_fabrica: "",
             estado_mesa_servicio: "",
             estado_fabrica: "",
             observacion: "",
@@ -55,6 +56,7 @@ window.mesaFabricaApp = function () {
                 reporte_id: item?.reporte_id || null,
                 estado_ticket: estadoTicket,
                 tipo_asignacion: item?.tipo_asignacion || "",
+                scope_mesa_fabrica: this.getScope(item),
                 fecha_inicio: this.toDateInputValue(item?.fecha_ingreso_reporte || item?.fecha_inicio),
                 fecha_cierre: this.toDateInputValue(item?.fecha_cierre_mesa_fab || item?.fecha_fin),
                 observacion: item?.observacion_mesa_fabrica || item?.observacion || "",
@@ -86,6 +88,7 @@ window.mesaFabricaApp = function () {
                 reporte_id: null,
                 tipo_asignacion: item?.tipo_asignacion || "",
                 tipo_asignacion_id: item?.tipo_asignacion_id || null,
+                scope_mesa_fabrica: scope,
                 nombre_modulo: item?.nombre_modulo || "",
                 nro_caso_interno: "",
                 nro_caso_cliente: "",
@@ -138,6 +141,7 @@ window.mesaFabricaApp = function () {
                 const fechaIngreso = this.resolveFechaIngreso(item, scope === "fabrica");
                 await axios.post(`${this.API}/mesa-fabrica/${item.id}/enviar-aprobacion`, {
                     reporte_id: item.reporte_id || null,
+                    scope,
                     fecha_inicio: fechaIngreso || null,
                     tipo_servicio: esMesa ? (item.tipo_servicio || null) : null,
                     nro_caso_cliente: esMesa ? (item.nro_caso_cliente || null) : null,
@@ -182,6 +186,7 @@ window.mesaFabricaApp = function () {
                 const perfilAsignado = scope === "fabrica" ? this.getPerfilFabricaAsignado(this.form) : "";
                 const payload = {
                     ...this.form,
+                    scope,
                     total_cobrar: this.esAsociado ? null : (this.form.total_cobrar || null),
                     tipo_servicio: scope === "mesa" ? (this.form.tipo_servicio || null) : null,
                     estado_mesa_servicio: scope === "mesa" ? (this.form.estado_ticket || null) : null,
@@ -291,12 +296,20 @@ window.mesaFabricaApp = function () {
             return (this.tickets || []).filter((t) => t.id === id && Boolean(t?.reporte_id)).length;
         },
 
+        normalizeScope(value) {
+            const norm = this.normalizeTipo(value);
+            if (norm === "mesa") return "mesa";
+            if (norm === "fabrica") return "fabrica";
+            return "";
+        },
+
         getScope(item) {
+            const explicitScope = this.normalizeScope(item?.scope_mesa_fabrica || this.form?.scope_mesa_fabrica);
+            if (explicitScope) return explicitScope;
+
             const tipo = this.normalizeTipo(item?.tipo_asignacion || this.form?.tipo_asignacion || "");
             const hasMesaByTipo = tipo.includes("mesa de servicio");
             const hasFabricaByTipo = tipo.includes("fabrica");
-            if (hasFabricaByTipo && !hasMesaByTipo) return "fabrica";
-            if (hasMesaByTipo && !hasFabricaByTipo) return "mesa";
 
             const hasFabricaHints = Boolean(
                 String(item?.estado_fabrica || "").trim() ||
@@ -312,7 +325,11 @@ window.mesaFabricaApp = function () {
             );
             if (hasFabricaHints && !hasMesaHints) return "fabrica";
             if (hasMesaHints && !hasFabricaHints) return "mesa";
+            if (hasFabricaByTipo && !hasMesaByTipo) return "fabrica";
+            if (hasMesaByTipo && !hasFabricaByTipo) return "mesa";
             if (hasFabricaHints) return "fabrica";
+            if (hasMesaHints) return "mesa";
+            if (hasFabricaByTipo) return "fabrica";
             return "mesa";
         },
 

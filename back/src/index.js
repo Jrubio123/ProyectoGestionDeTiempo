@@ -345,7 +345,20 @@ function resolveEstadoFabricaInput(value, estadosFabrica) {
   return null;
 }
 
-function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, hints = {}) {
+function normalizeScopeInput(value) {
+  const norm = normalizeEnumLabel(value);
+  if (norm === "mesa") return "mesa";
+  if (norm === "fabrica") return "fabrica";
+  return null;
+}
+
+function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, hints = {}, preferredScope = null) {
+  const explicitScope =
+    normalizeScopeInput(preferredScope) ||
+    normalizeScopeInput(hints?.scope) ||
+    normalizeScopeInput(hints?.scope_mesa_fabrica);
+  if (explicitScope) return explicitScope;
+
   const tituloNorm = String(tipoAsignacionTitulo || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -365,25 +378,20 @@ function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, hints = {})
     hints?.perfil_fabrica,
     hints?.wricef
   ].some((v) => String(v || "").trim() !== "");
-  const tipoAsignacionNumeric = Number(tipoAsignacionId || 0);
-  // Dato maestro preferido: si el tipo de asignacion es mesa/fabrica,
-  // usamos ese valor salvo que el ticket traiga pistas claras del otro flujo.
-  if (tipoAsignacionNumeric === 5) {
-    if (hasFabricaHints && !hasMesaHints) return "fabrica";
-    return "mesa";
-  }
-  if (tipoAsignacionNumeric === 6) {
-    if (hasMesaHints && !hasFabricaHints) return "mesa";
-    return "fabrica";
-  }
+  if (hasFabricaHints && !hasMesaHints) return "fabrica";
+  if (hasMesaHints && !hasFabricaHints) return "mesa";
 
   const hasMesaByTitle = tituloNorm.includes("mesa de servicio");
   const hasFabricaByTitle = tituloNorm.includes("fabrica");
 
-  if (hasFabricaHints && !hasMesaHints) return "fabrica";
-  if (hasMesaHints && !hasFabricaHints) return "mesa";
+  const tipoAsignacionNumeric = Number(tipoAsignacionId || 0);
   if (hasFabricaByTitle && !hasMesaByTitle) return "fabrica";
   if (hasMesaByTitle && !hasFabricaByTitle) return "mesa";
+  // Compatibilidad con instalaciones que usan ids clásicos 5/6.
+  if (tipoAsignacionNumeric === 6) return "fabrica";
+  if (tipoAsignacionNumeric === 5) return "mesa";
+  if (hasFabricaHints) return "fabrica";
+  if (hasMesaHints) return "mesa";
   if (hasFabricaByTitle) return "fabrica";
   if (hasMesaByTitle) return "mesa";
   return null;
@@ -553,23 +561,59 @@ function getRequestPublicBaseUrl(req) {
 function buildEmailLayout({ title, intro, blocks = [], ctaLabel, ctaUrl, closing }) {
   const blockHtml = blocks
     .filter((b) => b?.label)
-    .map((b) => `<p style="margin: 0 0 6px;"><strong>${b.label}:</strong> ${b.value || "N/A"}</p>`)
+    .map((b) => `
+      <tr>
+        <td style="padding:0 0 8px 0;font-family:Segoe UI,Arial,sans-serif;font-size:14px;line-height:1.45;color:#20272f;">
+          <strong>${b.label}:</strong> ${b.value || "N/A"}
+        </td>
+      </tr>
+    `)
     .join("");
 
   const ctaHtml = ctaLabel && ctaUrl
-    ? `<a href="${ctaUrl}" style="display:inline-block;margin-top:12px;background:#189fa9;color:#ffffff;text-decoration:none;font-weight:700;padding:10px 16px;border-radius:10px;">${ctaLabel}</a>`
+    ? `
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:14px;">
+        <tr>
+          <td bgcolor="#189fa9" style="border-radius:10px;">
+            <a href="${ctaUrl}" style="display:inline-block;padding:10px 16px;font-family:Segoe UI,Arial,sans-serif;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;">
+              ${ctaLabel}
+            </a>
+          </td>
+        </tr>
+      </table>
+    `
     : "";
 
   return `
-    <div style="font-family:Segoe UI,Arial,sans-serif;color:#20272f;line-height:1.5;">
-      <h2 style="margin:0 0 10px;color:#1f2a37;">${title}</h2>
-      <p style="margin:0 0 14px;">${intro}</p>
-      <div style="background:#f6f8fb;border:1px solid #e6ebf2;border-radius:12px;padding:14px 16px;">
-        ${blockHtml}
-      </div>
-      ${ctaHtml}
-      <p style="margin:16px 0 0;color:#5b6678;">${closing || "Atentamente, Silver Consulting."}</p>
-    </div>
+    <!doctype html>
+    <html lang="es">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>${title || "Notificación"}</title>
+      </head>
+      <body style="margin:0;padding:0;background:#f3f6fb;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f3f6fb;padding:20px 10px;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:640px;background:#ffffff;border:1px solid #dfe6f2;border-radius:14px;overflow:hidden;">
+                <tr>
+                  <td style="padding:20px 22px;font-family:Segoe UI,Arial,sans-serif;color:#20272f;">
+                    <h2 style="margin:0 0 12px 0;font-size:22px;line-height:1.25;color:#1f2a37;">${title}</h2>
+                    <p style="margin:0 0 14px 0;font-size:14px;line-height:1.5;">${intro}</p>
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f6f8fb;border:1px solid #e6ebf2;border-radius:12px;padding:14px 16px;">
+                      ${blockHtml}
+                    </table>
+                    ${ctaHtml}
+                    <p style="margin:16px 0 0 0;font-size:13px;line-height:1.45;color:#5b6678;">${closing || "Atentamente, Silver Consulting."}</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
   `;
 }
 
@@ -5480,6 +5524,7 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         ra.fecha_fin,
         ra.valor_hora,
         ta.public_id AS tipo_asignacion_id,
+        con.id_tipo_asignacion AS tipo_asignacion_internal_id,
         c.public_id AS cliente_id,
         c.titulo AS nombre_cliente,
         m.public_id AS modulo_id,
@@ -5521,7 +5566,22 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
       [userId, estados.abierto, estados.proceso]
     );
     const rows = Array.isArray(result.rows) ? result.rows : [];
-    const ticketRows = rows.map((row) => applyTicketCaseFields(row));
+    const ticketRows = rows.map((row) => {
+      const rowScope = getMesaFabricaScope(
+        row?.tipo_asignacion_internal_id,
+        row?.tipo_asignacion,
+        row
+      );
+      const withCases = applyTicketCaseFields(row);
+      const {
+        tipo_asignacion_internal_id: _tipoAsignacionInternalId,
+        ...safeRow
+      } = withCases;
+      return {
+        ...safeRow,
+        scope_mesa_fabrica: rowScope
+      };
+    });
     if (!ocultarMonto) {
       return res.json(ticketRows);
     }
@@ -5554,7 +5614,8 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     estado_fabrica,
     requerimiento,
     perfil_fabrica,
-    wricef
+    wricef,
+    scope: scopeInput
   } = req.body || {};
 
   const client = await pool.connect();
@@ -5638,8 +5699,9 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       nro_caso_int_ext,
       requerimiento,
       perfil_fabrica,
-      wricef
-    });
+      wricef,
+      scope: scopeInput
+    }, scopeInput);
     const estadosMesa = await getEstadoMesaValues();
     const estadosFabrica = await getEstadoFabricaValues();
     const estadoMesaNormalizado = resolveEstadoMesaInput(estado_mesa_servicio, estadosMesa);
@@ -5910,7 +5972,8 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     fecha_inicio,
     fecha_cierre,
     horas_reportadas,
-    total_cobrar
+    total_cobrar,
+    scope: scopeInput
   } = req.body;
 
   try {
@@ -5975,10 +6038,12 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
       tipo_servicio,
       nro_caso_cliente,
       nro_caso_interno,
+      nro_caso_int_ext,
       requerimiento,
       perfil_fabrica,
-      wricef
-    });
+      wricef,
+      scope: scopeInput
+    }, scopeInput);
 
     const estados = await getEstadoAsignacionValues();
     const estadoNormalizado = resolveEstadoAsignacionInput(estado, estados);

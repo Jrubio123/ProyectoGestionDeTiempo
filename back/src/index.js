@@ -1,4 +1,4 @@
-﻿const path = require("path");
+const path = require("path");
 const envFile =
   process.env.NODE_ENV === "production" ? ".env_produccion" : ".env";
 require("dotenv").config({ path: path.resolve(process.cwd(), envFile) });
@@ -891,75 +891,6 @@ function makePublicIdNotFoundError(tableName, value) {
   return err;
 }
 
-function normalizeIdInput(value) {
-  if (value === undefined || value === null) return "";
-  return String(value).trim();
-}
-
-async function resolveInternalId(db, tableName, value, { required = false } = {}) {
-  const raw = normalizeIdInput(value);
-  if (!raw) {
-    if (required) throw makePublicIdNotFoundError(tableName, value);
-    return null;
-  }
-
-  if (isNumericId(raw)) return Number(raw);
-  if (!isGuid(raw)) {
-    if (required) throw makePublicIdNotFoundError(tableName, value);
-    return null;
-  }
-
-  if (!ALLOWED_PUBLIC_ID_TABLES.has(tableName)) {
-    throw new Error(`Tabla no permitida para resolver public_id: ${tableName}`);
-  }
-
-  const result = await db.query(
-    `SELECT id FROM ${tableName} WHERE public_id = $1 LIMIT 1`,
-    [raw]
-  );
-  const resolved = result.rows[0]?.id || null;
-  if (!resolved && required) throw makePublicIdNotFoundError(tableName, value);
-  return resolved;
-}
-
-async function resolveInternalIds(db, tableName, values = []) {
-  if (!Array.isArray(values) || values.length === 0) return [];
-
-  const normalized = values.map((value) => normalizeIdInput(value));
-  const publicIds = [];
-  const publicSet = new Set();
-
-  for (const raw of normalized) {
-    if (!raw) throw makePublicIdNotFoundError(tableName, raw);
-    if (isNumericId(raw)) continue;
-    if (!isGuid(raw)) throw makePublicIdNotFoundError(tableName, raw);
-    if (!publicSet.has(raw)) {
-      publicSet.add(raw);
-      publicIds.push(raw);
-    }
-  }
-
-  const byPublicId = new Map();
-  if (publicIds.length > 0) {
-    if (!ALLOWED_PUBLIC_ID_TABLES.has(tableName)) {
-      throw new Error(`Tabla no permitida para resolver public_id: ${tableName}`);
-    }
-    const result = await db.query(
-      `SELECT id, public_id FROM ${tableName} WHERE public_id = ANY($1::uuid[])`,
-      [publicIds]
-    );
-    for (const row of result.rows || []) {
-      byPublicId.set(String(row.public_id), row.id);
-    }
-    for (const raw of publicIds) {
-      if (!byPublicId.has(raw)) {
-        throw makePublicIdNotFoundError(tableName, raw);
-      }
-    }
-  }
-
-  return normalized.map((raw) => (isNumericId(raw) ? Number(raw) : byPublicId.get(raw)));
-}
 
 const MAX_TICKETS_POR_ASIGNACION = 10;
 
@@ -2354,11 +2285,9 @@ function extractPublicIdFromContract(contractId) {
   return match ? match[0] : "";
 }
 
-async function assertCuentaCobroOwnerAccess(cuentaInternalId, req) {
+async function assertCuentaCobroOwnerAccess(createdBy, req) {
   const role = normalizeValue(req.user?.rol);
   if (["administrador", "coordinador"].includes(role)) return;
-  const owner = await pool.query("SELECT created_by FROM cuenta_cobro WHERE id = $1", [cuentaInternalId]);
-  const createdBy = owner.rows[0]?.created_by;
   if (!createdBy || String(createdBy) !== String(req.user?.id)) {
     const err = new Error("Acceso denegado");
     err.code = "ACCESS_DENIED";
@@ -2404,6 +2333,8 @@ async function getCuentaCobroPdfContext(cuentaInternalId) {
       ta.titulo AS tipo_asignacion,
       u.nombre_usuario AS consultor_responsable,
       rh.nro_caso_int_ext,
+      ra.nro_caso_cliente AS asignacion_nro_caso_cliente,
+      ra.nro_caso_interno AS asignacion_nro_caso_interno,
       rh.horas_reportadas,
       rh.cantidad_dias_reportados,
       rh.total_cobrar
@@ -2412,15 +2343,27 @@ async function getCuentaCobroPdfContext(cuentaInternalId) {
       LEFT JOIN modulo m ON rh.modulo_id = m.id
       LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
       LEFT JOIN usuarios u ON rh.consultor_responsable_id = u.id
+      LEFT JOIN registro_asignaciones ra ON rh.id_registro_asignacion = ra.id
     WHERE rh.id_cuenta_cobro = $1
     ORDER BY rh.id DESC
     `,
     [cuentaInternalId]
   );
 
+  const detalles = (detallesRes.rows || []).map((row) => {
+    const withCases = applyTicketCaseFields(row);
+    return {
+      ...withCases,
+      nro_caso_cliente:
+        withCases.nro_caso_cliente || row?.asignacion_nro_caso_cliente || null,
+      nro_caso_interno:
+        withCases.nro_caso_interno || row?.asignacion_nro_caso_interno || null
+    };
+  });
+
   return {
     cuenta,
-    detalles: detallesRes.rows || []
+    detalles
   };
 }
 
@@ -2610,6 +2553,35 @@ function sectionTitle(doc, title, y) {
 }
 
 // ── Función principal ─────────────────────────────────────────
+function buildCaseSummaryText(row = {}) {
+  const parsed = parseTicketCaseFields(row?.nro_caso_int_ext);
+  const casoCliente =
+    normalizeCaseValue(row?.nro_caso_cliente) ||
+    normalizeCaseValue(row?.asignacion_nro_caso_cliente) ||
+    parsed.nro_caso_cliente;
+  const casoInterno =
+    normalizeCaseValue(row?.nro_caso_interno) ||
+    normalizeCaseValue(row?.asignacion_nro_caso_interno) ||
+    parsed.nro_caso_interno;
+  if (casoCliente && casoInterno) return `Cli: ${casoCliente} | Int: ${casoInterno}`;
+  if (casoCliente) return `Cli: ${casoCliente}`;
+  if (casoInterno) return `Int: ${casoInterno}`;
+  const legacy = normalizeCaseValue(row?.nro_caso_int_ext);
+  return legacy || "-";
+}
+
+function fitSingleLineText(doc, value, maxWidth, { fontName = "Helvetica", fontSize = 8 } = {}) {
+  const base = String(value ?? "-").replace(/\s+/g, " ").trim() || "-";
+  doc.font(fontName).fontSize(fontSize);
+  if (doc.widthOfString(base) <= maxWidth) return base;
+  const suffix = "...";
+  let current = base;
+  while (current.length > 1 && doc.widthOfString(`${current}${suffix}`) > maxWidth) {
+    current = current.slice(0, -1);
+  }
+  return `${current}${suffix}`;
+}
+
 function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const PW = pageWidth(doc);
   const ML = MARGIN.left;
@@ -2747,12 +2719,12 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   curY = sectionTitle(doc, "DETALLE DE SERVICIOS", curY);
 
   const cols = [
-    { label: "Cliente", key: "cliente", w: 115 },
-    { label: "Consultor", key: "consultor_responsable", w: 110 },
-    { label: "Tipo", key: "tipo_asignacion", w: 85 },
-    { label: "Caso / Req.", key: "nro_caso_int_ext", w: 70 },
-    { label: "Cant.", key: "_cant", w: 38, align: "right" },
-    { label: "Total", key: "_total", w: 62, align: "right" },
+    { label: "Cliente", key: "cliente", w: 110 },
+    { label: "Consultor", key: "consultor_responsable", w: 102 },
+    { label: "Tipo", key: "tipo_asignacion", w: 78 },
+    { label: "Caso / Req.", key: "nro_caso_int_ext", w: 96 },
+    { label: "Cant.", key: "_cant", w: 40, align: "right" },
+    { label: "Total", key: "_total", w: 64, align: "right" },
   ];
 
   // Ajustar anchos para que sumen exactamente PW
@@ -2796,15 +2768,17 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
       cliente: d.cliente || "-",
       consultor_responsable: d.consultor_responsable || "-",
       tipo_asignacion: d.tipo_asignacion || "-",
-      nro_caso_int_ext: d.nro_caso_int_ext || "-",
+      nro_caso_int_ext: buildCaseSummaryText(d),
       _cant: cant,
       _total: formatCuentaCobroCurrency(d.total_cobrar),
     };
 
     cols.forEach(c => {
-      doc.fontSize(8).font("Helvetica").fillColor(COLOR.textoPrin)
-        .text(vals[c.key], c.x + 4, curY + 4,
-          { width: c.w - 8, align: c.align || "left", lineBreak: false, ellipsis: true });
+      const isNumericCol = c.key === "_cant" || c.key === "_total";
+      const fontName = isNumericCol ? "Helvetica-Bold" : "Helvetica";
+      const fitted = fitSingleLineText(doc, vals[c.key], c.w - 8, { fontName, fontSize: 8 });
+      doc.fontSize(8).font(fontName).fillColor(COLOR.textoPrin)
+        .text(fitted, c.x + 4, curY + 4, { width: c.w - 8, align: c.align || "left", lineBreak: false });
     });
 
     curY += ROW_H;
@@ -3011,14 +2985,14 @@ app.put("/clientes/:id", requireAccess({ roles: ["Administrador"] }), async (req
   const { titulo, nit, prefijo, requiere_confirmacion_cliente } = req.body;
 
   try {
-    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, id, { required: true });
     const result = await pool.query(
       `UPDATE clientes
        SET titulo = $1,
            nit = $2,
            prefijo = $3,
-           requiere_confirmacion_cliente = $4
-       WHERE id = $5
+           requiere_confirmacion_cliente = $4,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = (SELECT id FROM clientes WHERE public_id = $5)
        RETURNING
          public_id AS id,
          titulo,
@@ -3029,14 +3003,11 @@ app.put("/clientes/:id", requireAccess({ roles: ["Administrador"] }), async (req
          COALESCE(requiere_confirmacion_cliente, false) AS requiere_confirmacion_cliente,
          created_at,
          updated_at`,
-      [titulo, nit, prefijo, toBooleanInput(requiere_confirmacion_cliente, false), clienteId]
+      [titulo, nit, prefijo, toBooleanInput(requiere_confirmacion_cliente, false), id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: "Cliente no encontrado" });
     res.json(withPublicId(result.rows[0]));
   } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
-      return res.status(404).json({ error: "Cliente no encontrado" });
-    }
     console.error(err);
     res.status(500).json({ error: "Error al actualizar" });
   }
@@ -3047,17 +3018,13 @@ app.delete("/clientes/:id", requireAccess({ roles: ["Administrador"] }), async (
   const { id } = req.params;
 
   try {
-    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, id, { required: true });
-    // Validar dependencias (Ejemplo: si tienes tabla consultorias)
-    // const check = await pool.query("SELECT id FROM consultorias WHERE id_cliente = $1", [id]);
-    // if (check.rows.length > 0) return res.status(400).json({ tiene_consultorias: true });
-
-    await pool.query("UPDATE clientes SET activo = false WHERE id = $1", [clienteId]);
+    const result = await pool.query(
+      "UPDATE clientes SET activo = false, updated_at = CURRENT_TIMESTAMP WHERE id = (SELECT id FROM clientes WHERE public_id = $1) RETURNING id",
+      [id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: "Cliente no encontrado" });
     res.json({ ok: true });
   } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
-      return res.status(404).json({ error: "Cliente no encontrado" });
-    }
     console.error(err);
     res.status(500).json({ error: "Error al eliminar" });
   }
@@ -3115,24 +3082,23 @@ app.get("/sub-consultores/:principalId", requireAccess({ roles: ["Administrador"
   const { principalId } = req.params;
   try {
     if (!principalId) return res.json([]);
-    const principalInternalId = await resolveInternalId(pool, ID_TABLES.usuarios, principalId, { required: true });
     const result = await pool.query(
       `
+      WITH c_principal AS (SELECT id FROM usuarios WHERE public_id = $1)
       SELECT
         u.public_id AS id,
         u.nombre_usuario,
         u.email
       FROM usuarios u
       WHERE u.activo = true
-        AND u.id_consultor_principal = $1
+        AND u.id_consultor_principal = (SELECT id FROM c_principal)
         AND LOWER(u.tipo_consultor::text) = 'asociado'
       ORDER BY u.nombre_usuario ASC
       `,
-      [principalInternalId]
+      [principalId]
     );
     res.json(result.rows);
   } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.json([]);
     console.error(err);
     res.status(500).json({ error: "Error al obtener consultores asociados" });
   }
@@ -3143,9 +3109,9 @@ app.get("/sub-consultores/disponibles/:principalId", requireAccess({ roles: ["Ad
   const { principalId } = req.params;
   try {
     if (!principalId) return res.json([]);
-    const principalInternalId = await resolveInternalId(pool, ID_TABLES.usuarios, principalId, { required: true });
     const result = await pool.query(
       `
+      WITH c_principal AS (SELECT id FROM usuarios WHERE public_id = $1)
       SELECT
         u.public_id AS id,
         u.nombre_usuario,
@@ -3153,17 +3119,16 @@ app.get("/sub-consultores/disponibles/:principalId", requireAccess({ roles: ["Ad
       FROM usuarios u
       LEFT JOIN roles r ON u.rol_usuario_id = r.id
       WHERE u.activo = true
-        AND u.id <> $1
+        AND u.id <> (SELECT id FROM c_principal)
         AND u.id_consultor_principal IS NULL
         AND (r.titulo IN ('Consultor', 'Consultor Principal', 'Mesa de Servicio'))
         AND (u.tipo_consultor IS NULL OR LOWER(u.tipo_consultor::text) <> 'asociado')
       ORDER BY u.nombre_usuario ASC
       `,
-      [principalInternalId]
+      [principalId]
     );
     res.json(result.rows);
   } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.json([]);
     console.error(err);
     res.status(500).json({ error: "Error al obtener consultores disponibles" });
   }
@@ -3176,46 +3141,47 @@ app.post("/sub-consultores/asociar", requireAccess({ roles: ["Administrador", "C
     if (!principal_id || !asociado_id) {
       return res.status(400).json({ error: "Faltan datos para asociar" });
     }
-    const principalId = await resolveInternalId(pool, ID_TABLES.usuarios, principal_id, { required: true });
-    const asociadoId = await resolveInternalId(pool, ID_TABLES.usuarios, asociado_id, { required: true });
 
-    const principal = await pool.query(
-      "SELECT id, tipo_consultor FROM usuarios WHERE id = $1 AND activo = true",
-      [principalId]
+    const result = await pool.query(
+      `
+      WITH 
+        c_principal AS (
+          SELECT id, tipo_consultor 
+          FROM usuarios 
+          WHERE public_id = $1 AND activo = true
+        ),
+        c_asociado AS (
+          SELECT id, id_consultor_principal 
+          FROM usuarios 
+          WHERE public_id = $2 AND activo = true
+        )
+      UPDATE usuarios
+      SET id_consultor_principal = (SELECT id FROM c_principal),
+          tipo_consultor = 'Asociado',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = (SELECT id FROM c_asociado)
+        AND EXISTS (SELECT 1 FROM c_principal WHERE LOWER(tipo_consultor::text) IS NULL OR LOWER(tipo_consultor::text) <> 'asociado')
+        AND (SELECT id_consultor_principal FROM c_asociado) IS NULL
+      RETURNING id
+      `,
+      [principal_id, asociado_id]
     );
-    if (principal.rows.length === 0) {
-      return res.status(404).json({ error: "Consultor principal no encontrado" });
-    }
-    const principalTipo = normalizeValue(principal.rows[0].tipo_consultor);
-    if (principalTipo === "asociado") {
-      return res.status(400).json({ error: "Un consultor asociado no puede tener asociados" });
-    }
 
-    const asociado = await pool.query(
-      "SELECT id, id_consultor_principal FROM usuarios WHERE id = $1 AND activo = true",
-      [asociadoId]
-    );
-    if (asociado.rows.length === 0) {
-      return res.status(404).json({ error: "Consultor asociado no encontrado" });
-    }
-    if (String(asociado.rows[0].id_consultor_principal || "") !== "") {
-      return res.status(400).json({ error: "El consultor ya está¡ asociado a otro principal" });
-    }
+    if (result.rowCount === 0) {
+      // Analizar por qué falló
+      const checkP = await pool.query("SELECT id, tipo_consultor FROM usuarios WHERE public_id = $1 AND activo = true", [principal_id]);
+      if (checkP.rowCount === 0) return res.status(404).json({ error: "Consultor principal no encontrado" });
+      if (normalizeValue(checkP.rows[0].tipo_consultor) === "asociado") return res.status(400).json({ error: "Un consultor asociado no puede tener asociados" });
 
-    await pool.query(
-      `UPDATE usuarios
-       SET id_consultor_principal = $1,
-           tipo_consultor = 'Asociado',
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2`,
-      [principalId, asociadoId]
-    );
+      const checkA = await pool.query("SELECT id, id_consultor_principal FROM usuarios WHERE public_id = $1 AND activo = true", [asociado_id]);
+      if (checkA.rowCount === 0) return res.status(404).json({ error: "Consultor asociado no encontrado" });
+      if (String(checkA.rows[0].id_consultor_principal || "") !== "") return res.status(400).json({ error: "El consultor ya está asociado a otro principal" });
+      
+      return res.status(500).json({ error: "Error lógico desconocido" });
+    }
 
     res.json({ ok: true });
   } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
-      return res.status(404).json({ error: "Consultor no encontrado" });
-    }
     console.error(err);
     res.status(500).json({ error: "Error al asociar consultor" });
   }
@@ -3229,34 +3195,36 @@ app.delete("/sub-consultores/:asociadoId", requireAccess({ roles: ["Administrado
     if (!asociadoId || !principal_id) {
       return res.status(400).json({ error: "Faltan datos para desvincular" });
     }
-    const asociadoInternalId = await resolveInternalId(pool, ID_TABLES.usuarios, asociadoId, { required: true });
-    const principalInternalId = await resolveInternalId(pool, ID_TABLES.usuarios, principal_id, { required: true });
 
-    const asociado = await pool.query(
-      "SELECT id, id_consultor_principal FROM usuarios WHERE id = $1 AND activo = true",
-      [asociadoInternalId]
+    const result = await pool.query(
+      `
+      WITH 
+        c_principal AS (SELECT id FROM usuarios WHERE public_id = $2),
+        c_asociado AS (SELECT id, id_consultor_principal FROM usuarios WHERE public_id = $1 AND activo = true)
+      UPDATE usuarios
+      SET id_consultor_principal = NULL,
+          tipo_consultor = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = (SELECT id FROM c_asociado)
+        AND id_consultor_principal = (SELECT id FROM c_principal)
+      RETURNING id
+      `,
+      [asociadoId, principal_id]
     );
-    if (asociado.rows.length === 0) {
-      return res.status(404).json({ error: "Consultor asociado no encontrado" });
-    }
-    if (String(asociado.rows[0].id_consultor_principal || "") !== String(principalInternalId)) {
-      return res.status(403).json({ error: "No autorizado para desvincular" });
-    }
 
-    await pool.query(
-      `UPDATE usuarios
-       SET id_consultor_principal = NULL,
-           tipo_consultor = NULL,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $1`,
-      [asociadoInternalId]
-    );
+    if (result.rowCount === 0) {
+      const checkP = await pool.query("SELECT id FROM usuarios WHERE public_id = $1", [principal_id]);
+      const checkA = await pool.query("SELECT id, id_consultor_principal FROM usuarios WHERE public_id = $1 AND activo = true", [asociadoId]);
+      
+      if (checkA.rowCount === 0) return res.status(404).json({ error: "Consultor asociado no encontrado" });
+      if (checkP.rowCount > 0 && String(checkA.rows[0].id_consultor_principal || "") !== String(checkP.rows[0].id)) {
+        return res.status(403).json({ error: "No autorizado para desvincular" });
+      }
+      return res.status(404).json({ error: "Principal o Asociado no válido" });
+    }
 
     res.json({ ok: true });
   } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
-      return res.status(404).json({ error: "Consultor no encontrado" });
-    }
     console.error(err);
     res.status(500).json({ error: "Error al desvincular consultor" });
   }
@@ -3343,32 +3311,43 @@ app.put("/admin/modulos/:id", requireAccess({ roles: ["Administrador"] }), async
   const activo = req.body?.activo;
   try {
     if (!titulo) return res.status(400).json({ error: "El título es obligatorio" });
-    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, id, { required: true });
-    const dup = await pool.query(
-      "SELECT id FROM modulo WHERE LOWER(TRIM(titulo)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1",
-      [titulo, moduloId]
-    );
-    if (dup.rows.length > 0) {
-      return res.status(400).json({ error: "Ya existe un módulo con ese título" });
-    }
+    
+    // CTE para resolver el id interno, validar duplicados y hacer update en un viaje
     const result = await pool.query(
       `
+      WITH 
+        c_modulo AS (SELECT id, titulo FROM modulo WHERE public_id = $5),
+        c_dup AS (
+          SELECT id 
+          FROM modulo 
+          WHERE LOWER(TRIM(titulo)) = LOWER(TRIM($1)) 
+            AND id != (SELECT id FROM c_modulo)
+          LIMIT 1
+        )
       UPDATE modulo
       SET titulo = $1,
           nombre_completo = $2,
           descripcion = $3,
           activo = COALESCE($4::boolean, activo),
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = $5
+      WHERE id = (SELECT id FROM c_modulo)
+        AND NOT EXISTS (SELECT 1 FROM c_dup)
       RETURNING public_id AS id, titulo, nombre_completo, descripcion, activo, created_at, updated_at
       `,
-      [titulo, nombreCompleto, descripcion, activo === undefined ? null : Boolean(activo), moduloId]
+      [titulo, nombreCompleto, descripcion, activo === undefined ? null : Boolean(activo), id]
     );
-    res.json(result.rows[0]);
-  } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+
+    if (result.rowCount === 0) {
+      // Verificar manual (sin error crash) si fue por duplicado o porque no existe el modulo
+      const dupCheck = await pool.query("SELECT id FROM modulo WHERE LOWER(TRIM(titulo)) = LOWER(TRIM($1))", [titulo]);
+      if (dupCheck.rowCount > 0 && dupCheck.rows[0].id) {
+        return res.status(400).json({ error: "Ya existe un módulo con ese título" });
+      }
       return res.status(404).json({ error: "Módulo no encontrado" });
     }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al actualizar módulo" });
   }
@@ -3377,22 +3356,19 @@ app.put("/admin/modulos/:id", requireAccess({ roles: ["Administrador"] }), async
 app.delete("/admin/modulos/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   const { id } = req.params;
   try {
-    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, id, { required: true });
     const result = await pool.query(
       `
       UPDATE modulo
       SET activo = false,
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1
+      WHERE id = (SELECT id FROM modulo WHERE public_id = $1)
       RETURNING public_id AS id
       `,
-      [moduloId]
+      [id]
     );
+    if (!result.rows[0]) return res.status(404).json({ error: "Módulo no encontrado" });
     res.json(result.rows[0] || { ok: true });
   } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
-      return res.status(404).json({ error: "Módulo no encontrado" });
-    }
     console.error(err);
     res.status(500).json({ error: "Error al eliminar módulo" });
   }
@@ -3456,31 +3432,42 @@ app.put("/admin/roles/:id", requireAccess({ roles: ["Administrador"] }), async (
   const activo = req.body?.activo;
   try {
     if (!titulo) return res.status(400).json({ error: "El título es obligatorio" });
-    const rolId = await resolveInternalId(pool, ID_TABLES.roles, id, { required: true });
-    const dup = await pool.query(
-      "SELECT id FROM roles WHERE LOWER(TRIM(titulo)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1",
-      [titulo, rolId]
-    );
-    if (dup.rows.length > 0) {
-      return res.status(400).json({ error: "Ya existe un rol con ese título" });
-    }
+
+    // CTE para resolver el id interno, validar duplicados y hacer update en un viaje
     const result = await pool.query(
       `
+      WITH 
+        c_rol AS (SELECT id, titulo FROM roles WHERE public_id = $4),
+        c_dup AS (
+          SELECT id 
+          FROM roles 
+          WHERE LOWER(TRIM(titulo)) = LOWER(TRIM($1)) 
+            AND id != (SELECT id FROM c_rol)
+          LIMIT 1
+        )
       UPDATE roles
       SET titulo = $1,
           descripcion = $2,
           activo = COALESCE($3::boolean, activo),
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = $4
+      WHERE id = (SELECT id FROM c_rol)
+        AND NOT EXISTS (SELECT 1 FROM c_dup)
       RETURNING public_id AS id, titulo, descripcion, activo, created_at, updated_at
       `,
-      [titulo, descripcion, activo === undefined ? null : Boolean(activo), rolId]
+      [titulo, descripcion, activo === undefined ? null : Boolean(activo), id]
     );
-    res.json(result.rows[0]);
-  } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+
+    if (result.rowCount === 0) {
+      // Verificar manual si fue por duplicado o porque no existe el rol
+      const dupCheck = await pool.query("SELECT id FROM roles WHERE LOWER(TRIM(titulo)) = LOWER(TRIM($1))", [titulo]);
+      if (dupCheck.rowCount > 0 && dupCheck.rows[0].id) {
+        return res.status(400).json({ error: "Ya existe un rol con ese título" });
+      }
       return res.status(404).json({ error: "Rol no encontrado" });
     }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al actualizar rol" });
   }
@@ -3489,29 +3476,41 @@ app.put("/admin/roles/:id", requireAccess({ roles: ["Administrador"] }), async (
 app.delete("/admin/roles/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   const { id } = req.params;
   try {
-    const rolId = await resolveInternalId(pool, ID_TABLES.roles, id, { required: true });
-    const inUse = await pool.query(
-      "SELECT id FROM usuarios WHERE rol_usuario_id = $1 LIMIT 1",
-      [rolId]
-    );
-    if (inUse.rows.length > 0) {
-      return res.status(400).json({ error: "No se puede eliminar: el rol está asignado a usuarios" });
-    }
+    // Para roles, tenemos una validación adicional si está en uso. Podemos hacer un CTE.
     const result = await pool.query(
       `
+      WITH 
+        c_rol AS (SELECT id FROM roles WHERE public_id = $1),
+        c_uso AS (SELECT id FROM usuarios WHERE rol_usuario_id = (SELECT id FROM c_rol) LIMIT 1)
       UPDATE roles
       SET activo = false,
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1
-      RETURNING public_id AS id
+      WHERE id = (SELECT id FROM c_rol)
+        AND NOT EXISTS (SELECT 1 FROM c_uso)
+      RETURNING public_id AS id, 
+                (EXISTS (SELECT 1 FROM c_uso)) AS en_uso,
+                (SELECT id FROM c_rol) AS existe_rol
       `,
-      [rolId]
+      [id]
     );
+
+    if (result.rowCount === 0) {
+      // Diferenciar el error si rowCount fue 0 por no existir o por estar en uso
+      const checkOriginal = await pool.query(
+        "SELECT id FROM roles WHERE public_id = $1", [id]
+      );
+      if (checkOriginal.rowCount === 0) return res.status(404).json({ error: "Rol no encontrado" });
+      
+      const checkUso = await pool.query(
+        "SELECT id FROM usuarios WHERE rol_usuario_id = $1 LIMIT 1", [checkOriginal.rows[0].id]
+      );
+      if (checkUso.rowCount > 0) return res.status(400).json({ error: "No se puede eliminar: el rol está asignado a usuarios" });
+      
+      return res.status(500).json({ error: "Error lógico desconocido al eliminar" });
+    }
+    
     res.json(result.rows[0] || { ok: true });
   } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
-      return res.status(404).json({ error: "Rol no encontrado" });
-    }
     console.error(err);
     res.status(500).json({ error: "Error al eliminar rol" });
   }
@@ -3578,32 +3577,43 @@ app.put("/admin/bancos/:id", requireAccess({ roles: ["Administrador"] }), async 
   const activo = req.body?.activo;
   try {
     if (!titulo) return res.status(400).json({ error: "El título es obligatorio" });
-    const bancoId = await resolveInternalId(pool, ID_TABLES.bancos, id, { required: true });
-    const dup = await pool.query(
-      "SELECT id FROM bancos WHERE LOWER(TRIM(titulo)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1",
-      [titulo, bancoId]
-    );
-    if (dup.rows.length > 0) {
-      return res.status(400).json({ error: "Ya existe un banco con ese título" });
-    }
+
+    // CTE para resolver el id interno, validar duplicados y hacer update en un viaje
     const result = await pool.query(
       `
+      WITH 
+        c_banco AS (SELECT id, titulo FROM bancos WHERE public_id = $5),
+        c_dup AS (
+          SELECT id 
+          FROM bancos 
+          WHERE LOWER(TRIM(titulo)) = LOWER(TRIM($1)) 
+            AND id != (SELECT id FROM c_banco)
+          LIMIT 1
+        )
       UPDATE bancos
       SET titulo = $1,
           codigo_bancolombia = $2,
           codigo_conversor = $3,
           activo = COALESCE($4::boolean, activo),
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = $5
+      WHERE id = (SELECT id FROM c_banco)
+        AND NOT EXISTS (SELECT 1 FROM c_dup)
       RETURNING public_id AS id, titulo, codigo_bancolombia, codigo_conversor, activo, created_at, updated_at
       `,
-      [titulo, codigoBancolombia, codigoConversor, activo === undefined ? null : Boolean(activo), bancoId]
+      [titulo, codigoBancolombia, codigoConversor, activo === undefined ? null : Boolean(activo), id]
     );
-    res.json(result.rows[0]);
-  } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+
+    if (result.rowCount === 0) {
+      // Verificar manual si fue por duplicado o porque no existe el banco
+      const dupCheck = await pool.query("SELECT id FROM bancos WHERE LOWER(TRIM(titulo)) = LOWER(TRIM($1))", [titulo]);
+      if (dupCheck.rowCount > 0 && dupCheck.rows[0].id) {
+        return res.status(400).json({ error: "Ya existe un banco con ese título" });
+      }
       return res.status(404).json({ error: "Banco no encontrado" });
     }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al actualizar banco" });
   }
@@ -3612,29 +3622,41 @@ app.put("/admin/bancos/:id", requireAccess({ roles: ["Administrador"] }), async 
 app.delete("/admin/bancos/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   const { id } = req.params;
   try {
-    const bancoId = await resolveInternalId(pool, ID_TABLES.bancos, id, { required: true });
-    const inUse = await pool.query(
-      "SELECT id FROM usuarios WHERE banco_id = $1 LIMIT 1",
-      [bancoId]
-    );
-    if (inUse.rows.length > 0) {
-      return res.status(400).json({ error: "No se puede eliminar: el banco está asignado a usuarios" });
-    }
+    // Para bancos, validación adicional de usuarios. CTE para proteger e invalidar si está en uso
     const result = await pool.query(
       `
+      WITH 
+        c_banco AS (SELECT id FROM bancos WHERE public_id = $1),
+        c_uso AS (SELECT id FROM usuarios WHERE banco_id = (SELECT id FROM c_banco) LIMIT 1)
       UPDATE bancos
       SET activo = false,
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1
-      RETURNING public_id AS id
+      WHERE id = (SELECT id FROM c_banco)
+        AND NOT EXISTS (SELECT 1 FROM c_uso)
+      RETURNING public_id AS id, 
+                (EXISTS (SELECT 1 FROM c_uso)) AS en_uso,
+                (SELECT id FROM c_banco) AS existe_banco
       `,
-      [bancoId]
+      [id]
     );
+
+    if (result.rowCount === 0) {
+      // Diferenciar el error si rowCount fue 0
+      const checkOriginal = await pool.query(
+        "SELECT id FROM bancos WHERE public_id = $1", [id]
+      );
+      if (checkOriginal.rowCount === 0) return res.status(404).json({ error: "Banco no encontrado" });
+      
+      const checkUso = await pool.query(
+        "SELECT id FROM usuarios WHERE banco_id = $1 LIMIT 1", [checkOriginal.rows[0].id]
+      );
+      if (checkUso.rowCount > 0) return res.status(400).json({ error: "No se puede eliminar: el banco está asignado a usuarios" });
+      
+      return res.status(500).json({ error: "Error lógico desconocido al eliminar" });
+    }
+    
     res.json(result.rows[0] || { ok: true });
   } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
-      return res.status(404).json({ error: "Banco no encontrado" });
-    }
     console.error(err);
     res.status(500).json({ error: "Error al eliminar banco" });
   }
@@ -3670,24 +3692,36 @@ app.put("/admin/usuarios/:id/rol", requireAccess({ roles: ["Administrador"] }), 
   const { rol_id } = req.body || {};
   try {
     if (!rol_id) return res.status(400).json({ error: "Falta rol_id" });
-    const userId = await resolveInternalId(pool, ID_TABLES.usuarios, id, { required: true });
-    const rolId = await resolveInternalId(pool, ID_TABLES.roles, rol_id, { required: true });
+    
+    // CTE para resolver usuario y rol en 1 query
     const result = await pool.query(
       `
+      WITH 
+        c_usuario AS (SELECT id, nombre_usuario, email FROM usuarios WHERE public_id = $2),
+        c_rol AS (SELECT id FROM roles WHERE public_id = $1)
       UPDATE usuarios
-      SET rol_usuario_id = $1,
+      SET rol_usuario_id = (SELECT id FROM c_rol),
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = $2
+      WHERE id = (SELECT id FROM c_usuario)
+        AND EXISTS (SELECT 1 FROM c_rol)
       RETURNING public_id AS id, nombre_usuario, email
       `,
-      [rolId, userId]
+      [rol_id, id]
     );
-    if (!result.rows[0]) return res.status(404).json({ error: "Usuario no encontrado" });
+
+    if (result.rowCount === 0) {
+      // Verificar manual (sin error crash) si fue porque no existe el rol o el usuario
+      const checkRol = await pool.query("SELECT id FROM roles WHERE public_id = $1", [rol_id]);
+      if (checkRol.rowCount === 0) return res.status(404).json({ error: "Rol no encontrado" });
+      
+      const checkUser = await pool.query("SELECT id FROM usuarios WHERE public_id = $1", [id]);
+      if (checkUser.rowCount === 0) return res.status(404).json({ error: "Usuario no encontrado" });
+      
+      return res.status(500).json({ error: "Error desconocido al asignar rol" });
+    }
+
     res.json(result.rows[0]);
   } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
-      return res.status(404).json({ error: "Usuario o rol no encontrado" });
-    }
     console.error(err);
     res.status(500).json({ error: "Error al actualizar rol de usuario" });
   }
@@ -3844,10 +3878,11 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
     if (!cliente_id || !modulo_id || !perfil || !nivel) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
-    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, cliente_id, { required: true });
-    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, modulo_id, { required: true });
     const result = await pool.query(
       `
+      WITH
+       c_cliente AS (SELECT id FROM clientes WHERE public_id = $2),
+       c_modulo AS (SELECT id FROM modulo WHERE public_id = $3)
       INSERT INTO solicitudes_rrhh
         (
           coordinador_id,
@@ -3866,14 +3901,16 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
           informacion_adicional,
           prioridad
         )
-      VALUES
-        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      SELECT
+        $1, (SELECT id FROM c_cliente), (SELECT id FROM c_modulo), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+      WHERE EXISTS (SELECT 1 FROM c_cliente)
+        AND EXISTS (SELECT 1 FROM c_modulo)
       RETURNING id
       `,
       [
         req.user?.id,
-        clienteId,
-        moduloId,
+        cliente_id,
+        modulo_id,
         perfil,
         nivel,
         tiempo || null,
@@ -3888,6 +3925,9 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
         prioridad || "Media"
       ]
     );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Cliente y/o módulo no encontrado(s), o inválido(s)" });
+    }
     const createdInternalId = result.rows[0]?.id;
     const createdRes = await pool.query(
       `
@@ -4012,7 +4052,6 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
   const { id } = req.params;
   const { estado, observaciones_rrhh } = req.body || {};
   try {
-    const solicitudId = await resolveInternalId(pool, ID_TABLES.solicitudesRrhh, id, { required: true });
     const solicitudInfo = await pool.query(
       `
       SELECT
@@ -4028,9 +4067,9 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
         LEFT JOIN clientes c ON c.id = s.cliente_id
         LEFT JOIN modulo m ON m.id = s.modulo_id
         LEFT JOIN usuarios u ON u.id = s.coordinador_id
-      WHERE s.id = $1
+      WHERE s.public_id = $1
       `,
-      [solicitudId]
+      [id]
     );
 
     if (solicitudInfo.rows.length === 0) {
@@ -4145,7 +4184,6 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
 registerPreregistroRoutes({
   app,
   pool,
-  resolveInternalId,
   ID_TABLES,
   normalizeValue,
   requireAccess,
@@ -4157,7 +4195,6 @@ registerPreregistroRoutes({
 registerContratacionesRoutes({
   app,
   pool,
-  resolveInternalId,
   ID_TABLES,
   normalizeValue,
   requireAccess,
@@ -4706,14 +4743,24 @@ app.get("/tarifa-consultor", requireAccess({ roles: ["Administrador", "Coordinad
     if (!consultor_id || !cliente_id) {
       return res.status(400).json({ error: "Faltan parámetros requeridos" });
     }
-    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_id, { required: true });
-    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, cliente_id, { required: true });
-    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, modulo_id, { required: false });
-    const tipoAsignacionId = await resolveInternalId(pool, ID_TABLES.tipoAsignacion, tipo_asignacion_id, { required: false });
     const result = await pool.query(
-      `SELECT obtener_tarifa_consultor($1, $2, $3, $4) AS valor_tarifa`,
-      [consultorId, clienteId, moduloId || null, tipoAsignacionId || null]
+      `
+      WITH 
+        c_consultor AS (SELECT id FROM usuarios WHERE public_id = $1),
+        c_cliente AS (SELECT id FROM clientes WHERE public_id = $2),
+        c_modulo AS (SELECT id FROM modulo WHERE public_id = $3),
+        c_tipo_asignacion AS (SELECT id FROM tipo_asignacion WHERE public_id = $4)
+      SELECT obtener_tarifa_consultor(
+        (SELECT id FROM c_consultor), 
+        (SELECT id FROM c_cliente), 
+        (SELECT id FROM c_modulo), 
+        (SELECT id FROM c_tipo_asignacion)
+      ) AS valor_tarifa
+      `,
+      [consultor_id, cliente_id, modulo_id || null, tipo_asignacion_id || null]
     );
+
+    // Si todo es null porque UUIDs son malos la función va a arrojar null
     res.json(withPublicId(result.rows[0]));
   } catch (err) {
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {
@@ -4768,21 +4815,32 @@ app.post("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador"] }),
     if (!cliente_id || !consultor_id || !tipo_asignacion_id || !valor) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
-    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, cliente_id, { required: true });
-    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_id, { required: true });
-    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, modulo_id, { required: false });
-    const tipoAsignacionId = await resolveInternalId(pool, ID_TABLES.tipoAsignacion, tipo_asignacion_id, { required: true });
 
-    const ins = await pool.query(
-      `INSERT INTO tarifa_consultor
-        (id_cliente, consultor_id, modulo_id, id_tipo_asignacion, valor_tarifa, activo)
-       VALUES ($1, $2, $3, $4, $5, true)
-       RETURNING id`,
-      [clienteId, consultorId, moduloId || null, tipoAsignacionId || null, valor]
-    );
-    const tarifaId = ins.rows[0]?.id;
-    const result = await pool.query(
-      `SELECT
+    const result = await pool.query(`
+      WITH 
+        c_cliente AS (SELECT id FROM clientes WHERE public_id = $1),
+        c_consultor AS (SELECT id FROM usuarios WHERE public_id = $2),
+        c_modulo AS (SELECT id FROM modulo WHERE public_id = $3),
+        c_tipo_asignacion AS (SELECT id FROM tipo_asignacion WHERE public_id = $4),
+        
+        i_tarifa AS (
+          INSERT INTO tarifa_consultor (
+            id_cliente, consultor_id, modulo_id, id_tipo_asignacion, valor_tarifa, activo
+          )
+          SELECT 
+            c_cliente.id, 
+            c_consultor.id, 
+            (SELECT id FROM c_modulo), 
+            c_tipo_asignacion.id, 
+            $5, 
+            true
+          FROM c_cliente, c_consultor, c_tipo_asignacion
+          WHERE c_cliente.id IS NOT NULL 
+            AND c_consultor.id IS NOT NULL 
+            AND c_tipo_asignacion.id IS NOT NULL
+          RETURNING id
+        )
+      SELECT
         tc.public_id AS id,
         c.public_id AS cliente_id,
         u.public_id AS consultor_id,
@@ -4795,19 +4853,20 @@ app.post("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador"] }),
         m.titulo AS nombre_modulo,
         ta.titulo AS tipo_asignacion,
         u.moneda_cobro AS moneda
-      FROM tarifa_consultor tc
+      FROM i_tarifa
+      JOIN tarifa_consultor tc ON tc.id = i_tarifa.id
       JOIN clientes c ON c.id = tc.id_cliente
       JOIN usuarios u ON u.id = tc.consultor_id
       LEFT JOIN modulo m ON m.id = tc.modulo_id
       LEFT JOIN tipo_asignacion ta ON ta.id = tc.id_tipo_asignacion
-      WHERE tc.id = $1`,
-      [tarifaId]
-    );
+    `, [cliente_id, consultor_id, modulo_id || null, tipo_asignacion_id, valor]);
+
+    if (result.rowCount === 0) {
+      return res.status(400).json({ error: "Cliente, consultor o tipo de asignación no válido" });
+    }
+
     res.json(withPublicId(result.rows[0]));
   } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
-      return res.status(400).json({ error: "Cliente, consultor, módulo o tipo de asignación no válido" });
-    }
     console.error(err);
     res.status(500).json({ error: "Error al guardar tarifa" });
   }
@@ -4819,56 +4878,72 @@ app.put("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador"] 
   const { cliente_id, consultor_id, modulo_id, tipo_asignacion_id, valor } = req.body;
 
   try {
-    const tarifaId = await resolveInternalId(pool, ID_TABLES.tarifaConsultor, id, { required: true });
-    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, cliente_id, { required: true });
-    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_id, { required: true });
-    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, modulo_id, { required: false });
-    const tipoAsignacionId = await resolveInternalId(pool, ID_TABLES.tipoAsignacion, tipo_asignacion_id, { required: true });
     const result = await pool.query(
-      `WITH upd AS (
-         UPDATE tarifa_consultor
-         SET id_cliente = $1,
-             consultor_id = $2,
-             modulo_id = $3,
-             id_tipo_asignacion = $4,
-             valor_tarifa = $5
-         WHERE id = $6
-         RETURNING id
-       )
-       SELECT
-         tc.public_id AS id,
-         c.public_id AS cliente_id,
-         u.public_id AS consultor_id,
-         m.public_id AS modulo_id,
-         ta.public_id AS tipo_asignacion_id,
-         tc.valor_tarifa AS valor,
-         tc.activo,
-         c.titulo AS nombre_cliente,
-         u.nombre_usuario AS nombre_consultor,
-         m.titulo AS nombre_modulo,
-         ta.titulo AS tipo_asignacion,
-         u.moneda_cobro AS moneda
-       FROM tarifa_consultor tc
-       JOIN clientes c ON c.id = tc.id_cliente
-       JOIN usuarios u ON u.id = tc.consultor_id
-       LEFT JOIN modulo m ON m.id = tc.modulo_id
-       LEFT JOIN tipo_asignacion ta ON ta.id = tc.id_tipo_asignacion
-       WHERE tc.id = (SELECT id FROM upd)`,
+      `
+      WITH 
+        c_tarifa AS (SELECT id FROM tarifa_consultor WHERE public_id = $6),
+        c_cliente AS (SELECT id, titulo FROM clientes WHERE public_id = $1),
+        c_consultor AS (SELECT id, nombre_usuario, moneda_cobro FROM usuarios WHERE public_id = $2),
+        c_modulo AS (SELECT id, titulo FROM modulo WHERE public_id = $3),
+        c_tipo_asignacion AS (SELECT id, titulo FROM tipo_asignacion WHERE public_id = $4),
+        
+        upd AS (
+          UPDATE tarifa_consultor
+          SET id_cliente = (SELECT id FROM c_cliente),
+              consultor_id = (SELECT id FROM c_consultor),
+              modulo_id = (SELECT id FROM c_modulo),
+              id_tipo_asignacion = (SELECT id FROM c_tipo_asignacion),
+              valor_tarifa = $5
+          WHERE id = (SELECT id FROM c_tarifa)
+            AND EXISTS (SELECT 1 FROM c_cliente)
+            AND EXISTS (SELECT 1 FROM c_consultor)
+            AND EXISTS (SELECT 1 FROM c_tipo_asignacion)
+          RETURNING id, id_cliente, consultor_id, modulo_id, id_tipo_asignacion, valor_tarifa, activo, public_id
+        )
+      SELECT
+        upd.public_id AS id,
+        $1 AS cliente_id,
+        $2 AS consultor_id,
+        $3 AS modulo_id,
+        $4 AS tipo_asignacion_id,
+        upd.valor_tarifa AS valor,
+        upd.activo,
+        (SELECT titulo FROM c_cliente) AS nombre_cliente,
+        (SELECT nombre_usuario FROM c_consultor) AS nombre_consultor,
+        (SELECT titulo FROM c_modulo) AS nombre_modulo,
+        (SELECT titulo FROM c_tipo_asignacion) AS tipo_asignacion,
+        (SELECT moneda_cobro FROM c_consultor) AS moneda
+      FROM upd
+      `,
       [
-        clienteId,
-        consultorId,
-        moduloId || null,
-        tipoAsignacionId || null,
+        cliente_id,
+        consultor_id,
+        modulo_id || null,
+        tipo_asignacion_id, // NOT NULL EN DB AL PARECER SEGUN REQ
         valor,
-        tarifaId
+        id
       ]
     );
-    if (!result.rows[0]) return res.status(404).json({ error: "Tarifa no encontrada" });
+
+    if (result.rowCount === 0) {
+      // Analizar fallo
+      const checkT = await pool.query("SELECT id FROM tarifa_consultor WHERE public_id = $1", [id]);
+      if (checkT.rowCount === 0) return res.status(404).json({ error: "Tarifa no encontrada" });
+      
+      const checkC = await pool.query("SELECT id FROM clientes WHERE public_id = $1", [cliente_id]);
+      if (checkC.rowCount === 0) return res.status(404).json({ error: "Cliente no encontrado" });
+
+      const checkU = await pool.query("SELECT id FROM usuarios WHERE public_id = $1", [consultor_id]);
+      if (checkU.rowCount === 0) return res.status(404).json({ error: "Consultor no encontrado" });
+      
+      const checkTA = await pool.query("SELECT id FROM tipo_asignacion WHERE public_id = $1", [tipo_asignacion_id]);
+      if (checkTA.rowCount === 0) return res.status(404).json({ error: "Tipo de asignación no encontrado" });
+      
+      return res.status(500).json({ error: "Error desconocido al actualizar tarifa" });
+    }
+    
     res.json(result.rows[0]);
   } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
-      return res.status(404).json({ error: "Tarifa o referencias no encontradas" });
-    }
     console.error(err);
     res.status(500).json({ error: "Error al actualizar tarifa" });
   }
@@ -4879,13 +4954,20 @@ app.delete("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador
   const { id } = req.params;
 
   try {
-    const tarifaId = await resolveInternalId(pool, ID_TABLES.tarifaConsultor, id, { required: true });
-    await pool.query("UPDATE tarifa_consultor SET activo = false WHERE id = $1", [tarifaId]);
-    res.json({ ok: true });
-  } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+    const result = await pool.query(`
+      WITH c_tarifa AS (SELECT id FROM tarifa_consultor WHERE public_id = $1)
+      UPDATE tarifa_consultor 
+      SET activo = false 
+      WHERE id = (SELECT id FROM c_tarifa)
+      RETURNING id
+    `, [id]);
+
+    if (result.rowCount === 0) {
       return res.status(404).json({ error: "Tarifa no encontrada" });
     }
+
+    res.json({ ok: true });
+  } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al eliminar tarifa" });
   }
@@ -4898,16 +4980,9 @@ app.delete("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador
 // Obtener consultorías
 app.get("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   try {
-    let coordinadorId = null;
-    if (req.query.coordinador_id) {
-      coordinadorId = await resolveInternalId(
-        pool,
-        ID_TABLES.usuarios,
-        req.query.coordinador_id,
-        { required: true }
-      );
-    }
+    const { coordinador_id } = req.query;
     const result = await pool.query(`
+      WITH c_coordinador AS (SELECT id FROM usuarios WHERE public_id = $1)
       SELECT
         c.public_id AS id,
         cli.public_id AS cliente_id,
@@ -4923,12 +4998,11 @@ app.get("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"]
       LEFT JOIN usuarios u ON u.id = c.coordinador_responsable_id
       LEFT JOIN tipo_asignacion ta ON ta.id = c.id_tipo_asignacion
       WHERE c.activo = true
-        AND ($1::int IS NULL OR c.coordinador_responsable_id = $1)
+        AND ($1::text IS NULL OR c.coordinador_responsable_id = (SELECT id FROM c_coordinador))
       ORDER BY c.id DESC
-    `, [coordinadorId]);
+    `, [coordinador_id || null]);
     res.json(result.rows);
   } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.json([]);
     console.error(err);
     res.status(500).json({ error: "Error al obtener consultorías" });
   }
@@ -4942,20 +5016,28 @@ app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"
     if (!cliente_id || !coordinador_id || !tipo_asignacion_id) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
-    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, cliente_id, { required: true });
-    const coordinadorId = await resolveInternalId(pool, ID_TABLES.usuarios, coordinador_id, { required: true });
-    const tipoAsignacionId = await resolveInternalId(pool, ID_TABLES.tipoAsignacion, tipo_asignacion_id, { required: true });
 
-    const ins = await pool.query(
-      `INSERT INTO consultorias
-        (id_cliente, coordinador_responsable_id, id_tipo_asignacion, descripcion_consultoria, activo)
-       VALUES ($1, $2, $3, $4, true)
-       RETURNING id`,
-      [clienteId, coordinadorId, tipoAsignacionId, descripcion_consultoria || null]
-    );
-    const consultoriaId = ins.rows[0]?.id;
     const result = await pool.query(
-      `SELECT
+      `
+      WITH 
+        c_cliente AS (SELECT id FROM clientes WHERE public_id = $1),
+        c_coordinador AS (SELECT id FROM usuarios WHERE public_id = $2),
+        c_tipo_asignacion AS (SELECT id FROM tipo_asignacion WHERE public_id = $3),
+        
+        ins AS (
+          INSERT INTO consultorias (id_cliente, coordinador_responsable_id, id_tipo_asignacion, descripcion_consultoria, activo)
+          SELECT 
+            (SELECT id FROM c_cliente), 
+            (SELECT id FROM c_coordinador), 
+            (SELECT id FROM c_tipo_asignacion), 
+            $4, 
+            true
+          WHERE EXISTS (SELECT 1 FROM c_cliente)
+            AND EXISTS (SELECT 1 FROM c_coordinador)
+            AND EXISTS (SELECT 1 FROM c_tipo_asignacion)
+          RETURNING id
+        )
+      SELECT
         c.public_id AS id,
         cli.public_id AS cliente_id,
         u.public_id AS coordinador_id,
@@ -4964,48 +5046,42 @@ app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"
         c.activo,
         cli.titulo AS nombre_cliente,
         u.nombre_usuario AS nombre_coordinador,
+        u.email AS coordinador_email,
         ta.titulo AS tipo_asignacion
-      FROM consultorias c
+      FROM ins
+      JOIN consultorias c ON c.id = ins.id
       JOIN clientes cli ON cli.id = c.id_cliente
       LEFT JOIN usuarios u ON u.id = c.coordinador_responsable_id
       LEFT JOIN tipo_asignacion ta ON ta.id = c.id_tipo_asignacion
-      WHERE c.id = $1`,
-      [consultoriaId]
+      `,
+      [cliente_id, coordinador_id, tipo_asignacion_id, descripcion_consultoria || null]
     );
+
+    if (result.rowCount === 0) {
+      return res.status(400).json({ error: "Cliente, coordinador o tipo de asignación no válido" });
+    }
+
     const created = result.rows[0];
 
     // Email al coordinador asignado
-    const mailInfo = await pool.query(
-      `SELECT
-         u.email AS coordinador_email,
-         u.nombre_usuario AS coordinador_nombre,
-         c.titulo AS cliente,
-         ta.titulo AS tipo_asignacion
-       FROM usuarios u
-         JOIN clientes c ON c.id = $1
-         JOIN tipo_asignacion ta ON ta.id = $2
-        WHERE u.id = $3`,
-      [clienteId, tipoAsignacionId, coordinadorId]
-    );
-    const row = mailInfo.rows[0];
-    if (row?.coordinador_email) {
+    if (created.coordinador_email) {
       const portalUrl = buildPortalUrl("mis-asignaciones-coordinador");
       await sendEmailSafe({
         ...getGraphContext(req),
-        to: row.coordinador_email,
-        subject: `Nueva consultoría asignada - ${row.cliente}`,
+        to: created.coordinador_email,
+        subject: `Nueva consultoría asignada - ${created.nombre_cliente}`,
         text:
-          `Hola ${row.coordinador_nombre || ""},\n` +
-          `Se creó una consultoría para el cliente ${row.cliente}.\n` +
-          `Tipo de asignación: ${row.tipo_asignacion}.\n` +
+          `Hola ${created.nombre_coordinador || ""},\n` +
+          `Se creó una consultoría para el cliente ${created.nombre_cliente}.\n` +
+          `Tipo de asignación: ${created.tipo_asignacion}.\n` +
           `Descripción: ${descripcion_consultoria || "Sin descripción"}.\n` +
           `Revisa en: ${portalUrl}\n`,
         html: buildEmailLayout({
           title: "Nueva consultoría asignada",
-          intro: `Hola <strong>${row.coordinador_nombre || "Coordinador"}</strong>, se creó una consultoría para que inicies gestión operativa.`,
+          intro: `Hola <strong>${created.nombre_coordinador || "Coordinador"}</strong>, se creó una consultoría para que inicies gestión operativa.`,
           blocks: [
-            { label: "Cliente", value: row.cliente },
-            { label: "Tipo de asignación", value: row.tipo_asignacion || "N/A" },
+            { label: "Cliente", value: created.nombre_cliente },
+            { label: "Tipo de asignación", value: created.tipo_asignacion || "N/A" },
             { label: "Descripción", value: descripcion_consultoria || "Sin descripción" }
           ],
           ctaLabel: "Ver consultoría en el portal",
@@ -5014,11 +5090,10 @@ app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"
       });
     }
 
+    // Remover email the response options if not wanted by the frontend
+    delete created.coordinador_email;
     res.json(created);
   } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
-      return res.status(400).json({ error: "Cliente, coordinador o tipo de asignación no válido" });
-    }
     console.error(err);
     res.status(500).json({ error: "Error al guardar consultoría" });
   }
@@ -5030,49 +5105,61 @@ app.put("/consultorias/:id", requireAccess({ roles: ["Administrador", "Coordinad
   const { cliente_id, coordinador_id, tipo_asignacion_id, descripcion_consultoria } = req.body;
 
   try {
-    const consultoriaId = await resolveInternalId(pool, ID_TABLES.consultorias, id, { required: true });
-    const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, cliente_id, { required: true });
-    const coordinadorId = await resolveInternalId(pool, ID_TABLES.usuarios, coordinador_id, { required: true });
-    const tipoAsignacionId = await resolveInternalId(pool, ID_TABLES.tipoAsignacion, tipo_asignacion_id, { required: true });
     const result = await pool.query(
-      `WITH upd AS (
-         UPDATE consultorias
-         SET id_cliente = $1,
-             coordinador_responsable_id = $2,
-             id_tipo_asignacion = $3,
-             descripcion_consultoria = $4
-         WHERE id = $5
-         RETURNING id
-       )
-       SELECT
-         c.public_id AS id,
-         cli.public_id AS cliente_id,
-         u.public_id AS coordinador_id,
-         ta.public_id AS tipo_asignacion_id,
-         c.descripcion_consultoria,
-         c.activo,
-         cli.titulo AS nombre_cliente,
-         u.nombre_usuario AS nombre_coordinador,
-         ta.titulo AS tipo_asignacion
-       FROM consultorias c
-       JOIN clientes cli ON cli.id = c.id_cliente
-       LEFT JOIN usuarios u ON u.id = c.coordinador_responsable_id
-       LEFT JOIN tipo_asignacion ta ON ta.id = c.id_tipo_asignacion
-       WHERE c.id = (SELECT id FROM upd)`,
+      `
+      WITH 
+        c_consultoria AS (SELECT id FROM consultorias WHERE public_id = $5),
+        c_cliente AS (SELECT id FROM clientes WHERE public_id = $1),
+        c_coordinador AS (SELECT id FROM usuarios WHERE public_id = $2),
+        c_tipo_asignacion AS (SELECT id FROM tipo_asignacion WHERE public_id = $3),
+        
+        upd AS (
+          UPDATE consultorias
+          SET id_cliente = (SELECT id FROM c_cliente),
+              coordinador_responsable_id = (SELECT id FROM c_coordinador),
+              id_tipo_asignacion = (SELECT id FROM c_tipo_asignacion),
+              descripcion_consultoria = $4
+          WHERE id = (SELECT id FROM c_consultoria)
+            AND EXISTS (SELECT 1 FROM c_cliente)
+            AND EXISTS (SELECT 1 FROM c_coordinador)
+            AND EXISTS (SELECT 1 FROM c_tipo_asignacion)
+          RETURNING id
+        )
+      SELECT
+        c.public_id AS id,
+        cli.public_id AS cliente_id,
+        u.public_id AS coordinador_id,
+        ta.public_id AS tipo_asignacion_id,
+        c.descripcion_consultoria,
+        c.activo,
+        cli.titulo AS nombre_cliente,
+        u.nombre_usuario AS nombre_coordinador,
+        ta.titulo AS tipo_asignacion
+      FROM upd
+      JOIN consultorias c ON c.id = upd.id
+      JOIN clientes cli ON cli.id = c.id_cliente
+      LEFT JOIN usuarios u ON u.id = c.coordinador_responsable_id
+      LEFT JOIN tipo_asignacion ta ON ta.id = c.id_tipo_asignacion
+      `,
       [
-        clienteId,
-        coordinadorId,
-        tipoAsignacionId,
+        cliente_id,
+        coordinador_id,
+        tipo_asignacion_id,
         descripcion_consultoria || null,
-        consultoriaId
+        id
       ]
     );
-    if (!result.rows[0]) return res.status(404).json({ error: "Consultoría no encontrada" });
+
+    if (result.rowCount === 0) {
+      // Verificar manual (sin error crash)
+      const checkC = await pool.query("SELECT id FROM consultorias WHERE public_id = $1", [id]);
+      if (checkC.rowCount === 0) return res.status(404).json({ error: "Consultoría no encontrada" });
+      
+      return res.status(404).json({ error: "Cliente, coordinador o tipo de asignación no válido" });
+    }
+    
     res.json(result.rows[0]);
   } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
-      return res.status(404).json({ error: "Consultoría o referencias no encontradas" });
-    }
     console.error(err);
     res.status(500).json({ error: "Error al actualizar consultoría" });
   }
@@ -5083,13 +5170,20 @@ app.delete("/consultorias/:id", requireAccess({ roles: ["Administrador", "Coordi
   const { id } = req.params;
 
   try {
-    const consultoriaId = await resolveInternalId(pool, ID_TABLES.consultorias, id, { required: true });
-    await pool.query("UPDATE consultorias SET activo = false WHERE id = $1", [consultoriaId]);
-    res.json({ ok: true });
-  } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+    const result = await pool.query(`
+      WITH c_consultoria AS (SELECT id FROM consultorias WHERE public_id = $1)
+      UPDATE consultorias 
+      SET activo = false 
+      WHERE id = (SELECT id FROM c_consultoria)
+      RETURNING id
+    `, [id]);
+
+    if (result.rowCount === 0) {
       return res.status(404).json({ error: "Consultoría no encontrada" });
     }
+
+    res.json({ ok: true });
+  } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al eliminar consultoría" });
   }
@@ -5102,44 +5196,52 @@ app.delete("/consultorias/:id", requireAccess({ roles: ["Administrador", "Coordi
 // Listar asignaciones activas para coordinador
 app.get("/mis-asignaciones-coordinador", requireAccess({ roles: ["Coordinador"] }), async (req, res) => {
   try {
-    const userId = req.user?.id || req.query.coordinador_id;
+    const { coordinador_id } = req.query;
+    const userId = req.user?.id || null;
+
     const result = await pool.query(`
-        SELECT
-          ra.public_id AS id,
-          con.public_id AS consultoria_id,
-          c.public_id AS cliente_id,
-          c.titulo AS cliente,
-          u.nombre_usuario AS consultor_responsable,
-          coord.nombre_usuario AS coordinador,
-          m.titulo AS modulo,
-          ta.titulo AS tipo_asignacion,
-          ta.public_id AS tipo_asignacion_id,
-          con.descripcion_consultoria,
-          u.public_id AS consultor_responsable_id,
-          m.public_id AS id_modulo,
-          ra.estado,
-          ra.tipo_servicio,
-          ra.valor_hora,
-          ra.valor_dia,
-          ra.total_pagar,
-          ra.es_costo_total,
-          ra.cantidad_dias,
-          ra.fecha_inicio,
-          ra.fecha_fin,
-          ra.nro_caso_interno,
-          ra.nro_caso_cliente,
-          ra.observacion
-        FROM registro_asignaciones ra
-          JOIN consultorias con ON ra.id_consultoria = con.id
-          JOIN clientes c ON con.id_cliente = c.id
-          LEFT JOIN usuarios u ON ra.consultor_responsable_id = u.id
-          LEFT JOIN usuarios coord ON con.coordinador_responsable_id = coord.id
-          LEFT JOIN modulo m ON ra.id_modulo = m.id
-          LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
-        WHERE con.activo = true
-          AND ($1::int IS NULL OR con.coordinador_responsable_id = $1)
-        ORDER BY ra.id DESC
-      `, [userId || null]);
+      WITH 
+        c_user AS (SELECT id FROM usuarios WHERE public_id = $1::text OR (id = $2::int AND $1::text IS NULL))
+      SELECT
+        ra.public_id AS id,
+        con.public_id AS consultoria_id,
+        c.public_id AS cliente_id,
+        c.titulo AS cliente,
+        u.nombre_usuario AS consultor_responsable,
+        coord.nombre_usuario AS coordinador,
+        m.titulo AS modulo,
+        ta.titulo AS tipo_asignacion,
+        ta.public_id AS tipo_asignacion_id,
+        con.descripcion_consultoria,
+        u.public_id AS consultor_responsable_id,
+        m.public_id AS id_modulo,
+        ra.estado,
+        ra.tipo_servicio,
+        ra.valor_hora,
+        ra.valor_dia,
+        ra.total_pagar,
+        ra.es_costo_total,
+        ra.cantidad_dias,
+        ra.fecha_inicio,
+        ra.fecha_fin,
+        ra.nro_caso_interno,
+        ra.nro_caso_cliente,
+        ra.observacion
+      FROM registro_asignaciones ra
+        JOIN consultorias con ON ra.id_consultoria = con.id
+        JOIN clientes c ON con.id_cliente = c.id
+        LEFT JOIN usuarios u ON ra.consultor_responsable_id = u.id
+        LEFT JOIN usuarios coord ON con.coordinador_responsable_id = coord.id
+        LEFT JOIN modulo m ON ra.id_modulo = m.id
+        LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
+      WHERE con.activo = true
+        AND (
+          ($1::text IS NULL AND $2::int IS NULL) 
+          OR con.coordinador_responsable_id = (SELECT id FROM c_user)
+        )
+      ORDER BY ra.id DESC
+    `, [coordinador_id || null, userId]);
+    
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -5150,8 +5252,12 @@ app.get("/mis-asignaciones-coordinador", requireAccess({ roles: ["Coordinador"] 
 // Listar asignaciones activas para consultor
 app.get("/mis-asignaciones", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   try {
-    const userId = req.user?.id || req.query.consultor_id;
+    const { consultor_id } = req.query;
+    const userId = req.user?.id || null;
+
     const result = await pool.query(`
+      WITH 
+        c_consultor AS (SELECT id, id_consultor_principal FROM usuarios WHERE public_id = $1::text OR (id = $2::int AND $1::text IS NULL))
       SELECT
         ra.public_id AS id,
         con.public_id AS consultoria_id,
@@ -5188,17 +5294,17 @@ app.get("/mis-asignaciones", requireAccess({ roles: ["Consultor", "Consultor Pri
           LIMIT 1
         ) lr ON true
       WHERE (
-        $1::int IS NULL
-        OR ra.consultor_responsable_id = $1
+        ($1::text IS NULL AND $2::int IS NULL)
+        OR ra.consultor_responsable_id = (SELECT id FROM c_consultor)
         OR ra.consultor_responsable_id IN (
           SELECT u.id
           FROM usuarios u
           WHERE u.activo = true
-            AND u.id_consultor_principal = $1
+            AND u.id_consultor_principal = (SELECT id FROM c_consultor)
         )
       )
       ORDER BY ra.id DESC
-    `, [userId || null]);
+    `, [consultor_id || null, userId]);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -5209,9 +5315,13 @@ app.get("/mis-asignaciones", requireAccess({ roles: ["Consultor", "Consultor Pri
 // Asignaciones disponibles para registro de horas (consultor)
 app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   try {
+    const { consultor_id } = req.query;
+    const userId = req.user?.id || null;
     const estados = await getEstadoAsignacionValues();
-    const userId = req.user?.id || req.query.consultor_id;
+
     const result = await pool.query(`
+      WITH 
+        c_consultor AS (SELECT id, id_consultor_principal FROM usuarios WHERE public_id = $1::text OR (id = $2::int AND $1::text IS NULL))
       SELECT
         ra.public_id AS id,
         con.public_id AS consultoria_id,
@@ -5268,17 +5378,17 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
           WHERE rh.id_registro_asignacion = ra.id
         ) uso ON true
       WHERE (
-        $1::int IS NULL
-        OR ra.consultor_responsable_id = $1
+        ($1::text IS NULL AND $2::int IS NULL)
+        OR ra.consultor_responsable_id = (SELECT id FROM c_consultor)
         OR ra.consultor_responsable_id IN (
           SELECT u.id
           FROM usuarios u
           WHERE u.activo = true
-            AND u.id_consultor_principal = $1
+            AND u.id_consultor_principal = (SELECT id FROM c_consultor)
         )
       )
         AND (lr.estado_reporte IS NULL OR lr.estado_reporte IN ('Rechazado', 'Aprobado'))
-        AND ra.estado IN ($2::tipo_estado_asignacion, $3::tipo_estado_asignacion)
+        AND ra.estado IN ($3::tipo_estado_asignacion, $4::tipo_estado_asignacion)
         AND NOT (
           COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
           OR LOWER(TRIM(COALESCE(ta.titulo, ''))) IN ('mesa de servicio', 'fabrica', 'fábrica')
@@ -5338,28 +5448,10 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
     if (!id_registro_asignacion) {
       return res.status(400).json({ error: "Falta id_registro_asignacion" });
     }
-    const registroAsignacionId = await resolveInternalId(
-      pool,
-      ID_TABLES.registroAsignaciones,
-      id_registro_asignacion,
-      { required: true }
-    );
 
-    const existente = await pool.query(
-      `SELECT id, estado_reporte
-         FROM reporte_horas
-         WHERE id_registro_asignacion = $1
-           AND estado_reporte IN ('Pendiente', 'Rechazado')
-         ORDER BY updated_at DESC NULLS LAST, id DESC
-         LIMIT 1`,
-      [registroAsignacionId]
-    );
-    const existenteRow = existente.rows[0];
-    if (existenteRow?.estado_reporte === "Pendiente") {
-      return res.status(400).json({ error: "Ya hay un reporte pendiente para esta asignación" });
-    }
-
-    const meta = await pool.query(`
+    const metaConsulta = await pool.query(
+      `
+      WITH c_asignacion AS (SELECT id FROM registro_asignaciones WHERE public_id = $1)
       SELECT
         ra.id,
         ra.estado AS estado_asignacion,
@@ -5374,18 +5466,30 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
         con.id_cliente,
         con.id_tipo_asignacion,
         con.coordinador_responsable_id,
-        ta.titulo AS tipo_asignacion_titulo
+        ta.titulo AS tipo_asignacion_titulo,
+        (SELECT estado_reporte 
+         FROM reporte_horas 
+         WHERE id_registro_asignacion = ra.id 
+           AND estado_reporte IN ('Pendiente', 'Rechazado') 
+         ORDER BY updated_at DESC NULLS LAST, id DESC LIMIT 1) AS _existente_estado
       FROM registro_asignaciones ra
         JOIN consultorias con ON ra.id_consultoria = con.id
         LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
-      WHERE ra.id = $1
-    `, [registroAsignacionId]);
+      WHERE ra.id = (SELECT id FROM c_asignacion)
+      `,
+      [id_registro_asignacion]
+    );
 
-    if (meta.rows.length === 0) {
+    if (metaConsulta.rows.length === 0) {
       return res.status(404).json({ error: "Asignación no encontrada" });
     }
 
-    const info = meta.rows[0];
+    const info = metaConsulta.rows[0];
+    if (info._existente_estado === "Pendiente") {
+      return res.status(400).json({ error: "Ya hay un reporte pendiente para esta asignación" });
+    }
+
+    const registroAsignacionId = info.id;
     if (!info.consultor_responsable_id) {
       return res.status(400).json({ error: "La asignación no tiene consultor responsable." });
     }
@@ -5770,22 +5874,13 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
   let txStarted = false;
   try {
     const ocultarMonto = isAsociadoUser(req);
-    const registroId = await resolveInternalId(
-      client,
-      ID_TABLES.registroAsignaciones,
-      id,
-      { required: true }
-    );
-    const reporteId = await resolveInternalId(
-      client,
-      ID_TABLES.reporteHoras,
-      reporte_id,
-      { required: false }
-    );
     await client.query("BEGIN");
     txStarted = true;
     const meta = await client.query(
       `
+      WITH
+        c_asignacion AS (SELECT id FROM registro_asignaciones WHERE public_id = $1),
+        c_reporte AS (SELECT id FROM reporte_horas WHERE public_id = $3)
       SELECT
         ra.id,
         ra.estado AS estado_asignacion,
@@ -5803,18 +5898,20 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
         con.id_cliente,
         con.id_tipo_asignacion,
         con.coordinador_responsable_id,
-        ta.titulo AS tipo_asignacion_titulo
+        ta.titulo AS tipo_asignacion_titulo,
+        (SELECT id FROM c_asignacion) AS diag_asignacion
       FROM registro_asignaciones ra
         JOIN consultorias con ON ra.id_consultoria = con.id
         LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
         LEFT JOIN usuarios ucons ON ucons.id = ra.consultor_responsable_id
-      WHERE ra.id = $1
+      WHERE ra.id = (SELECT id FROM c_asignacion)
         AND ra.consultor_responsable_id = $2
       `,
-      [registroId, req.user?.id]
+      [id, req.user?.id, reporte_id || null]
     );
     if (!meta.rows.length) {
       await client.query("ROLLBACK");
+      // Could also distinguish on `diag_asignacion` but 404 is fine
       return res.status(404).json({ error: "Ticket no encontrado" });
     }
 
@@ -5864,14 +5961,22 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     }
 
     const editable = await client.query(
-      `SELECT id, estado_reporte, nro_caso_int_ext, perfil_fabrica, created_at
-       FROM reporte_horas
-       WHERE id_registro_asignacion = $1
-         AND ($2::int IS NULL OR id = $2::int)
+      `WITH 
+         c_asignacion AS (SELECT id FROM registro_asignaciones WHERE public_id = $1),
+         c_reporte AS (SELECT id, estado_reporte, nro_caso_int_ext, perfil_fabrica, created_at FROM reporte_horas WHERE public_id = $2)
+       SELECT id, estado_reporte, nro_caso_int_ext, perfil_fabrica, created_at
+       FROM c_reporte
+       WHERE ($2::text IS NOT NULL)
          AND estado_reporte IN ('Revisión', 'Rechazado')
-       ORDER BY updated_at DESC NULLS LAST, id DESC
+       UNION ALL
+       SELECT id, estado_reporte, nro_caso_int_ext, perfil_fabrica, created_at
+       FROM reporte_horas
+       WHERE $2::text IS NULL
+         AND id_registro_asignacion = (SELECT id FROM c_asignacion)
+         AND estado_reporte IN ('Revisión', 'Rechazado')
+       ORDER BY created_at DESC NULLS LAST, id DESC
        LIMIT 1`,
-      [registroId, reporteId || null]
+      [id, reporte_id || null]
     );
     const editableRow = editable.rows[0];
     const bodyCases = parseTicketCaseFields(nro_caso_int_ext);
@@ -5914,7 +6019,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     const perfilInputNormalizado = normalizePerfilFabricaInput(perfil_fabrica);
     const perfilEditable = normalizePerfilFabricaInput(editableRow?.perfil_fabrica);
     const perfilAsignado = scope === "fabrica"
-      ? (perfilEditable || await getAssignedPerfilFabrica(client, registroId, reporteId || null))
+      ? (perfilEditable || await getAssignedPerfilFabrica(client, info.id, editableRow?.id || null))
       : null;
     if (scope === "fabrica" && perfilInputRaw && !perfilInputNormalizado) {
       await client.query("ROLLBACK");
@@ -5932,7 +6037,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     const finalWricef = (wricef || "").toString().trim() || null;
 
     let saved;
-    if (reporteId && editableRow) {
+    if (reporte_id && editableRow) {
       saved = await client.query(
         `UPDATE reporte_horas
          SET horas_reportadas = COALESCE($1, horas_reportadas),
@@ -5980,13 +6085,13 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           editableRow.id
         ]
       );
-    } else if (reporteId && !editableRow) {
+    } else if (reporte_id && !editableRow) {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Solicitud no editable o no encontrada" });
     } else {
       const totalTickets = await client.query(
         `SELECT COUNT(1) AS total FROM reporte_horas WHERE id_registro_asignacion = $1`,
-        [registroId]
+        [info.id]
       );
       const cantidadTickets = Number(totalTickets.rows[0]?.total || 0);
       if (cantidadTickets >= MAX_TICKETS_POR_ASIGNACION) {
@@ -5995,6 +6100,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           error: `Máximo de ${MAX_TICKETS_POR_ASIGNACION} tickets por asignación alcanzado`
         });
       }
+      
       saved = await client.query(
         `INSERT INTO reporte_horas
           (id_registro_asignacion, horas_reportadas, total_cobrar, tipo_servicio, nro_caso_int_ext,
@@ -6004,7 +6110,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,'Pendiente')
            RETURNING *`,
         [
-          registroId,
+          info.id,
           finalHoras,
           finalTotal,
           finalTipoServicio,
@@ -6126,21 +6232,13 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
 
   try {
     const ocultarMonto = isAsociadoUser(req);
-    const registroId = await resolveInternalId(
-      pool,
-      ID_TABLES.registroAsignaciones,
-      id,
-      { required: true }
-    );
-    const reporteId = await resolveInternalId(
-      pool,
-      ID_TABLES.reporteHoras,
-      reporte_id,
-      { required: false }
-    );
     const tipoValido = await pool.query(
       `
+      WITH
+        c_asignacion AS (SELECT id FROM registro_asignaciones WHERE public_id = $1),
+        c_reporte AS (SELECT id, estado_reporte, nro_caso_int_ext, perfil_fabrica, created_at FROM reporte_horas WHERE public_id = $3)
       SELECT
+        ra.id AS registro_id,
         con.id_tipo_asignacion,
         ta.titulo AS tipo_asignacion_titulo,
         ra.estado AS estado_asignacion,
@@ -6151,19 +6249,25 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
         con.id_cliente,
         con.coordinador_responsable_id,
         ra.consultor_responsable_id,
-        ucons.id_consultor_principal AS consultor_principal_rel_id
+        ucons.id_consultor_principal AS consultor_principal_rel_id,
+        (SELECT id FROM c_asignacion) AS diag_asignacion,
+        (SELECT id FROM c_reporte) AS _reporte_id_resolv
       FROM registro_asignaciones ra
         JOIN consultorias con ON con.id = ra.id_consultoria
         LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
         LEFT JOIN usuarios ucons ON ucons.id = ra.consultor_responsable_id
-      WHERE ra.id = $1
+      WHERE ra.id = (SELECT id FROM c_asignacion)
         AND ra.consultor_responsable_id = $2
       `,
-      [registroId, req.user?.id]
+      [id, req.user?.id, reporte_id || null]
     );
     if (!tipoValido.rows.length) {
+      if (!tipoValido.rows.diag_asignacion) {
+         return res.status(404).json({ error: "Ticket o asignación no encontrado" });
+      }
       return res.status(404).json({ error: "Ticket no encontrado" });
     }
+    const { registro_id: registroId, _reporte_id_resolv: reporteId } = tipoValido.rows[0];
     const estadosAsignacion = await getEstadoAsignacionValues();
     if (!isAsignacionReportableEstado(tipoValido.rows[0]?.estado_asignacion, estadosAsignacion)) {
       return res.status(400).json({ error: "La asignación está cerrada y no permite nuevos reportes." });
@@ -6240,14 +6344,19 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     const finalWricef = (wricef || "").toString().trim() || null;
     const consultorPrincipalId = tipoValido.rows[0]?.consultor_principal_rel_id || null;
     const editable = await pool.query(
-      `SELECT id, nro_caso_int_ext, perfil_fabrica, created_at
+      `WITH c_reporte AS (SELECT id, nro_caso_int_ext, perfil_fabrica, created_at FROM reporte_horas WHERE public_id = $2)
+       SELECT id, nro_caso_int_ext, perfil_fabrica, created_at
+       FROM c_reporte
+       WHERE ($2::text IS NOT NULL)
+       UNION ALL
+       SELECT id, nro_caso_int_ext, perfil_fabrica, created_at
        FROM reporte_horas
-       WHERE id_registro_asignacion = $1
-         AND ($2::int IS NULL OR id = $2::int)
+       WHERE $2::text IS NULL
+         AND id_registro_asignacion = $1
          AND estado_reporte IN ('Revisión', 'Rechazado')
-       ORDER BY updated_at DESC NULLS LAST, id DESC
-      LIMIT 1`,
-      [registroId, reporteId || null]
+       ORDER BY created_at DESC NULLS LAST, id DESC
+       LIMIT 1`,
+      [registroId, reporte_id || null]
     );
     const bodyCases = parseTicketCaseFields(nro_caso_int_ext);
     const editableCases = parseTicketCaseFields(editable.rows[0]?.nro_caso_int_ext);
@@ -6290,7 +6399,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
       normalizeDateOnlyInput(editable.rows[0]?.created_at) ||
       normalizeDateOnlyInput(tipoValido.rows[0]?.fecha_inicio) ||
       null;
-    if (!reporteId) {
+    if (!reporte_id) {
       const totalTickets = await pool.query(
         `SELECT COUNT(1) AS total
          FROM reporte_horas
@@ -6304,7 +6413,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
         });
       }
     }
-    if (reporteId && editable.rows.length > 0) {
+    if (reporte_id && editable.rows.length > 0) {
       await pool.query(
         `UPDATE reporte_horas
          SET horas_reportadas = COALESCE($1, horas_reportadas),
@@ -6339,7 +6448,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
           editable.rows[0].id
         ]
       );
-    } else if (reporteId && editable.rows.length === 0) {
+    } else if (reporte_id && editable.rows.length === 0) {
       return res.status(404).json({ error: "Solicitud no editable o no encontrada" });
     } else {
       await pool.query(
@@ -6391,14 +6500,10 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
 app.get("/horas-por-cobrar/:consultorId", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
   const { consultorId } = req.params;
   try {
-    const consultorInternalId = await resolveInternalId(pool, ID_TABLES.usuarios, consultorId, { required: true });
     const role = normalizeValue(req.user?.rol);
-    if (!["administrador", "coordinador"].includes(role) && String(req.user?.id) !== String(consultorInternalId)) {
-      return res.status(403).json({ error: "Acceso denegado" });
-    }
-    if (!consultorInternalId) return res.json([]);
     const result = await pool.query(
       `
+      WITH c_consultor AS (SELECT id FROM usuarios WHERE public_id = $1)
       SELECT
         rh.public_id AS id,
         rh.total_cobrar,
@@ -6408,27 +6513,41 @@ app.get("/horas-por-cobrar/:consultorId", requireAccess({ roles: ["Consultor", "
         rh.nro_caso_int_ext,
         rh.requerimiento,
         c.titulo AS cliente,
-        ta.titulo AS tipo_asignacion
+        ta.titulo AS tipo_asignacion,
+        (SELECT id FROM c_consultor) AS _consultor_id
       FROM reporte_horas rh
         LEFT JOIN clientes c ON rh.cliente_id = c.id
         LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
       WHERE rh.estado_reporte = 'Aprobado'
         AND rh.id_cuenta_cobro IS NULL
         AND (
-          rh.consultor_responsable_id = $1
-          OR rh.consultor_principal_id = $1
+          rh.consultor_responsable_id = (SELECT id FROM c_consultor)
+          OR rh.consultor_principal_id = (SELECT id FROM c_consultor)
           OR rh.consultor_responsable_id IN (
             SELECT u.id
             FROM usuarios u
             WHERE u.activo = true
-              AND u.id_consultor_principal = $1
+              AND u.id_consultor_principal = (SELECT id FROM c_consultor)
           )
         )
       ORDER BY rh.id DESC
       `,
-      [consultorInternalId]
+      [consultorId]
     );
-    res.json(result.rows);
+
+    const checkRows = result.rows;
+    if (checkRows.length > 0 && !["administrador", "coordinador"].includes(role) && String(req.user?.id) !== String(checkRows[0]._consultor_id)) {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+    const responseRows = checkRows.map(({ _consultor_id, ...row }) => {
+      const withCases = applyTicketCaseFields(row);
+      return {
+        ...withCases,
+        nro_caso_cliente: withCases.nro_caso_cliente || null,
+        nro_caso_interno: withCases.nro_caso_interno || null
+      };
+    });
+    res.json(responseRows);
   } catch (err) {
     if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.json([]);
     console.error(err);
@@ -6445,46 +6564,49 @@ app.post("/cuentas-cobro/preview", requireAccess({ roles: ["Consultor", "Consult
   }
 
   try {
-    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_id, { required: true });
-    const reporteIds = await resolveInternalIds(pool, ID_TABLES.reporteHoras, ids_reportes);
     if (normalizeValue(req.user?.tipo_consultor) === "asociado") {
       return res.status(403).json({ error: "Acceso denegado" });
     }
-    if (String(req.user?.id) !== String(consultorId)) {
-      return res.status(403).json({ error: "Acceso denegado" });
-    }
-    // 1. Obtener moneda del consultor
-    const monedaRes = await pool.query(
-      "SELECT moneda_cobro FROM usuarios WHERE id = $1",
-      [consultorId]
-    );
-    const moneda = monedaRes.rows[0]?.moneda_cobro || "COP";
 
-    // 2. Calcular totales y fechas
     const meta = await pool.query(
-      `SELECT
-        COUNT(*) AS count,
-        COALESCE(SUM(total_cobrar), 0) AS total,
-        MIN(created_at)::date AS min_fecha,
-        MAX(created_at)::date AS max_fecha
-      FROM reporte_horas
-      WHERE id = ANY($1)
-        AND estado_reporte = 'Aprobado'
-        AND id_cuenta_cobro IS NULL
+      `
+      WITH
+        c_consultor AS (SELECT id, moneda_cobro FROM usuarios WHERE public_id = $1),
+        c_reportes AS (SELECT id FROM reporte_horas WHERE public_id = ANY($2::uuid[]))
+      SELECT
+        COUNT(rh.id) AS count,
+        COALESCE(SUM(rh.total_cobrar), 0) AS total,
+        MIN(rh.created_at)::date AS min_fecha,
+        MAX(rh.created_at)::date AS max_fecha,
+        (SELECT id FROM c_consultor) AS _consultor_id,
+        COALESCE((SELECT moneda_cobro FROM c_consultor), 'COP') AS moneda
+      FROM reporte_horas rh
+      WHERE rh.id IN (SELECT id FROM c_reportes)
+        AND rh.estado_reporte = 'Aprobado'
+        AND rh.id_cuenta_cobro IS NULL
         AND (
-          consultor_responsable_id = $2
-          OR consultor_principal_id = $2
-          OR consultor_responsable_id IN (
+          rh.consultor_responsable_id = (SELECT id FROM c_consultor)
+          OR rh.consultor_principal_id = (SELECT id FROM c_consultor)
+          OR rh.consultor_responsable_id IN (
             SELECT u.id
             FROM usuarios u
             WHERE u.activo = true
-              AND u.id_consultor_principal = $2
+              AND u.id_consultor_principal = (SELECT id FROM c_consultor)
           )
-        )`,
-      [reporteIds, consultorId]
+        )
+      `,
+      [consultor_id, ids_reportes]
     );
 
     const info = meta.rows[0];
+
+    if (!info._consultor_id) {
+      return res.status(404).json({ error: "Consultor no encontrado" });
+    }
+
+    if (String(req.user?.id) !== String(info._consultor_id)) {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
 
     // 3. Validar que todos los registros sean vÁ¡lidos
     if (Number(info.count) !== ids_reportes.length) {
@@ -6495,13 +6617,13 @@ app.post("/cuentas-cobro/preview", requireAccess({ roles: ["Consultor", "Consult
 
     // 4. Convertir a letras
     const total = Number(info.total || 0);
-    const total_letras = buildTotalLetras(total, moneda);
+    const total_letras = buildTotalLetras(total, info.moneda);
 
     // 5. Retornar respuesta
     res.json({
       total: total,
       total_letras: total_letras,
-      moneda: moneda,
+      moneda: info.moneda,
       fecha_inicio: info.min_fecha,
       fecha_fin: info.max_fecha
     });
@@ -6525,12 +6647,7 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
   const client = await pool.connect();
   let txStarted = false;
   try {
-    const consultorId = await resolveInternalId(client, ID_TABLES.usuarios, consultor_id, { required: true });
-    const reporteIds = await resolveInternalIds(client, ID_TABLES.reporteHoras, ids_reportes);
     if (normalizeValue(req.user?.tipo_consultor) === "asociado") {
-      return res.status(403).json({ error: "Acceso denegado" });
-    }
-    if (String(req.user?.id) !== String(consultorId)) {
       return res.status(403).json({ error: "Acceso denegado" });
     }
     await client.query("BEGIN");
@@ -6538,33 +6655,50 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
 
     const meta = await client.query(
       `
+      WITH
+        c_consultor AS (SELECT id, moneda_cobro FROM usuarios WHERE public_id = $1),
+        c_reportes AS (
+          SELECT id, total_cobrar, created_at
+          FROM reporte_horas
+          WHERE public_id = ANY($2::uuid[])
+            AND estado_reporte = 'Aprobado'
+            AND id_cuenta_cobro IS NULL
+            AND (
+              consultor_responsable_id = (SELECT id FROM c_consultor)
+              OR consultor_principal_id = (SELECT id FROM c_consultor)
+              OR consultor_responsable_id IN (
+                SELECT u.id
+                FROM usuarios u
+                WHERE u.activo = true
+                  AND u.id_consultor_principal = (SELECT id FROM c_consultor)
+              )
+            )
+        )
       SELECT
-        COUNT(*) AS count,
+        COUNT(id) AS count,
         COALESCE(SUM(total_cobrar), 0) AS total,
         MIN(created_at)::date AS min_fecha,
-        MAX(created_at)::date AS max_fecha
-      FROM reporte_horas
-      WHERE id = ANY($1)
-        AND estado_reporte = 'Aprobado'
-        AND id_cuenta_cobro IS NULL
-        AND (
-          consultor_responsable_id = $2
-          OR consultor_principal_id = $2
-          OR consultor_responsable_id IN (
-            SELECT u.id
-            FROM usuarios u
-            WHERE u.activo = true
-              AND u.id_consultor_principal = $2
-          )
-        )
+        MAX(created_at)::date AS max_fecha,
+        COALESCE((SELECT moneda_cobro FROM c_consultor), 'COP') AS moneda,
+        ARRAY_AGG(id) AS used_ids,
+        (SELECT id FROM c_consultor) AS _consultor_id
+      FROM c_reportes
       `,
-      [reporteIds, consultorId]
+      [consultor_id, ids_reportes]
     );
 
     const info = meta.rows[0];
+    if (!info._consultor_id) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Consultor no encontrado" });
+    }
+    if (String(req.user?.id) !== String(info._consultor_id)) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
     if (Number(info.count) !== ids_reportes.length) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Algunos registros no son v¡lidos para cobro" });
+      return res.status(400).json({ error: "Algunos registros no son válidos para cobro" });
     }
 
     if (total_numeros !== undefined && Number(total_numeros) !== Number(info.total || 0)) {
@@ -6572,22 +6706,41 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
       return res.status(400).json({ error: "El total no coincide con los reportes aprobados" });
     }
 
-    const monedaRes = await client.query(
-      "SELECT moneda_cobro FROM usuarios WHERE id = $1",
-      [consultorId]
-    );
-    const moneda = monedaRes.rows[0]?.moneda_cobro || "COP";
-    const totalLetrasFinal = buildTotalLetras(Number(info.total || 0), moneda);
+    const totalLetrasFinal = buildTotalLetras(Number(info.total || 0), info.moneda);
     const descripcionFinal =
       (typeof req.body.descripcion === "string" && req.body.descripcion.trim()) ||
       `Cuenta de cobro ${fecha_inicio} - ${fecha_fin}`;
 
+    const estadosAsignacion = await getEstadoAsignacionValues();
+
     const insert = await client.query(
       `
-      INSERT INTO cuenta_cobro
-        (descripcion, fecha_correspondiente, fecha_periodo_inicio, fecha_periodo_fin, total_cuenta_cobro, total_letras, ciudad_cobro, created_by)
-      VALUES ($1, CURRENT_DATE, $2, $3, $4, $5, $6, $7)
-      RETURNING *
+      WITH
+        c_insert AS (
+          INSERT INTO cuenta_cobro
+            (descripcion, fecha_correspondiente, fecha_periodo_inicio, fecha_periodo_fin, total_cuenta_cobro, total_letras, ciudad_cobro, created_by)
+          VALUES ($1, CURRENT_DATE, $2, $3, $4, $5, $6, $7)
+          RETURNING *
+        ),
+        c_upd_rep AS (
+          UPDATE reporte_horas
+          SET id_cuenta_cobro = (SELECT id FROM c_insert)
+          WHERE id = ANY($8::int[])
+          RETURNING id_registro_asignacion
+        ),
+        c_upd_ra AS (
+          UPDATE registro_asignaciones ra
+          SET estado = $9::tipo_estado_asignacion
+          FROM consultorias con
+          LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
+          WHERE ra.id_consultoria = con.id
+            AND ra.id IN (SELECT id_registro_asignacion FROM c_upd_rep)
+            AND NOT (
+              COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) IN ('mesa de servicio', 'fabrica', 'fábrica')
+            )
+        )
+      SELECT * FROM c_insert
       `,
       [
         descripcionFinal,
@@ -6596,40 +6749,10 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
         info.total,
         totalLetrasFinal,
         ciudad_cobro,
-        consultorId
+        info._consultor_id,
+        info.used_ids || [],
+        estadosAsignacion.cerrado
       ]
-    );
-
-    const cuentaId = insert.rows[0].id;
-
-    await client.query(
-      `
-      UPDATE reporte_horas
-      SET id_cuenta_cobro = $1
-      WHERE id = ANY($2)
-      `,
-      [cuentaId, reporteIds]
-    );
-
-    const estados = await getEstadoAsignacionValues();
-    await client.query(
-      `
-      UPDATE registro_asignaciones ra
-      SET estado = $2::tipo_estado_asignacion
-      FROM consultorias con
-      LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
-      WHERE ra.id_consultoria = con.id
-        AND ra.id IN (
-          SELECT id_registro_asignacion
-          FROM reporte_horas
-          WHERE id = ANY($1)
-        )
-        AND NOT (
-          COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
-          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) IN ('mesa de servicio', 'fabrica', 'fábrica')
-        )
-      `,
-      [reporteIds, estados.cerrado]
     );
 
     await client.query("COMMIT");
@@ -6642,7 +6765,7 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
         `SELECT nombre_usuario, email
          FROM usuarios
          WHERE id = $1`,
-        [consultorId]
+        [info._consultor_id]
       );
       const consultor = userInfo.rows[0];
       await sendEmailSafe({
@@ -6684,13 +6807,8 @@ app.get("/cuentas-cobro/historial/:userId", requireAccess({ roles: ["Consultor",
   const { userId } = req.params;
   const { fecha_inicio, fecha_fin } = req.query;
   try {
-    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, userId, { required: true });
     const role = normalizeValue(req.user?.rol);
-    if (!["administrador", "coordinador"].includes(role) && String(req.user?.id) !== String(consultorId)) {
-      return res.status(403).json({ error: "Acceso denegado" });
-    }
-    if (!consultorId) return res.json([]);
-    const params = [consultorId];
+    const params = [userId];
     let whereFecha = "";
     if (fecha_inicio && fecha_fin) {
       params.push(fecha_inicio, fecha_fin);
@@ -6698,6 +6816,7 @@ app.get("/cuentas-cobro/historial/:userId", requireAccess({ roles: ["Consultor",
     }
     const result = await pool.query(
       `
+      WITH c_consultor AS (SELECT id FROM usuarios WHERE public_id = $1)
       SELECT
         cc.public_id AS id,
         COALESCE(NULLIF(cc.descripcion, ''), 'Cuenta de cobro') AS descripcion,
@@ -6708,15 +6827,20 @@ app.get("/cuentas-cobro/historial/:userId", requireAccess({ roles: ["Consultor",
         cc.total_letras,
         cc.estado,
         cc.datos_adjuntos,
-        cc.created_at
+        cc.created_at,
+        (SELECT id FROM c_consultor) AS _consultor_id
       FROM cuenta_cobro cc
-      WHERE cc.created_by = $1
+      WHERE cc.created_by = (SELECT id FROM c_consultor)
         ${whereFecha}
       ORDER BY cc.id DESC
       `,
       params
     );
-    res.json(result.rows);
+    const checkRows = result.rows;
+    if (checkRows.length > 0 && !["administrador", "coordinador"].includes(role) && String(req.user?.id) !== String(checkRows[0]._consultor_id)) {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+    res.json(checkRows.map(({ _consultor_id, ...row }) => row));
   } catch (err) {
     if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.json([]);
     console.error(err);
@@ -6728,7 +6852,6 @@ app.get("/cuentas-cobro/historial/:userId", requireAccess({ roles: ["Consultor",
 app.get("/cuentas-cobro/soportes", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const { consultor_id } = req.query || {};
   try {
-    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_id, { required: false });
     const result = await pool.query(
       `
       SELECT
@@ -6749,10 +6872,10 @@ app.get("/cuentas-cobro/soportes", requireAccess({ roles: ["Administrador", "Coo
           cc.datos_adjuntos ? 'soportes'
           OR cc.datos_adjuntos #> '{firma,documento_firmado}' IS NOT NULL
         )
-        AND ($1::int IS NULL OR cc.created_by = $1)
+        AND ($1::uuid IS NULL OR u.public_id = $1::uuid)
       ORDER BY cc.id DESC
       `,
-      [consultorId || null]
+      [consultor_id || null]
     );
     res.json(result.rows || []);
   } catch (err) {
@@ -6766,15 +6889,13 @@ app.get("/cuentas-cobro/soportes", requireAccess({ roles: ["Administrador", "Coo
 app.get("/cuentas-cobro/detalle/:cuentaId", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
   const { cuentaId } = req.params;
   try {
-    const cuentaInternalId = await resolveInternalId(pool, ID_TABLES.cuentaCobro, cuentaId, { required: true });
     const role = normalizeValue(req.user?.rol);
+    const meta = await pool.query("SELECT id, created_by FROM cuenta_cobro WHERE public_id = $1", [cuentaId]);
+    if (!meta.rows.length) return res.status(404).json({ error: "Cuenta no encontrada" });
+    const cuentaInfo = meta.rows[0];
+
     if (!["administrador", "coordinador"].includes(role)) {
-      const owner = await pool.query(
-        "SELECT created_by FROM cuenta_cobro WHERE id = $1",
-        [cuentaInternalId]
-      );
-      const createdBy = owner.rows[0]?.created_by;
-      if (!createdBy || String(createdBy) !== String(req.user?.id)) {
+      if (String(cuentaInfo.created_by) !== String(req.user?.id)) {
         return res.status(403).json({ error: "Acceso denegado" });
       }
     }
@@ -6798,7 +6919,7 @@ app.get("/cuentas-cobro/detalle/:cuentaId", requireAccess({ roles: ["Consultor",
       WHERE rh.id_cuenta_cobro = $1
       ORDER BY rh.id DESC
       `,
-      [cuentaInternalId]
+      [cuentaInfo.id]
     );
     res.json(result.rows);
   } catch (err) {
@@ -6830,7 +6951,6 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
 
   let graphStage = "init";
   try {
-    const cuentaInternalId = await resolveInternalId(pool, ID_TABLES.cuentaCobro, id, { required: true });
     const ownerResult = await pool.query(
       `
       SELECT
@@ -6843,9 +6963,9 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
         u.nombre_usuario
       FROM cuenta_cobro cc
       JOIN usuarios u ON u.id = cc.created_by
-      WHERE cc.id = $1
+      WHERE cc.public_id = $1
       `,
-      [cuentaInternalId]
+      [id]
     );
 
     const cuenta = ownerResult.rows[0];
@@ -6945,7 +7065,7 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $2
       `,
-      [JSON.stringify(adjuntos), cuentaInternalId]
+      [JSON.stringify(adjuntos), cuenta.id]
     );
 
     res.json({
@@ -6985,8 +7105,10 @@ app.post("/cuentas-cobro/:id/adjuntos", requireAccess({ roles: ["Consultor", "Co
 app.get("/cuentas-cobro/:id/pdf", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
   const { id } = req.params;
   try {
-    const cuentaInternalId = await resolveInternalId(pool, ID_TABLES.cuentaCobro, id, { required: true });
-    await assertCuentaCobroOwnerAccess(cuentaInternalId, req);
+    const meta = await pool.query("SELECT id, created_by FROM cuenta_cobro WHERE public_id = $1", [id]);
+    if (!meta.rows.length) return res.status(404).json({ error: "Cuenta no encontrada" });
+    const cuentaInternalId = meta.rows[0].id;
+    await assertCuentaCobroOwnerAccess(meta.rows[0].created_by, req);
     const { cuenta, detalles } = await getCuentaCobroPdfContext(cuentaInternalId);
     if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
 
@@ -7019,8 +7141,10 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
   }
 
   try {
-    const cuentaInternalId = await resolveInternalId(pool, ID_TABLES.cuentaCobro, id, { required: true });
-    await assertCuentaCobroOwnerAccess(cuentaInternalId, req);
+    const meta = await pool.query("SELECT id, created_by FROM cuenta_cobro WHERE public_id = $1", [id]);
+    if (!meta.rows.length) return res.status(404).json({ error: "Cuenta no encontrada" });
+    const cuentaInternalId = meta.rows[0].id;
+    await assertCuentaCobroOwnerAccess(meta.rows[0].created_by, req);
 
     const { cuenta, detalles } = await getCuentaCobroPdfContext(cuentaInternalId);
     if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
@@ -7208,9 +7332,6 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
   }
 
   try {
-    const cuentaInternalId = await resolveInternalId(pool, ID_TABLES.cuentaCobro, id, { required: true });
-    await assertCuentaCobroOwnerAccess(cuentaInternalId, req);
-
     const cuentaResult = await pool.query(
       `
       SELECT
@@ -7224,14 +7345,15 @@ app.post("/cuentas-cobro/:id/firma/reconciliar", requireAccess({ roles: ["Consul
         u.email
       FROM cuenta_cobro cc
       LEFT JOIN usuarios u ON u.id = cc.created_by
-      WHERE cc.id = $1
+      WHERE cc.public_id = $1
       LIMIT 1
       `,
-      [cuentaInternalId]
+      [id]
     );
 
     const cuenta = cuentaResult.rows[0] || null;
     if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
+    await assertCuentaCobroOwnerAccess(cuenta.created_by, req);
 
     const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object"
       ? cuenta.datos_adjuntos
@@ -7491,9 +7613,6 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
   }
 
   try {
-    const cuentaInternalId = await resolveInternalId(pool, ID_TABLES.cuentaCobro, id, { required: true });
-    await assertCuentaCobroOwnerAccess(cuentaInternalId, req);
-
     const cuentaResult = await pool.query(
       `
       SELECT
@@ -7507,13 +7626,16 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
         u.email
       FROM cuenta_cobro cc
       LEFT JOIN usuarios u ON u.id = cc.created_by
-      WHERE cc.id = $1
+      WHERE cc.public_id = $1
       LIMIT 1
       `,
-      [cuentaInternalId]
+      [id]
     );
+
     const cuenta = cuentaResult.rows[0] || null;
     if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
+    await assertCuentaCobroOwnerAccess(cuenta.created_by, req);
+    const cuentaInternalId = cuenta.id;
 
     const pdfBuffer = parsePdfDataUrl(cuentaPdfBase64);
     if (!isPdfBuffer(pdfBuffer)) {
@@ -7970,6 +8092,11 @@ app.get("/aprobaciones/pendientes", requireAccess({ roles: ["Coordinador"] }), a
         rh.public_id AS id,
         rh.created_at AS fecha_reporte,
         rh.nro_caso_int_ext,
+        rh.tipo_servicio,
+        rh.requerimiento,
+        rh.perfil_fabrica,
+        rh.wricef,
+        rh.id_registro_asignacion,
         rh.total_cobrar,
         rh.horas_reportadas,
         rh.cantidad_dias_reportados,
@@ -7977,17 +8104,34 @@ app.get("/aprobaciones/pendientes", requireAccess({ roles: ["Coordinador"] }), a
         u.nombre_usuario AS nombre_consultor,
         u.email AS email_consultor,
         m.titulo AS nombre_modulo,
-        ta.titulo AS nombre_tipo_asignacion
+        ta.titulo AS nombre_tipo_asignacion,
+        ra.public_id AS asignacion_id,
+        ra.nro_caso_cliente AS asignacion_nro_caso_cliente,
+        ra.nro_caso_interno AS asignacion_nro_caso_interno,
+        ra.fecha_inicio AS asignacion_fecha_inicio,
+        ra.fecha_fin AS asignacion_fecha_fin,
+        ra.observacion AS asignacion_observacion
       FROM reporte_horas rh
         LEFT JOIN clientes c ON rh.cliente_id = c.id
         LEFT JOIN usuarios u ON rh.consultor_responsable_id = u.id
         LEFT JOIN modulo m ON rh.modulo_id = m.id
         LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
+        LEFT JOIN registro_asignaciones ra ON rh.id_registro_asignacion = ra.id
       WHERE rh.estado_reporte = 'Pendiente'
         AND rh.coordinador_id = $1
       ORDER BY rh.created_at DESC
     `, [userId]);
-    res.json(result.rows);
+    const rows = (result.rows || []).map((row) => {
+      const withCases = applyTicketCaseFields(row);
+      return {
+        ...withCases,
+        nro_caso_cliente:
+          withCases.nro_caso_cliente || row?.asignacion_nro_caso_cliente || null,
+        nro_caso_interno:
+          withCases.nro_caso_interno || row?.asignacion_nro_caso_interno || null
+      };
+    });
+    res.json(rows);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al obtener reportes" });
@@ -8000,17 +8144,18 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
   const { estado, motivo } = req.body;
 
   try {
-    const reporteId = await resolveInternalId(pool, ID_TABLES.reporteHoras, id, { required: true });
     if (!estado) {
       return res.status(400).json({ error: "Falta estado" });
     }
     const result = await pool.query(
-      `UPDATE reporte_horas
+      `
+       WITH c_reporte AS (SELECT id FROM reporte_horas WHERE public_id = $3)
+       UPDATE reporte_horas
        SET estado_reporte = $1,
            motivo_rechazo = $2
-       WHERE id = $3
+       WHERE id = (SELECT id FROM c_reporte)
        RETURNING *`,
-      [estado, motivo || null, reporteId]
+      [estado, motivo || null, id]
     );
 
     if (result.rows.length === 0) {
@@ -8201,81 +8346,124 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
     const valorHoraNum = toNullableNumber(valor_hora);
     const valorDiaNum = toNullableNumber(valor_dia);
     const totalPagarNum = toNullableNumber(total_pagar);
-    const asignacionId = await resolveInternalId(pool, ID_TABLES.registroAsignaciones, id, { required: true });
-    const tipoMeta = await pool.query(
-      `SELECT ta.titulo AS tipo_asignacion_titulo
-       FROM registro_asignaciones ra
-       JOIN consultorias con ON con.id = ra.id_consultoria
-       LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
-       WHERE ra.id = $1
-       LIMIT 1`,
-      [asignacionId]
-    );
-    const tipoNorm = String(tipoMeta.rows[0]?.tipo_asignacion_titulo || "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .trim();
-    const esTiempoCostoFijoTipo = tipoNorm.includes("tiempo y costo fijo");
-    const esCostoTotal = esTiempoCostoFijoTipo && toBooleanInput(es_costo_total, false);
-    const cantidadDiasFinal = esCostoTotal ? null : cantidadDiasNum;
-    const valorHoraFinal = esCostoTotal ? null : valorHoraNum;
-    const valorDiaFinal = esCostoTotal ? null : valorDiaNum;
-    if (esCostoTotal && !(Number(totalPagarNum || 0) > 0)) {
-      return res.status(400).json({ error: "Debes indicar un presupuesto total mayor a 0 para costo total." });
-    }
-    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_responsable_id, { required: false });
-    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, id_modulo, { required: false });
+    const esCostoTotalInput = toBooleanInput(es_costo_total, false);
+    
     const estados = await getEstadoAsignacionValues();
     const estadoNormalizado = resolveEstadoAsignacionInput(estado, estados);
     if (estado && !estadoNormalizado) {
       return res.status(400).json({ error: "Estado de asignación inválido" });
     }
+    
     const tipoServicioNormalizado = normalizeTipoServicioInput(tipo_servicio);
     if (tipo_servicio && !tipoServicioNormalizado) {
       return res.status(400).json({ error: "Tipo de servicio inválido" });
     }
-    const result = await pool.query(
-      `UPDATE registro_asignaciones
-       SET consultor_responsable_id = $1,
-           id_modulo = $2,
-           fecha_inicio = $3,
-           fecha_fin = $4,
-           cantidad_dias = $5,
-           valor_hora = $6,
-           valor_dia = $7,
-           nro_caso_interno = $8,
-           nro_caso_cliente = $9,
-           tipo_servicio = $10,
-           estado = COALESCE($11::tipo_estado_asignacion, estado),
-           observacion = $12,
-           total_pagar = $13,
-           es_costo_total = $14
-       WHERE id = $15
-       RETURNING *`,
-      [
-        consultorId || null,
-        moduloId || null,
-        fecha_inicio || null,
-        fecha_fin || null,
-        cantidadDiasFinal,
-        valorHoraFinal,
-        valorDiaFinal,
-        nro_caso_interno || null,
-        nro_caso_cliente || null,
-        tipoServicioNormalizado,
-        estadoNormalizado,
-        observacion || null,
-        totalPagarNum,
-        esCostoTotal,
-        asignacionId
-      ]
-    );
-    res.json(withPublicId(result.rows[0]));
-  } catch (err) {
-    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
-      return res.status(404).json({ error: "Asignación o referencias no encontradas" });
+
+    const cteQuery = `
+      WITH
+        c_asignacion AS (SELECT id, id_consultoria FROM registro_asignaciones WHERE public_id = $1),
+        c_consultor AS (SELECT id FROM usuarios WHERE public_id = $2),
+        c_modulo AS (SELECT id FROM modulo WHERE public_id = $3),
+        
+        c_meta AS (
+          SELECT
+            ta.titulo AS tipo_asignacion_titulo,
+            LOWER(TRIM(UNACCENT(ta.titulo))) AS n_tipo
+          FROM c_asignacion a
+          JOIN consultorias con ON con.id = a.id_consultoria
+          LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
+        ),
+        
+        c_calc AS (
+          SELECT
+            CASE WHEN m.n_tipo LIKE '%tiempo y costo fijo%' THEN true ELSE false END AS es_t_c_fijo
+          FROM c_meta m
+        ),
+        
+        c_valores AS (
+          SELECT
+            c.es_t_c_fijo,
+            -- Aplicamos regla de costo total
+            CASE WHEN c.es_t_c_fijo AND $13::boolean THEN null ELSE $4::int END AS out_dias,
+            CASE WHEN c.es_t_c_fijo AND $13::boolean THEN null ELSE $5::numeric END AS out_v_hora,
+            CASE WHEN c.es_t_c_fijo AND $13::boolean THEN null ELSE $6::numeric END AS out_v_dia
+          FROM c_calc c
+        ),
+        
+        upd AS (
+          UPDATE registro_asignaciones ra
+          SET consultor_responsable_id = (CASE WHEN $2::text IS NOT NULL THEN (SELECT id FROM c_consultor) ELSE NULL END),
+              id_modulo = (CASE WHEN $3::text IS NOT NULL THEN (SELECT id FROM c_modulo) ELSE NULL END),
+              fecha_inicio = $7::date,
+              fecha_fin = $8::date,
+              cantidad_dias = (SELECT out_dias FROM c_valores),
+              valor_hora = (SELECT out_v_hora FROM c_valores),
+              valor_dia = (SELECT out_v_dia FROM c_valores),
+              nro_caso_interno = $9,
+              nro_caso_cliente = $10,
+              tipo_servicio = COALESCE($11, ra.tipo_servicio),
+              estado = COALESCE($12::tipo_estado_asignacion, ra.estado),
+              observacion = $14,
+              total_pagar = $15::numeric,
+              es_costo_total = (SELECT es_t_c_fijo FROM c_valores) AND $13::boolean
+          WHERE id = (SELECT id FROM c_asignacion)
+            AND (NOT ((SELECT es_t_c_fijo FROM c_valores) AND $13::boolean) OR $15::numeric > 0)
+            AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM c_consultor))
+            AND ($3::text IS NULL OR EXISTS (SELECT 1 FROM c_modulo))
+          RETURNING ra.*
+        )
+      
+      SELECT
+        u.*,
+        
+        -- Diagnostic flags incase of 0 rows returned
+        (SELECT id FROM c_asignacion) AS diag_asignacion,
+        (SELECT id FROM c_consultor) AS diag_consultor,
+        (SELECT id FROM c_modulo) AS diag_modulo,
+        (SELECT es_t_c_fijo FROM c_calc) AS diag_es_tcf
+      FROM upd u RIGHT JOIN c_asignacion ON true
+    `;
+
+    const result = await pool.query(cteQuery, [
+      id,                          // $1
+      consultor_responsable_id || null, // $2
+      id_modulo || null,           // $3
+      cantidadDiasNum,             // $4
+      valorHoraNum,                // $5
+      valorDiaNum,                 // $6
+      fecha_inicio || null,        // $7
+      fecha_fin || null,           // $8
+      nro_caso_interno || null,    // $9
+      nro_caso_cliente || null,    // $10
+      tipoServicioNormalizado || null, // $11
+      estadoNormalizado || null,   // $12
+      esCostoTotalInput,           // $13
+      observacion || null,         // $14
+      totalPagarNum                // $15
+    ]);
+
+    const row = result.rows[0];
+
+    if (!row || !row.id) {
+       // Check diagnostics
+       if (!row) return res.status(404).json({ error: "Asignación o referencias no encontradas" });
+       if (!row.diag_asignacion) return res.status(404).json({ error: "Asignación no encontrada" });
+       if (consultor_responsable_id && !row.diag_consultor) return res.status(404).json({ error: "Consultor no encontrado" });
+       if (id_modulo && !row.diag_modulo) return res.status(404).json({ error: "Módulo no encontrado" });
+       
+       if (row.diag_es_tcf && esCostoTotalInput && !(Number(totalPagarNum) > 0)) {
+         return res.status(400).json({ error: "Debes indicar un presupuesto total mayor a 0 para costo total." });
+       }
+       return res.status(500).json({ error: "Error desconocido al actualizar asignación" });
     }
+
+    delete row.diag_asignacion;
+    delete row.diag_consultor;
+    delete row.diag_modulo;
+    delete row.diag_es_tcf;
+
+    res.json(withPublicId(row));
+  } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al actualizar asignación" });
   }
@@ -8285,11 +8473,12 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
 app.delete("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   const { id } = req.params;
   try {
-    const asignacionId = await resolveInternalId(pool, ID_TABLES.registroAsignaciones, id, { required: true });
     const estados = await getEstadoAsignacionValues();
     const role = normalizeValue(req.user?.rol);
     const meta = await pool.query(
-      `SELECT
+      `
+       WITH c_asignacion AS (SELECT id FROM registro_asignaciones WHERE public_id = $1)
+       SELECT
          ra.id,
          con.coordinador_responsable_id,
          con.id_tipo_asignacion,
@@ -8297,8 +8486,9 @@ app.delete("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador"
        FROM registro_asignaciones ra
        JOIN consultorias con ON con.id = ra.id_consultoria
        LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
-       WHERE ra.id = $1`,
-      [asignacionId]
+       WHERE ra.id = (SELECT id FROM c_asignacion)
+      `,
+      [id]
     );
     if (!meta.rows.length) {
       return res.status(404).json({ error: "Asignación no encontrada" });
@@ -8359,169 +8549,256 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     const totalPagarInput = toNullableNumber(total_pagar);
     const esCostoTotalInput = toBooleanInput(es_costo_total, false);
     const estados = await getEstadoAsignacionValues();
+
     if (!id_consultoria || !consultor_responsable_id || !id_modulo) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
-    const consultoriaId = await resolveInternalId(pool, ID_TABLES.consultorias, id_consultoria, { required: true });
-    const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_responsable_id, { required: true });
-    const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, id_modulo, { required: true });
+
     const tipoServicioNormalizado = normalizeTipoServicioInput(tipo_servicio || "Servicio");
     if (!tipoServicioNormalizado) {
       return res.status(400).json({ error: "Tipo de servicio inválido" });
     }
 
-    const meta = await pool.query(
-      `SELECT
-         con.id_cliente,
-         con.id_tipo_asignacion,
-         ta.titulo AS tipo_asignacion_titulo
-       FROM consultorias con
-       LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
-       WHERE con.id = $1
-         AND con.activo = true`,
-      [consultoriaId]
-    );
-    if (meta.rows.length === 0) {
-      return res.status(400).json({ error: "Consultoría no válida" });
+    // CTE monumental que:
+    // 1. Resuelve IDs (consultoria, consultor, modulo)
+    // 2. Extrae meta (cliente, tipo_asignacion)
+    // 3. Valida duplicados de asignación activa
+    // 4. Calcula tarifas si es necesario o aplica cálculos de presupuesto
+    // 5. Inserta
+    const cteQuery = `
+      WITH 
+        c_consultoria AS (
+          SELECT con.id, con.id_cliente, con.id_tipo_asignacion, ta.titulo AS tipo_asig_titulo
+          FROM consultorias con
+          LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
+          WHERE con.public_id = $1 AND con.activo = true
+        ),
+        c_consultor AS (SELECT id, email, nombre_usuario FROM usuarios WHERE public_id = $2),
+        c_modulo AS (SELECT id, titulo FROM modulo WHERE public_id = $3),
+        c_estados AS (
+          SELECT $4::tipo_estado_asignacion AS st_abierto, $5::tipo_estado_asignacion AS st_proceso
+        ),
+        
+        -- Validar duplicidad
+        c_dup AS (
+          SELECT ra.id
+          FROM registro_asignaciones ra
+          JOIN c_consultoria con ON ra.id_consultoria = con.id
+          JOIN c_consultor uc ON ra.consultor_responsable_id = uc.id
+          JOIN c_modulo m ON ra.id_modulo = m.id
+          WHERE ra.estado IN ((SELECT st_abierto FROM c_estados), (SELECT st_proceso FROM c_estados))
+          LIMIT 1
+        ),
+        
+        -- Metadatos procesados
+        c_meta AS (
+          SELECT 
+            (SELECT id FROM c_consultoria) AS id_consultoria,
+            (SELECT id_cliente FROM c_consultoria) AS id_cliente,
+            (SELECT id_tipo_asignacion FROM c_consultoria) AS id_tipo_asignacion,
+            LOWER(TRIM(UNACCENT((SELECT tipo_asig_titulo FROM c_consultoria)))) AS n_tipo,
+            (SELECT id FROM c_consultor) AS id_consultor,
+            (SELECT id FROM c_modulo) AS id_modulo
+        ),
+        
+        -- Obtener tarifa vigente si aplica (es_mesa_o_fabrica)
+        c_tarifa AS (
+          SELECT 
+            m.n_tipo,
+            m.id_consultoria,
+            m.id_consultor,
+            m.id_modulo,
+            CASE 
+              WHEN m.id_tipo_asignacion IN (5, 6) OR m.n_tipo IN ('mesa de servicio', 'fabrica') THEN true
+              ELSE false
+            END AS es_mesa_fabrica,
+            CASE 
+              WHEN m.n_tipo LIKE '%full%' OR m.n_tipo LIKE '%part%' THEN true
+              ELSE false
+            END AS es_mensual,
+            CASE 
+              WHEN m.n_tipo LIKE '%tiempo y costo fijo%' THEN true
+              ELSE false
+            END AS es_t_c_fijo,
+            CASE 
+              WHEN m.n_tipo LIKE '%horas por demanda%' THEN true
+              ELSE false
+            END AS es_h_demanda,
+            obtener_tarifa_consultor(m.id_consultor, m.id_cliente, m.id_modulo, m.id_tipo_asignacion) AS tarifa_calculada
+          FROM c_meta m
+        ),
+        
+        -- Cálculos de valores finales
+        c_valores AS (
+          SELECT 
+            t.es_mesa_fabrica,
+            t.es_mensual,
+            t.es_t_c_fijo,
+            t.es_h_demanda,
+            t.tarifa_calculada,
+            
+            -- Lógica estricta de variables adaptada a postgres
+            CASE 
+              WHEN t.es_h_demanda THEN null
+              WHEN t.es_t_c_fijo AND $12::boolean THEN null  -- esA_costo_totalFinal
+              ELSE $6::numeric -- horas_asignadas
+            END AS out_horas,
+            
+            CASE 
+              WHEN t.es_h_demanda THEN null
+              ELSE $7::int -- cantidad_dias
+            END AS out_dias,
+            
+            CASE 
+              WHEN t.es_mesa_fabrica THEN t.tarifa_calculada
+              WHEN t.es_t_c_fijo AND $12::boolean THEN null
+              ELSE $8::numeric -- valor_hora
+            END AS out_v_hora,
+            
+            CASE 
+              WHEN t.es_mesa_fabrica THEN null
+              WHEN t.es_t_c_fijo AND $12::boolean THEN null
+              ELSE $9::numeric -- valor_dia
+            END AS out_v_dia,
+            
+            CASE 
+              WHEN t.es_h_demanda THEN 0
+              WHEN t.es_mesa_fabrica THEN COALESCE($10::numeric, ($6::numeric * t.tarifa_calculada))
+              WHEN t.es_t_c_fijo AND $12::boolean THEN ROUND($10::numeric, 2)
+              WHEN NOT t.es_mensual AND $10::numeric IS NULL AND $8::numeric IS NOT NULL AND $6::numeric IS NOT NULL THEN ($8::numeric * $6::numeric)
+              ELSE $10::numeric
+            END AS out_t_pagar
+          FROM c_tarifa t
+        ),
+        
+        insertar AS (
+          INSERT INTO registro_asignaciones (
+            id_consultoria, id_modulo, consultor_responsable_id, fecha_inicio, fecha_fin,
+            cantidad_dias, horas_asignadas, valor_hora, valor_dia, tipo_servicio, total_pagar, es_costo_total, estado, aprobar_coordinador
+          )
+          SELECT 
+            (SELECT id FROM c_consultoria),
+            (SELECT id FROM c_modulo),
+            (SELECT id FROM c_consultor),
+            $13::date, -- fecha_inicio
+            $14::date, -- fecha_fin
+            v.out_dias,
+            v.out_horas,
+            v.out_v_hora,
+            v.out_v_dia,
+            $11, -- tipo_servicio
+            v.out_t_pagar,
+            ($12::boolean AND v.es_t_c_fijo) AS es_costo_total_f,
+            (SELECT st_abierto FROM c_estados),
+            'Pendiente'
+          FROM c_valores v
+          WHERE EXISTS (SELECT 1 FROM c_consultoria)
+            AND EXISTS (SELECT 1 FROM c_consultor)
+            AND EXISTS (SELECT 1 FROM c_modulo)
+            AND NOT EXISTS (SELECT 1 FROM c_dup)
+            -- Validaciones que bloquearían el insert:
+            AND (NOT v.es_mesa_fabrica OR v.tarifa_calculada > 0)
+            AND (NOT (v.es_t_c_fijo AND $12::boolean) OR $10::numeric > 0)
+          RETURNING public_id AS id, 
+                    id_consultoria,
+                    id_modulo,
+                    consultor_responsable_id,
+                    fecha_inicio,
+                    fecha_fin,
+                    cantidad_dias,
+                    horas_asignadas,
+                    valor_hora,
+                    valor_dia,
+                    tipo_servicio,
+                    total_pagar,
+                    es_costo_total,
+                    estado,
+                    created_at,
+                    updated_at
+        )
+
+      SELECT 
+        i.*,
+        (SELECT email FROM c_consultor) AS email_consultor,
+        (SELECT nombre_usuario FROM c_consultor) AS nombre_consultor,
+        (SELECT titulo FROM modulo WHERE id = i.id_modulo) AS nombre_modulo,
+        (SELECT cli.titulo FROM clientes cli JOIN consultorias c ON c.id_cliente = cli.id WHERE c.id = i.id_consultoria) AS nombre_cliente,
+        (SELECT ta.titulo FROM tipo_asignacion ta JOIN consultorias c ON c.id_tipo_asignacion = ta.id WHERE c.id = i.id_consultoria) AS tipo_asignacion,
+        (SELECT u.nombre_usuario FROM usuarios u JOIN consultorias c ON c.coordinador_responsable_id = u.id WHERE c.id = i.id_consultoria) AS nombre_coordinador,
+        
+        -- Diagnostic flags incase of 0 rows returned
+        (SELECT id FROM c_consultoria) AS diag_consultoria,
+        (SELECT id FROM c_consultor) AS diag_consultor,
+        (SELECT id FROM c_modulo) AS diag_modulo,
+        (SELECT id FROM c_dup) AS diag_dup,
+        (SELECT tarifa_calculada FROM c_tarifa) AS diag_tarifa_calc,
+        (SELECT es_mesa_fabrica FROM c_tarifa) AS diag_es_mf,
+        (SELECT es_t_c_fijo FROM c_tarifa) AS diag_es_tcf
+      FROM insertar i RIGHT JOIN c_consultoria ON true
+    `;
+
+    const result = await pool.query(cteQuery, [
+      id_consultoria,          // $1
+      consultor_responsable_id,// $2
+      id_modulo,               // $3
+      estados.abierto,         // $4
+      estados.proceso,         // $5
+      horasAsignadasNum,       // $6
+      cantidadDiasNum,         // $7
+      valorHoraInput,          // $8
+      valorDiaInput,           // $9
+      totalPagarInput,         // $10
+      tipoServicioNormalizado, // $11
+      esCostoTotalInput,       // $12
+      fecha_inicio || null,    // $13
+      fecha_fin || null        // $14
+    ]);
+
+    const row = result.rows[0];
+
+    // If no row or an empty row without our inserted ID was returned, it means validation failed inside CTE
+    if (!row || !row.id) {
+       // Using the diag flags from RIGHT JOIN
+       if (!row) return res.status(404).json({ error: "Consultoría o referencias no encontradas" });
+       if (!row.diag_consultoria) return res.status(404).json({ error: "Consultoría no válida" });
+       if (!row.diag_consultor) return res.status(404).json({ error: "Consultor no encontrado" });
+       if (!row.diag_modulo) return res.status(404).json({ error: "Módulo no encontrado" });
+       if (row.diag_dup) return res.status(400).json({ error: "Ya existe asignación para este consultor, cliente y módulo" });
+       
+       if (row.diag_es_mf && !(Number(row.diag_tarifa_calc) > 0)) {
+         return res.status(400).json({ error: "No existe una tarifa vigente para este consultor, cliente, módulo y tipo de asignación." });
+       }
+       if (row.diag_es_tcf && esCostoTotalInput && !(Number(totalPagarInput) > 0)) {
+         return res.status(400).json({ error: "Debes indicar un presupuesto total mayor a 0 para costo total." });
+       }
+       return res.status(500).json({ error: "Error desconocido al procesar asignación" });
     }
-    const clienteId = meta.rows[0].id_cliente;
-    const tipoAsignacionId = meta.rows[0].id_tipo_asignacion;
 
-    const dup = await pool.query(
-      `SELECT ra.id
-       FROM registro_asignaciones ra
-       JOIN consultorias con ON ra.id_consultoria = con.id
-         WHERE ra.consultor_responsable_id = $1
-           AND ra.id_modulo = $2
-           AND con.id_cliente = $3
-           AND con.id_tipo_asignacion = $4
-           AND ra.estado IN ($5::tipo_estado_asignacion, $6::tipo_estado_asignacion)
-         LIMIT 1`,
-      [consultorId, moduloId, clienteId, tipoAsignacionId, estados.abierto, estados.proceso]
-    );
-    if (dup.rows.length > 0) {
-      return res.status(400).json({ error: "Ya existe asignación para este consultor, cliente y módulo" });
-    }
-
-    const tipoAsigNorm = String(meta.rows[0]?.tipo_asignacion_titulo || "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .trim();
-    const esMesaOFabrica =
-      [5, 6].includes(Number(tipoAsignacionId || 0)) ||
-      ["mesa de servicio", "fabrica"].includes(tipoAsigNorm);
-    const esMensual = tipoAsigNorm.includes("full") || tipoAsigNorm.includes("part");
-    const esTiempoCostoFijo = tipoAsigNorm.includes("tiempo y costo fijo");
-    const esCostoTotalFinal = esTiempoCostoFijo && esCostoTotalInput;
-    const esHorasPorDemanda = tipoAsigNorm.includes("horas por demanda");
-
-    let valorHoraFinal = valorHoraInput;
-    let valorDiaFinal = valorDiaInput;
-    let totalPagarFinal = totalPagarInput;
-    let horasAsignadasFinal = horasAsignadasNum;
-    let cantidadDiasFinal = cantidadDiasNum;
-
-    if (esMesaOFabrica) {
-      const tarifaRes = await pool.query(
-        `SELECT obtener_tarifa_consultor($1, $2, $3, $4) AS valor_tarifa`,
-        [consultorId, clienteId, moduloId || null, tipoAsignacionId || null]
-      );
-      const tarifaVigente = Number(tarifaRes.rows[0]?.valor_tarifa || 0);
-      if (!(tarifaVigente > 0)) {
-        return res.status(400).json({
-          error: "No existe una tarifa vigente para este consultor, cliente, módulo y tipo de asignación."
-        });
-      }
-      valorHoraFinal = tarifaVigente;
-      valorDiaFinal = null;
-      totalPagarFinal =
-        totalPagarInput !== null
-          ? totalPagarInput
-          : (horasAsignadasNum !== null ? horasAsignadasNum * tarifaVigente : null);
-    }
-
-    if (esHorasPorDemanda) {
-      horasAsignadasFinal = null;
-      cantidadDiasFinal = null;
-      totalPagarFinal = 0;
-    } else if (esCostoTotalFinal) {
-      horasAsignadasFinal = null;
-      valorHoraFinal = null;
-      valorDiaFinal = null;
-      if (!(Number(totalPagarInput || 0) > 0)) {
-        return res.status(400).json({ error: "Debes indicar un presupuesto total mayor a 0 para costo total." });
-      }
-      totalPagarFinal = Math.round((Number(totalPagarInput) + Number.EPSILON) * 100) / 100;
-    } else if (!esMensual && totalPagarFinal === null && valorHoraFinal !== null && horasAsignadasFinal !== null) {
-      totalPagarFinal = valorHoraFinal * horasAsignadasFinal;
-    }
-
-    const result = await pool.query(
-      `INSERT INTO registro_asignaciones
-        (id_consultoria, id_modulo, consultor_responsable_id, fecha_inicio, fecha_fin,
-         cantidad_dias, horas_asignadas, valor_hora, valor_dia, tipo_servicio, total_pagar, es_costo_total, estado, aprobar_coordinador)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::tipo_estado_asignacion,'Pendiente')
-       RETURNING *`,
-      [
-        consultoriaId,
-        moduloId,
-        consultorId,
-        fecha_inicio || null,
-        fecha_fin || null,
-        cantidadDiasFinal,
-        horasAsignadasFinal,
-        valorHoraFinal,
-        valorDiaFinal,
-        tipoServicioNormalizado,
-        totalPagarFinal,
-        esCostoTotalFinal,
-        estados.abierto
-      ]
-    );
-    const created = result.rows[0];
+    const created = row;
 
     // Email al consultor asignado
-    const mailInfo = await pool.query(
-      `SELECT
-         uc.email AS consultor_email,
-         uc.nombre_usuario AS consultor_nombre,
-         cli.titulo AS cliente,
-         ta.titulo AS tipo_asignacion,
-         m.titulo AS modulo,
-         ucoord.nombre_usuario AS coordinador_nombre
-       FROM consultorias con
-         JOIN clientes cli ON cli.id = con.id_cliente
-         LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
-         LEFT JOIN modulo m ON m.id = $2
-         LEFT JOIN usuarios ucoord ON ucoord.id = con.coordinador_responsable_id
-         JOIN usuarios uc ON uc.id = $1
-        WHERE con.id = $3`,
-      [consultorId, moduloId, consultoriaId]
-    );
-    const row = mailInfo.rows[0];
-    if (row?.consultor_email) {
+    if (created.email_consultor) {
       const portalUrl = buildPortalUrl("mis-asignaciones-consultor");
       await sendEmailSafe({
         ...getGraphContext(req),
-        to: row.consultor_email,
-        subject: `🚀 Nueva asignación: ${row.modulo || "Proyecto"} - ${row.cliente}`,
+        to: created.email_consultor,
+        subject: `🚀 Nueva asignación: ${created.nombre_modulo || "Proyecto"} - ${created.nombre_cliente}`,
         text:
-          `Hola ${row.consultor_nombre || ""},\n` +
+          `Hola ${created.nombre_consultor || ""},\n` +
           `Tienes una nueva asignación.\n` +
-          `Cliente: ${row.cliente}\n` +
-          `Tipo: ${row.tipo_asignacion || "N/A"}\n` +
-          `Módulo: ${row.modulo || "N/A"}\n` +
-          `Coordinador: ${row.coordinador_nombre || "N/A"}\n` +
+          `Cliente: ${created.nombre_cliente}\n` +
+          `Tipo: ${created.tipo_asignacion || "N/A"}\n` +
+          `Módulo: ${created.nombre_modulo || "N/A"}\n` +
+          `Coordinador: ${created.nombre_coordinador || "N/A"}\n` +
           `Ingresa al portal: ${portalUrl}\n`,
         html: buildEmailLayout({
           title: "Nueva asignación de actividad",
-          intro: `Hola <strong>${row.consultor_nombre || "Consultor"}</strong>, has sido asignado a una nueva actividad de consultoría.`,
+          intro: `Hola <strong>${created.nombre_consultor || "Consultor"}</strong>, has sido asignado a una nueva actividad de consultoría.`,
           blocks: [
-            { label: "Cliente", value: row.cliente },
-            { label: "Módulo/Tecnología", value: row.modulo || "N/A" },
-            { label: "Tipo de asignación", value: row.tipo_asignacion || "N/A" },
-            { label: "Coordinador", value: row.coordinador_nombre || "N/A" }
+            { label: "Cliente", value: created.nombre_cliente },
+            { label: "Módulo/Tecnología", value: created.nombre_modulo || "N/A" },
+            { label: "Tipo de asignación", value: created.tipo_asignacion || "N/A" },
+            { label: "Coordinador", value: created.nombre_coordinador || "N/A" }
           ],
           ctaLabel: "Ver asignación en el portal",
           ctaUrl: portalUrl
@@ -8529,7 +8806,22 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
       });
     }
 
-    res.json(withPublicId(created));
+    // cleanup response
+    delete created.email_consultor;
+    delete created.nombre_consultor;
+    delete created.nombre_modulo;
+    delete created.nombre_cliente;
+    delete created.tipo_asignacion;
+    delete created.nombre_coordinador;
+    delete created.diag_consultoria;
+    delete created.diag_consultor;
+    delete created.diag_modulo;
+    delete created.diag_dup;
+    delete created.diag_tarifa_calc;
+    delete created.diag_es_mf;
+    delete created.diag_es_tcf;
+
+    res.json(created);
   } catch (err) {
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {
       return res.status(400).json({ error: "Consultoría, consultor o módulo no válido" });
@@ -8595,4 +8887,5 @@ process.on("SIGINT", () => {
 process.on("SIGTERM", () => {
   void gracefulShutdown("SIGTERM");
 });
+
 

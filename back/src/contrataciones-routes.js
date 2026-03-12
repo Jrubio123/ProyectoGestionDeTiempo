@@ -433,6 +433,82 @@ module.exports = function registerContratacionesRoutes(deps) {
     return allOk ? ESTADOS.completado : ESTADOS.enProceso;
   }
 
+  async function dispatchAndFinalizeSolicitud({ internalId, req }) {
+    const rawSolicitud = await getByInternalId(pool, internalId);
+    if (!rawSolicitud) {
+      throw new Error("No se pudo recuperar la solicitud para enviar correos");
+    }
+
+    const solicitud = formatRow(rawSolicitud);
+    const graphContext = getGraphContext(req);
+    const coordinadorEmail = toNullableString(rawSolicitud.coordinador_email || req.user?.email);
+    const requiereConfirmacionCliente = Boolean(rawSolicitud.requiere_confirmacion_cliente);
+
+    const mailResults = {
+      mesa: false,
+      th: false,
+      coordinador: false
+    };
+
+    if (solicitud.tipo_solicitud === TIPO_NUEVO) {
+      const mesaResult = await sendMail(graphContext, DESTINOS_MESA, buildMailMesaNuevo(solicitud));
+      mailResults.mesa = Boolean(mesaResult.ok);
+
+      if (requiereConfirmacionCliente) {
+        const coordResult = await sendMail(
+          graphContext,
+          coordinadorEmail,
+          buildMailCoordinadorParcialHolcim(solicitud)
+        );
+        mailResults.coordinador = Boolean(coordResult.ok);
+      } else {
+        const thResult = await sendMail(graphContext, DESTINOS_TH, buildMailThNuevo(solicitud));
+        mailResults.th = Boolean(thResult.ok);
+        const coordResult = await sendMail(
+          graphContext,
+          coordinadorEmail,
+          buildMailCoordinadorCompletoNuevo(solicitud)
+        );
+        mailResults.coordinador = Boolean(coordResult.ok);
+      }
+    }
+
+    if (solicitud.tipo_solicitud === TIPO_EXTENSION) {
+      const thResult = await sendMail(graphContext, DESTINOS_TH, buildMailThExtension(solicitud));
+      mailResults.th = Boolean(thResult.ok);
+    }
+
+    if (solicitud.tipo_solicitud === TIPO_RETIRO) {
+      const mesaResult = await sendMail(graphContext, DESTINOS_MESA, buildMailMesaRetiro(solicitud));
+      mailResults.mesa = Boolean(mesaResult.ok);
+      const thResult = await sendMail(graphContext, DESTINOS_TH, buildMailThRetiro(solicitud));
+      mailResults.th = Boolean(thResult.ok);
+      const coordResult = await sendMail(graphContext, coordinadorEmail, buildMailCoordinadorRetiro(solicitud));
+      mailResults.coordinador = Boolean(coordResult.ok);
+    }
+
+    const estadoFinal = computeFinalStateOnCreate({
+      tipoSolicitud: solicitud.tipo_solicitud,
+      requiereConfirmacionCliente,
+      mailResults
+    });
+
+    await pool.query(
+      `
+      UPDATE solicitudes_contratacion
+      SET
+        estado = $1,
+        correo_enviado_mesa = $2,
+        correo_enviado_th = $3,
+        correo_confirmacion_coordinador = $4
+      WHERE id = $5
+      `,
+      [estadoFinal, mailResults.mesa, mailResults.th, mailResults.coordinador, internalId]
+    );
+
+    return getByInternalId(pool, internalId);
+  }
+
   app.get(
     "/contrataciones/personas",
     requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }),
@@ -586,14 +662,15 @@ module.exports = function registerContratacionesRoutes(deps) {
       const grupoDistribucion = toNullableString(payload.grupo_distribucion);
       const necesidadTi = toNullableString(payload.necesidad_ti);
       const observaciones = toNullableString(payload.observaciones);
+      const enviarCorreos = payload.enviar_correos !== false;
 
       if (!nombre || !apellidos) {
         return res.status(400).json({ error: "nombre y apellidos son obligatorios" });
       }
-      if (!necesidadTi) {
+      if (enviarCorreos && !necesidadTi) {
         return res.status(400).json({ error: "necesidad_ti es obligatoria" });
       }
-      if (tipoSolicitud === TIPO_RETIRO && !payload.fecha_retiro) {
+      if (enviarCorreos && tipoSolicitud === TIPO_RETIRO && !payload.fecha_retiro) {
         return res.status(400).json({ error: "fecha_retiro es obligatoria para solicitudes de retiro" });
       }
 
@@ -680,10 +757,11 @@ module.exports = function registerContratacionesRoutes(deps) {
           requiereConfirmacionCliente = Boolean(cliente.requiere_confirmacion_cliente) && tipoSolicitud === TIPO_NUEVO;
         }
 
-        const estadoInicial =
-          tipoSolicitud === TIPO_NUEVO && requiereConfirmacionCliente
+        const estadoInicial = enviarCorreos
+          ? tipoSolicitud === TIPO_NUEVO && requiereConfirmacionCliente
             ? ESTADOS.pendienteConfirmacionCliente
-            : ESTADOS.enProceso;
+            : ESTADOS.enProceso
+          : ESTADOS.pendiente;
 
         const datosExtra =
           payload.datos_extra && typeof payload.datos_extra === "object" && !Array.isArray(payload.datos_extra)
@@ -778,76 +856,16 @@ module.exports = function registerContratacionesRoutes(deps) {
         );
 
         const createdId = inserted.rows[0]?.id;
-        const rawSolicitud = await getByInternalId(pool, createdId);
-        if (!rawSolicitud) {
+        if (!createdId) {
           return res.status(500).json({ error: "No se pudo recuperar la solicitud creada" });
         }
-        const solicitud = formatRow(rawSolicitud);
-        const graphContext = getGraphContext(req);
-        const coordinadorEmail = toNullableString(rawSolicitud.coordinador_email || req.user?.email);
-        const mailResults = {
-          mesa: false,
-          th: false,
-          coordinador: false
-        };
 
-        if (tipoSolicitud === TIPO_NUEVO) {
-          const mesaResult = await sendMail(graphContext, DESTINOS_MESA, buildMailMesaNuevo(solicitud));
-          mailResults.mesa = Boolean(mesaResult.ok);
-
-          if (requiereConfirmacionCliente) {
-            const coordResult = await sendMail(
-              graphContext,
-              coordinadorEmail,
-              buildMailCoordinadorParcialHolcim(solicitud)
-            );
-            mailResults.coordinador = Boolean(coordResult.ok);
-          } else {
-            const thResult = await sendMail(graphContext, DESTINOS_TH, buildMailThNuevo(solicitud));
-            mailResults.th = Boolean(thResult.ok);
-            const coordResult = await sendMail(
-              graphContext,
-              coordinadorEmail,
-              buildMailCoordinadorCompletoNuevo(solicitud)
-            );
-            mailResults.coordinador = Boolean(coordResult.ok);
-          }
+        if (!enviarCorreos) {
+          const created = await getByInternalId(pool, createdId);
+          return res.status(201).json(formatRow(created));
         }
 
-        if (tipoSolicitud === TIPO_EXTENSION) {
-          const thResult = await sendMail(graphContext, DESTINOS_TH, buildMailThExtension(solicitud));
-          mailResults.th = Boolean(thResult.ok);
-        }
-
-        if (tipoSolicitud === TIPO_RETIRO) {
-          const mesaResult = await sendMail(graphContext, DESTINOS_MESA, buildMailMesaRetiro(solicitud));
-          mailResults.mesa = Boolean(mesaResult.ok);
-          const thResult = await sendMail(graphContext, DESTINOS_TH, buildMailThRetiro(solicitud));
-          mailResults.th = Boolean(thResult.ok);
-          const coordResult = await sendMail(graphContext, coordinadorEmail, buildMailCoordinadorRetiro(solicitud));
-          mailResults.coordinador = Boolean(coordResult.ok);
-        }
-
-        const estadoFinal = computeFinalStateOnCreate({
-          tipoSolicitud,
-          requiereConfirmacionCliente,
-          mailResults
-        });
-
-        await pool.query(
-          `
-          UPDATE solicitudes_contratacion
-          SET
-            estado = $1,
-            correo_enviado_mesa = $2,
-            correo_enviado_th = $3,
-            correo_confirmacion_coordinador = $4
-          WHERE id = $5
-          `,
-          [estadoFinal, mailResults.mesa, mailResults.th, mailResults.coordinador, createdId]
-        );
-
-        const updated = await getByInternalId(pool, createdId);
+        const updated = await dispatchAndFinalizeSolicitud({ internalId: createdId, req });
         return res.status(201).json(formatRow(updated));
       } catch (err) {
         if (err?.code === "PUBLIC_ID_NOT_FOUND") {
@@ -855,6 +873,262 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
         console.error(err);
         return res.status(500).json({ error: "Error creando solicitud de contratacion" });
+      }
+    }
+  );
+
+  app.post(
+    "/contrataciones/solicitudes/:id/completar",
+    requireAccess({ roles: ["Administrador", "Coordinador"] }),
+    async (req, res) => {
+      const payload = req.body || {};
+      try {
+        const current = await getByPublicId(pool, req.params.id);
+        if (!current) return res.status(404).json({ error: "Solicitud no encontrada" });
+        const internalId = current.id;
+
+        if (!requireOwnerIfCoordinator(req, current)) {
+          return res.status(403).json({ error: "No puedes operar solicitudes de otro coordinador" });
+        }
+        if (current.estado === ESTADOS.completado) {
+          return res.status(422).json({ error: "La solicitud ya esta completada" });
+        }
+
+        const tipoSolicitud = current.tipo_solicitud;
+        const tipoSolicitudInput = payload.tipo_solicitud ? normalizeTipoSolicitud(payload.tipo_solicitud) : tipoSolicitud;
+        if (!tipoSolicitudInput || tipoSolicitudInput !== tipoSolicitud) {
+          return res.status(400).json({ error: "No se puede cambiar tipo_solicitud en esta operacion" });
+        }
+
+        const nombre = payload.nombre !== undefined ? toNullableString(payload.nombre) : current.nombre;
+        const apellidos = payload.apellidos !== undefined ? toNullableString(payload.apellidos) : current.apellidos;
+        const numeroDocumento =
+          payload.numero_documento !== undefined ? toNullableString(payload.numero_documento) : current.numero_documento;
+        const perfil = payload.perfil !== undefined ? toNullableString(payload.perfil) : current.perfil;
+        const correoPersonal =
+          payload.correo_personal !== undefined ? toNullableString(payload.correo_personal) : current.correo_personal;
+        const correoEmpresarial =
+          payload.correo_empresarial !== undefined ? toNullableString(payload.correo_empresarial) : current.correo_empresarial;
+        const telefono = payload.telefono !== undefined ? toNullableString(payload.telefono) : current.telefono;
+        const ubicacion = payload.ubicacion !== undefined ? toNullableString(payload.ubicacion) : current.ubicacion;
+        const grupoAppTiempos =
+          payload.grupo_app_tiempos !== undefined ? toNullableString(payload.grupo_app_tiempos) : current.grupo_app_tiempos;
+        const grupoDistribucion =
+          payload.grupo_distribucion !== undefined ? toNullableString(payload.grupo_distribucion) : current.grupo_distribucion;
+        const necesidadTi =
+          payload.necesidad_ti !== undefined ? toNullableString(payload.necesidad_ti) : current.necesidad_ti;
+        const observaciones = payload.observaciones !== undefined ? toNullableString(payload.observaciones) : current.observaciones;
+
+        if (!nombre || !apellidos) {
+          return res.status(400).json({ error: "nombre y apellidos son obligatorios" });
+        }
+        if (!necesidadTi) {
+          return res.status(400).json({ error: "necesidad_ti es obligatoria" });
+        }
+
+        const monedaInput = payload.moneda !== undefined ? payload.moneda : current.moneda;
+        const moneda = monedaInput ? normalizeMoneda(monedaInput) : null;
+        if (monedaInput && !moneda) {
+          return res.status(400).json({ error: "moneda invalida. Usa COP o USD" });
+        }
+
+        const modalidadInput = payload.modalidad_contrato !== undefined ? payload.modalidad_contrato : current.modalidad_contrato;
+        const modalidadContrato = modalidadInput ? normalizeModalidad(modalidadInput) : null;
+        if (modalidadInput && !modalidadContrato) {
+          return res
+            .status(400)
+            .json({ error: "modalidad_contrato invalida. Usa Full time, Medio tiempo o Por horas" });
+        }
+
+        const fechaInicio = payload.fecha_inicio !== undefined
+          ? (payload.fecha_inicio ? normalizeDateOnly(payload.fecha_inicio) : null)
+          : current.fecha_inicio;
+        const fechaFin = payload.fecha_fin !== undefined
+          ? (payload.fecha_fin ? normalizeDateOnly(payload.fecha_fin) : null)
+          : current.fecha_fin;
+        const fechaExtensionDesde = payload.fecha_extension_desde !== undefined
+          ? (payload.fecha_extension_desde ? normalizeDateOnly(payload.fecha_extension_desde) : null)
+          : current.fecha_extension_desde;
+        const fechaExtensionHasta = payload.fecha_extension_hasta !== undefined
+          ? (payload.fecha_extension_hasta ? normalizeDateOnly(payload.fecha_extension_hasta) : null)
+          : current.fecha_extension_hasta;
+        const fechaRetiro = payload.fecha_retiro !== undefined
+          ? (payload.fecha_retiro ? normalizeDateOnly(payload.fecha_retiro) : null)
+          : current.fecha_retiro;
+
+        if (payload.fecha_inicio !== undefined && payload.fecha_inicio && !fechaInicio) {
+          return res.status(400).json({ error: "fecha_inicio invalida" });
+        }
+        if (payload.fecha_fin !== undefined && payload.fecha_fin && !fechaFin) {
+          return res.status(400).json({ error: "fecha_fin invalida" });
+        }
+        if (payload.fecha_extension_desde !== undefined && payload.fecha_extension_desde && !fechaExtensionDesde) {
+          return res.status(400).json({ error: "fecha_extension_desde invalida" });
+        }
+        if (payload.fecha_extension_hasta !== undefined && payload.fecha_extension_hasta && !fechaExtensionHasta) {
+          return res.status(400).json({ error: "fecha_extension_hasta invalida" });
+        }
+        if (payload.fecha_retiro !== undefined && payload.fecha_retiro && !fechaRetiro) {
+          return res.status(400).json({ error: "fecha_retiro invalida" });
+        }
+
+        const personaPublicId =
+          payload.persona_usuario_id !== undefined ? toNullableString(payload.persona_usuario_id) : current.persona_public_id;
+        const supervisorPublicId =
+          payload.supervisor_id !== undefined ? toNullableString(payload.supervisor_id) : current.supervisor_public_id;
+        const tipoDocumentoPublicId =
+          payload.tipo_documento_id !== undefined ? toNullableString(payload.tipo_documento_id) : current.tipo_documento_public_id;
+        const clientePublicId =
+          payload.cliente_id !== undefined ? toNullableString(payload.cliente_id) : current.cliente_public_id;
+
+        const refsRes = await pool.query(
+          `
+          SELECT
+            (SELECT id FROM usuarios WHERE public_id::text = $1::text) AS persona_usuario_id,
+            (SELECT id FROM usuarios WHERE public_id::text = $2::text) AS supervisor_id,
+            (SELECT id FROM documento_identidad WHERE public_id::text = $3::text) AS tipo_documento_id,
+            (SELECT id FROM clientes WHERE public_id::text = $4::text) AS cliente_id
+          `,
+          [personaPublicId || null, supervisorPublicId || null, tipoDocumentoPublicId || null, clientePublicId || null]
+        );
+        const refs = refsRes.rows[0];
+
+        if (personaPublicId && !refs.persona_usuario_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
+        if (supervisorPublicId && !refs.supervisor_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
+        if (tipoDocumentoPublicId && !refs.tipo_documento_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
+        if (clientePublicId && !refs.cliente_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
+
+        const personaUsuarioId = refs.persona_usuario_id || null;
+        const supervisorId = refs.supervisor_id || null;
+        const tipoDocumentoId = refs.tipo_documento_id || null;
+        const clienteId = refs.cliente_id || null;
+
+        if (tipoSolicitud === TIPO_NUEVO && !clienteId) {
+          return res.status(400).json({ error: "Cliente obligatorio para solicitudes Nuevo" });
+        }
+        if (tipoSolicitud === TIPO_RETIRO && !fechaRetiro) {
+          return res.status(400).json({ error: "fecha_retiro es obligatoria para solicitudes de retiro" });
+        }
+
+        let clienteNombre = null;
+        let requiereConfirmacionCliente = false;
+        if (clienteId) {
+          const clienteRes = await pool.query(
+            `
+            SELECT titulo, COALESCE(requiere_confirmacion_cliente, false) AS requiere_confirmacion_cliente
+            FROM clientes
+            WHERE id = $1
+            LIMIT 1
+            `,
+            [clienteId]
+          );
+          const cliente = clienteRes.rows[0];
+          if (!cliente) {
+            return res.status(400).json({ error: "Cliente no encontrado" });
+          }
+          clienteNombre = cliente.titulo || null;
+          requiereConfirmacionCliente = Boolean(cliente.requiere_confirmacion_cliente) && tipoSolicitud === TIPO_NUEVO;
+        }
+
+        const existingDatosExtra =
+          current.datos_extra && typeof current.datos_extra === "object" && !Array.isArray(current.datos_extra)
+            ? current.datos_extra
+            : {};
+        const incomingDatosExtra =
+          payload.datos_extra && typeof payload.datos_extra === "object" && !Array.isArray(payload.datos_extra)
+            ? payload.datos_extra
+            : {};
+        const datosExtra = { ...existingDatosExtra, ...incomingDatosExtra };
+        if (payload.modulo_id && !datosExtra.modulo_id) datosExtra.modulo_id = payload.modulo_id;
+        if (payload.modulo && !datosExtra.modulo) datosExtra.modulo = payload.modulo;
+        if (clienteNombre && !datosExtra.cliente_nombre) datosExtra.cliente_nombre = clienteNombre;
+
+        await pool.query(
+          `
+          UPDATE solicitudes_contratacion
+          SET
+            estado = $1,
+            persona_usuario_id = $2,
+            supervisor_id = $3,
+            cliente_id = $4,
+            tipo_documento_id = $5,
+            nombre = $6,
+            apellidos = $7,
+            numero_documento = $8,
+            perfil = $9,
+            correo_personal = $10,
+            correo_empresarial = $11,
+            telefono = $12,
+            ubicacion = $13,
+            grupo_app_tiempos = $14,
+            grupo_distribucion = $15,
+            moneda = $16,
+            tarifa_hora = $17,
+            tarifa_mes = $18,
+            tarifa_medio_tiempo = $19,
+            tarifa_capacitacion = $20,
+            modalidad_contrato = $21,
+            fecha_inicio = $22,
+            fecha_fin = $23,
+            fecha_extension_desde = $24,
+            fecha_extension_hasta = $25,
+            fecha_retiro = $26,
+            necesidad_ti = $27,
+            observaciones = $28,
+            datos_extra = $29::jsonb,
+            requiere_confirmacion_cliente = $30,
+            correo_enviado_mesa = false,
+            correo_enviado_th = false,
+            correo_confirmacion_coordinador = false
+          WHERE id = $31
+          `,
+          [
+            ESTADOS.enProceso,
+            personaUsuarioId,
+            supervisorId,
+            clienteId,
+            tipoDocumentoId,
+            nombre,
+            apellidos,
+            numeroDocumento,
+            perfil,
+            correoPersonal,
+            correoEmpresarial,
+            telefono,
+            ubicacion,
+            grupoAppTiempos,
+            grupoDistribucion,
+            moneda,
+            toNullableNumber(payload.tarifa_hora !== undefined ? payload.tarifa_hora : current.tarifa_hora),
+            toNullableNumber(payload.tarifa_mes !== undefined ? payload.tarifa_mes : current.tarifa_mes),
+            toNullableNumber(
+              payload.tarifa_medio_tiempo !== undefined ? payload.tarifa_medio_tiempo : current.tarifa_medio_tiempo
+            ),
+            toNullableNumber(
+              payload.tarifa_capacitacion !== undefined ? payload.tarifa_capacitacion : current.tarifa_capacitacion
+            ),
+            modalidadContrato,
+            fechaInicio,
+            fechaFin,
+            fechaExtensionDesde,
+            fechaExtensionHasta,
+            fechaRetiro,
+            necesidadTi,
+            observaciones,
+            JSON.stringify(datosExtra),
+            requiereConfirmacionCliente,
+            internalId
+          ]
+        );
+
+        const updated = await dispatchAndFinalizeSolicitud({ internalId, req });
+        return res.json(formatRow(updated));
+      } catch (err) {
+        if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+          return res.status(400).json({ error: "Cliente, supervisor, persona o tipo documento no valido" });
+        }
+        console.error(err);
+        return res.status(500).json({ error: "Error completando solicitud de contratacion" });
       }
     }
   );

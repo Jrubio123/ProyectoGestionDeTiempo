@@ -253,7 +253,12 @@ module.exports = function registerPreregistroRoutes(deps) {
       await client.query("BEGIN");
       const solicitudRes = await client.query(
         `SELECT s.id, s.estado, su.email AS coordinador_email, su.nombre_usuario AS coordinador_nombre, s.perfil
+              , s.public_id AS solicitud_public_id, s.coordinador_id, s.cliente_id, s.modulo_id
+              , s.modalidad, s.ubicacion, s.fecha_inicio_esperada, s.descripcion, s.informacion_adicional, s.observaciones_rrhh
+              , c.titulo AS cliente_nombre, m.titulo AS modulo_nombre
          FROM solicitudes_rrhh s
+         LEFT JOIN clientes c ON c.id = s.cliente_id
+         LEFT JOIN modulo m ON m.id = s.modulo_id
          LEFT JOIN usuarios su ON su.id = s.coordinador_id
          WHERE s.public_id = $1 FOR UPDATE OF s`,
         [req.params.public_id]
@@ -301,6 +306,126 @@ module.exports = function registerPreregistroRoutes(deps) {
           req.user?.id
         ]
       );
+
+      // Si existe el modulo de contrataciones, crear un borrador para continuar el flujo desde Coordinacion.
+      // No envia correos todavia: el coordinador completa datos faltantes y luego dispara el proceso.
+      const hasContratacionesTable = await client.query(`SELECT to_regclass('public.solicitudes_contratacion') AS reg`);
+      if (hasContratacionesTable.rows[0]?.reg) {
+        await client.query("SAVEPOINT sv_preregistro_contratacion");
+        try {
+          const existingContratacion = await client.query(
+            `
+            SELECT id
+            FROM solicitudes_contratacion
+            WHERE tipo_solicitud = 'Nuevo'
+              AND COALESCE(datos_extra->>'origen', '') = 'rrhh'
+              AND COALESCE(datos_extra->>'rrhh_solicitud_id', '') = $1
+            LIMIT 1
+            `,
+            [String(solicitud.solicitud_public_id || "")]
+          );
+
+          if (!existingContratacion.rows.length) {
+            const clienteMeta = await client.query(
+              `
+              SELECT COALESCE(requiere_confirmacion_cliente, false) AS requiere_confirmacion_cliente
+              FROM clientes
+              WHERE id = $1
+              LIMIT 1
+              `,
+              [solicitud.cliente_id]
+            );
+            const requiereConfirmacionCliente = Boolean(clienteMeta.rows[0]?.requiere_confirmacion_cliente);
+
+            const necesidadTiResumen = [solicitud.descripcion, solicitud.informacion_adicional]
+              .map((v) => String(v || "").trim())
+              .filter(Boolean)
+              .join(" | ");
+
+            const datosExtra = {
+              origen: "rrhh",
+              rrhh_solicitud_id: String(solicitud.solicitud_public_id || ""),
+              preregistro_id: String(created.rows[0]?.public_id || ""),
+              modulo_id: solicitud.modulo_id || null,
+              modulo_nombre: solicitud.modulo_nombre || null,
+              cliente_nombre: solicitud.cliente_nombre || null
+            };
+
+            await client.query(
+              `
+              INSERT INTO solicitudes_contratacion (
+                tipo_solicitud,
+                estado,
+                coordinador_solicitante_id,
+                cliente_id,
+                tipo_documento_id,
+                nombre,
+                apellidos,
+                numero_documento,
+                perfil,
+                correo_personal,
+                telefono,
+                ubicacion,
+                modalidad_contrato,
+                fecha_inicio,
+                necesidad_ti,
+                observaciones,
+                datos_extra,
+                requiere_confirmacion_cliente,
+                correo_enviado_mesa,
+                correo_enviado_th,
+                correo_confirmacion_coordinador
+              )
+              VALUES (
+                'Nuevo',
+                'Pendiente',
+                $1,
+                $2,
+                $3,
+                $4,
+                $5,
+                $6,
+                $7,
+                $8,
+                $9,
+                $10,
+                $11,
+                $12,
+                $13,
+                $14,
+                $15::jsonb,
+                $16,
+                false,
+                false,
+                false
+              )
+              `,
+              [
+                solicitud.coordinador_id,
+                solicitud.cliente_id,
+                tipoDocumentoId,
+                String(nombre).trim(),
+                String(apellidos).trim(),
+                String(numero_documento).trim(),
+                solicitud.perfil || null,
+                String(correo_personal).trim().toLowerCase(),
+                telefono || null,
+                solicitud.ubicacion || pais_ubicacion || null,
+                solicitud.modalidad || null,
+                solicitud.fecha_inicio_esperada || null,
+                necesidadTiResumen || null,
+                solicitud.observaciones_rrhh || null,
+                JSON.stringify(datosExtra),
+                requiereConfirmacionCliente
+              ]
+            );
+          }
+          await client.query("RELEASE SAVEPOINT sv_preregistro_contratacion");
+        } catch (draftErr) {
+          await client.query("ROLLBACK TO SAVEPOINT sv_preregistro_contratacion");
+          console.error("No fue posible crear borrador en contrataciones (se continua con preregistro):", draftErr?.message || draftErr);
+        }
+      }
       await client.query("COMMIT");
 
       if (solicitud.coordinador_email) {

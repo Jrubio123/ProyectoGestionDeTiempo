@@ -1,6 +1,7 @@
 // js/preregistros-coord.js
 window.preregistrosCoordApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
+    const DRAFT_SOURCE_RRHH = "rrhh";
 
     const emptyForm = () => ({
         persona_usuario_id: "",
@@ -48,9 +49,18 @@ window.preregistrosCoordApp = function () {
         tipoModal: "Nuevo",
         detalle: null,
 
+        modoEdicion: false,
+        solicitudEditId: null,
+        datosExtraBase: {},
+
         form: emptyForm(),
         busquedaPersona: "",
         personasEncontradas: [],
+        personaSeleccionada: null,
+        mostrarSugerenciasPersona: false,
+        buscandoPersonas: false,
+        debounceBusquedaPersona: null,
+
         erroresFormulario: [],
 
         getAuthConfig() {
@@ -91,21 +101,104 @@ window.preregistrosCoordApp = function () {
             }
         },
 
-        abrirModal(tipo) {
+        aplicarSupervisorPorDefecto() {
+            const currentUserId = window.auth?.getUser?.()?.id || "";
+            if (!currentUserId) return;
+            const exists = (this.supervisores || []).some((sup) => String(sup?.id || "") === String(currentUserId));
+            if (exists) {
+                this.form.supervisor_id = currentUserId;
+            }
+        },
+
+        mapSolicitudToForm(item) {
+            return {
+                persona_usuario_id: item?.persona?.id || "",
+                tipo_documento_id: item?.tipo_documento?.id || "",
+                cliente_id: item?.cliente?.id || "",
+                supervisor_id: item?.supervisor?.id || "",
+                modulo_id: item?.datos_extra?.modulo_id || "",
+                nombre: item?.nombre || "",
+                apellidos: item?.apellidos || "",
+                numero_documento: item?.numero_documento || "",
+                perfil: item?.perfil || "",
+                correo_personal: item?.correo_personal || "",
+                correo_empresarial: item?.correo_empresarial || "",
+                telefono: item?.telefono || "",
+                ubicacion: item?.ubicacion || "",
+                grupo_app_tiempos: item?.grupo_app_tiempos || "",
+                grupo_distribucion: item?.grupo_distribucion || "",
+                moneda: item?.moneda || "COP",
+                tarifa_hora: item?.tarifa_hora ?? "",
+                tarifa_mes: item?.tarifa_mes ?? "",
+                tarifa_medio_tiempo: item?.tarifa_medio_tiempo ?? "",
+                tarifa_capacitacion: item?.tarifa_capacitacion ?? "",
+                modalidad_contrato: item?.modalidad_contrato || "",
+                fecha_inicio: item?.fecha_inicio || "",
+                fecha_fin: item?.fecha_fin || "",
+                fecha_extension_desde: item?.fecha_extension_desde || "",
+                fecha_extension_hasta: item?.fecha_extension_hasta || "",
+                fecha_retiro: item?.fecha_retiro || "",
+                necesidad_ti: item?.necesidad_ti || "",
+                observaciones: item?.observaciones || ""
+            };
+        },
+
+        abrirModal(tipo, item = null) {
             this.tipoModal = tipo;
             this.modalOpen = true;
-            this.form = emptyForm();
-            this.personasEncontradas = [];
-            this.busquedaPersona = "";
             this.erroresFormulario = [];
+            this.personasEncontradas = [];
+            this.mostrarSugerenciasPersona = false;
+            this.personaSeleccionada = null;
+
+            if (item) {
+                this.modoEdicion = true;
+                this.solicitudEditId = item.id;
+                this.form = this.mapSolicitudToForm(item);
+                this.datosExtraBase =
+                    item?.datos_extra && typeof item.datos_extra === "object" && !Array.isArray(item.datos_extra)
+                        ? { ...item.datos_extra }
+                        : {};
+                if (item?.persona?.id) {
+                    this.personaSeleccionada = { ...item.persona };
+                    this.busquedaPersona = item?.persona?.nombre || "";
+                } else {
+                    this.busquedaPersona = "";
+                }
+                return;
+            }
+
+            this.modoEdicion = false;
+            this.solicitudEditId = null;
+            this.datosExtraBase = {};
+            this.form = emptyForm();
+            this.busquedaPersona = "";
+            this.aplicarSupervisorPorDefecto();
+        },
+
+        abrirModalDesdeSolicitud(item) {
+            if (!item?.id) return;
+            this.detalleOpen = false;
+            this.detalle = null;
+            this.abrirModal(item.tipo_solicitud || "Nuevo", item);
         },
 
         cerrarModal() {
             this.modalOpen = false;
+            this.modoEdicion = false;
+            this.solicitudEditId = null;
+            this.datosExtraBase = {};
             this.form = emptyForm();
             this.personasEncontradas = [];
             this.busquedaPersona = "";
+            this.personaSeleccionada = null;
+            this.mostrarSugerenciasPersona = false;
+            this.buscandoPersonas = false;
             this.erroresFormulario = [];
+            if (this.debounceBusquedaPersona) {
+                clearTimeout(this.debounceBusquedaPersona);
+                this.debounceBusquedaPersona = null;
+            }
         },
 
         abrirDetalle(item) {
@@ -118,20 +211,56 @@ window.preregistrosCoordApp = function () {
             this.detalle = null;
         },
 
-        async buscarPersonas() {
+        onInputBusquedaPersona() {
             const q = String(this.busquedaPersona || "").trim();
+            this.form.persona_usuario_id = "";
+            this.personaSeleccionada = null;
+
+            if (this.debounceBusquedaPersona) {
+                clearTimeout(this.debounceBusquedaPersona);
+                this.debounceBusquedaPersona = null;
+            }
             if (q.length < 2) {
                 this.personasEncontradas = [];
+                this.mostrarSugerenciasPersona = false;
                 return;
             }
+
+            this.debounceBusquedaPersona = setTimeout(() => {
+                this.buscarPersonas(q);
+            }, 220);
+        },
+
+        onFocusBusquedaPersona() {
+            if (this.personasEncontradas.length) {
+                this.mostrarSugerenciasPersona = true;
+            }
+        },
+
+        ocultarSugerenciasPersona() {
+            this.mostrarSugerenciasPersona = false;
+        },
+
+        async buscarPersonas(q) {
+            const query = String(q || "").trim();
+            if (query.length < 2) {
+                this.personasEncontradas = [];
+                this.mostrarSugerenciasPersona = false;
+                return;
+            }
+            this.buscandoPersonas = true;
             try {
                 const res = await axios.get(`${API}/contrataciones/personas`, {
                     ...(this.getAuthConfig() || {}),
-                    params: { search: q, limit: 10 }
+                    params: { search: query, limit: 10 }
                 });
                 this.personasEncontradas = Array.isArray(res.data) ? res.data : [];
+                this.mostrarSugerenciasPersona = this.personasEncontradas.length > 0;
             } catch (e) {
                 this.personasEncontradas = [];
+                this.mostrarSugerenciasPersona = false;
+            } finally {
+                this.buscandoPersonas = false;
             }
         },
 
@@ -142,16 +271,28 @@ window.preregistrosCoordApp = function () {
             this.form.numero_documento = persona.numero_documento || "";
             this.form.correo_empresarial = persona.correo_empresarial || "";
             this.form.telefono = persona.telefono || "";
+            this.personaSeleccionada = { ...persona };
 
             const nombreCompleto = String(persona.nombre_usuario || "").trim();
             const partes = nombreCompleto ? nombreCompleto.split(/\s+/) : [];
-            if (!this.form.nombre && partes.length) {
+            if (!String(this.form.nombre || "").trim() && partes.length) {
                 this.form.nombre = partes.slice(0, 2).join(" ");
             }
-            if (!this.form.apellidos && partes.length > 2) {
+            if (!String(this.form.apellidos || "").trim() && partes.length > 2) {
                 this.form.apellidos = partes.slice(2).join(" ");
             }
+
+            this.busquedaPersona = nombreCompleto || this.busquedaPersona;
             this.personasEncontradas = [];
+            this.mostrarSugerenciasPersona = false;
+        },
+
+        limpiarPersonaSeleccionada() {
+            this.form.persona_usuario_id = "";
+            this.personaSeleccionada = null;
+            this.busquedaPersona = "";
+            this.personasEncontradas = [];
+            this.mostrarSugerenciasPersona = false;
         },
 
         validarFormulario() {
@@ -164,24 +305,42 @@ window.preregistrosCoordApp = function () {
             return errors;
         },
 
+        construirPayload() {
+            const datosExtra = {
+                ...(this.datosExtraBase || {})
+            };
+            if (this.form.modulo_id) {
+                datosExtra.modulo_id = this.form.modulo_id;
+            }
+
+            return {
+                ...this.form,
+                tipo_solicitud: this.tipoModal,
+                enviar_correos: true,
+                datos_extra: datosExtra
+            };
+        },
+
         async guardarSolicitud() {
             this.erroresFormulario = this.validarFormulario();
             if (this.erroresFormulario.length) return;
 
-            const payload = {
-                ...this.form,
-                tipo_solicitud: this.tipoModal,
-                datos_extra: {
-                    modulo_id: this.form.modulo_id || null
-                }
-            };
+            const payload = this.construirPayload();
 
             try {
-                await axios.post(`${API}/contrataciones/solicitudes`, payload, this.getAuthConfig());
+                if (this.modoEdicion && this.solicitudEditId) {
+                    await axios.post(
+                        `${API}/contrataciones/solicitudes/${this.solicitudEditId}/completar`,
+                        payload,
+                        this.getAuthConfig()
+                    );
+                } else {
+                    await axios.post(`${API}/contrataciones/solicitudes`, payload, this.getAuthConfig());
+                }
                 this.cerrarModal();
                 await this.cargarSolicitudes();
             } catch (e) {
-                const msg = e?.response?.data?.error || "Error creando solicitud";
+                const msg = e?.response?.data?.error || (this.modoEdicion ? "Error completando solicitud" : "Error creando solicitud");
                 alert(msg);
             }
         },
@@ -202,19 +361,40 @@ window.preregistrosCoordApp = function () {
             }
         },
 
+        normalizarTexto(value) {
+            return String(value || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .trim();
+        },
+
+        esPendienteConfirmacionCliente(estado) {
+            return this.normalizarTexto(estado) === "pendiente confirmacion cliente";
+        },
+
         puedeEnviarTH(item) {
             return (
                 !!item &&
                 item.tipo_solicitud === "Nuevo" &&
                 item.requiere_confirmacion_cliente === true &&
-                item.estado === "Pendiente Confirmación Cliente" &&
+                this.esPendienteConfirmacionCliente(item.estado) &&
                 item.correo_enviado_th !== true
+            );
+        },
+
+        puedeContinuar(item) {
+            return (
+                !!item &&
+                item.tipo_solicitud === "Nuevo" &&
+                item.estado === "Pendiente" &&
+                String(item?.datos_extra?.origen || "").toLowerCase() === DRAFT_SOURCE_RRHH
             );
         },
 
         estadoClass(estado) {
             if (estado === "Completado") return "bg-emerald-100 text-emerald-700";
-            if (estado === "Pendiente Confirmación Cliente") return "bg-amber-100 text-amber-700";
+            if (this.esPendienteConfirmacionCliente(estado)) return "bg-amber-100 text-amber-700";
             if (estado === "En Proceso") return "bg-blue-100 text-blue-700";
             if (estado === "Pendiente") return "bg-slate-100 text-slate-700";
             return "bg-slate-100 text-slate-600";

@@ -61,6 +61,7 @@
                     <tr>
                         <th class="px-6 py-4">Fecha / Ticket</th>
                         <th class="px-6 py-4">Consultor</th>
+                        <th class="px-6 py-4">Caso cliente/interno</th>
                         <th class="px-6 py-4">Detalle</th>
                         <th class="px-6 py-4 text-right">Cobro</th>
                         <th class="px-6 py-4 text-center">Estado</th>
@@ -97,9 +98,15 @@
                             </td>
 
                             <td class="px-6 py-4 align-top">
+                                <p class="text-xs text-gray-500">Cliente</p>
+                                <p class="text-sm font-semibold text-gray-800 break-words" x-text="casoCliente(r) || '-'"></p>
+                                <p class="text-xs text-gray-500 mt-2">Interno</p>
+                                <p class="text-sm font-semibold text-gray-800 break-words" x-text="casoInterno(r) || '-'"></p>
+                            </td>
+
+                            <td class="px-6 py-4 align-top">
                                 <p class="font-semibold text-gray-700" x-text="r.nombre_cliente"></p>
                                 <p class="text-xs text-gray-500 mb-1" x-text="r.nombre_modulo"></p>
-                                <p class="text-[11px] text-gray-500 mb-1" :title="resumenCaso(r)" x-text="resumenCaso(r)"></p>
                                 <span class="text-[10px] uppercase font-bold tracking-wider text-green-600 bg-green-50 px-2 py-0.5 rounded border border-green-100" x-text="r.nombre_tipo_asignacion"></span>
                             </td>
 

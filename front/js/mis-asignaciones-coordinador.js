@@ -36,6 +36,8 @@ window.misAsignacionesApp = function () {
             nro_caso_interno: "",
             nro_caso_cliente: "",
             tipo_servicio: "",
+            es_costo_total: false,
+            total_pagar: 0,
             estado: "Abierto",
             observacion: ""
         },
@@ -72,7 +74,9 @@ window.misAsignacionesApp = function () {
                     ...a,
                     _key: `${a.consultoria_id || "c"}-${a.id || "na"}-${idx}`,
                     valor_hora: Number(a.valor_hora || 0),
-                    cantidad_dias: Number(a.cantidad_dias || 0)
+                    cantidad_dias: Number(a.cantidad_dias || 0),
+                    total_pagar: Number(a.total_pagar || 0),
+                    es_costo_total: Boolean(a.es_costo_total)
                 }));
             } catch (e) {
                 this.asignaciones = [];
@@ -127,6 +131,8 @@ window.misAsignacionesApp = function () {
                 nro_caso_interno: asignacion.nro_caso_interno || "",
                 nro_caso_cliente: asignacion.nro_caso_cliente || "",
                 tipo_servicio: asignacion.tipo_servicio || "",
+                es_costo_total: Boolean(asignacion.es_costo_total),
+                total_pagar: Number(asignacion.total_pagar || 0),
                 estado: asignacion.estado || "Abierto",
                 observacion: asignacion.observacion || ""
             };
@@ -141,6 +147,12 @@ window.misAsignacionesApp = function () {
 
         async validarTarifa() {
             if (!this.consultoriaInfo.cliente_id || !this.form.consultor_responsable_id || !this.form.id_modulo) {
+                this.tarifaEncontrada = true;
+                this.form.valor_hora = 0;
+                this.form.valor_dia = 0;
+                return;
+            }
+            if (this.esCostoTotalTipo()) {
                 this.tarifaEncontrada = true;
                 this.form.valor_hora = 0;
                 this.form.valor_dia = 0;
@@ -197,6 +209,9 @@ window.misAsignacionesApp = function () {
         },
 
         calcularTotalPagar() {
+            if (this.esCostoTotalTipo()) {
+                return Number(this.form.total_pagar || 0);
+            }
             const valorHora = Number(this.form.valor_hora || 0);
             const valorDiaCalculado = Number(this.form.valor_dia || 0) || (valorHora > 0 ? (valorHora / 20) : 0);
             if (this.esMensualTipo()) {
@@ -212,6 +227,29 @@ window.misAsignacionesApp = function () {
         esMensualTipo() {
             const t = String(this.consultoriaInfo.tipo_asignacion || "").toLowerCase();
             return t.includes("full") || t.includes("part");
+        },
+
+        esTiempoCostoFijoTipo() {
+            const t = String(this.consultoriaInfo.tipo_asignacion || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase();
+            return t.includes("tiempo y costo fijo");
+        },
+
+        esCostoTotalTipo() {
+            const raw = this.form.es_costo_total;
+            const boolVal = raw === true || raw === 1 || String(raw).toLowerCase() === "true" || String(raw) === "1";
+            return this.esTiempoCostoFijoTipo() && boolVal;
+        },
+
+        cambiarModoTiempoCostoFijo() {
+            if (this.esCostoTotalTipo()) {
+                this.form.valor_hora = 0;
+                this.form.valor_dia = 0;
+                this.form.cantidad_dias = 0;
+            }
+            this.validarTarifa();
         },
 
         calcularDiasMensual(fechaInicio, fechaFin) {
@@ -257,17 +295,19 @@ window.misAsignacionesApp = function () {
                     ? null
                     : Number(this.form.valor_dia);
                 const totalPagar = Number(this.calcularTotalPagar());
+                const esCostoTotal = this.esCostoTotalTipo();
                 const payload = {
                     consultor_responsable_id: this.form.consultor_responsable_id,
                     id_modulo: this.form.id_modulo,
                     fecha_inicio: this.form.fecha_inicio || null,
                     fecha_fin: this.form.fecha_fin || null,
-                    cantidad_dias: Number.isFinite(cantidadDias) ? cantidadDias : null,
-                    valor_hora: Number.isFinite(valorHora) ? valorHora : null,
-                    valor_dia: Number.isFinite(valorDia) ? valorDia : null,
+                    cantidad_dias: esCostoTotal ? null : (Number.isFinite(cantidadDias) ? cantidadDias : null),
+                    valor_hora: esCostoTotal ? null : (Number.isFinite(valorHora) ? valorHora : null),
+                    valor_dia: esCostoTotal ? null : (Number.isFinite(valorDia) ? valorDia : null),
                     nro_caso_interno: this.form.nro_caso_interno || null,
                     nro_caso_cliente: this.form.nro_caso_cliente || null,
                     tipo_servicio: this.form.tipo_servicio || null,
+                    es_costo_total: esCostoTotal,
                     estado: this.form.estado || null,
                     observacion: this.form.observacion || null,
                     total_pagar: Number.isFinite(totalPagar) ? totalPagar : null

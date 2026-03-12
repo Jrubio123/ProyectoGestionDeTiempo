@@ -1,6 +1,18 @@
-﻿BEGIN;
+BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+INSERT INTO roles (titulo, descripcion, activo)
+SELECT 'Reclutador', 'Usuario encargado de reclutar y gestionar candidatos y consultores', true
+WHERE NOT EXISTS (
+  SELECT 1 FROM roles WHERE LOWER(titulo) = LOWER('Reclutador')
+);
+
+INSERT INTO roles (titulo, descripcion, activo)
+SELECT 'Talento Humano', 'Usuario de Talento Humano para onboarding y aprobacion de preregistros', true
+WHERE NOT EXISTS (
+  SELECT 1 FROM roles WHERE LOWER(titulo) = LOWER('Talento Humano')
+);
 
 WITH roles_map AS (
   SELECT LOWER(titulo) AS rol_key, id

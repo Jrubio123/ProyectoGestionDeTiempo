@@ -70,22 +70,47 @@ window.registroHorasApp = function () {
             return [...new Set(this.asignaciones.map((a) => a.nombre_tipo_asignacion).filter(Boolean))];
         },
 
+        esTipoMensual(tipoAsignacion) {
+            const tipo = String(tipoAsignacion || "").toLowerCase();
+            return tipo.includes("full") || tipo.includes("part");
+        },
+
+        esTipoTiempoCostoFijo(tipoAsignacion) {
+            const tipo = String(tipoAsignacion || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .trim();
+            return tipo.includes("tiempo y costo fijo");
+        },
+
+        esCostoTotal(item) {
+            const raw = item?.es_costo_total;
+            const boolVal = raw === true || raw === 1 || String(raw).toLowerCase() === "true" || String(raw) === "1";
+            return this.esTipoTiempoCostoFijo(item?.nombre_tipo_asignacion) && boolVal;
+        },
+
         obtenerTarifa(item) {
-            const tipo = String(item?.nombre_tipo_asignacion || "").toLowerCase();
-            const esDias = tipo.includes("full") || tipo.includes("part");
+            if (this.esCostoTotal(item)) return 1;
+            const esDias = this.esTipoMensual(item?.nombre_tipo_asignacion);
             return esDias ? item.valor_dia || 0 : item.valor_hora || 0;
         },
 
         calcularCosto(item) {
-            const tarifa = this.obtenerTarifa(item);
             const cantidad = parseFloat(item.input_cantidad) || 0;
+            if (this.esCostoTotal(item)) return this.formatearDinero(cantidad);
+            const tarifa = this.obtenerTarifa(item);
             return this.formatearDinero(tarifa * cantidad);
         },
 
         esExceso(item) {
             const reportado = parseFloat(item.input_cantidad) || 0;
-            const tipo = String(item?.nombre_tipo_asignacion || "").toLowerCase();
-            const esDias = tipo.includes("full") || tipo.includes("part");
+            if (this.esCostoTotal(item)) {
+                const disponible = item?.total_disponible;
+                if (disponible === null || disponible === undefined || Number.isNaN(Number(disponible))) return false;
+                return reportado > Number(disponible);
+            }
+            const esDias = this.esTipoMensual(item?.nombre_tipo_asignacion);
             if (esDias) {
                 const disponible = item?.dias_disponibles;
                 if (disponible === null || disponible === undefined || Number.isNaN(Number(disponible))) return false;
@@ -107,15 +132,21 @@ window.registroHorasApp = function () {
 
         async enviarReporte(item) {
             const tipo = item.nombre_tipo_asignacion;
-            const tipoLower = String(tipo || "").toLowerCase();
-            const esDias = tipoLower.includes("full") || tipoLower.includes("part");
-            const unidad = esDias ? "Dias" : "Horas";
+            const esCostoTotal = this.esCostoTotal(item);
+            const esDias = this.esTipoMensual(tipo);
+            const unidad = esCostoTotal ? "COP" : (esDias ? "Dias" : "Horas");
             const cantidad = parseFloat(item.input_cantidad) || 0;
+            if (!esCostoTotal && esDias && !Number.isInteger(cantidad)) {
+                alert("Para Full time/Part time solo se permiten dias enteros.");
+                return;
+            }
 
             if (this.esExceso(item)) {
-                const maximo = esDias
-                    ? Number(item?.dias_disponibles ?? item?.cantidad_dias ?? 0)
-                    : Number(item?.horas_disponibles ?? item?.horas_asignadas ?? 0);
+                const maximo = esCostoTotal
+                    ? Number(item?.total_disponible ?? item?.total_pagar ?? 0)
+                    : esDias
+                        ? Number(item?.dias_disponibles ?? item?.cantidad_dias ?? 0)
+                        : Number(item?.horas_disponibles ?? item?.horas_asignadas ?? 0);
                 alert(`No puedes reportar ${cantidad} ${unidad}. Maximo permitido: ${maximo}.`);
                 return;
             }
@@ -123,12 +154,12 @@ window.registroHorasApp = function () {
             if (!confirm(`¿Reportar ${cantidad} ${unidad} para ${item.nombre_cliente}?`)) return;
 
             const tarifa = this.obtenerTarifa(item);
-            const total = tarifa * cantidad;
+            const total = esCostoTotal ? cantidad : (tarifa * cantidad);
 
             const payload = {
                 id_registro_asignacion: item.id,
-                horas_reportadas: esDias ? 0 : cantidad,
-                cantidad_dias_reportados: esDias ? cantidad : 0,
+                horas_reportadas: esCostoTotal ? 0 : (esDias ? 0 : cantidad),
+                cantidad_dias_reportados: esCostoTotal ? 0 : (esDias ? cantidad : 0),
                 total_cobrar: total,
                 tipo_servicio: tipo,
                 nro_caso_int_ext: item.nro_caso_interno || item.nro_caso_cliente || null

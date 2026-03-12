@@ -106,6 +106,16 @@
                     </div>
 
                     <div class="p-5 bg-gray-50 rounded-xl border border-gray-100 space-y-4">
+                        <div x-show="esTiempoCostoFijo && !esMesaServicio" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-xs font-bold text-gray-500 uppercase">Modalidad Tiempo y Costo Fijo</label>
+                                <select x-model="form.modo_tiempo_costo_fijo" @change="cambiarModoTiempoCosto" class="w-full mt-1 p-2 border rounded-lg text-sm">
+                                    <option value="tiempo">Por tiempo (horas)</option>
+                                    <option value="costo_total">Por costo total (presupuesto)</option>
+                                </select>
+                            </div>
+                        </div>
+
                         <div x-show="!esMesaServicio" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <label class="text-xs font-bold text-gray-500 uppercase">Fecha Inicio</label>
@@ -123,9 +133,14 @@
                                 <input type="number" x-model="form.cantidad_dias" readonly class="w-full mt-1 p-2 bg-gray-100 border rounded-lg text-sm font-mono text-gray-600">
                             </div>
                             
-                            <div x-show="esPorHora && !esHorasPorDemanda">
+                            <div x-show="esPorHora && !esHorasPorDemanda && !esCostoTotalModo">
                                 <label class="text-xs font-bold text-gray-500 uppercase">Horas Asignadas</label>
                                 <input type="number" x-model="form.horas_asignadas" class="w-full mt-1 p-2 border rounded-lg text-sm font-mono focus:border-indigo-500 outline-none">
+                            </div>
+
+                            <div x-show="esCostoTotalModo">
+                                <label class="text-xs font-bold text-gray-500 uppercase">Presupuesto Total Proyecto</label>
+                                <input type="number" x-model="form.presupuesto_total" class="w-full mt-1 p-2 border rounded-lg text-sm font-mono focus:border-indigo-500 outline-none">
                             </div>
 
                             <div x-show="esHorasPorDemanda" class="col-span-1 sm:col-span-2">

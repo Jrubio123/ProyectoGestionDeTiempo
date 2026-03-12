@@ -14,7 +14,9 @@ window.asignacionConsultorApp = function () {
             fecha_inicio: "",
             fecha_fin: "",
             cantidad_dias: 0,
-            horas_asignadas: 0
+            horas_asignadas: 0,
+            presupuesto_total: 0,
+            modo_tiempo_costo_fijo: "tiempo"
         },
 
         formDisplay: {
@@ -88,6 +90,8 @@ window.asignacionConsultorApp = function () {
             this.form.fecha_fin = "";
             this.form.cantidad_dias = this.esMensual ? 20 : 0;
             this.form.horas_asignadas = 0;
+            this.form.presupuesto_total = 0;
+            this.form.modo_tiempo_costo_fijo = "tiempo";
         },
 
         resetAlertaTarifa() {
@@ -138,6 +142,10 @@ window.asignacionConsultorApp = function () {
 
         async buscarTarifa() {
             if (!this.form.consultor_id || !this.form.modulo_id || !this.proyectoSelected) {
+                this.resetAlertaTarifa();
+                return;
+            }
+            if (this.esCostoTotalModo) {
                 this.resetAlertaTarifa();
                 return;
             }
@@ -242,6 +250,15 @@ window.asignacionConsultorApp = function () {
             return !this.esMensual;
         },
 
+        get esTiempoCostoFijo() {
+            const t = this.normalizeTipo(this.proyectoSelected?.tipo_asignacion || "");
+            return t.includes("tiempo y costo fijo");
+        },
+
+        get esCostoTotalModo() {
+            return this.esTiempoCostoFijo && this.form.modo_tiempo_costo_fijo === "costo_total";
+        },
+
         get esHorasPorDemanda() {
             const t = this.normalizeTipo(this.proyectoSelected?.tipo_asignacion || "");
             return t.includes("horas por demanda");
@@ -252,10 +269,25 @@ window.asignacionConsultorApp = function () {
             return t.includes("mesa de servicio") || t.includes("fabrica");
         },
 
+        cambiarModoTiempoCosto() {
+            if (!this.esTiempoCostoFijo) {
+                this.form.modo_tiempo_costo_fijo = "tiempo";
+                return;
+            }
+            if (this.esCostoTotalModo) {
+                this.form.horas_asignadas = 0;
+            } else {
+                this.form.presupuesto_total = 0;
+            }
+            this.buscarTarifa();
+        },
+
         get formValido() {
-            if (!this.form.consultor_id || !this.form.modulo_id || !(this.alertaTarifa.valor > 0)) return false;
+            if (!this.form.consultor_id || !this.form.modulo_id) return false;
+            if (!this.esCostoTotalModo && !(this.alertaTarifa.valor > 0)) return false;
             if (this.esMesaServicio) return true;
             if (this.esHorasPorDemanda) return true;
+            if (this.esCostoTotalModo) return Number(this.form.presupuesto_total || 0) > 0;
             if (this.esPorHora) {
                 return (this.form.horas_asignadas || 0) > 0;
             }
@@ -267,6 +299,8 @@ window.asignacionConsultorApp = function () {
             let total = 0;
             if (this.esMesaServicio || this.esHorasPorDemanda) {
                 total = 0;
+            } else if (this.esCostoTotalModo) {
+                total = Number(this.form.presupuesto_total || 0);
             } else if (this.esMensual) {
                 const dias = this.calcularDiasMensual(
                     this.form.fecha_inicio,
@@ -285,6 +319,7 @@ window.asignacionConsultorApp = function () {
             const tarifa = this.alertaTarifa.valor || 0;
             const esMesaOFabrica = this.esMesaServicio;
             const esHorasDemanda = this.esHorasPorDemanda;
+            const esCostoTotal = this.esCostoTotalModo;
             const diasMensual = this.esMensual
                 ? this.calcularDiasMensual(this.form.fecha_inicio, this.form.fecha_fin) || 20
                 : 0;
@@ -293,10 +328,12 @@ window.asignacionConsultorApp = function () {
                 ? null
                 : esHorasDemanda
                     ? 0
+                    : esCostoTotal
+                        ? Number(this.form.presupuesto_total || 0)
                     : this.esMensual
                         ? tarifa * (meses || 1)
                         : tarifa * (this.form.horas_asignadas || 0);
-            const valorDia = esMesaOFabrica ? null : (this.esMensual ? (tarifa / 20) : null);
+            const valorDia = esMesaOFabrica || esCostoTotal ? null : (this.esMensual ? (tarifa / 20) : null);
             const payload = {
                 id_consultoria: this.proyectoSelected.consultoria_id || this.proyectoSelected.id,
                 id_modulo: this.form.modulo_id,
@@ -304,10 +341,11 @@ window.asignacionConsultorApp = function () {
                 fecha_inicio: esMesaOFabrica ? null : (this.form.fecha_inicio || null),
                 fecha_fin: esMesaOFabrica ? null : (this.form.fecha_fin || null),
                 cantidad_dias: esMesaOFabrica ? null : (this.esMensual ? diasMensual : (this.form.cantidad_dias || null)),
-                horas_asignadas: esMesaOFabrica ? null : (this.esMensual || esHorasDemanda ? null : (this.form.horas_asignadas || null)),
-                valor_hora: esMesaOFabrica ? tarifa || null : (this.esMensual ? null : tarifa || null),
+                horas_asignadas: esMesaOFabrica ? null : (this.esMensual || esHorasDemanda || esCostoTotal ? null : (this.form.horas_asignadas || null)),
+                valor_hora: esMesaOFabrica ? tarifa || null : ((this.esMensual || esCostoTotal) ? null : tarifa || null),
                 valor_dia: valorDia,
                 total_pagar: total,
+                es_costo_total: esCostoTotal,
                 tipo_servicio: null
             };
 

@@ -104,10 +104,11 @@
                                         <input type="number" 
                                                x-model="item.input_cantidad" 
                                                min="0"
+                                               :step="esCostoTotal(item) ? 1000 : (esTipoMensual(item.nombre_tipo_asignacion) ? 1 : 0.25)"
                                                class="w-20 p-2 text-right font-mono text-sm outline-none"
                                                placeholder="0">
                                         <div class="bg-gray-50 px-3 py-2 text-xs font-bold text-gray-500 border-l border-gray-200"
-                                             x-text="String(item.nombre_tipo_asignacion || '').toLowerCase().includes('full') || String(item.nombre_tipo_asignacion || '').toLowerCase().includes('part') ? 'Días' : 'Hrs'"></div>
+                                             x-text="esCostoTotal(item) ? 'COP' : (esTipoMensual(item.nombre_tipo_asignacion) ? 'Días' : 'Hrs')"></div>
                                     </div>
 
                                     <div x-show="esExceso(item)" class="text-[10px] text-red-500 font-bold mt-1 flex items-center animate-pulse">
@@ -119,7 +120,12 @@
 
                             <td class="px-6 py-4 text-right align-top" x-show="!$data.esAsociado" x-cloak>
                                 <p class="font-mono font-bold text-gray-700" x-text="calcularCosto(item)"></p>
-                                <p class="text-[10px] text-gray-400">Tarifa: <span x-text="formatearDinero(obtenerTarifa(item))"></span></p>
+                                <p class="text-[10px] text-gray-400" x-show="!esCostoTotal(item)">
+                                    Tarifa: <span x-text="formatearDinero(obtenerTarifa(item))"></span>
+                                </p>
+                                <p class="text-[10px] text-gray-400" x-show="esCostoTotal(item)">
+                                    Disponible: <span x-text="formatearDinero(item.total_disponible || item.total_pagar || 0)"></span>
+                                </p>
                             </td>
 
                             <td class="px-6 py-4 text-center align-top">

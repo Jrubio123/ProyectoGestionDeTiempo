@@ -2,7 +2,6 @@ module.exports = function registerContratacionesRoutes(deps) {
   const {
     app,
     pool,
-    resolveInternalId,
     ID_TABLES,
     normalizeValue,
     requireAccess,
@@ -236,8 +235,13 @@ module.exports = function registerContratacionesRoutes(deps) {
     };
   }
 
-  async function getById(db, internalId) {
+  async function getByInternalId(db, internalId) {
     const result = await db.query(`${BASE_SELECT} WHERE sc.id = $1 LIMIT 1`, [internalId]);
+    return result.rows[0] || null;
+  }
+
+  async function getByPublicId(db, publicId) {
+    const result = await db.query(`${BASE_SELECT} WHERE sc.public_id = $1 LIMIT 1`, [publicId]);
     return result.rows[0] || null;
   }
 
@@ -508,10 +512,10 @@ module.exports = function registerContratacionesRoutes(deps) {
 
         const clienteInput = toNullableString(req.query?.cliente_id);
         if (clienteInput) {
-          const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, clienteInput, { required: false });
-          if (!clienteId) return res.json([]);
+          const clienteRes = await pool.query("SELECT id FROM clientes WHERE public_id = $1", [clienteInput]);
+          if (!clienteRes.rows.length) return res.json([]);
           where.push(`sc.cliente_id = $${idx++}`);
-          values.push(clienteId);
+          values.push(clienteRes.rows[0].id);
         }
 
         const limit = Math.min(Math.max(Number(req.query?.limit || 100), 1), 300);
@@ -543,10 +547,7 @@ module.exports = function registerContratacionesRoutes(deps) {
     requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }),
     async (req, res) => {
       try {
-        const internalId = await resolveInternalId(pool, ID_TABLES.solicitudesContratacion, req.params.id, {
-          required: true
-        });
-        const row = await getById(pool, internalId);
+        const row = await getByPublicId(pool, req.params.id);
         if (!row) return res.status(404).json({ error: "Solicitud no encontrada" });
         if (!requireOwnerIfCoordinator(req, row)) {
           return res.status(403).json({ error: "No puedes ver solicitudes de otro coordinador" });
@@ -633,18 +634,30 @@ module.exports = function registerContratacionesRoutes(deps) {
       }
 
       try {
-        const personaUsuarioId = await resolveInternalId(pool, ID_TABLES.usuarios, payload.persona_usuario_id, {
-          required: false
-        });
-        const supervisorId = await resolveInternalId(pool, ID_TABLES.usuarios, payload.supervisor_id, {
-          required: false
-        });
-        const tipoDocumentoId = await resolveInternalId(pool, ID_TABLES.documentoIdentidad, payload.tipo_documento_id, {
-          required: false
-        });
-        const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, payload.cliente_id, {
-          required: tipoSolicitud === TIPO_NUEVO
-        });
+        const refsRes = await pool.query(
+          `
+          SELECT
+            (SELECT id FROM usuarios WHERE public_id = $1) AS persona_usuario_id,
+            (SELECT id FROM usuarios WHERE public_id = $2) AS supervisor_id,
+            (SELECT id FROM documento_identidad WHERE public_id = $3) AS tipo_documento_id,
+            (SELECT id FROM clientes WHERE public_id = $4) AS cliente_id
+          `,
+          [payload.persona_usuario_id || null, payload.supervisor_id || null, payload.tipo_documento_id || null, payload.cliente_id || null]
+        );
+        const refs = refsRes.rows[0];
+        
+        if (payload.persona_usuario_id && !refs.persona_usuario_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
+        if (payload.supervisor_id && !refs.supervisor_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
+        if (payload.tipo_documento_id && !refs.tipo_documento_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
+        if (tipoSolicitud === TIPO_NUEVO && (!payload.cliente_id || !refs.cliente_id)) {
+           return res.status(400).json({ error: "Cliente obligatorio para solicitudes Nuevo" });
+        }
+        if (payload.cliente_id && !refs.cliente_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
+
+        const personaUsuarioId = refs.persona_usuario_id || null;
+        const supervisorId = refs.supervisor_id || null;
+        const tipoDocumentoId = refs.tipo_documento_id || null;
+        const clienteId = refs.cliente_id || null;
 
         let clienteNombre = null;
         let requiereConfirmacionCliente = false;
@@ -850,11 +863,9 @@ module.exports = function registerContratacionesRoutes(deps) {
     requireAccess({ roles: ["Administrador", "Coordinador"] }),
     async (req, res) => {
       try {
-        const internalId = await resolveInternalId(pool, ID_TABLES.solicitudesContratacion, req.params.id, {
-          required: true
-        });
-        const row = await getById(pool, internalId);
+        const row = await getByPublicId(pool, req.params.id);
         if (!row) return res.status(404).json({ error: "Solicitud no encontrada" });
+        const internalId = row.id;
         if (!requireOwnerIfCoordinator(req, row)) {
           return res.status(403).json({ error: "No puedes operar solicitudes de otro coordinador" });
         }
@@ -883,7 +894,7 @@ module.exports = function registerContratacionesRoutes(deps) {
           [thOk, thOk ? ESTADOS.completado : ESTADOS.pendienteConfirmacionCliente, internalId]
         );
 
-        const updated = await getById(pool, internalId);
+        const updated = await getByInternalId(pool, internalId);
         return res.json(formatRow(updated));
       } catch (err) {
         if (err?.code === "PUBLIC_ID_NOT_FOUND") {

@@ -1,8 +1,7 @@
-﻿module.exports = function registerPreregistroRoutes(deps) {
+module.exports = function registerPreregistroRoutes(deps) {
   const {
     app,
     pool,
-    resolveInternalId,
     ID_TABLES,
     normalizeValue,
     requireAccess,
@@ -228,8 +227,13 @@
     };
   }
 
-  async function getById(db, id) {
+  async function getByInternalId(db, id) {
     const r = await db.query(`${BASE_SELECT} WHERE p.id = $1 LIMIT 1`, [id]);
+    return r.rows[0] || null;
+  }
+
+  async function getByPublicId(db, publicId) {
+    const r = await db.query(`${BASE_SELECT} WHERE p.public_id = $1 LIMIT 1`, [publicId]);
     return r.rows[0] || null;
   }
 
@@ -246,20 +250,20 @@
 
     const client = await pool.connect();
     try {
-      const solicitudId = await resolveInternalId(client, ID_TABLES.solicitudesRrhh, req.params.public_id, { required: true });
       await client.query("BEGIN");
       const solicitudRes = await client.query(
         `SELECT s.id, s.estado, su.email AS coordinador_email, su.nombre_usuario AS coordinador_nombre, s.perfil
          FROM solicitudes_rrhh s
          LEFT JOIN usuarios su ON su.id = s.coordinador_id
-         WHERE s.id = $1 FOR UPDATE OF s`,
-        [solicitudId]
+         WHERE s.public_id = $1 FOR UPDATE OF s`,
+        [req.params.public_id]
       );
       const solicitud = solicitudRes.rows[0];
       if (!solicitud) {
         await client.query("ROLLBACK");
         return res.status(404).json({ error: "Solicitud no encontrada" });
       }
+      const solicitudId = solicitud.id;
       if (!["Entrevistas", "Reclutamiento"].includes(String(solicitud.estado || ""))) {
         await client.query("ROLLBACK");
         return res.status(422).json({ error: "La solicitud debe estar en Entrevistas o Reclutamiento para contratar" });
@@ -331,9 +335,9 @@
     const editable = ["nombre", "apellidos", "tipo_documento", "numero_documento", "telefono", "correo_personal", "pais_ubicacion", "ciudad"];
     const client = await pool.connect();
     try {
-      const id = await resolveInternalId(client, ID_TABLES.preregistroPersonas, req.params.public_id, { required: true });
-      const current = await getById(client, id);
+      const current = await getByPublicId(client, req.params.public_id);
       if (!current) return res.status(404).json({ error: "Preregistro no encontrado" });
+      const id = current.id;
       if (current.estado !== ESTADOS.pendienteCoordinador) {
         return res.status(422).json({ error: "No se puede editar seccion 1 en el estado actual" });
       }
@@ -361,7 +365,7 @@
       if (!sets.length) return res.status(400).json({ error: "No hay campos para actualizar" });
       vals.push(id);
       await client.query(`UPDATE preregistro_personas SET ${sets.join(", ")} WHERE id = $${idx}`, vals);
-      return res.json(formatRow(await getById(client, id)));
+      return res.json(formatRow(await getByInternalId(client, id)));
     } catch (err) {
       if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.status(404).json({ error: "Preregistro no encontrado" });
       console.error(err);
@@ -387,9 +391,9 @@
 
     const client = await pool.connect();
     try {
-      const id = await resolveInternalId(client, ID_TABLES.preregistroPersonas, req.params.public_id, { required: true });
-      const current = await getById(client, id);
+      const current = await getByPublicId(client, req.params.public_id);
       if (!current) return res.status(404).json({ error: "Preregistro no encontrado" });
+      const id = current.id;
       if (current.estado !== ESTADOS.pendienteCoordinador) {
         return res.status(422).json({ error: "La seccion 2 solo puede completarse en Pendiente Coordinador" });
       }
@@ -426,7 +430,7 @@
         ]
       );
 
-      const updated = await getById(client, id);
+      const updated = await getByInternalId(client, id);
       const thUsers = await pool.query(
         `SELECT u.email
          FROM usuarios u
@@ -480,9 +484,9 @@
 
     const client = await pool.connect();
     try {
-      const id = await resolveInternalId(client, ID_TABLES.preregistroPersonas, req.params.public_id, { required: true });
-      const current = await getById(client, id);
+      const current = await getByPublicId(client, req.params.public_id);
       if (!current) return res.status(404).json({ error: "Preregistro no encontrado" });
+      const id = current.id;
       if (current.estado !== ESTADOS.pendienteRevisionTh) {
         return res.status(422).json({ error: "Solo se puede editar seccion 2 en Pendiente Revision TH" });
       }
@@ -514,7 +518,7 @@
       if (!sets.length) return res.status(400).json({ error: "No hay campos para actualizar" });
       vals.push(id);
       await client.query(`UPDATE preregistro_personas SET ${sets.join(", ")} WHERE id = $${idx}`, vals);
-      return res.json(formatRow(await getById(client, id)));
+      return res.json(formatRow(await getByInternalId(client, id)));
     } catch (err) {
       if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.status(404).json({ error: "Preregistro no encontrado" });
       console.error(err);
@@ -541,14 +545,16 @@
 
     const client = await pool.connect();
     try {
-      const id = await resolveInternalId(client, ID_TABLES.preregistroPersonas, req.params.public_id, { required: true });
-      const current = await getById(client, id);
+      const current = await getByPublicId(client, req.params.public_id);
       if (!current) return res.status(404).json({ error: "Preregistro no encontrado" });
+      const id = current.id;
       if (![ESTADOS.pendienteRevisionTh, ESTADOS.pendienteCorreoSilver].includes(current.estado)) {
         return res.status(422).json({ error: "No se puede completar seccion 3 en el estado actual" });
       }
 
-      const bancoId = await resolveInternalId(client, ID_TABLES.bancos, banco_id, { required: true });
+      const bancoRes = await client.query("SELECT id FROM bancos WHERE public_id = $1", [banco_id]);
+      if (!bancoRes.rows.length) return res.status(400).json({ error: "Banco no encontrado" });
+      const bancoId = bancoRes.rows[0].id;
       const correoSilverNorm = correo_silver ? String(correo_silver).trim().toLowerCase() : null;
       if (correoSilverNorm) {
         const [dupUser, dupPre] = await Promise.all([
@@ -570,7 +576,7 @@
         [direccion, String(tipo_persona).trim(), bancoId, String(tipo_cuenta).trim(), String(numero_cuenta).trim(), correoSilverNorm, nextState, req.user?.id, id]
       );
 
-      return res.json(formatRow(await getById(client, id)));
+      return res.json(formatRow(await getByInternalId(client, id)));
     } catch (err) {
       if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.status(400).json({ error: "Preregistro o banco no encontrado" });
       console.error(err);
@@ -588,9 +594,9 @@
 
     const client = await pool.connect();
     try {
-      const id = await resolveInternalId(client, ID_TABLES.preregistroPersonas, req.params.public_id, { required: true });
-      const current = await getById(client, id);
+      const current = await getByPublicId(client, req.params.public_id);
       if (!current) return res.status(404).json({ error: "Preregistro no encontrado" });
+      const id = current.id;
       if (current.estado !== ESTADOS.pendienteCorreoSilver) {
         return res.status(422).json({ error: "Solo se puede ingresar correo silver en Pendiente Correo Silver" });
       }
@@ -604,7 +610,7 @@
       }
 
       await client.query(`UPDATE preregistro_personas SET correo_silver = $1 WHERE id = $2`, [correoSilver, id]);
-      return res.json(formatRow(await getById(client, id)));
+      return res.json(formatRow(await getByInternalId(client, id)));
     } catch (err) {
       if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.status(404).json({ error: "Preregistro no encontrado" });
       console.error(err);
@@ -617,14 +623,14 @@
   app.post("/api/preregistros/:public_id/aprobar", requireAccess({ roles: ["Talento Humano"] }), async (req, res) => {
     const client = await pool.connect();
     try {
-      const id = await resolveInternalId(client, ID_TABLES.preregistroPersonas, req.params.public_id, { required: true });
       await client.query("BEGIN");
 
-      const current = await getById(client, id);
+      const current = await getByPublicId(client, req.params.public_id);
       if (!current) {
         await client.query("ROLLBACK");
         return res.status(404).json({ error: "Preregistro no encontrado" });
       }
+      const id = current.id;
       if (![ESTADOS.pendienteRevisionTh, ESTADOS.pendienteCorreoSilver].includes(current.estado)) {
         await client.query("ROLLBACK");
         return res.status(422).json({ error: "El preregistro no esta en un estado aprobable" });
@@ -716,9 +722,9 @@
 
   app.post("/api/preregistros/:public_id/completar", requireAccess({ roles: ["Talento Humano"] }), async (req, res) => {
     try {
-      const id = await resolveInternalId(pool, ID_TABLES.preregistroPersonas, req.params.public_id, { required: true });
-      const current = await getById(pool, id);
+      const current = await getByPublicId(pool, req.params.public_id);
       if (!current) return res.status(404).json({ error: "Preregistro no encontrado" });
+      const id = current.id;
       if (current.estado === ESTADOS.completado) {
         return res.json(formatRow(current));
       }
@@ -736,15 +742,15 @@
       return res.status(400).json({ error: "motivo_anulacion es obligatorio y minimo de 20 caracteres" });
     }
     try {
-      const id = await resolveInternalId(pool, ID_TABLES.preregistroPersonas, req.params.public_id, { required: true });
-      const current = await getById(pool, id);
+      const current = await getByPublicId(pool, req.params.public_id);
       if (!current) return res.status(404).json({ error: "Preregistro no encontrado" });
+      const id = current.id;
       if (current.estado === ESTADOS.completado) {
         return res.status(422).json({ error: "No se puede anular un preregistro Completado" });
       }
 
       await pool.query(`UPDATE preregistro_personas SET estado = $1, motivo_anulacion = $2, anulado_por = $3, fecha_anulacion = NOW() WHERE id = $4`, [ESTADOS.anulado, motivo, req.user?.id, id]);
-      const updated = await getById(pool, id);
+      const updated = await getByInternalId(pool, id);
 
       const tasks = [];
       if (updated?.coordinador_email) {
@@ -794,10 +800,10 @@
         vals.push(hasta);
       }
       if (solicitud_id) {
-        const solicitudId = await resolveInternalId(pool, ID_TABLES.solicitudesRrhh, solicitud_id, { required: false });
-        if (solicitudId) {
+        const solRes = await pool.query("SELECT id FROM solicitudes_rrhh WHERE public_id = $1", [solicitud_id]);
+        if (solRes.rows.length > 0) {
           where.push(`p.id_solicitud_rrhh = $${idx++}`);
-          vals.push(solicitudId);
+          vals.push(solRes.rows[0].id);
         } else {
           return res.json({ page, limit, total: 0, data: [] });
         }
@@ -825,8 +831,7 @@
 
   app.get("/api/preregistros/:public_id", requireAccess({ roles: ["Reclutador", "Coordinador", "Talento Humano", "Administrador"] }), async (req, res) => {
     try {
-      const id = await resolveInternalId(pool, ID_TABLES.preregistroPersonas, req.params.public_id, { required: true });
-      const row = await getById(pool, id);
+      const row = await getByPublicId(pool, req.params.public_id);
       if (!row) return res.status(404).json({ error: "Preregistro no encontrado" });
 
       const role = normalizeValue(req.user?.rol);

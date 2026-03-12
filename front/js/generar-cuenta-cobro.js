@@ -36,7 +36,7 @@ window.cuentaCobroApp = function () {
                 const res = await axios.get(`${API}/horas-por-cobrar/${id}`);
                 this.registros = (res.data || []).map((r) => ({
                     ...r,
-                    caso: r.nro_caso_int_ext || null,
+                    ...this.parseCaseData(r.nro_caso_int_ext, r),
                     checked: false
                 }));
                 this.actualizarPeriodo();
@@ -188,6 +188,49 @@ window.cuentaCobroApp = function () {
 
         irHistorialCobros() {
             window.location.hash = "#mis-cuentas-cobros";
+        },
+
+        parseCaseData(rawValue, row = {}) {
+            const fallbackCliente = String(row?.nro_caso_cliente || "").trim() || null;
+            const fallbackInterno = String(row?.nro_caso_interno || "").trim() || null;
+            const raw = String(rawValue ?? "").trim();
+            if (!raw) {
+                return {
+                    nro_caso_cliente: fallbackCliente,
+                    nro_caso_interno: fallbackInterno
+                };
+            }
+            try {
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === "object") {
+                    const cliente = String(
+                        parsed.nro_caso_cliente ?? parsed.cliente ?? parsed.caso_cliente ?? fallbackCliente ?? ""
+                    ).trim() || null;
+                    const interno = String(
+                        parsed.nro_caso_interno ?? parsed.interno ?? parsed.caso_interno ?? fallbackInterno ?? ""
+                    ).trim() || null;
+                    if (cliente || interno) {
+                        return { nro_caso_cliente: cliente, nro_caso_interno: interno };
+                    }
+                }
+            } catch (err) {
+                // Texto legacy: se replica en ambos campos por compatibilidad visual.
+            }
+            return {
+                nro_caso_cliente: fallbackCliente || raw,
+                nro_caso_interno: fallbackInterno || raw
+            };
+        },
+
+        resumenCaso(item) {
+            const cliente = String(item?.nro_caso_cliente || "").trim();
+            const interno = String(item?.nro_caso_interno || "").trim();
+            if (cliente && interno) return `Caso cliente: ${cliente} | Caso interno: ${interno}`;
+            if (cliente) return `Caso cliente: ${cliente}`;
+            if (interno) return `Caso interno: ${interno}`;
+            const req = String(item?.requerimiento || "").trim();
+            if (req) return `Req: ${req}`;
+            return "Sin caso";
         },
 
         formatearDinero(val) {

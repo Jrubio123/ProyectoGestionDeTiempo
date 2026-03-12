@@ -771,11 +771,11 @@ module.exports = function registerPreregistroRoutes(deps) {
   });
 
   app.get("/api/preregistros", requireAccess({ roles: ["Reclutador", "Coordinador", "Talento Humano", "Administrador"] }), async (req, res) => {
+    const page = Math.max(Number(req.query?.page || 1), 1);
+    const limit = Math.min(Math.max(Number(req.query?.limit || 20), 1), 100);
     try {
       const role = normalizeValue(req.user?.rol);
       const { estado, search, desde, hasta, solicitud_id } = req.query || {};
-      const page = Math.max(Number(req.query?.page || 1), 1);
-      const limit = Math.min(Math.max(Number(req.query?.limit || 20), 1), 100);
       const offset = (page - 1) * limit;
 
       const where = [];
@@ -824,6 +824,16 @@ module.exports = function registerPreregistroRoutes(deps) {
 
       return res.json({ page, limit, total: result.rows.length, data: result.rows.map(formatRow) });
     } catch (err) {
+      if (["42P01", "42703", "42883"].includes(String(err?.code || ""))) {
+        console.error("Preregistro con esquema incompleto, retornando vacio:", err?.message || err);
+        return res.json({
+          page,
+          limit,
+          total: 0,
+          data: [],
+          warning: "Esquema de preregistro pendiente de migracion en base de datos"
+        });
+      }
       console.error(err);
       return res.status(500).json({ error: "Error listando preregistros" });
     }

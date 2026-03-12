@@ -1,137 +1,226 @@
-﻿<div x-data="preregistrosCoordApp()" class="prereg-screen max-w-7xl mx-auto">
-    <div class="prereg-frame">
-        <section class="prereg-hero">
-            <div class="prereg-hero-inner">
+<div x-data="preregistrosCoordApp()" class="max-w-7xl mx-auto space-y-6">
+    <section class="bg-white/80 border border-slate-200 rounded-3xl p-6 shadow-sm">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+                <h1 class="text-2xl font-bold text-slate-900">Contrataciones</h1>
+                <p class="text-sm text-slate-600 mt-1">Gestiona solicitudes de nuevo contrato, extension y retiro con trazabilidad por estado.</p>
+            </div>
+            <button type="button" @click="cargarSolicitudes" class="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50">
+                Actualizar
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-5">
+            <button type="button" @click="abrirModal('Nuevo')" class="text-left rounded-2xl border border-slate-200 p-4 hover:border-emerald-300 hover:bg-emerald-50/40 transition">
+                <p class="text-xs uppercase tracking-wide text-emerald-700 font-bold">Nuevo</p>
+                <p class="text-sm text-slate-800 font-semibold mt-1">Crear Solicitud</p>
+                <p class="text-xs text-slate-500 mt-1">Contrato nuevo (persona nueva o existente)</p>
+            </button>
+            <button type="button" @click="abrirModal('Extension')" class="text-left rounded-2xl border border-slate-200 p-4 hover:border-amber-300 hover:bg-amber-50/40 transition">
+                <p class="text-xs uppercase tracking-wide text-amber-700 font-bold">Extension</p>
+                <p class="text-sm text-slate-800 font-semibold mt-1">Modificar Contrato</p>
+                <p class="text-xs text-slate-500 mt-1">Tarifas, fechas, cliente o supervisor</p>
+            </button>
+            <button type="button" @click="abrirModal('Retiro')" class="text-left rounded-2xl border border-slate-200 p-4 hover:border-rose-300 hover:bg-rose-50/40 transition">
+                <p class="text-xs uppercase tracking-wide text-rose-700 font-bold">Retiro</p>
+                <p class="text-sm text-slate-800 font-semibold mt-1">Retirar Contrato</p>
+                <p class="text-xs text-slate-500 mt-1">Bloqueo de accesos y cierre administrativo</p>
+            </button>
+        </div>
+    </section>
+
+    <section class="bg-white/80 border border-slate-200 rounded-3xl p-4 md:p-6 shadow-sm">
+        <div class="flex flex-col md:flex-row md:items-center gap-3 md:justify-between mb-4">
+            <h2 class="text-base font-bold text-slate-800">Mis Solicitudes</h2>
+            <div class="flex flex-col md:flex-row gap-2">
+                <select x-model="filtroEstado" class="px-3 py-2 rounded-xl border border-slate-200 text-sm">
+                    <option value="">Todos los estados</option>
+                    <template x-for="estado in estadosDisponibles" :key="estado">
+                        <option :value="estado" x-text="estado"></option>
+                    </template>
+                </select>
+                <input type="text" x-model="busqueda" placeholder="Buscar por nombre, doc o correo" class="px-3 py-2 rounded-xl border border-slate-200 text-sm min-w-[250px]">
+            </div>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="text-left text-xs uppercase tracking-wide text-slate-500 border-b border-slate-200">
+                    <tr>
+                        <th class="py-3 pr-3">Tipo</th>
+                        <th class="py-3 pr-3">Consultor</th>
+                        <th class="py-3 pr-3">Cliente</th>
+                        <th class="py-3 pr-3">Fecha</th>
+                        <th class="py-3 pr-3">Estado</th>
+                        <th class="py-3 text-right">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    <template x-if="!solicitudesFiltradas.length">
+                        <tr>
+                            <td colspan="6" class="py-8 text-center text-slate-500">No hay solicitudes para mostrar.</td>
+                        </tr>
+                    </template>
+                    <template x-for="item in solicitudesFiltradas" :key="item.id">
+                        <tr>
+                            <td class="py-3 pr-3 font-semibold text-slate-700" x-text="item.tipo_solicitud"></td>
+                            <td class="py-3 pr-3">
+                                <p class="font-semibold text-slate-800" x-text="`${item.nombre || ''} ${item.apellidos || ''}`.trim()"></p>
+                                <p class="text-xs text-slate-500" x-text="item.numero_documento || 'Sin documento'"></p>
+                            </td>
+                            <td class="py-3 pr-3" x-text="item?.cliente?.nombre || '-' "></td>
+                            <td class="py-3 pr-3" x-text="formatFecha(item.created_at)"></td>
+                            <td class="py-3 pr-3">
+                                <span class="px-2.5 py-1 rounded-full text-xs font-semibold" :class="estadoClass(item.estado)" x-text="item.estado"></span>
+                            </td>
+                            <td class="py-3 text-right space-x-2">
+                                <button type="button" @click="abrirDetalle(item)" class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">Ver</button>
+                                <button type="button" x-show="puedeEnviarTH(item)" @click="enviarATH(item)" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Enviar a TH</button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <div x-show="modalOpen" class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm p-3 md:p-6 overflow-y-auto" style="display: none;">
+        <div class="max-w-5xl mx-auto bg-white rounded-3xl border border-slate-200 shadow-2xl p-5 md:p-7">
+            <div class="flex items-start justify-between gap-4 mb-5">
                 <div>
-                    <div class="flex items-center gap-3">
-                        <h1 class="prereg-title">Onboarding</h1>
-                        <span class="prereg-role-badge">● COORDINADOR</span>
-                    </div>
-                    <p class="prereg-subtitle">Personas contratadas que necesitan datos de proyecto y tarifas.</p>
+                    <h3 class="text-xl font-bold text-slate-900" x-text="`Solicitud ${tipoModal}`"></h3>
+                    <p class="text-sm text-slate-600 mt-1">Busca un usuario existente para autocompletar o diligencia manualmente.</p>
                 </div>
+                <button type="button" @click="cerrarModal" class="px-3 py-2 rounded-xl border border-slate-200 text-slate-700">Cerrar</button>
             </div>
-        </section>
 
-        <section class="prereg-stats">
-            <p class="prereg-stats-label">Filtrar por estado</p>
-            <div class="prereg-stats-grid">
-                <template x-for="card in estadoCards" :key="card.key">
-                    <button type="button" class="prereg-stat-card" :class="[card.tone, filtro === card.key ? 'is-active' : '']" @click="setFiltro(card.key)">
-                        <div class="prereg-stat-dot"></div>
-                        <div class="prereg-stat-count" x-text="String(contarPorKey(card.key)).padStart(2, '0')"></div>
-                        <div class="prereg-stat-name" x-text="card.label"></div>
-                    </button>
-                </template>
-            </div>
-        </section>
-
-        <section class="prereg-content">
-            <div class="prereg-content-header">
-                <span class="prereg-content-title" x-text="tituloFiltro"></span>
-                <div class="prereg-search">
-                    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
-                    <input type="text" placeholder="Buscar por nombre, documento..." x-model="busqueda">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 md:p-4 mb-4">
+                <p class="text-xs uppercase tracking-wide text-slate-500 font-bold mb-2">Buscar Persona Existente</p>
+                <div class="flex gap-2">
+                    <input type="text" x-model="busquedaPersona" placeholder="Nombre, documento o correo" class="flex-1 px-3 py-2 rounded-xl border border-slate-200 text-sm">
+                    <button type="button" @click="buscarPersonas" class="px-4 py-2 rounded-xl bg-slate-800 text-white text-sm">Buscar</button>
+                </div>
+                <div x-show="personasEncontradas.length" class="mt-2 max-h-40 overflow-auto border border-slate-200 rounded-xl bg-white divide-y divide-slate-100">
+                    <template x-for="persona in personasEncontradas" :key="persona.id">
+                        <button type="button" @click="seleccionarPersona(persona)" class="w-full text-left px-3 py-2 hover:bg-slate-50">
+                            <p class="text-sm font-semibold text-slate-800" x-text="persona.nombre_usuario"></p>
+                            <p class="text-xs text-slate-500" x-text="`${persona.numero_documento || 'Sin doc'} · ${persona.correo_empresarial || 'Sin correo'}`"></p>
+                        </button>
+                    </template>
                 </div>
             </div>
 
-            <div class="prereg-cards-grid">
-                <template x-if="!preregistrosFiltrados.length">
-                    <div class="prereg-empty">
-                        <div class="prereg-empty-icon">◎</div>
-                        <div class="prereg-empty-text">No hay preregistros en este estado</div>
-                    </div>
-                </template>
+            <form @submit.prevent="guardarSolicitud" class="space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <input x-model="form.nombre" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Nombres *">
+                    <input x-model="form.apellidos" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Apellidos *">
+                    <select x-model="form.tipo_documento_id" class="px-3 py-2 rounded-xl border border-slate-200">
+                        <option value="">Tipo documento</option>
+                        <template x-for="doc in documentos" :key="doc.id">
+                            <option :value="doc.id" x-text="doc.titulo"></option>
+                        </template>
+                    </select>
+                    <input x-model="form.numero_documento" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Numero documento">
+                    <input x-model="form.correo_personal" type="email" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Correo personal">
+                    <input x-model="form.correo_empresarial" type="email" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Correo empresarial">
+                    <input x-model="form.telefono" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Telefono">
+                    <input x-model="form.ubicacion" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Ubicacion">
+                    <input x-model="form.perfil" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Perfil">
+                    <select x-model="form.supervisor_id" class="px-3 py-2 rounded-xl border border-slate-200">
+                        <option value="">Supervisor / Coordinador</option>
+                        <template x-for="sup in supervisores" :key="sup.id">
+                            <option :value="sup.id" x-text="sup.nombre"></option>
+                        </template>
+                    </select>
+                    <select x-model="form.cliente_id" class="px-3 py-2 rounded-xl border border-slate-200">
+                        <option value="">Cliente</option>
+                        <template x-for="cliente in clientes" :key="cliente.id">
+                            <option :value="cliente.id" x-text="cliente.titulo"></option>
+                        </template>
+                    </select>
+                    <select x-model="form.modulo_id" class="px-3 py-2 rounded-xl border border-slate-200">
+                        <option value="">Modulo</option>
+                        <template x-for="modulo in modulos" :key="modulo.id">
+                            <option :value="modulo.id" x-text="modulo.titulo"></option>
+                        </template>
+                    </select>
+                    <input x-model="form.grupo_app_tiempos" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Grupo APP tiempos">
+                    <input x-model="form.grupo_distribucion" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Grupo distribucion">
+                    <select x-model="form.moneda" class="px-3 py-2 rounded-xl border border-slate-200">
+                        <option value="">Moneda</option>
+                        <option value="COP">COP</option>
+                        <option value="USD">USD</option>
+                    </select>
+                    <select x-model="form.modalidad_contrato" class="px-3 py-2 rounded-xl border border-slate-200">
+                        <option value="">Modalidad contrato</option>
+                        <option value="Full time">Full time</option>
+                        <option value="Medio tiempo">Medio tiempo</option>
+                        <option value="Por horas">Por horas</option>
+                    </select>
+                    <input x-model="form.tarifa_hora" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa hora">
+                    <input x-model="form.tarifa_mes" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa mes">
+                    <input x-model="form.tarifa_medio_tiempo" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa medio tiempo">
+                    <input x-model="form.tarifa_capacitacion" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa capacitacion">
+                </div>
 
-                <template x-for="p in preregistrosFiltrados" :key="p.id">
-                    <article class="prereg-card" :class="cardTone(p.estado)">
-                        <div class="prereg-card-top">
-                            <div>
-                                <div class="prereg-card-name" x-text="`${p.nombre || ''} ${p.apellidos || ''}`.trim() || '-' "></div>
-                                <div class="prereg-card-cargo" x-text="`${p.solicitud?.perfil || '-'} · ${p.solicitud?.nivel || '-'}`"></div>
-                            </div>
-                            <span class="prereg-pill" :class="pillClass(estadoToKey(p.estado))" x-text="pillText(p.estado)"></span>
-                        </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3" x-show="tipoModal === 'Nuevo'">
+                    <input x-model="form.fecha_inicio" type="date" class="px-3 py-2 rounded-xl border border-slate-200">
+                    <input x-model="form.fecha_fin" type="date" class="px-3 py-2 rounded-xl border border-slate-200">
+                </div>
 
-                        <div class="prereg-meta">
-                            <div>
-                                <div class="prereg-meta-label">Cliente</div>
-                                <div class="prereg-meta-val" x-text="p.solicitud?.cliente?.nombre || '-' "></div>
-                            </div>
-                            <div>
-                                <div class="prereg-meta-label">Estado</div>
-                                <div class="prereg-meta-val" x-text="p.estado || '-' "></div>
-                            </div>
-                        </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3" x-show="tipoModal === 'Extension'">
+                    <input x-model="form.fecha_extension_desde" type="date" class="px-3 py-2 rounded-xl border border-slate-200">
+                    <input x-model="form.fecha_extension_hasta" type="date" class="px-3 py-2 rounded-xl border border-slate-200">
+                </div>
 
-                        <div class="prereg-card-footer">
-                            <span class="prereg-time" x-text="`Creado: ${formatFecha(p.created_at)}`"></span>
-                            <button type="button" class="prereg-btn prereg-btn-orange" x-show="requiereAccionCoord(p)" @click="abrirDetalle(p)">Completar datos</button>
-                            <button type="button" class="prereg-btn prereg-btn-ghost" x-show="!requiereAccionCoord(p)" @click="abrirDetalle(p)">Ver detalle</button>
-                        </div>
-                    </article>
-                </template>
-            </div>
-        </section>
+                <div class="grid grid-cols-1 gap-3" x-show="tipoModal === 'Retiro'">
+                    <input x-model="form.fecha_retiro" type="date" class="px-3 py-2 rounded-xl border border-slate-200">
+                </div>
+
+                <textarea x-model="form.necesidad_ti" rows="3" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Que necesitas de TI? (obligatorio) *"></textarea>
+                <textarea x-model="form.observaciones" rows="3" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Observaciones"></textarea>
+
+                <div x-show="erroresFormulario.length" class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-700 text-sm">
+                    <p class="font-semibold">Completa los campos requeridos:</p>
+                    <ul class="list-disc pl-5 mt-1">
+                        <template x-for="error in erroresFormulario" :key="error">
+                            <li x-text="error"></li>
+                        </template>
+                    </ul>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" @click="cerrarModal" class="px-4 py-2 rounded-xl border border-slate-200 text-slate-700">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700">Enviar Solicitud</button>
+                </div>
+            </form>
+        </div>
     </div>
 
-    <div x-show="modalDetalle" class="prereg-modal-backdrop">
-        <div class="prereg-modal-panel">
-            <div class="prereg-modal-head">
+    <div x-show="detalleOpen" class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm p-3 md:p-6 overflow-y-auto" style="display: none;">
+        <div class="max-w-3xl mx-auto bg-white rounded-3xl border border-slate-200 shadow-2xl p-5 md:p-7">
+            <div class="flex items-start justify-between gap-4 mb-4">
                 <div>
-                    <h3 class="prereg-modal-title">Detalle de preregistro</h3>
-                    <p class="prereg-modal-subtitle" x-text="itemActivo?.estado || '-' "></p>
+                    <h3 class="text-xl font-bold text-slate-900">Detalle Solicitud</h3>
+                    <p class="text-sm text-slate-600" x-text="detalle?.estado || '-' "></p>
                 </div>
-                <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarDetalle">Cerrar</button>
+                <button type="button" @click="cerrarDetalle" class="px-3 py-2 rounded-xl border border-slate-200 text-slate-700">Cerrar</button>
             </div>
 
-            <section class="prereg-section">
-                <p class="prereg-section-title">Sección 1 - Datos Personales (solo lectura)</p>
-                <div class="prereg-info-grid">
-                    <div class="prereg-info-card"><p class="prereg-info-label">Nombre completo</p><p class="prereg-info-value" x-text="`${itemActivo?.nombre || ''} ${itemActivo?.apellidos || ''}`.trim() || '-' "></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Documento</p><p class="prereg-info-value" x-text="`${itemActivo?.tipo_documento || '-'} · ${itemActivo?.numero_documento || '-'}`"></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Teléfono</p><p class="prereg-info-value" x-text="itemActivo?.telefono || '-' "></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Correo personal</p><p class="prereg-info-value" x-text="itemActivo?.correo_personal || '-' "></p></div>
-                </div>
-            </section>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Tipo</p><p class="font-semibold" x-text="detalle?.tipo_solicitud || '-' "></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Cliente</p><p class="font-semibold" x-text="detalle?.cliente?.nombre || '-' "></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Nombre</p><p class="font-semibold" x-text="`${detalle?.nombre || ''} ${detalle?.apellidos || ''}`.trim() || '-' "></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Documento</p><p class="font-semibold" x-text="detalle?.numero_documento || '-' "></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Perfil</p><p class="font-semibold" x-text="detalle?.perfil || '-' "></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Supervisor</p><p class="font-semibold" x-text="detalle?.supervisor?.nombre || '-' "></p></div>
+                <div class="rounded-xl border border-slate-200 p-3 md:col-span-2"><p class="text-xs text-slate-500">Necesidad TI</p><p class="font-semibold" x-text="detalle?.necesidad_ti || '-' "></p></div>
+                <div class="rounded-xl border border-slate-200 p-3 md:col-span-2"><p class="text-xs text-slate-500">Observaciones</p><p class="font-semibold" x-text="detalle?.observaciones || '-' "></p></div>
+            </div>
 
-            <section class="prereg-section">
-                <p class="prereg-section-title">Sección 2 - Datos del Puesto</p>
-                <div class="prereg-info-grid mb-3">
-                    <div class="prereg-info-card"><p class="prereg-info-label">Cliente</p><p class="prereg-info-value" x-text="itemActivo?.solicitud?.cliente?.nombre || '-' "></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Módulo</p><p class="prereg-info-value" x-text="itemActivo?.solicitud?.modulo?.nombre || '-' "></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Perfil / Nivel</p><p class="prereg-info-value" x-text="`${itemActivo?.solicitud?.perfil || '-'} · ${itemActivo?.solicitud?.nivel || '-'}`"></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Modalidad / Ubicación</p><p class="prereg-info-value" x-text="`${itemActivo?.solicitud?.modalidad || '-'} · ${itemActivo?.solicitud?.ubicacion || '-'}`"></p></div>
-                </div>
-
-                <div class="prereg-form-grid" :class="{ 'opacity-70': !seccion2Editable }">
-                    <input class="prereg-input" x-model="formS2.responsable_supervisor" :disabled="!seccion2Editable" placeholder="Responsable / Supervisor *">
-                    <input type="date" class="prereg-input" x-model="formS2.fecha_fin" :disabled="!seccion2Editable">
-                    <select class="prereg-input" x-model="formS2.moneda" :disabled="!seccion2Editable"><option value="COP">COP</option><option value="USD">USD</option></select>
-                    <input class="prereg-input" x-model="formS2.pais_pago" :disabled="!seccion2Editable" placeholder="País de pago (opcional)">
-                    <input type="number" step="0.01" class="prereg-input" x-model="formS2.tarifa_hora" :disabled="!seccion2Editable" placeholder="Tarifa Hora">
-                    <input type="number" step="0.01" class="prereg-input" x-model="formS2.tarifa_mes" :disabled="!seccion2Editable" placeholder="Tarifa Mes">
-                    <input type="number" step="0.01" class="prereg-input" x-model="formS2.tarifa_medio_tiempo" :disabled="!seccion2Editable" placeholder="Tarifa Medio Tiempo">
-                    <input type="number" step="0.01" class="prereg-input" x-model="formS2.tarifa_capacitacion" :disabled="!seccion2Editable" placeholder="Tarifa Capacitación">
-                    <label class="prereg-check"><input type="checkbox" x-model="formS2.vpn_corona" :disabled="!seccion2Editable"> VPN Corona</label>
-                    <label class="prereg-check"><input type="checkbox" x-model="formS2.necesita_s_user" :disabled="!seccion2Editable"> Necesita S User</label>
-                    <input class="prereg-input md:col-span-2" x-model="formS2.grupo_usuario" :disabled="!seccion2Editable" placeholder="Grupo de Usuario">
-                    <input class="prereg-input md:col-span-2" x-model="formS2.grupo_distribucion" :disabled="!seccion2Editable" placeholder="Grupo de Distribución">
-                    <textarea class="prereg-input md:col-span-2" x-model="formS2.observaciones" :disabled="!seccion2Editable" placeholder="Observaciones"></textarea>
-                </div>
-            </section>
-
-            <section class="prereg-section">
-                <p class="prereg-section-title">Sección 3 - Datos Legales (solo lectura)</p>
-                <div x-show="!itemActivo?.direccion && !itemActivo?.tipo_persona" class="prereg-placeholder">Pendiente de Talento Humano.</div>
-                <div x-show="itemActivo?.direccion || itemActivo?.tipo_persona" class="prereg-info-grid">
-                    <div class="prereg-info-card"><p class="prereg-info-label">Dirección</p><p class="prereg-info-value" x-text="itemActivo?.direccion || '-' "></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Tipo de persona</p><p class="prereg-info-value" x-text="itemActivo?.tipo_persona || '-' "></p></div>
-                </div>
-            </section>
-
-            <div class="prereg-modal-footer">
-                <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarDetalle" x-text="seccion2Editable ? 'Cancelar' : 'Cerrar'"></button>
-                <button type="button" x-show="seccion2Editable" @click="guardarS2" :disabled="guardandoS2" class="prereg-btn prereg-btn-orange">Guardar y Enviar a TH</button>
+            <div class="flex justify-end gap-2 mt-4">
+                <button type="button" x-show="puedeEnviarTH(detalle)" @click="enviarATH(detalle)" class="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700">Enviar a TH</button>
+                <button type="button" @click="cerrarDetalle" class="px-4 py-2 rounded-xl border border-slate-200 text-slate-700">Cerrar</button>
             </div>
         </div>
     </div>

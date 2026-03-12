@@ -14,6 +14,7 @@ const { NumerosALetras } = require("numero-a-letras");
 const { sendEmail, getGraphAccessToken } = require("./email");
 const { pool, getPoolStats, isTransientDbError } = require("./db");
 const registerPreregistroRoutes = require("./preregistro-routes");
+const registerContratacionesRoutes = require("./contrataciones-routes");
 
 
 const app = express();
@@ -872,7 +873,8 @@ const ID_TABLES = Object.freeze({
   cuentaCobro: "cuenta_cobro",
   reporteHoras: "reporte_horas",
   solicitudesRrhh: "solicitudes_rrhh",
-  preregistroPersonas: "preregistro_personas"
+  preregistroPersonas: "preregistro_personas",
+  solicitudesContratacion: "solicitudes_contratacion"
 });
 
 const ALLOWED_PUBLIC_ID_TABLES = new Set(Object.values(ID_TABLES));
@@ -972,6 +974,15 @@ function toNullableInteger(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return null;
   return Math.trunc(parsed);
+}
+
+function toBooleanInput(value, fallback = false) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "boolean") return value;
+  const raw = String(value).trim().toLowerCase();
+  if (["true", "1", "si", "sí", "yes", "on"].includes(raw)) return true;
+  if (["false", "0", "no", "off"].includes(raw)) return false;
+  return fallback;
 }
 
 function buildUserResponse(userRow) {
@@ -2942,6 +2953,7 @@ app.get("/clientes", requireAccess({ roles: ["Administrador", "Coordinador"] }),
         prefijo,
         correlativo,
         activo,
+        COALESCE(requiere_confirmacion_cliente, false) AS requiere_confirmacion_cliente,
         created_at,
         updated_at
       FROM clientes
@@ -2957,7 +2969,7 @@ app.get("/clientes", requireAccess({ roles: ["Administrador", "Coordinador"] }),
 
 // 2. CREAR CLIENTE
 app.post("/clientes", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
-  const { titulo, nit, prefijo } = req.body;
+  const { titulo, nit, prefijo, requiere_confirmacion_cliente } = req.body;
 
   try {
     // Validar duplicados
@@ -2971,8 +2983,8 @@ app.post("/clientes", requireAccess({ roles: ["Administrador"] }), async (req, r
     const nuevoCorrelativo = corrRes.rows[0].next_val;
 
     const result = await pool.query(
-      `INSERT INTO clientes (titulo, nit, prefijo, correlativo, activo)
-       VALUES ($1, $2, $3, $4, true)
+      `INSERT INTO clientes (titulo, nit, prefijo, correlativo, activo, requiere_confirmacion_cliente)
+       VALUES ($1, $2, $3, $4, true, $5)
        RETURNING
          public_id AS id,
          titulo,
@@ -2980,9 +2992,10 @@ app.post("/clientes", requireAccess({ roles: ["Administrador"] }), async (req, r
          prefijo,
          correlativo,
          activo,
+         COALESCE(requiere_confirmacion_cliente, false) AS requiere_confirmacion_cliente,
          created_at,
          updated_at`,
-      [titulo, nit, prefijo || '', nuevoCorrelativo]
+      [titulo, nit, prefijo || '', nuevoCorrelativo, toBooleanInput(requiere_confirmacion_cliente, false)]
     );
 
     res.json(result.rows[0]);
@@ -2995,14 +3008,17 @@ app.post("/clientes", requireAccess({ roles: ["Administrador"] }), async (req, r
 // 3. EDITAR CLIENTE
 app.put("/clientes/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   const { id } = req.params;
-  const { titulo, nit, prefijo } = req.body;
+  const { titulo, nit, prefijo, requiere_confirmacion_cliente } = req.body;
 
   try {
     const clienteId = await resolveInternalId(pool, ID_TABLES.clientes, id, { required: true });
     const result = await pool.query(
       `UPDATE clientes
-       SET titulo = $1, nit = $2, prefijo = $3
-       WHERE id = $4
+       SET titulo = $1,
+           nit = $2,
+           prefijo = $3,
+           requiere_confirmacion_cliente = $4
+       WHERE id = $5
        RETURNING
          public_id AS id,
          titulo,
@@ -3010,9 +3026,10 @@ app.put("/clientes/:id", requireAccess({ roles: ["Administrador"] }), async (req
          prefijo,
          correlativo,
          activo,
+         COALESCE(requiere_confirmacion_cliente, false) AS requiere_confirmacion_cliente,
          created_at,
          updated_at`,
-      [titulo, nit, prefijo, clienteId]
+      [titulo, nit, prefijo, toBooleanInput(requiere_confirmacion_cliente, false), clienteId]
     );
     if (!result.rows[0]) return res.status(404).json({ error: "Cliente no encontrado" });
     res.json(withPublicId(result.rows[0]));
@@ -3708,6 +3725,46 @@ app.get("/bancos", requireAuthenticated, async (req, res) => {
   }
 });
 
+// Tipos de documento activos
+app.get("/documentos-identidad", requireAuthenticated, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT public_id AS id, titulo, codigo
+      FROM documento_identidad
+      WHERE activo = true
+      ORDER BY titulo ASC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener documentos de identidad" });
+  }
+});
+
+// Supervisores/Coordinadores disponibles para flujos de contratación
+app.get("/supervisores", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        u.public_id AS id,
+        u.nombre_usuario AS nombre,
+        u.email
+      FROM usuarios u
+      LEFT JOIN roles r ON r.id = u.rol_usuario_id
+      WHERE u.activo = true
+        AND (
+          LOWER(COALESCE(r.titulo, '')) IN ('coordinador', 'administrador')
+          OR LOWER(COALESCE(u.tipo_consultor::text, '')) = 'principal'
+        )
+      ORDER BY u.nombre_usuario ASC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener supervisores" });
+  }
+});
+
 
 /* ===============================
    API - RRHH SOLICITUDES
@@ -4086,6 +4143,18 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
 });
 
 registerPreregistroRoutes({
+  app,
+  pool,
+  resolveInternalId,
+  ID_TABLES,
+  normalizeValue,
+  requireAccess,
+  getGraphContext,
+  sendEmailSafe,
+  buildEmailLayout
+});
+
+registerContratacionesRoutes({
   app,
   pool,
   resolveInternalId,
@@ -4704,39 +4773,35 @@ app.post("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador"] }),
     const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, modulo_id, { required: false });
     const tipoAsignacionId = await resolveInternalId(pool, ID_TABLES.tipoAsignacion, tipo_asignacion_id, { required: true });
 
+    const ins = await pool.query(
+      `INSERT INTO tarifa_consultor
+        (id_cliente, consultor_id, modulo_id, id_tipo_asignacion, valor_tarifa, activo)
+       VALUES ($1, $2, $3, $4, $5, true)
+       RETURNING id`,
+      [clienteId, consultorId, moduloId || null, tipoAsignacionId || null, valor]
+    );
+    const tarifaId = ins.rows[0]?.id;
     const result = await pool.query(
-      `WITH ins AS (
-         INSERT INTO tarifa_consultor
-           (id_cliente, consultor_id, modulo_id, id_tipo_asignacion, valor_tarifa, activo)
-         VALUES ($1, $2, $3, $4, $5, true)
-         RETURNING id
-       )
-       SELECT
-         tc.public_id AS id,
-         c.public_id AS cliente_id,
-         u.public_id AS consultor_id,
-         m.public_id AS modulo_id,
-         ta.public_id AS tipo_asignacion_id,
-         tc.valor_tarifa AS valor,
-         tc.activo,
-         c.titulo AS nombre_cliente,
-         u.nombre_usuario AS nombre_consultor,
-         m.titulo AS nombre_modulo,
-         ta.titulo AS tipo_asignacion,
-         u.moneda_cobro AS moneda
-       FROM tarifa_consultor tc
-       JOIN clientes c ON c.id = tc.id_cliente
-       JOIN usuarios u ON u.id = tc.consultor_id
-       LEFT JOIN modulo m ON m.id = tc.modulo_id
-       LEFT JOIN tipo_asignacion ta ON ta.id = tc.id_tipo_asignacion
-       WHERE tc.id = (SELECT id FROM ins)`,
-      [
-        clienteId,
-        consultorId,
-        moduloId || null,
-        tipoAsignacionId || null,
-        valor
-      ]
+      `SELECT
+        tc.public_id AS id,
+        c.public_id AS cliente_id,
+        u.public_id AS consultor_id,
+        m.public_id AS modulo_id,
+        ta.public_id AS tipo_asignacion_id,
+        tc.valor_tarifa AS valor,
+        tc.activo,
+        c.titulo AS nombre_cliente,
+        u.nombre_usuario AS nombre_consultor,
+        m.titulo AS nombre_modulo,
+        ta.titulo AS tipo_asignacion,
+        u.moneda_cobro AS moneda
+      FROM tarifa_consultor tc
+      JOIN clientes c ON c.id = tc.id_cliente
+      JOIN usuarios u ON u.id = tc.consultor_id
+      LEFT JOIN modulo m ON m.id = tc.modulo_id
+      LEFT JOIN tipo_asignacion ta ON ta.id = tc.id_tipo_asignacion
+      WHERE tc.id = $1`,
+      [tarifaId]
     );
     res.json(withPublicId(result.rows[0]));
   } catch (err) {
@@ -4881,34 +4946,31 @@ app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"
     const coordinadorId = await resolveInternalId(pool, ID_TABLES.usuarios, coordinador_id, { required: true });
     const tipoAsignacionId = await resolveInternalId(pool, ID_TABLES.tipoAsignacion, tipo_asignacion_id, { required: true });
 
+    const ins = await pool.query(
+      `INSERT INTO consultorias
+        (id_cliente, coordinador_responsable_id, id_tipo_asignacion, descripcion_consultoria, activo)
+       VALUES ($1, $2, $3, $4, true)
+       RETURNING id`,
+      [clienteId, coordinadorId, tipoAsignacionId, descripcion_consultoria || null]
+    );
+    const consultoriaId = ins.rows[0]?.id;
     const result = await pool.query(
-      `WITH ins AS (
-         INSERT INTO consultorias
-           (id_cliente, coordinador_responsable_id, id_tipo_asignacion, descripcion_consultoria, activo)
-         VALUES ($1, $2, $3, $4, true)
-         RETURNING id
-       )
-       SELECT
-         c.public_id AS id,
-         cli.public_id AS cliente_id,
-         u.public_id AS coordinador_id,
-         ta.public_id AS tipo_asignacion_id,
-         c.descripcion_consultoria,
-         c.activo,
-         cli.titulo AS nombre_cliente,
-         u.nombre_usuario AS nombre_coordinador,
-         ta.titulo AS tipo_asignacion
-       FROM consultorias c
-       JOIN clientes cli ON cli.id = c.id_cliente
-       LEFT JOIN usuarios u ON u.id = c.coordinador_responsable_id
-       LEFT JOIN tipo_asignacion ta ON ta.id = c.id_tipo_asignacion
-       WHERE c.id = (SELECT id FROM ins)`,
-      [
-        clienteId,
-        coordinadorId,
-        tipoAsignacionId,
-        descripcion_consultoria || null
-      ]
+      `SELECT
+        c.public_id AS id,
+        cli.public_id AS cliente_id,
+        u.public_id AS coordinador_id,
+        ta.public_id AS tipo_asignacion_id,
+        c.descripcion_consultoria,
+        c.activo,
+        cli.titulo AS nombre_cliente,
+        u.nombre_usuario AS nombre_coordinador,
+        ta.titulo AS tipo_asignacion
+      FROM consultorias c
+      JOIN clientes cli ON cli.id = c.id_cliente
+      LEFT JOIN usuarios u ON u.id = c.coordinador_responsable_id
+      LEFT JOIN tipo_asignacion ta ON ta.id = c.id_tipo_asignacion
+      WHERE c.id = $1`,
+      [consultoriaId]
     );
     const created = result.rows[0];
 
@@ -5060,6 +5122,7 @@ app.get("/mis-asignaciones-coordinador", requireAccess({ roles: ["Coordinador"] 
           ra.valor_hora,
           ra.valor_dia,
           ra.total_pagar,
+          ra.es_costo_total,
           ra.cantidad_dias,
           ra.fecha_inicio,
           ra.fecha_fin,
@@ -5102,6 +5165,7 @@ app.get("/mis-asignaciones", requireAccess({ roles: ["Consultor", "Consultor Pri
         ra.valor_hora,
         ra.valor_dia,
         ra.total_pagar,
+        ra.es_costo_total,
         ra.estado,
         ra.tipo_servicio,
         ra.nro_caso_interno,
@@ -5158,6 +5222,7 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
         ta.titulo AS nombre_tipo_asignacion,
         ra.horas_asignadas,
         ra.cantidad_dias,
+        ra.es_costo_total,
         CASE
           WHEN ra.horas_asignadas IS NULL THEN NULL
           ELSE GREATEST(ra.horas_asignadas - COALESCE(uso.horas_aprobadas, 0), 0)
@@ -5166,6 +5231,10 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
           WHEN ra.cantidad_dias IS NULL THEN NULL
           ELSE GREATEST(ra.cantidad_dias - COALESCE(uso.dias_aprobados, 0), 0)
         END AS dias_disponibles,
+        CASE
+          WHEN COALESCE(ra.es_costo_total, false) = false OR ra.total_pagar IS NULL THEN NULL
+          ELSE GREATEST(ra.total_pagar - COALESCE(uso.total_aprobado, 0), 0)
+        END AS total_disponible,
         ra.valor_hora,
         ra.valor_dia,
         ra.total_pagar,
@@ -5193,7 +5262,8 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
         LEFT JOIN LATERAL (
           SELECT
             COALESCE(SUM(CASE WHEN rh.estado_reporte = 'Aprobado' THEN rh.horas_reportadas ELSE 0 END), 0) AS horas_aprobadas,
-            COALESCE(SUM(CASE WHEN rh.estado_reporte = 'Aprobado' THEN rh.cantidad_dias_reportados ELSE 0 END), 0) AS dias_aprobados
+            COALESCE(SUM(CASE WHEN rh.estado_reporte = 'Aprobado' THEN rh.cantidad_dias_reportados ELSE 0 END), 0) AS dias_aprobados,
+            COALESCE(SUM(CASE WHEN rh.estado_reporte = 'Aprobado' THEN rh.total_cobrar ELSE 0 END), 0) AS total_aprobado
           FROM reporte_horas rh
           WHERE rh.id_registro_asignacion = ra.id
         ) uso ON true
@@ -5216,13 +5286,23 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
         AND (
           LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%horas por demanda%'
           OR (
+            COALESCE(ra.es_costo_total, false) = true
+            AND (
+              ra.total_pagar IS NOT NULL
+              AND ra.total_pagar > COALESCE(uso.total_aprobado, 0)
+            )
+          )
+          OR (
             (
               LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%full%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%part%'
             )
+            AND COALESCE(ra.es_costo_total, false) = false
             AND (ra.cantidad_dias IS NULL OR ra.cantidad_dias > COALESCE(uso.dias_aprobados, 0))
           )
           OR (
+            COALESCE(ra.es_costo_total, false) = false
+            AND
             NOT (
               LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%full%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%part%'
@@ -5251,8 +5331,8 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
   } = req.body;
 
   try {
-    const horasReportadasNum = toNullableNumber(horas_reportadas);
-    const diasReportadosNum = toNullableInteger(cantidad_dias_reportados);
+    const horasReportadasInput = toNullableNumber(horas_reportadas);
+    const diasReportadosInput = toNullableNumber(cantidad_dias_reportados);
     const totalCobrarNum = toNullableNumber(total_cobrar);
 
     if (!id_registro_asignacion) {
@@ -5286,6 +5366,10 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
         ra.id_modulo,
         ra.horas_asignadas,
         ra.cantidad_dias,
+        ra.valor_hora,
+        ra.valor_dia,
+        ra.total_pagar,
+        ra.es_costo_total,
         ra.consultor_responsable_id,
         con.id_cliente,
         con.id_tipo_asignacion,
@@ -5302,6 +5386,22 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
     }
 
     const info = meta.rows[0];
+    if (!info.consultor_responsable_id) {
+      return res.status(400).json({ error: "La asignación no tiene consultor responsable." });
+    }
+    if (req.user?.id) {
+      const permiso = await pool.query(
+        `SELECT 1
+         FROM usuarios u
+         WHERE u.id = $1
+           AND (u.id = $2 OR u.id_consultor_principal = $2)
+         LIMIT 1`,
+        [info.consultor_responsable_id, req.user.id]
+      );
+      if (permiso.rows.length === 0) {
+        return res.status(403).json({ error: "No tienes permisos para reportar esta asignación" });
+      }
+    }
     const estadosAsignacion = await getEstadoAsignacionValues();
     if (!isAsignacionReportableEstado(info.estado_asignacion, estadosAsignacion)) {
       return res.status(400).json({ error: "La asignación está cerrada y no permite nuevos reportes." });
@@ -5324,13 +5424,49 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
     const esMensual =
       tipoAsignacionTitulo.includes("full") ||
       tipoAsignacionTitulo.includes("part");
+    const esTiempoCostoFijo = tipoAsignacionTitulo.includes("tiempo y costo fijo");
+    const esCostoTotal = esTiempoCostoFijo && toBooleanInput(info.es_costo_total, false);
     const esHorasPorDemanda = tipoAsignacionTitulo.includes("horas por demanda");
-    const cantidadSolicitada = esMensual
-      ? Number(diasReportadosNum || 0)
-      : Number(horasReportadasNum || 0);
+    let cantidadSolicitada = 0;
+    let horasReportadasFinal = 0;
+    let diasReportadosFinal = 0;
+    let totalCobrarFinal = totalCobrarNum;
 
-    if (!(cantidadSolicitada > 0)) {
-      return res.status(400).json({ error: esMensual ? "Debes reportar días mayores a 0" : "Debes reportar horas mayores a 0" });
+    if (esCostoTotal) {
+      const totalAsignado = toNullableNumber(info.total_pagar);
+      if (totalAsignado === null) {
+        return res.status(400).json({ error: "La asignación no tiene presupuesto total configurado." });
+      }
+      cantidadSolicitada = Number(totalCobrarNum || 0);
+      if (!(cantidadSolicitada > 0)) {
+        return res.status(400).json({ error: "Debes reportar un valor mayor a 0 para costo total" });
+      }
+      totalCobrarFinal = Math.round((cantidadSolicitada + Number.EPSILON) * 100) / 100;
+    } else {
+      if (esMensual && diasReportadosInput !== null && !Number.isInteger(diasReportadosInput)) {
+        return res.status(400).json({ error: "Los días reportados deben ser un número entero" });
+      }
+      cantidadSolicitada = esMensual
+        ? Number(diasReportadosInput || 0)
+        : Number(horasReportadasInput || 0);
+      horasReportadasFinal = esMensual ? 0 : Number(horasReportadasInput || 0);
+      diasReportadosFinal = esMensual ? Math.trunc(diasReportadosInput || 0) : 0;
+      const valorHoraAsignado = toNullableNumber(info.valor_hora);
+      const valorDiaAsignado = toNullableNumber(info.valor_dia);
+      if (esMensual) {
+        const tarifaDia = valorDiaAsignado ?? (valorHoraAsignado !== null ? Number(valorHoraAsignado) / 20 : null);
+        if (tarifaDia !== null) {
+          totalCobrarFinal = Number(tarifaDia) * Number(diasReportadosFinal || 0);
+        }
+      } else if (valorHoraAsignado !== null) {
+        totalCobrarFinal = Number(valorHoraAsignado) * Number(horasReportadasFinal || 0);
+      }
+      if (totalCobrarFinal !== null) {
+        totalCobrarFinal = Math.round((Number(totalCobrarFinal) + Number.EPSILON) * 100) / 100;
+      }
+      if (!(cantidadSolicitada > 0)) {
+        return res.status(400).json({ error: esMensual ? "Debes reportar días mayores a 0" : "Debes reportar horas mayores a 0" });
+      }
     }
 
     if (!esHorasPorDemanda) {
@@ -5338,27 +5474,39 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
         `
         SELECT
           COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN horas_reportadas ELSE 0 END), 0) AS horas_aprobadas,
-          COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN cantidad_dias_reportados ELSE 0 END), 0) AS dias_aprobados
+          COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN cantidad_dias_reportados ELSE 0 END), 0) AS dias_aprobados,
+          COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN total_cobrar ELSE 0 END), 0) AS total_aprobado
         FROM reporte_horas
         WHERE id_registro_asignacion = $1
         `,
         [registroAsignacionId]
       );
-      const horasAprobadas = Number(uso.rows[0]?.horas_aprobadas || 0);
-      const diasAprobadas = Number(uso.rows[0]?.dias_aprobadas || 0);
-      const horasAsignadas = toNullableNumber(info.horas_asignadas);
-      const diasAsignados = toNullableNumber(info.cantidad_dias);
-
-      if (esMensual && diasAsignados !== null) {
-        const disponibles = Math.max(diasAsignados - diasAprobadas, 0);
-        if (cantidadSolicitada > disponibles) {
-          return res.status(400).json({ error: `Excede días disponibles de la asignación (${disponibles})` });
+      if (esCostoTotal) {
+        const totalAprobado = Number(uso.rows[0]?.total_aprobado || 0);
+        const totalAsignado = toNullableNumber(info.total_pagar);
+        if (totalAsignado !== null) {
+          const disponibles = Math.max(totalAsignado - totalAprobado, 0);
+          if (cantidadSolicitada > disponibles) {
+            return res.status(400).json({ error: `Excede presupuesto disponible de la asignación (${disponibles})` });
+          }
         }
-      }
-      if (!esMensual && horasAsignadas !== null) {
-        const disponibles = Math.max(horasAsignadas - horasAprobadas, 0);
-        if (cantidadSolicitada > disponibles) {
-          return res.status(400).json({ error: `Excede horas disponibles de la asignación (${disponibles})` });
+      } else {
+        const horasAprobadas = Number(uso.rows[0]?.horas_aprobadas || 0);
+        const diasAprobadas = Number(uso.rows[0]?.dias_aprobadas || 0);
+        const horasAsignadas = toNullableNumber(info.horas_asignadas);
+        const diasAsignados = toNullableNumber(info.cantidad_dias);
+
+        if (esMensual && diasAsignados !== null) {
+          const disponibles = Math.max(diasAsignados - diasAprobadas, 0);
+          if (cantidadSolicitada > disponibles) {
+            return res.status(400).json({ error: `Excede días disponibles de la asignación (${disponibles})` });
+          }
+        }
+        if (!esMensual && horasAsignadas !== null) {
+          const disponibles = Math.max(horasAsignadas - horasAprobadas, 0);
+          if (cantidadSolicitada > disponibles) {
+            return res.status(400).json({ error: `Excede horas disponibles de la asignación (${disponibles})` });
+          }
         }
       }
     }
@@ -5396,9 +5544,9 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
            WHERE id = $12
            RETURNING *`,
         [
-          horasReportadasNum,
-          diasReportadosNum,
-          totalCobrarNum,
+          horasReportadasFinal,
+          diasReportadosFinal,
+          totalCobrarFinal,
           tipo_servicio || null,
           nro_caso_int_ext || null,
           info.id_cliente,
@@ -5420,9 +5568,9 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
            RETURNING *`,
         [
           registroAsignacionId,
-          horasReportadasNum,
-          diasReportadosNum,
-          totalCobrarNum,
+          horasReportadasFinal,
+          diasReportadosFinal,
+          totalCobrarFinal,
           tipo_servicio || null,
           nro_caso_int_ext || null,
           info.id_cliente,
@@ -5474,7 +5622,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
           `El consultor ${correoRow.consultor_nombre || ""} reportó horas.\n` +
           `Cliente: ${correoRow.cliente}\n` +
           `Tipo: ${correoRow.tipo_asignacion || "N/A"}\n` +
-          `Detalle: ${buildReporteResumen({ horas_reportadas: horasReportadasNum, cantidad_dias_reportados: diasReportadosNum, total_cobrar: totalCobrarNum })}\n` +
+          `Detalle: ${buildReporteResumen({ horas_reportadas: horasReportadasFinal, cantidad_dias_reportados: diasReportadosFinal, total_cobrar: totalCobrarFinal })}\n` +
           `Revisar: ${portalUrl}\n`,
         html: buildEmailLayout({
           title: "Aprobación pendiente de reporte",
@@ -5482,7 +5630,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
           blocks: [
             { label: "Cliente", value: correoRow.cliente || "N/A" },
             { label: "Tipo de asignación", value: correoRow.tipo_asignacion || "N/A" },
-            { label: "Resumen", value: buildReporteResumen({ horas_reportadas: horasReportadasNum, cantidad_dias_reportados: diasReportadosNum, total_cobrar: totalCobrarNum }) }
+            { label: "Resumen", value: buildReporteResumen({ horas_reportadas: horasReportadasFinal, cantidad_dias_reportados: diasReportadosFinal, total_cobrar: totalCobrarFinal }) }
           ],
           ctaLabel: "Revisar y aprobar",
           ctaUrl: portalUrl
@@ -7876,10 +8024,12 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
         let estadoAprobadoDestino = estados.proceso;
         const asignacionMeta = await pool.query(
           `SELECT
-             con.id_tipo_asignacion,
-             ta.titulo AS tipo_asignacion_titulo,
-             ra.horas_asignadas,
-             ra.cantidad_dias
+           con.id_tipo_asignacion,
+            ta.titulo AS tipo_asignacion_titulo,
+            ra.horas_asignadas,
+            ra.cantidad_dias,
+            ra.total_pagar,
+            ra.es_costo_total
            FROM registro_asignaciones ra
            JOIN consultorias con ON con.id = ra.id_consultoria
            LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
@@ -7899,13 +8049,16 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
               .toLowerCase()
               .trim();
             const esMensual = tipoNorm.includes("full") || tipoNorm.includes("part");
+            const esTiempoCostoFijo = tipoNorm.includes("tiempo y costo fijo");
+            const esCostoTotal = esTiempoCostoFijo && toBooleanInput(meta.es_costo_total, false);
             const esHorasPorDemanda = tipoNorm.includes("horas por demanda");
             if (!esHorasPorDemanda) {
               const uso = await pool.query(
                 `
                 SELECT
                   COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN horas_reportadas ELSE 0 END), 0) AS horas_aprobadas,
-                  COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN cantidad_dias_reportados ELSE 0 END), 0) AS dias_aprobados
+                  COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN cantidad_dias_reportados ELSE 0 END), 0) AS dias_aprobados,
+                  COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN total_cobrar ELSE 0 END), 0) AS total_aprobado
                 FROM reporte_horas
                 WHERE id_registro_asignacion = $1
                 `,
@@ -7913,11 +8066,14 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
               );
               const horasAsignadas = toNullableNumber(meta.horas_asignadas);
               const diasAsignados = toNullableNumber(meta.cantidad_dias);
+              const totalAsignado = toNullableNumber(meta.total_pagar);
               const horasAprobadas = Number(uso.rows[0]?.horas_aprobadas || 0);
               const diasAprobadas = Number(uso.rows[0]?.dias_aprobadas || 0);
+              const totalAprobado = Number(uso.rows[0]?.total_aprobado || 0);
               const agotadoPorHoras = !esMensual && horasAsignadas !== null && horasAprobadas >= horasAsignadas;
               const agotadoPorDias = esMensual && diasAsignados !== null && diasAprobadas >= diasAsignados;
-              if (agotadoPorHoras || agotadoPorDias) {
+              const agotadoPorTotal = esCostoTotal && totalAsignado !== null && totalAprobado >= totalAsignado;
+              if (agotadoPorHoras || agotadoPorDias || agotadoPorTotal) {
                 estadoAprobadoDestino = estados.cerrado || estados.proceso;
               }
             }
@@ -8036,7 +8192,8 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
     tipo_servicio,
     estado,
     observacion,
-    total_pagar
+    total_pagar,
+    es_costo_total
   } = req.body;
 
   try {
@@ -8045,6 +8202,28 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
     const valorDiaNum = toNullableNumber(valor_dia);
     const totalPagarNum = toNullableNumber(total_pagar);
     const asignacionId = await resolveInternalId(pool, ID_TABLES.registroAsignaciones, id, { required: true });
+    const tipoMeta = await pool.query(
+      `SELECT ta.titulo AS tipo_asignacion_titulo
+       FROM registro_asignaciones ra
+       JOIN consultorias con ON con.id = ra.id_consultoria
+       LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
+       WHERE ra.id = $1
+       LIMIT 1`,
+      [asignacionId]
+    );
+    const tipoNorm = String(tipoMeta.rows[0]?.tipo_asignacion_titulo || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+    const esTiempoCostoFijoTipo = tipoNorm.includes("tiempo y costo fijo");
+    const esCostoTotal = esTiempoCostoFijoTipo && toBooleanInput(es_costo_total, false);
+    const cantidadDiasFinal = esCostoTotal ? null : cantidadDiasNum;
+    const valorHoraFinal = esCostoTotal ? null : valorHoraNum;
+    const valorDiaFinal = esCostoTotal ? null : valorDiaNum;
+    if (esCostoTotal && !(Number(totalPagarNum || 0) > 0)) {
+      return res.status(400).json({ error: "Debes indicar un presupuesto total mayor a 0 para costo total." });
+    }
     const consultorId = await resolveInternalId(pool, ID_TABLES.usuarios, consultor_responsable_id, { required: false });
     const moduloId = await resolveInternalId(pool, ID_TABLES.modulo, id_modulo, { required: false });
     const estados = await getEstadoAsignacionValues();
@@ -8070,23 +8249,25 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
            tipo_servicio = $10,
            estado = COALESCE($11::tipo_estado_asignacion, estado),
            observacion = $12,
-        total_pagar = $13
-       WHERE id = $14
+           total_pagar = $13,
+           es_costo_total = $14
+       WHERE id = $15
        RETURNING *`,
       [
         consultorId || null,
         moduloId || null,
         fecha_inicio || null,
         fecha_fin || null,
-        cantidadDiasNum,
-        valorHoraNum,
-        valorDiaNum,
+        cantidadDiasFinal,
+        valorHoraFinal,
+        valorDiaFinal,
         nro_caso_interno || null,
         nro_caso_cliente || null,
         tipoServicioNormalizado,
         estadoNormalizado,
         observacion || null,
         totalPagarNum,
+        esCostoTotal,
         asignacionId
       ]
     );
@@ -8166,7 +8347,8 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     valor_hora,
     valor_dia,
     tipo_servicio,
-    total_pagar
+    total_pagar,
+    es_costo_total
   } = req.body;
 
   try {
@@ -8175,6 +8357,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     const valorHoraInput = toNullableNumber(valor_hora);
     const valorDiaInput = toNullableNumber(valor_dia);
     const totalPagarInput = toNullableNumber(total_pagar);
+    const esCostoTotalInput = toBooleanInput(es_costo_total, false);
     const estados = await getEstadoAsignacionValues();
     if (!id_consultoria || !consultor_responsable_id || !id_modulo) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
@@ -8229,6 +8412,8 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
       [5, 6].includes(Number(tipoAsignacionId || 0)) ||
       ["mesa de servicio", "fabrica"].includes(tipoAsigNorm);
     const esMensual = tipoAsigNorm.includes("full") || tipoAsigNorm.includes("part");
+    const esTiempoCostoFijo = tipoAsigNorm.includes("tiempo y costo fijo");
+    const esCostoTotalFinal = esTiempoCostoFijo && esCostoTotalInput;
     const esHorasPorDemanda = tipoAsigNorm.includes("horas por demanda");
 
     let valorHoraFinal = valorHoraInput;
@@ -8260,6 +8445,14 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
       horasAsignadasFinal = null;
       cantidadDiasFinal = null;
       totalPagarFinal = 0;
+    } else if (esCostoTotalFinal) {
+      horasAsignadasFinal = null;
+      valorHoraFinal = null;
+      valorDiaFinal = null;
+      if (!(Number(totalPagarInput || 0) > 0)) {
+        return res.status(400).json({ error: "Debes indicar un presupuesto total mayor a 0 para costo total." });
+      }
+      totalPagarFinal = Math.round((Number(totalPagarInput) + Number.EPSILON) * 100) / 100;
     } else if (!esMensual && totalPagarFinal === null && valorHoraFinal !== null && horasAsignadasFinal !== null) {
       totalPagarFinal = valorHoraFinal * horasAsignadasFinal;
     }
@@ -8267,8 +8460,8 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     const result = await pool.query(
       `INSERT INTO registro_asignaciones
         (id_consultoria, id_modulo, consultor_responsable_id, fecha_inicio, fecha_fin,
-         cantidad_dias, horas_asignadas, valor_hora, valor_dia, tipo_servicio, total_pagar, estado, aprobar_coordinador)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::tipo_estado_asignacion,'Pendiente')
+         cantidad_dias, horas_asignadas, valor_hora, valor_dia, tipo_servicio, total_pagar, es_costo_total, estado, aprobar_coordinador)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::tipo_estado_asignacion,'Pendiente')
        RETURNING *`,
       [
         consultoriaId,
@@ -8282,6 +8475,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
         valorDiaFinal,
         tipoServicioNormalizado,
         totalPagarFinal,
+        esCostoTotalFinal,
         estados.abierto
       ]
     );

@@ -4,7 +4,7 @@
             <div class="prereg-hero-inner">
                 <div>
                     <div class="flex items-center gap-3">
-                        <h1 class="prereg-title">Onboarding</h1>
+                        <h1 class="prereg-title">Contrataciones</h1>
                         <span class="prereg-role-badge">● TALENTO HUMANO</span>
                     </div>
                     <p class="prereg-subtitle">Revisión, aprobación y creación de usuarios.</p>
@@ -38,7 +38,7 @@
                 <template x-if="!preregistrosFiltrados.length">
                     <div class="prereg-empty">
                         <div class="prereg-empty-icon">◎</div>
-                        <div class="prereg-empty-text">No hay preregistros en este estado</div>
+                        <div class="prereg-empty-text">No hay contrataciones en este estado</div>
                     </div>
                 </template>
 
@@ -78,7 +78,7 @@
         <div class="prereg-modal-panel">
             <div class="prereg-modal-head">
                 <div>
-                    <h3 class="prereg-modal-title">Detalle de preregistro</h3>
+                    <h3 class="prereg-modal-title">Detalle de contratación</h3>
                     <p class="prereg-modal-subtitle" x-text="itemActivo?.estado || '-' "></p>
                 </div>
                 <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarDetalle">Cerrar</button>
@@ -123,13 +123,13 @@
                 <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarDetalle">Cancelar</button>
                 <button type="button" x-show="seccion3Editable" @click="guardarS3" :disabled="guardandoS3" class="prereg-btn prereg-btn-ghost">Guardar</button>
                 <button type="button" x-show="seccion3Editable" @click="aprobarPreregistro" :disabled="!puedeAprobar || aprobando" class="prereg-btn prereg-btn-teal">Aprobar</button>
-                <button type="button" x-show="itemActivo?.estado !== 'Completado' && itemActivo?.estado !== 'Anulado'" @click="abrirModalAnular" class="prereg-btn prereg-btn-danger">Anular preregistro</button>
+                <button type="button" x-show="itemActivo?.estado !== 'Completado' && itemActivo?.estado !== 'Anulado'" @click="abrirModalAnular" class="prereg-btn prereg-btn-danger">Anular contratación</button>
             </div>
 
             <div x-show="modalAnular" class="prereg-mini-backdrop">
                 <div class="prereg-mini-modal">
                     <h4 class="prereg-mini-title">Confirmar anulación</h4>
-                    <p class="prereg-mini-subtitle">¿Estás seguro de anular este preregistro? Esta acción no se puede deshacer.</p>
+                    <p class="prereg-mini-subtitle">¿Estás seguro de anular esta contratación? Esta acción no se puede deshacer.</p>
                     <textarea rows="4" class="prereg-input mt-3" x-model="motivoAnulacion" placeholder="Motivo (mínimo 20 caracteres)"></textarea>
                     <div class="prereg-mini-footer">
                         <button type="button" @click="modalAnular=false" class="prereg-btn prereg-btn-ghost">Cancelar</button>

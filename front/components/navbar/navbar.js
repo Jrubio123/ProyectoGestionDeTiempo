@@ -51,9 +51,9 @@ function getAllSearchViews() {
         { label: "Generar Cuenta Cobro", hash: "#generar-cuenta-cobro" },
         { label: "Catálogos Admin", hash: "#catalogos-admin" },
         { label: "Solicitudes RRHH", hash: "#solicitudesCoord" },
-        { label: "Preregistros Coordinador", hash: "#preregistrosCoord" },
+        { label: "Contrataciones", hash: "#preregistrosCoord" },
         { label: "Pool de Solicitudes", hash: "#solicitudesRecl" },
-        { label: "Preregistros TH", hash: "#onboardingTH" }
+        { label: "Contrataciones TH", hash: "#onboardingTH" }
     ];
 }
 

@@ -254,6 +254,7 @@ CREATE TABLE clientes
     prefijo VARCHAR(20),
     correlativo INTEGER,
     activo BOOLEAN DEFAULT true,
+    requiere_confirmacion_cliente BOOLEAN DEFAULT false,
 
     -- Información adicional
     direccion TEXT,
@@ -271,6 +272,7 @@ CREATE INDEX idx_clientes_prefijo ON clientes(prefijo);
 COMMENT ON TABLE clientes IS 'Catálogo de clientes de la empresa';
 COMMENT ON COLUMN clientes.titulo IS 'Nombre de la empresa cliente';
 COMMENT ON COLUMN clientes.nit IS 'Número de identificación tributaria';
+COMMENT ON COLUMN clientes.requiere_confirmacion_cliente IS 'Si es true, las solicitudes de nuevo contrato quedan en pendiente de confirmación del cliente antes de enviarse a TH';
 
 -- Tabla: TipoAsignacion
 CREATE TABLE tipo_asignacion
@@ -490,6 +492,7 @@ CREATE TABLE registro_asignaciones
     valor_hora DECIMAL(15, 2),
     valor_dia DECIMAL(15, 2),
     total_pagar DECIMAL(15, 2),
+    es_costo_total BOOLEAN DEFAULT false,
 
     -- Información del caso
     nro_caso_interno TEXT,
@@ -694,6 +697,74 @@ COMMENT ON COLUMN solicitudes_rrhh.presupuesto IS 'Rango salarial o presupuesto 
 CREATE INDEX idx_rrhh_estado ON solicitudes_rrhh(estado);
 CREATE INDEX idx_rrhh_coordinador ON solicitudes_rrhh(coordinador_id);
 CREATE INDEX idx_rrhh_cliente ON solicitudes_rrhh(cliente_id);
+
+CREATE TABLE solicitudes_contratacion (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+
+    tipo_solicitud VARCHAR(20) NOT NULL
+        CHECK (tipo_solicitud IN ('Nuevo', 'Extension', 'Retiro')),
+    estado VARCHAR(50) NOT NULL DEFAULT 'Pendiente'
+        CHECK (estado IN ('Pendiente', 'En Proceso', 'Pendiente Confirmación Cliente', 'Completado', 'Cancelado')),
+
+    coordinador_solicitante_id INT NOT NULL REFERENCES usuarios(id),
+    persona_usuario_id INT REFERENCES usuarios(id),
+    supervisor_id INT REFERENCES usuarios(id),
+    cliente_id INT REFERENCES clientes(id),
+    tipo_documento_id INT REFERENCES documento_identidad(id),
+
+    nombre VARCHAR(150) NOT NULL,
+    apellidos VARCHAR(150) NOT NULL,
+    numero_documento VARCHAR(50),
+    perfil VARCHAR(120),
+
+    correo_personal VARCHAR(255),
+    correo_empresarial VARCHAR(255),
+    telefono VARCHAR(50),
+    ubicacion VARCHAR(120),
+
+    grupo_app_tiempos VARCHAR(150),
+    grupo_distribucion VARCHAR(150),
+
+    moneda VARCHAR(10)
+        CHECK (moneda IN ('COP', 'USD')),
+    tarifa_hora NUMERIC(15,2),
+    tarifa_mes NUMERIC(15,2),
+    tarifa_medio_tiempo NUMERIC(15,2),
+    tarifa_capacitacion NUMERIC(15,2),
+
+    modalidad_contrato VARCHAR(50)
+        CHECK (modalidad_contrato IN ('Full time', 'Medio tiempo', 'Por horas')),
+
+    fecha_inicio DATE,
+    fecha_fin DATE,
+    fecha_extension_desde DATE,
+    fecha_extension_hasta DATE,
+    fecha_retiro DATE,
+
+    necesidad_ti TEXT,
+    observaciones TEXT,
+    datos_extra JSONB DEFAULT '{}'::jsonb,
+
+    requiere_confirmacion_cliente BOOLEAN DEFAULT false,
+    correo_enviado_mesa BOOLEAN DEFAULT false,
+    correo_enviado_th BOOLEAN DEFAULT false,
+    correo_confirmacion_coordinador BOOLEAN DEFAULT false,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+COMMENT ON TABLE solicitudes_contratacion IS 'Solicitudes de contrataciones y cambios de contrato (Nuevo, Extension, Retiro)';
+COMMENT ON COLUMN solicitudes_contratacion.estado IS 'Pendiente, En Proceso, Pendiente Confirmación Cliente, Completado o Cancelado';
+COMMENT ON COLUMN solicitudes_contratacion.requiere_confirmacion_cliente IS 'Cuando aplica (ej. HOLCIM), se debe confirmar con el cliente antes de enviar a TH';
+
+CREATE INDEX idx_contrataciones_tipo ON solicitudes_contratacion(tipo_solicitud);
+CREATE INDEX idx_contrataciones_estado ON solicitudes_contratacion(estado);
+CREATE INDEX idx_contrataciones_coordinador ON solicitudes_contratacion(coordinador_solicitante_id);
+CREATE INDEX idx_contrataciones_cliente ON solicitudes_contratacion(cliente_id);
+CREATE INDEX idx_contrataciones_documento ON solicitudes_contratacion(numero_documento);
+CREATE INDEX idx_contrataciones_created ON solicitudes_contratacion(created_at DESC);
 
 CREATE TABLE preregistro_personas (
     id SERIAL PRIMARY KEY,

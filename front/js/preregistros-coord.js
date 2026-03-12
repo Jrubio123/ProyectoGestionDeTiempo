@@ -1,253 +1,259 @@
-﻿// js/preregistros-coord.js
+// js/preregistros-coord.js
 window.preregistrosCoordApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
 
-    const STATE_BY_STATUS = Object.freeze({
-        "Pendiente Coordinador": "coord",
-        "Pendiente Revision TH": "th",
-        "Pendiente Correo Silver": "silver",
-        Completado: "done",
-        Anulado: "voided"
-    });
-
-    const FILTER_LABELS = Object.freeze({
-        all: "Mostrando todos",
-        coord: "Filtrando: Pendiente Coordinador",
-        th: "Filtrando: Pendiente Revision TH",
-        done: "Filtrando: Completado",
-        voided: "Filtrando: Anulado"
-    });
-
-    const PILL_TEXT = Object.freeze({
-        coord: "P. COORD",
-        th: "P. TH",
-        silver: "P. SILVER",
-        done: "COMPLETADO",
-        voided: "ANULADO",
-        all: "REGISTRO"
-    });
-
-    const emptyS2 = () => ({
-        responsable_supervisor: "",
-        fecha_fin: "",
+    const emptyForm = () => ({
+        persona_usuario_id: "",
+        tipo_documento_id: "",
+        cliente_id: "",
+        supervisor_id: "",
+        modulo_id: "",
+        nombre: "",
+        apellidos: "",
+        numero_documento: "",
+        perfil: "",
+        correo_personal: "",
+        correo_empresarial: "",
+        telefono: "",
+        ubicacion: "",
+        grupo_app_tiempos: "",
+        grupo_distribucion: "",
         moneda: "COP",
-        pais_pago: "",
         tarifa_hora: "",
         tarifa_mes: "",
         tarifa_medio_tiempo: "",
         tarifa_capacitacion: "",
-        vpn_corona: false,
-        necesita_s_user: false,
-        grupo_usuario: "",
-        grupo_distribucion: "",
+        modalidad_contrato: "",
+        fecha_inicio: "",
+        fecha_fin: "",
+        fecha_extension_desde: "",
+        fecha_extension_hasta: "",
+        fecha_retiro: "",
+        necesidad_ti: "",
         observaciones: ""
     });
 
     return {
-        preregistros: [],
-        filtro: "all",
+        solicitudes: [],
+        clientes: [],
+        modulos: [],
+        documentos: [],
+        supervisores: [],
+
+        filtroEstado: "",
         busqueda: "",
-        modalDetalle: false,
-        guardandoS2: false,
-        itemActivo: null,
-        formS2: emptyS2(),
-        estadoCards: [
-            { key: "all", label: "Todos", tone: "tone-all" },
-            { key: "coord", label: "Pendiente Coordinador", tone: "tone-coord" },
-            { key: "th", label: "Pendiente Revision TH", tone: "tone-th" },
-            { key: "done", label: "Completado", tone: "tone-done" },
-            { key: "voided", label: "Anulado", tone: "tone-voided" }
-        ],
+
+        modalOpen: false,
+        detalleOpen: false,
+        tipoModal: "Nuevo",
+        detalle: null,
+
+        form: emptyForm(),
+        busquedaPersona: "",
+        personasEncontradas: [],
+        erroresFormulario: [],
 
         getAuthConfig() {
             const token = window.auth?.getToken?.();
             return token ? { headers: { Authorization: `Bearer ${token}` } } : null;
         },
 
-        async requestWithApiFallback(method, path, payload) {
-            const normalizedPath = String(path || "").startsWith("/") ? String(path) : `/${String(path || "")}`;
-            const candidates = [normalizedPath];
-            if (normalizedPath.startsWith("/api/")) {
-                candidates.push(normalizedPath.replace(/^\/api/, ""));
-            } else {
-                candidates.push(`/api${normalizedPath}`);
-            }
-
-            let lastError = null;
-            for (const routePath of [...new Set(candidates)]) {
-                try {
-                    return await axios({
-                        method,
-                        url: `${API}${routePath}`,
-                        data: payload,
-                        ...(this.getAuthConfig() || {})
-                    });
-                } catch (e) {
-                    lastError = e;
-                    if (e?.response?.status !== 404) throw e;
-                }
-            }
-            throw lastError;
-        },
-
         async init() {
-            await this.cargarPreregistros();
+            await Promise.all([this.cargarCatalogos(), this.cargarSolicitudes()]);
         },
 
-        async cargarPreregistros() {
+        async cargarCatalogos() {
             try {
-                const res = await this.requestWithApiFallback("get", "/api/preregistros?limit=300&page=1");
-                this.preregistros = Array.isArray(res?.data?.data) ? res.data.data : [];
+                const [clientes, modulos, documentos, supervisores] = await Promise.all([
+                    axios.get(`${API}/clientes`, this.getAuthConfig()),
+                    axios.get(`${API}/modulos`, this.getAuthConfig()),
+                    axios.get(`${API}/documentos-identidad`, this.getAuthConfig()),
+                    axios.get(`${API}/supervisores`, this.getAuthConfig())
+                ]);
+                this.clientes = Array.isArray(clientes.data) ? clientes.data : [];
+                this.modulos = Array.isArray(modulos.data) ? modulos.data : [];
+                this.documentos = Array.isArray(documentos.data) ? documentos.data : [];
+                this.supervisores = Array.isArray(supervisores.data) ? supervisores.data : [];
             } catch (e) {
-                this.preregistros = [];
+                this.clientes = [];
+                this.modulos = [];
+                this.documentos = [];
+                this.supervisores = [];
             }
         },
 
-        normalizar(value) {
-            return String(value || "")
-                .normalize("NFD")
-                .replace(/[\u0300-\u036f]/g, "")
-                .toLowerCase()
-                .trim();
-        },
-
-        setFiltro(key) {
-            this.filtro = key;
-        },
-
-        estadoToKey(estado) {
-            return STATE_BY_STATUS[String(estado || "")] || "all";
-        },
-
-        cardTone(estado) {
-            const key = this.estadoToKey(estado);
-            return `estado-${key}`;
-        },
-
-        pillClass(key) {
-            return `tone-${key}`;
-        },
-
-        pillText(estado) {
-            const key = this.estadoToKey(estado);
-            return PILL_TEXT[key] || "REGISTRO";
-        },
-
-        contarPorKey(key) {
-            if (key === "all") return this.preregistros.length;
-            return this.preregistros.filter((p) => this.estadoToKey(p?.estado) === key).length;
-        },
-
-        coincideBusqueda(p) {
-            if (!this.busqueda) return true;
-            const q = this.normalizar(this.busqueda);
-            const campos = [
-                `${p?.nombre || ""} ${p?.apellidos || ""}`,
-                p?.solicitud?.perfil || "",
-                p?.solicitud?.cliente?.nombre || "",
-                p?.numero_documento || "",
-                p?.correo_personal || ""
-            ].map((x) => this.normalizar(x));
-            return campos.some((c) => c.includes(q));
-        },
-
-        get preregistrosFiltrados() {
-            let items = this.preregistros;
-            if (this.filtro !== "all") {
-                items = items.filter((p) => this.estadoToKey(p?.estado) === this.filtro);
+        async cargarSolicitudes() {
+            try {
+                const res = await axios.get(`${API}/contrataciones/solicitudes`, this.getAuthConfig());
+                this.solicitudes = Array.isArray(res.data) ? res.data : [];
+            } catch (e) {
+                this.solicitudes = [];
             }
-            if (this.busqueda) {
-                items = items.filter((p) => this.coincideBusqueda(p));
-            }
-            return items;
         },
 
-        get tituloFiltro() {
-            return FILTER_LABELS[this.filtro] || FILTER_LABELS.all;
+        abrirModal(tipo) {
+            this.tipoModal = tipo;
+            this.modalOpen = true;
+            this.form = emptyForm();
+            this.personasEncontradas = [];
+            this.busquedaPersona = "";
+            this.erroresFormulario = [];
         },
 
-        requiereAccionCoord(p) {
-            return p?.estado === "Pendiente Coordinador";
+        cerrarModal() {
+            this.modalOpen = false;
+            this.form = emptyForm();
+            this.personasEncontradas = [];
+            this.busquedaPersona = "";
+            this.erroresFormulario = [];
         },
 
-        abrirDetalle(p) {
-            this.itemActivo = JSON.parse(JSON.stringify(p || {}));
-            this.formS2 = {
-                responsable_supervisor: p?.responsable_supervisor || "",
-                fecha_fin: p?.fecha_fin ? String(p.fecha_fin).split("T")[0] : "",
-                moneda: p?.moneda || "COP",
-                pais_pago: p?.pais_pago || "",
-                tarifa_hora: p?.tarifa_hora ?? "",
-                tarifa_mes: p?.tarifa_mes ?? "",
-                tarifa_medio_tiempo: p?.tarifa_medio_tiempo ?? "",
-                tarifa_capacitacion: p?.tarifa_capacitacion ?? "",
-                vpn_corona: Boolean(p?.vpn_corona),
-                necesita_s_user: Boolean(p?.necesita_s_user),
-                grupo_usuario: p?.grupo_usuario || "",
-                grupo_distribucion: p?.grupo_distribucion || "",
-                observaciones: p?.observaciones || ""
-            };
-            this.modalDetalle = true;
+        abrirDetalle(item) {
+            this.detalle = item ? JSON.parse(JSON.stringify(item)) : null;
+            this.detalleOpen = true;
         },
 
         cerrarDetalle() {
-            this.modalDetalle = false;
-            this.itemActivo = null;
-            this.formS2 = emptyS2();
-            this.guardandoS2 = false;
+            this.detalleOpen = false;
+            this.detalle = null;
         },
 
-        get seccion2Editable() {
-            return this.itemActivo?.estado === "Pendiente Coordinador";
-        },
-
-        get s2Valida() {
-            const f = this.formS2;
-            return !!String(f.responsable_supervisor || "").trim()
-                && !!String(f.moneda || "").trim()
-                && typeof f.vpn_corona === "boolean"
-                && typeof f.necesita_s_user === "boolean";
-        },
-
-        async guardarS2() {
-            if (!this.itemActivo?.id || !this.seccion2Editable) return;
-            if (!this.s2Valida) {
-                alert("Completa los campos requeridos de la sección 2.");
+        async buscarPersonas() {
+            const q = String(this.busquedaPersona || "").trim();
+            if (q.length < 2) {
+                this.personasEncontradas = [];
                 return;
             }
-            this.guardandoS2 = true;
+            try {
+                const res = await axios.get(`${API}/contrataciones/personas`, {
+                    ...(this.getAuthConfig() || {}),
+                    params: { search: q, limit: 10 }
+                });
+                this.personasEncontradas = Array.isArray(res.data) ? res.data : [];
+            } catch (e) {
+                this.personasEncontradas = [];
+            }
+        },
+
+        seleccionarPersona(persona) {
+            if (!persona) return;
+            this.form.persona_usuario_id = persona.id || "";
+            this.form.tipo_documento_id = persona.tipo_documento_id || "";
+            this.form.numero_documento = persona.numero_documento || "";
+            this.form.correo_empresarial = persona.correo_empresarial || "";
+            this.form.telefono = persona.telefono || "";
+
+            const nombreCompleto = String(persona.nombre_usuario || "").trim();
+            const partes = nombreCompleto ? nombreCompleto.split(/\s+/) : [];
+            if (!this.form.nombre && partes.length) {
+                this.form.nombre = partes.slice(0, 2).join(" ");
+            }
+            if (!this.form.apellidos && partes.length > 2) {
+                this.form.apellidos = partes.slice(2).join(" ");
+            }
+            this.personasEncontradas = [];
+        },
+
+        validarFormulario() {
+            const errors = [];
+            if (!String(this.form.nombre || "").trim()) errors.push("Nombres");
+            if (!String(this.form.apellidos || "").trim()) errors.push("Apellidos");
+            if (!String(this.form.necesidad_ti || "").trim()) errors.push("Que necesitas de TI");
+            if (this.tipoModal === "Nuevo" && !String(this.form.cliente_id || "").trim()) errors.push("Cliente");
+            if (this.tipoModal === "Retiro" && !String(this.form.fecha_retiro || "").trim()) errors.push("Fecha retiro");
+            return errors;
+        },
+
+        async guardarSolicitud() {
+            this.erroresFormulario = this.validarFormulario();
+            if (this.erroresFormulario.length) return;
+
             const payload = {
-                ...this.formS2,
-                responsable_supervisor: String(this.formS2.responsable_supervisor || "").trim(),
-                fecha_fin: this.formS2.fecha_fin || null,
-                moneda: String(this.formS2.moneda || "").trim(),
-                pais_pago: String(this.formS2.pais_pago || "").trim() || null,
-                tarifa_hora: this.formS2.tarifa_hora === "" ? null : Number(this.formS2.tarifa_hora),
-                tarifa_mes: this.formS2.tarifa_mes === "" ? null : Number(this.formS2.tarifa_mes),
-                tarifa_medio_tiempo: this.formS2.tarifa_medio_tiempo === "" ? null : Number(this.formS2.tarifa_medio_tiempo),
-                tarifa_capacitacion: this.formS2.tarifa_capacitacion === "" ? null : Number(this.formS2.tarifa_capacitacion),
-                grupo_usuario: String(this.formS2.grupo_usuario || "").trim() || null,
-                grupo_distribucion: String(this.formS2.grupo_distribucion || "").trim() || null,
-                observaciones: String(this.formS2.observaciones || "").trim() || null
+                ...this.form,
+                tipo_solicitud: this.tipoModal,
+                datos_extra: {
+                    modulo_id: this.form.modulo_id || null
+                }
             };
 
             try {
-                await this.requestWithApiFallback("patch", `/api/preregistros/${this.itemActivo.id}/seccion-2`, payload);
-                await this.cargarPreregistros();
-                this.cerrarDetalle();
+                await axios.post(`${API}/contrataciones/solicitudes`, payload, this.getAuthConfig());
+                this.cerrarModal();
+                await this.cargarSolicitudes();
             } catch (e) {
-                const msg = e?.response?.data?.error || "Error guardando sección 2";
+                const msg = e?.response?.data?.error || "Error creando solicitud";
                 alert(msg);
-            } finally {
-                this.guardandoS2 = false;
             }
         },
 
-        formatFecha(fecha) {
-            if (!fecha) return "-";
-            const d = new Date(fecha);
-            if (Number.isNaN(d.getTime())) return String(fecha);
+        async enviarATH(item) {
+            if (!item?.id) return;
+            if (!confirm("Se enviara esta solicitud a Talento Humano. Deseas continuar?")) return;
+            try {
+                await axios.post(`${API}/contrataciones/solicitudes/${item.id}/enviar-th`, {}, this.getAuthConfig());
+                await this.cargarSolicitudes();
+                if (this.detalle?.id === item.id) {
+                    const actualizado = this.solicitudes.find((s) => s.id === item.id) || null;
+                    this.detalle = actualizado;
+                }
+            } catch (e) {
+                const msg = e?.response?.data?.error || "Error enviando a Talento Humano";
+                alert(msg);
+            }
+        },
+
+        puedeEnviarTH(item) {
+            return (
+                !!item &&
+                item.tipo_solicitud === "Nuevo" &&
+                item.requiere_confirmacion_cliente === true &&
+                item.estado === "Pendiente Confirmación Cliente" &&
+                item.correo_enviado_th !== true
+            );
+        },
+
+        estadoClass(estado) {
+            if (estado === "Completado") return "bg-emerald-100 text-emerald-700";
+            if (estado === "Pendiente Confirmación Cliente") return "bg-amber-100 text-amber-700";
+            if (estado === "En Proceso") return "bg-blue-100 text-blue-700";
+            if (estado === "Pendiente") return "bg-slate-100 text-slate-700";
+            return "bg-slate-100 text-slate-600";
+        },
+
+        formatFecha(value) {
+            if (!value) return "-";
+            const d = new Date(value);
+            if (Number.isNaN(d.getTime())) return String(value);
             return d.toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" });
+        },
+
+        incluyeBusqueda(item) {
+            const q = String(this.busqueda || "").trim().toLowerCase();
+            if (!q) return true;
+            const bag = [
+                `${item?.nombre || ""} ${item?.apellidos || ""}`,
+                item?.numero_documento || "",
+                item?.correo_personal || "",
+                item?.correo_empresarial || "",
+                item?.cliente?.nombre || "",
+                item?.tipo_solicitud || "",
+                item?.estado || ""
+            ]
+                .join(" ")
+                .toLowerCase();
+            return bag.includes(q);
+        },
+
+        get estadosDisponibles() {
+            const set = new Set((this.solicitudes || []).map((s) => s?.estado).filter(Boolean));
+            return Array.from(set);
+        },
+
+        get solicitudesFiltradas() {
+            return (this.solicitudes || []).filter((item) => {
+                if (this.filtroEstado && item?.estado !== this.filtroEstado) return false;
+                return this.incluyeBusqueda(item);
+            });
         }
     };
 };

@@ -48,6 +48,7 @@
                             <div>
                                 <div class="prereg-card-name" x-text="`${p.nombre || ''} ${p.apellidos || ''}`.trim() || '-' "></div>
                                 <div class="prereg-card-cargo" x-text="`${p.solicitud?.perfil || '-'} · ${p.solicitud?.cliente?.nombre || '-'}`"></div>
+                                <div class="text-[11px] text-slate-500 mt-1" x-text="flujoLabel(p)"></div>
                             </div>
                             <span class="prereg-pill" :class="pillClass(estadoToKey(p.estado))" x-text="pillText(p.estado)"></span>
                         </div>
@@ -79,7 +80,7 @@
             <div class="prereg-modal-head">
                 <div>
                     <h3 class="prereg-modal-title">Detalle de contratación</h3>
-                    <p class="prereg-modal-subtitle" x-text="itemActivo?.estado || '-' "></p>
+                    <p class="prereg-modal-subtitle" x-text="`${itemActivo?.estado || '-'} · ${flujoLabel(itemActivo)}`"></p>
                 </div>
                 <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarDetalle">Cerrar</button>
             </div>
@@ -123,7 +124,7 @@
                 <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarDetalle">Cancelar</button>
                 <button type="button" x-show="seccion3Editable" @click="guardarS3" :disabled="guardandoS3" class="prereg-btn prereg-btn-ghost">Guardar</button>
                 <button type="button" x-show="seccion3Editable" @click="aprobarPreregistro" :disabled="!puedeAprobar || aprobando" class="prereg-btn prereg-btn-teal">Aprobar</button>
-                <button type="button" x-show="itemActivo?.estado !== 'Completado' && itemActivo?.estado !== 'Anulado'" @click="abrirModalAnular" class="prereg-btn prereg-btn-danger">Anular contratación</button>
+                <button type="button" x-show="itemActivo?.origen_flujo === 'preregistro' && itemActivo?.estado !== 'Completado' && itemActivo?.estado !== 'Anulado'" @click="abrirModalAnular" class="prereg-btn prereg-btn-danger">Anular contratación</button>
             </div>
 
             <div x-show="modalAnular" class="prereg-mini-backdrop">

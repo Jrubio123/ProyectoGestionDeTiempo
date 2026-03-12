@@ -5891,8 +5891,8 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     const meta = await client.query(
       `
       WITH
-        c_asignacion AS (SELECT id FROM registro_asignaciones WHERE public_id = $1),
-        c_reporte AS (SELECT id FROM reporte_horas WHERE public_id = $3)
+        c_asignacion AS (SELECT id FROM registro_asignaciones WHERE public_id = $1::uuid),
+        c_reporte AS (SELECT id FROM reporte_horas WHERE public_id = $3::uuid)
       SELECT
         ra.id,
         ra.estado AS estado_asignacion,
@@ -5928,6 +5928,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     }
 
     const info = meta.rows[0];
+    const registroId = info.id;
     const estadosAsignacion = await getEstadoAsignacionValues();
     if (!isAsignacionReportableEstado(info.estado_asignacion, estadosAsignacion)) {
       await client.query("ROLLBACK");
@@ -5974,16 +5975,16 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
 
     const editable = await client.query(
       `WITH 
-         c_asignacion AS (SELECT id FROM registro_asignaciones WHERE public_id = $1),
-         c_reporte AS (SELECT id, estado_reporte, nro_caso_int_ext, perfil_fabrica, created_at FROM reporte_horas WHERE public_id = $2)
+         c_asignacion AS (SELECT id FROM registro_asignaciones WHERE public_id = $1::uuid),
+         c_reporte AS (SELECT id, estado_reporte, nro_caso_int_ext, perfil_fabrica, created_at FROM reporte_horas WHERE public_id = $2::uuid)
        SELECT id, estado_reporte, nro_caso_int_ext, perfil_fabrica, created_at
        FROM c_reporte
-       WHERE ($2::text IS NOT NULL)
+       WHERE ($2::uuid IS NOT NULL)
          AND estado_reporte IN ('Revisión', 'Rechazado')
        UNION ALL
        SELECT id, estado_reporte, nro_caso_int_ext, perfil_fabrica, created_at
        FROM reporte_horas
-       WHERE $2::text IS NULL
+       WHERE $2::uuid IS NULL
          AND id_registro_asignacion = (SELECT id FROM c_asignacion)
          AND estado_reporte IN ('Revisión', 'Rechazado')
        ORDER BY created_at DESC NULLS LAST, id DESC
@@ -6156,49 +6157,54 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     );
 
     await client.query("COMMIT");
+    txStarted = false;
 
-    // Notificar coordinador
-    const correoInfo = await pool.query(
-      `SELECT
-         ucoord.email AS coordinador_email,
-         ucoord.nombre_usuario AS coordinador_nombre,
-         ucons.nombre_usuario AS consultor_nombre,
-         c.titulo AS cliente,
-         ta.titulo AS tipo_asignacion
-       FROM consultorias con
-         JOIN clientes c ON con.id_cliente = c.id
-         LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
-         LEFT JOIN usuarios ucoord ON ucoord.id = con.coordinador_responsable_id
-         LEFT JOIN usuarios ucons ON ucons.id = $2
-       WHERE con.id = $1`,
-      [info.id_consultoria, info.consultor_responsable_id]
-    );
-    const correoRow = correoInfo.rows[0];
-    if (correoRow?.coordinador_email) {
-      const portalUrl = buildPortalUrl("aprobar-rechazar-coordinador");
-      await sendEmailSafe({
-        ...getGraphContext(req),
-        to: correoRow.coordinador_email,
-        subject: `⏳ Ticket enviado a aprobación: ${correoRow.consultor_nombre || "consultor"}`,
-        text:
-          `Hola ${correoRow.coordinador_nombre || ""},\n` +
-          `El consultor ${correoRow.consultor_nombre || ""} envió un ticket de Mesa/Fábrica.\n` +
-          `Cliente: ${correoRow.cliente}\n` +
-          `Tipo: ${correoRow.tipo_asignacion || "N/A"}\n` +
-          `Detalle: ${buildReporteResumen(saved.rows[0] || {})}\n` +
-          `Revisar: ${portalUrl}\n`,
-        html: buildEmailLayout({
-          title: "Ticket enviado a aprobación",
-          intro: `Hola <strong>${correoRow.coordinador_nombre || "Coordinador"}</strong>, el consultor <strong>${correoRow.consultor_nombre || "N/A"}</strong> envió un ticket de Mesa/Fábrica para validación.`,
-          blocks: [
-            { label: "Cliente", value: correoRow.cliente || "N/A" },
-            { label: "Tipo de asignación", value: correoRow.tipo_asignacion || "N/A" },
-            { label: "Resumen", value: buildReporteResumen(saved.rows[0] || {}) }
-          ],
-          ctaLabel: "Revisar ticket",
-          ctaUrl: portalUrl
-        })
-      });
+    // Notificación best-effort: si falla correo, el ticket ya quedó enviado.
+    try {
+      const correoInfo = await pool.query(
+        `SELECT
+           ucoord.email AS coordinador_email,
+           ucoord.nombre_usuario AS coordinador_nombre,
+           ucons.nombre_usuario AS consultor_nombre,
+           c.titulo AS cliente,
+           ta.titulo AS tipo_asignacion
+         FROM consultorias con
+           JOIN clientes c ON con.id_cliente = c.id
+           LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
+           LEFT JOIN usuarios ucoord ON ucoord.id = con.coordinador_responsable_id
+           LEFT JOIN usuarios ucons ON ucons.id = $2
+         WHERE con.id = $1`,
+        [info.id_consultoria, info.consultor_responsable_id]
+      );
+      const correoRow = correoInfo.rows[0];
+      if (correoRow?.coordinador_email) {
+        const portalUrl = buildPortalUrl("aprobar-rechazar-coordinador");
+        await sendEmailSafe({
+          ...getGraphContext(req),
+          to: correoRow.coordinador_email,
+          subject: `⏳ Ticket enviado a aprobación: ${correoRow.consultor_nombre || "consultor"}`,
+          text:
+            `Hola ${correoRow.coordinador_nombre || ""},\n` +
+            `El consultor ${correoRow.consultor_nombre || ""} envió un ticket de Mesa/Fábrica.\n` +
+            `Cliente: ${correoRow.cliente}\n` +
+            `Tipo: ${correoRow.tipo_asignacion || "N/A"}\n` +
+            `Detalle: ${buildReporteResumen(saved.rows[0] || {})}\n` +
+            `Revisar: ${portalUrl}\n`,
+          html: buildEmailLayout({
+            title: "Ticket enviado a aprobación",
+            intro: `Hola <strong>${correoRow.coordinador_nombre || "Coordinador"}</strong>, el consultor <strong>${correoRow.consultor_nombre || "N/A"}</strong> envió un ticket de Mesa/Fábrica para validación.`,
+            blocks: [
+              { label: "Cliente", value: correoRow.cliente || "N/A" },
+              { label: "Tipo de asignación", value: correoRow.tipo_asignacion || "N/A" },
+              { label: "Resumen", value: buildReporteResumen(saved.rows[0] || {}) }
+            ],
+            ctaLabel: "Revisar ticket",
+            ctaUrl: portalUrl
+          })
+        });
+      }
+    } catch (mailErr) {
+      console.error("Error notificando ticket a coordinador:", mailErr?.message || mailErr);
     }
 
     const savedRow = withPublicId(saved.rows[0] || {});
@@ -6206,7 +6212,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     res.json(savedRow);
   } catch (err) {
     if (txStarted) {
-      await client.query("ROLLBACK");
+      try { await client.query("ROLLBACK"); } catch (_) {}
     }
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {
       return res.status(404).json({ error: "Ticket o reporte no encontrado" });
@@ -8601,7 +8607,12 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     const cteQuery = `
       WITH 
         c_consultoria AS (
-          SELECT con.id, con.id_cliente, con.id_tipo_asignacion, ta.titulo AS tipo_asig_titulo
+          SELECT
+            con.id,
+            con.id_cliente,
+            con.id_tipo_asignacion,
+            con.coordinador_responsable_id,
+            ta.titulo AS tipo_asig_titulo
           FROM consultorias con
           LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
           WHERE con.public_id = $1::uuid AND con.activo = true
@@ -8612,7 +8623,8 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
           SELECT $4::tipo_estado_asignacion AS st_abierto, $5::tipo_estado_asignacion AS st_proceso
         ),
         
-        -- Validar duplicidad
+        -- Validar duplicidad activa en la misma consultoría, consultor y módulo.
+        -- Para asignaciones con fechas, solo bloquea si el rango se solapa.
         c_dup AS (
           SELECT ra.id
           FROM registro_asignaciones ra
@@ -8620,6 +8632,15 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
           JOIN c_consultor uc ON ra.consultor_responsable_id = uc.id
           JOIN c_modulo m ON ra.id_modulo = m.id
           WHERE ra.estado IN ((SELECT st_abierto FROM c_estados), (SELECT st_proceso FROM c_estados))
+            AND daterange(
+              COALESCE(ra.fecha_inicio, DATE '-infinity'),
+              COALESCE(ra.fecha_fin, DATE 'infinity'),
+              '[]'
+            ) && daterange(
+              COALESCE($13::date, DATE '-infinity'),
+              COALESCE($14::date, DATE 'infinity'),
+              '[]'
+            )
           LIMIT 1
         ),
         
@@ -8816,7 +8837,11 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
        if (!row.diag_consultoria) return res.status(404).json({ error: "Consultoría no válida" });
        if (!row.diag_consultor) return res.status(404).json({ error: "Consultor no encontrado" });
        if (!row.diag_modulo) return res.status(404).json({ error: "Módulo no encontrado" });
-       if (row.diag_dup) return res.status(400).json({ error: "Ya existe asignación para este consultor, cliente y módulo" });
+       if (row.diag_dup) {
+         return res.status(400).json({
+           error: "Ya existe una asignación activa para este consultor y módulo en la consultoría seleccionada (mismo período)."
+         });
+       }
        
        if (row.diag_es_mf && !(Number(row.diag_tarifa_calc) > 0)) {
          return res.status(400).json({ error: "No existe una tarifa vigente para este consultor, cliente, módulo y tipo de asignación." });
@@ -8829,34 +8854,38 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
 
     const created = row;
 
-    // Email al consultor asignado
-    if (created.email_consultor) {
-      const portalUrl = buildPortalUrl("mis-asignaciones-consultor");
-      await sendEmailSafe({
-        ...getGraphContext(req),
-        to: created.email_consultor,
-        subject: `🚀 Nueva asignación: ${created.nombre_modulo || "Proyecto"} - ${created.nombre_cliente}`,
-        text:
-          `Hola ${created.nombre_consultor || ""},\n` +
-          `Tienes una nueva asignación.\n` +
-          `Cliente: ${created.nombre_cliente}\n` +
-          `Tipo: ${created.tipo_asignacion || "N/A"}\n` +
-          `Módulo: ${created.nombre_modulo || "N/A"}\n` +
-          `Coordinador: ${created.nombre_coordinador || "N/A"}\n` +
-          `Ingresa al portal: ${portalUrl}\n`,
-        html: buildEmailLayout({
-          title: "Nueva asignación de actividad",
-          intro: `Hola <strong>${created.nombre_consultor || "Consultor"}</strong>, has sido asignado a una nueva actividad de consultoría.`,
-          blocks: [
-            { label: "Cliente", value: created.nombre_cliente },
-            { label: "Módulo/Tecnología", value: created.nombre_modulo || "N/A" },
-            { label: "Tipo de asignación", value: created.tipo_asignacion || "N/A" },
-            { label: "Coordinador", value: created.nombre_coordinador || "N/A" }
-          ],
-          ctaLabel: "Ver asignación en el portal",
-          ctaUrl: portalUrl
-        })
-      });
+    // Notificación best-effort: no debe revertir ni fallar la creación.
+    try {
+      if (created.email_consultor) {
+        const portalUrl = buildPortalUrl("mis-asignaciones-consultor");
+        await sendEmailSafe({
+          ...getGraphContext(req),
+          to: created.email_consultor,
+          subject: `🚀 Nueva asignación: ${created.nombre_modulo || "Proyecto"} - ${created.nombre_cliente}`,
+          text:
+            `Hola ${created.nombre_consultor || ""},\n` +
+            `Tienes una nueva asignación.\n` +
+            `Cliente: ${created.nombre_cliente}\n` +
+            `Tipo: ${created.tipo_asignacion || "N/A"}\n` +
+            `Módulo: ${created.nombre_modulo || "N/A"}\n` +
+            `Coordinador: ${created.nombre_coordinador || "N/A"}\n` +
+            `Ingresa al portal: ${portalUrl}\n`,
+          html: buildEmailLayout({
+            title: "Nueva asignación de actividad",
+            intro: `Hola <strong>${created.nombre_consultor || "Consultor"}</strong>, has sido asignado a una nueva actividad de consultoría.`,
+            blocks: [
+              { label: "Cliente", value: created.nombre_cliente },
+              { label: "Módulo/Tecnología", value: created.nombre_modulo || "N/A" },
+              { label: "Tipo de asignación", value: created.tipo_asignacion || "N/A" },
+              { label: "Coordinador", value: created.nombre_coordinador || "N/A" }
+            ],
+            ctaLabel: "Ver asignación en el portal",
+            ctaUrl: portalUrl
+          })
+        });
+      }
+    } catch (mailErr) {
+      console.error("Error notificando asignación al consultor:", mailErr?.message || mailErr);
     }
 
     // cleanup response

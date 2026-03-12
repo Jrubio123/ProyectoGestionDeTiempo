@@ -2,14 +2,6 @@
 window.onboardingThApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
 
-    const STATE_BY_STATUS = Object.freeze({
-        "Pendiente Coordinador": "coord",
-        "Pendiente Revision TH": "th",
-        "Pendiente Correo Silver": "silver",
-        Completado: "done",
-        Anulado: "voided"
-    });
-
     const FILTER_LABELS = Object.freeze({
         all: "Mostrando todos",
         coord: "Filtrando: Pendiente Coordinador",
@@ -91,7 +83,7 @@ window.onboardingThApp = function () {
         },
 
         async init() {
-            await Promise.all([this.cargarBancos(), this.cargarPreregistros()]);
+            await Promise.all([this.cargarBancos(), this.cargarRegistros()]);
         },
 
         async cargarBancos() {
@@ -103,13 +95,110 @@ window.onboardingThApp = function () {
             }
         },
 
-        async cargarPreregistros() {
+        async cargarRegistros() {
+            const [preregistros, solicitudes] = await Promise.all([
+                this.fetchPreregistros(),
+                this.fetchSolicitudesContratacion()
+            ]);
+
+            const itemsPreregistro = preregistros.map((item) => ({
+                ...item,
+                origen_flujo: "preregistro"
+            }));
+
+            const itemsContratacion = solicitudes
+                .filter((item) => this.normalizar(item?.datos_extra?.origen || "") !== "rrhh")
+                .map((item) => this.mapContratacionToRegistro(item));
+
+            this.preregistros = [...itemsPreregistro, ...itemsContratacion].sort((a, b) => {
+                const ta = new Date(a?.updated_at || a?.created_at || 0).getTime();
+                const tb = new Date(b?.updated_at || b?.created_at || 0).getTime();
+                return tb - ta;
+            });
+        },
+
+        async fetchPreregistros() {
             try {
                 const res = await this.requestWithApiFallback("get", "/api/preregistros?limit=400&page=1");
-                this.preregistros = Array.isArray(res?.data?.data) ? res.data.data : [];
+                return Array.isArray(res?.data?.data) ? res.data.data : [];
             } catch (e) {
-                this.preregistros = [];
+                return [];
             }
+        },
+
+        async fetchSolicitudesContratacion() {
+            try {
+                const res = await axios.get(`${API}/contrataciones/solicitudes?limit=400`, this.getAuthConfig());
+                return Array.isArray(res?.data) ? res.data : [];
+            } catch (e) {
+                return [];
+            }
+        },
+
+        mapContratacionToRegistro(item) {
+            const tipoDocumentoTitulo = item?.tipo_documento?.titulo || item?.tipo_documento?.codigo || null;
+            const clienteNombre = item?.cliente?.nombre || item?.datos_extra?.cliente_nombre || null;
+            const moduloNombre = item?.datos_extra?.modulo || item?.datos_extra?.modulo_nombre || null;
+            return {
+                id: item?.id,
+                origen_flujo: "contratacion",
+                solicitud: {
+                    id: item?.id,
+                    perfil: item?.perfil || null,
+                    nivel: item?.datos_extra?.nivel || null,
+                    estado: item?.estado || null,
+                    cliente: { id: item?.cliente?.id || null, nombre: clienteNombre },
+                    modulo: { id: item?.datos_extra?.modulo_id || null, nombre: moduloNombre },
+                    coordinador: item?.coordinador || null
+                },
+                nombre: item?.nombre || "",
+                apellidos: item?.apellidos || "",
+                tipo_documento: tipoDocumentoTitulo,
+                numero_documento: item?.numero_documento || null,
+                telefono: item?.telefono || null,
+                correo_personal: item?.correo_personal || null,
+                pais_ubicacion: item?.ubicacion || null,
+                ciudad: null,
+                responsable_supervisor: item?.supervisor?.nombre || null,
+                fecha_fin: item?.fecha_fin || null,
+                moneda: item?.moneda || null,
+                pais_pago: null,
+                tarifa_hora: item?.tarifa_hora ?? null,
+                tarifa_mes: item?.tarifa_mes ?? null,
+                tarifa_medio_tiempo: item?.tarifa_medio_tiempo ?? null,
+                tarifa_capacitacion: item?.tarifa_capacitacion ?? null,
+                vpn_corona: null,
+                necesita_s_user: null,
+                grupo_usuario: item?.grupo_app_tiempos || null,
+                grupo_distribucion: item?.grupo_distribucion || null,
+                observaciones: item?.observaciones || null,
+                direccion: null,
+                tipo_persona: "Natural",
+                banco: null,
+                tipo_cuenta: null,
+                numero_cuenta: null,
+                correo_silver: item?.correo_empresarial || null,
+                estado: item?.estado || "",
+                creado_por: item?.coordinador?.id || null,
+                creado_por_nombre: item?.coordinador?.nombre || null,
+                completado_coordinador_por: item?.coordinador?.id || null,
+                completado_coordinador_por_nombre: item?.coordinador?.nombre || null,
+                completado_th_por: null,
+                completado_th_por_nombre: null,
+                aprobado_por: null,
+                aprobado_por_nombre: null,
+                anulado_por: null,
+                anulado_por_nombre: null,
+                motivo_anulacion: null,
+                id_usuario_creado: item?.persona?.id || null,
+                usuario_creado: item?.persona || null,
+                fecha_completado_coordinador: item?.updated_at || item?.created_at || null,
+                fecha_completado_th: null,
+                fecha_aprobacion: item?.estado === "Completado" ? (item?.updated_at || item?.created_at || null) : null,
+                fecha_anulacion: null,
+                created_at: item?.created_at || null,
+                updated_at: item?.updated_at || item?.created_at || null
+            };
         },
 
         normalizar(value) {
@@ -120,12 +209,31 @@ window.onboardingThApp = function () {
                 .trim();
         },
 
+        flujoLabel(item) {
+            return item?.origen_flujo === "contratacion" ? "Contratación directa" : "Preregistro RRHH";
+        },
+
         setFiltro(key) {
             this.filtro = key;
         },
 
         estadoToKey(estado) {
-            return STATE_BY_STATUS[String(estado || "")] || "all";
+            const e = this.normalizar(estado);
+            if (
+                e === "pendiente coordinador" ||
+                e === "pendiente" ||
+                e === "pendiente confirmacion cliente" ||
+                e.startsWith("pendiente confirm")
+            ) {
+                return "coord";
+            }
+            if (e === "pendiente revision th" || e === "en proceso") {
+                return "th";
+            }
+            if (e === "pendiente correo silver") return "silver";
+            if (e === "completado") return "done";
+            if (e === "anulado") return "voided";
+            return "all";
         },
 
         cardTone(estado) {
@@ -176,12 +284,14 @@ window.onboardingThApp = function () {
         },
 
         accionPrincipalLabel(p) {
+            if (p?.origen_flujo !== "preregistro") return "Ver detalle";
             if (p.estado === "Pendiente Revision TH") return "Completar revisión";
             if (p.estado === "Pendiente Correo Silver") return "Ingresar correo Silver";
             return "Ver detalle";
         },
 
         accionPrincipalClass(p) {
+            if (p?.origen_flujo !== "preregistro") return "prereg-btn prereg-btn-ghost";
             if (p.estado === "Pendiente Correo Silver") return "prereg-btn prereg-btn-purple";
             if (p.estado === "Pendiente Revision TH") return "prereg-btn prereg-btn-teal";
             return "prereg-btn prereg-btn-ghost";
@@ -215,6 +325,7 @@ window.onboardingThApp = function () {
         },
 
         get seccion3Editable() {
+            if (this.itemActivo?.origen_flujo !== "preregistro") return false;
             const e = this.itemActivo?.estado;
             return e === "Pendiente Revision TH" || e === "Pendiente Correo Silver";
         },
@@ -253,7 +364,7 @@ window.onboardingThApp = function () {
                         correo_silver: String(this.formS3.correo_silver || "").trim() || null
                     }
                 );
-                await this.cargarPreregistros();
+                await this.cargarRegistros();
                 this.cerrarDetalle();
             } catch (e) {
                 const msg = e?.response?.data?.error || "Error guardando sección 3";
@@ -264,11 +375,12 @@ window.onboardingThApp = function () {
         },
 
         async aprobarPreregistro() {
+            if (this.itemActivo?.origen_flujo !== "preregistro") return;
             if (!this.itemActivo?.id || !this.puedeAprobar) return;
             this.aprobando = true;
             try {
                 await this.requestWithApiFallback("post", `/api/preregistros/${this.itemActivo.id}/aprobar`, {});
-                await this.cargarPreregistros();
+                await this.cargarRegistros();
                 this.cerrarDetalle();
             } catch (e) {
                 const msg = e?.response?.data?.error || "Error aprobando preregistro";
@@ -284,6 +396,7 @@ window.onboardingThApp = function () {
         },
 
         async confirmarAnulacion() {
+            if (this.itemActivo?.origen_flujo !== "preregistro") return;
             if (!this.itemActivo?.id) return;
             if (String(this.motivoAnulacion || "").trim().length < 20) {
                 alert("El motivo debe tener al menos 20 caracteres.");
@@ -296,7 +409,7 @@ window.onboardingThApp = function () {
                     `/api/preregistros/${this.itemActivo.id}/anular`,
                     { motivo_anulacion: String(this.motivoAnulacion || "").trim() }
                 );
-                await this.cargarPreregistros();
+                await this.cargarRegistros();
                 this.cerrarDetalle();
             } catch (e) {
                 const msg = e?.response?.data?.error || "Error anulando preregistro";

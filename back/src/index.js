@@ -4097,7 +4097,7 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
       return res.status(400).json({ error: "No hay cambios para actualizar" });
     }
 
-    values.push(solicitudId);
+    values.push(before.id);
     const result = await pool.query(
       `
       UPDATE solicitudes_rrhh

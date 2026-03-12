@@ -44,7 +44,7 @@
                             </div>
                             <div class="flex justify-between mt-1 text-xs text-gray-500">
                                 <span x-text="formatDate(r.created_at)"></span>
-                                <span x-text="r.caso || 'Sin caso'"></span>
+                                <span class="max-w-[260px] truncate text-right" :title="resumenCaso(r)" x-text="resumenCaso(r)"></span>
                             </div>
                             <div class="mt-1">
                                 <span class="px-2 py-0.5 rounded bg-gray-100 text-[10px] text-gray-600"

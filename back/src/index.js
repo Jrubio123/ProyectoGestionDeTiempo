@@ -5201,7 +5201,7 @@ app.get("/mis-asignaciones-coordinador", requireAccess({ roles: ["Coordinador"] 
 
     const result = await pool.query(`
       WITH 
-        c_user AS (SELECT id FROM usuarios WHERE public_id = $1::text OR (id = $2::int AND $1::text IS NULL))
+        c_user AS (SELECT id FROM usuarios WHERE public_id::text = $1::text OR (id = $2::int AND $1::text IS NULL))
       SELECT
         ra.public_id AS id,
         con.public_id AS consultoria_id,
@@ -5257,7 +5257,7 @@ app.get("/mis-asignaciones", requireAccess({ roles: ["Consultor", "Consultor Pri
 
     const result = await pool.query(`
       WITH 
-        c_consultor AS (SELECT id, id_consultor_principal FROM usuarios WHERE public_id = $1::text OR (id = $2::int AND $1::text IS NULL))
+        c_consultor AS (SELECT id, id_consultor_principal FROM usuarios WHERE public_id::text = $1::text OR (id = $2::int AND $1::text IS NULL))
       SELECT
         ra.public_id AS id,
         con.public_id AS consultoria_id,
@@ -5321,7 +5321,7 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
 
     const result = await pool.query(`
       WITH 
-        c_consultor AS (SELECT id, id_consultor_principal FROM usuarios WHERE public_id = $1::text OR (id = $2::int AND $1::text IS NULL))
+        c_consultor AS (SELECT id, id_consultor_principal FROM usuarios WHERE public_id::text = $1::text OR (id = $2::int AND $1::text IS NULL))
       SELECT
         ra.public_id AS id,
         con.public_id AS consultoria_id,
@@ -5421,7 +5421,7 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
           )
         )
       ORDER BY ra.id DESC
-    `, [userId || null, estados.abierto, estados.proceso]);
+    `, [consultor_id || null, userId, estados.abierto, estados.proceso]);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -5485,7 +5485,19 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
     }
 
     const info = metaConsulta.rows[0];
-    if (info._existente_estado === "Pendiente") {
+    const existenteRes = await pool.query(
+      `
+      SELECT id, estado_reporte
+      FROM reporte_horas
+      WHERE id_registro_asignacion = $1
+        AND estado_reporte IN ('Pendiente', 'Rechazado')
+      ORDER BY updated_at DESC NULLS LAST, id DESC
+      LIMIT 1
+      `,
+      [info.id]
+    );
+    const existenteRow = existenteRes.rows[0] || null;
+    if (existenteRow?.estado_reporte === "Pendiente") {
       return res.status(400).json({ error: "Ya hay un reporte pendiente para esta asignación" });
     }
 
@@ -8149,7 +8161,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
     }
     const result = await pool.query(
       `
-       WITH c_reporte AS (SELECT id FROM reporte_horas WHERE public_id = $3)
+       WITH c_reporte AS (SELECT id FROM reporte_horas WHERE public_id = $3::uuid)
        UPDATE reporte_horas
        SET estado_reporte = $1,
            motivo_rechazo = $2
@@ -8162,6 +8174,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
       return res.status(404).json({ error: "Reporte no encontrado" });
     }
 
+    const reporteId = result.rows[0]?.id || null;
     const registroId = result.rows[0]?.id_registro_asignacion || null;
     if (registroId) {
       try {
@@ -8368,7 +8381,27 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
         c_meta AS (
           SELECT
             ta.titulo AS tipo_asignacion_titulo,
-            LOWER(TRIM(UNACCENT(ta.titulo))) AS n_tipo
+            REPLACE(
+              REPLACE(
+                REPLACE(
+                  REPLACE(
+                    REPLACE(
+                      REPLACE(LOWER(TRIM(COALESCE(ta.titulo, ''))), 'á', 'a'),
+                      'é',
+                      'e'
+                    ),
+                    'í',
+                    'i'
+                  ),
+                  'ó',
+                  'o'
+                ),
+                'ú',
+                'u'
+              ),
+              'ü',
+              'u'
+            ) AS n_tipo
           FROM c_asignacion a
           JOIN consultorias con ON con.id = a.id_consultoria
           LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
@@ -8507,7 +8540,7 @@ app.delete("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador"
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $2
        RETURNING *`,
-      [estados.cerrado, asignacionId]
+      [estados.cerrado, info.id]
     );
 
     if (!result.rows.length) {
@@ -8571,10 +8604,10 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
           SELECT con.id, con.id_cliente, con.id_tipo_asignacion, ta.titulo AS tipo_asig_titulo
           FROM consultorias con
           LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
-          WHERE con.public_id = $1 AND con.activo = true
+          WHERE con.public_id = $1::uuid AND con.activo = true
         ),
-        c_consultor AS (SELECT id, email, nombre_usuario FROM usuarios WHERE public_id = $2),
-        c_modulo AS (SELECT id, titulo FROM modulo WHERE public_id = $3),
+        c_consultor AS (SELECT id, email, nombre_usuario FROM usuarios WHERE public_id = $2::uuid),
+        c_modulo AS (SELECT id, titulo FROM modulo WHERE public_id = $3::uuid),
         c_estados AS (
           SELECT $4::tipo_estado_asignacion AS st_abierto, $5::tipo_estado_asignacion AS st_proceso
         ),
@@ -8596,7 +8629,27 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
             (SELECT id FROM c_consultoria) AS id_consultoria,
             (SELECT id_cliente FROM c_consultoria) AS id_cliente,
             (SELECT id_tipo_asignacion FROM c_consultoria) AS id_tipo_asignacion,
-            LOWER(TRIM(UNACCENT((SELECT tipo_asig_titulo FROM c_consultoria)))) AS n_tipo,
+            REPLACE(
+              REPLACE(
+                REPLACE(
+                  REPLACE(
+                    REPLACE(
+                      REPLACE(LOWER(TRIM(COALESCE((SELECT tipo_asig_titulo FROM c_consultoria), ''))), 'á', 'a'),
+                      'é',
+                      'e'
+                    ),
+                    'í',
+                    'i'
+                  ),
+                  'ó',
+                  'o'
+                ),
+                'ú',
+                'u'
+              ),
+              'ü',
+              'u'
+            ) AS n_tipo,
             (SELECT id FROM c_consultor) AS id_consultor,
             (SELECT id FROM c_modulo) AS id_modulo
         ),

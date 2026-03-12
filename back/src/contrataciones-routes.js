@@ -455,13 +455,14 @@ module.exports = function registerContratacionesRoutes(deps) {
             di.codigo AS tipo_documento_codigo
           FROM usuarios u
           LEFT JOIN documento_identidad di ON di.id = u.tipo_documento_id
-          WHERE u.activo = true
-            AND (
-              u.nombre_usuario ILIKE $1
-              OR u.email ILIKE $1
-              OR COALESCE(u.cedula, '') ILIKE $1
-            )
-          ORDER BY u.nombre_usuario ASC
+          WHERE (
+            u.nombre_usuario ILIKE $1
+            OR u.email ILIKE $1
+            OR COALESCE(u.cedula, '') ILIKE $1
+          )
+          ORDER BY
+            CASE WHEN COALESCE(u.activo, true) THEN 0 ELSE 1 END,
+            u.nombre_usuario ASC
           LIMIT $2
           `,
           [`%${search}%`, limit]
@@ -637,10 +638,10 @@ module.exports = function registerContratacionesRoutes(deps) {
         const refsRes = await pool.query(
           `
           SELECT
-            (SELECT id FROM usuarios WHERE public_id = $1) AS persona_usuario_id,
-            (SELECT id FROM usuarios WHERE public_id = $2) AS supervisor_id,
-            (SELECT id FROM documento_identidad WHERE public_id = $3) AS tipo_documento_id,
-            (SELECT id FROM clientes WHERE public_id = $4) AS cliente_id
+            (SELECT id FROM usuarios WHERE public_id::text = $1::text) AS persona_usuario_id,
+            (SELECT id FROM usuarios WHERE public_id::text = $2::text) AS supervisor_id,
+            (SELECT id FROM documento_identidad WHERE public_id::text = $3::text) AS tipo_documento_id,
+            (SELECT id FROM clientes WHERE public_id::text = $4::text) AS cliente_id
           `,
           [payload.persona_usuario_id || null, payload.supervisor_id || null, payload.tipo_documento_id || null, payload.cliente_id || null]
         );
@@ -777,7 +778,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         );
 
         const createdId = inserted.rows[0]?.id;
-        const rawSolicitud = await getById(pool, createdId);
+        const rawSolicitud = await getByInternalId(pool, createdId);
         if (!rawSolicitud) {
           return res.status(500).json({ error: "No se pudo recuperar la solicitud creada" });
         }
@@ -846,7 +847,7 @@ module.exports = function registerContratacionesRoutes(deps) {
           [estadoFinal, mailResults.mesa, mailResults.th, mailResults.coordinador, createdId]
         );
 
-        const updated = await getById(pool, createdId);
+        const updated = await getByInternalId(pool, createdId);
         return res.status(201).json(formatRow(updated));
       } catch (err) {
         if (err?.code === "PUBLIC_ID_NOT_FOUND") {

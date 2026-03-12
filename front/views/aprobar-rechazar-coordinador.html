@@ -73,10 +73,15 @@
                             
                             <td class="px-6 py-4 align-top w-48">
                                 <p class="font-bold text-gray-700" x-text="formatDate(r.fecha_reporte)"></p>
-                                <div class="mt-1 flex items-center gap-1 text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded w-fit">
+                                <button
+                                    type="button"
+                                    @click.stop="abrirDetalle(r)"
+                                    class="mt-1 flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2 py-1 rounded border border-emerald-200 transition-colors"
+                                    title="Ver detalle del ticket"
+                                >
                                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"></path></svg>
                                     <span x-text="codigoTicket(r)"></span>
-                                </div>
+                                </button>
                             </td>
 
                             <td class="px-6 py-4 align-top">
@@ -94,6 +99,7 @@
                             <td class="px-6 py-4 align-top">
                                 <p class="font-semibold text-gray-700" x-text="r.nombre_cliente"></p>
                                 <p class="text-xs text-gray-500 mb-1" x-text="r.nombre_modulo"></p>
+                                <p class="text-[11px] text-gray-500 mb-1" :title="resumenCaso(r)" x-text="resumenCaso(r)"></p>
                                 <span class="text-[10px] uppercase font-bold tracking-wider text-green-600 bg-green-50 px-2 py-0.5 rounded border border-green-100" x-text="r.nombre_tipo_asignacion"></span>
                             </td>
 
@@ -130,6 +136,66 @@
             <div x-show="reportesFiltrados.length === 0" class="flex flex-col items-center justify-center h-64 text-gray-400">
                 <svg class="w-16 h-16 mb-4 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                 <p>No hay solicitudes pendientes.</p>
+            </div>
+        </div>
+    </div>
+
+    <div
+        x-show="modalDetalle.open"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-3"
+        x-transition.opacity
+        x-cloak
+    >
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-start justify-between gap-4">
+                <div>
+                    <h3 class="text-lg font-bold text-gray-900">Detalle del Ticket</h3>
+                    <p class="text-sm text-gray-500" x-text="modalDetalle.reporte ? codigoTicket(modalDetalle.reporte) : ''"></p>
+                </div>
+                <button @click="cerrarDetalle" class="p-2 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+
+            <div x-show="modalDetalle.reporte" class="mt-5 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                <div class="rounded-xl border border-gray-200 p-3 bg-gray-50">
+                    <p class="text-xs uppercase text-gray-400 font-bold">Consultor</p>
+                    <p class="font-semibold text-gray-800" x-text="modalDetalle.reporte?.nombre_consultor || '-'"></p>
+                    <p class="text-xs text-gray-500" x-text="modalDetalle.reporte?.email_consultor || '-'"></p>
+                </div>
+                <div class="rounded-xl border border-gray-200 p-3 bg-gray-50">
+                    <p class="text-xs uppercase text-gray-400 font-bold">Cliente / Modulo</p>
+                    <p class="font-semibold text-gray-800" x-text="modalDetalle.reporte?.nombre_cliente || '-'"></p>
+                    <p class="text-xs text-gray-500" x-text="modalDetalle.reporte?.nombre_modulo || '-'"></p>
+                </div>
+                <div class="rounded-xl border border-gray-200 p-3 bg-gray-50">
+                    <p class="text-xs uppercase text-gray-400 font-bold">Caso cliente</p>
+                    <p class="font-semibold text-gray-800 break-words" x-text="casoCliente(modalDetalle.reporte) || '-'"></p>
+                </div>
+                <div class="rounded-xl border border-gray-200 p-3 bg-gray-50">
+                    <p class="text-xs uppercase text-gray-400 font-bold">Caso interno</p>
+                    <p class="font-semibold text-gray-800 break-words" x-text="casoInterno(modalDetalle.reporte) || '-'"></p>
+                </div>
+                <div class="rounded-xl border border-gray-200 p-3 bg-gray-50">
+                    <p class="text-xs uppercase text-gray-400 font-bold">Cantidad reportada</p>
+                    <p class="font-semibold text-gray-800" x-text="resumenCantidad(modalDetalle.reporte)"></p>
+                </div>
+                <div class="rounded-xl border border-gray-200 p-3 bg-gray-50">
+                    <p class="text-xs uppercase text-gray-400 font-bold">Total a cobrar</p>
+                    <p class="font-semibold text-gray-800" x-text="formatearDinero(modalDetalle.reporte?.total_cobrar || 0)"></p>
+                </div>
+                <div class="rounded-xl border border-gray-200 p-3 bg-gray-50 md:col-span-2">
+                    <p class="text-xs uppercase text-gray-400 font-bold">Referencia adicional</p>
+                    <p class="font-semibold text-gray-800 break-words" x-text="referenciaTicket(modalDetalle.reporte) || '-'"></p>
+                </div>
+                <div class="rounded-xl border border-gray-200 p-3 bg-gray-50 md:col-span-2">
+                    <p class="text-xs uppercase text-gray-400 font-bold">Asignacion</p>
+                    <p class="font-semibold text-gray-800" x-text="modalDetalle.reporte?.tipo_servicio || '-'"></p>
+                    <p class="text-xs text-gray-500 mt-1">
+                        <span x-text="`Periodo: ${periodoAsignacion(modalDetalle.reporte)}`"></span>
+                    </p>
+                    <p class="text-xs text-gray-500 mt-1 break-words" x-text="modalDetalle.reporte?.asignacion_observacion || '-'"></p>
+                </div>
             </div>
         </div>
     </div>

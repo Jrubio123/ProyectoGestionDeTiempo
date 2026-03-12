@@ -6,6 +6,7 @@ window.aprobacionApp = function () {
         reportes: [],
         filters: { cliente: "", tipo: "", search: "" },
         modalRechazo: { open: false, id: null, motivo: "" },
+        modalDetalle: { open: false, reporte: null },
 
         async init() {
             await this.cargarDatos();
@@ -27,10 +28,15 @@ window.aprobacionApp = function () {
                 const matchTipo = !f.tipo || r.nombre_tipo_asignacion === f.tipo;
                 const search = (f.search || "").toLowerCase();
                 const codigo = this.codigoTicket(r).toLowerCase();
+                const casoCliente = this.casoCliente(r).toLowerCase();
+                const casoInterno = this.casoInterno(r).toLowerCase();
+                const referencia = this.referenciaTicket(r).toLowerCase();
                 const matchSearch =
                     !search ||
                     (r.nombre_consultor || "").toLowerCase().includes(search) ||
-                    (r.nro_caso_int_ext || "").toLowerCase().includes(search) ||
+                    casoCliente.includes(search) ||
+                    casoInterno.includes(search) ||
+                    referencia.includes(search) ||
                     codigo.includes(search);
                 return matchCli && matchTipo && matchSearch;
             });
@@ -60,6 +66,14 @@ window.aprobacionApp = function () {
 
         abrirRechazo(id) {
             this.modalRechazo = { open: true, id: id, motivo: "" };
+        },
+
+        abrirDetalle(reporte) {
+            this.modalDetalle = { open: true, reporte: { ...(reporte || {}) } };
+        },
+
+        cerrarDetalle() {
+            this.modalDetalle = { open: false, reporte: null };
         },
 
         async confirmarRechazo() {
@@ -109,6 +123,73 @@ window.aprobacionApp = function () {
                 .replace(/[\u0300-\u036f]/g, "")
                 .toLowerCase()
                 .trim();
+        },
+
+        parseCasePayload(rawValue) {
+            const raw = String(rawValue ?? "").trim();
+            if (!raw) {
+                return { nro_caso_cliente: "", nro_caso_interno: "" };
+            }
+            try {
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === "object") {
+                    return {
+                        nro_caso_cliente: String(parsed.nro_caso_cliente ?? parsed.cliente ?? parsed.caso_cliente ?? "").trim(),
+                        nro_caso_interno: String(parsed.nro_caso_interno ?? parsed.interno ?? parsed.caso_interno ?? "").trim()
+                    };
+                }
+            } catch (err) {
+                // Texto simple legacy.
+            }
+            return { nro_caso_cliente: raw, nro_caso_interno: raw };
+        },
+
+        casoCliente(item) {
+            const directo = String(item?.nro_caso_cliente || "").trim();
+            if (directo) return directo;
+            const fallback = String(item?.asignacion_nro_caso_cliente || "").trim();
+            if (fallback) return fallback;
+            return this.parseCasePayload(item?.nro_caso_int_ext).nro_caso_cliente || "";
+        },
+
+        casoInterno(item) {
+            const directo = String(item?.nro_caso_interno || "").trim();
+            if (directo) return directo;
+            const fallback = String(item?.asignacion_nro_caso_interno || "").trim();
+            if (fallback) return fallback;
+            return this.parseCasePayload(item?.nro_caso_int_ext).nro_caso_interno || "";
+        },
+
+        resumenCaso(item) {
+            const cliente = this.casoCliente(item);
+            const interno = this.casoInterno(item);
+            if (cliente && interno) return `Cliente: ${cliente} | Interno: ${interno}`;
+            if (cliente) return `Cliente: ${cliente}`;
+            if (interno) return `Interno: ${interno}`;
+            return "Sin caso";
+        },
+
+        referenciaTicket(item) {
+            const req = String(item?.requerimiento || "").trim();
+            const wricef = String(item?.wricef || "").trim();
+            const perfil = String(item?.perfil_fabrica || "").trim();
+            return [req, wricef, perfil].filter(Boolean).join(" | ");
+        },
+
+        resumenCantidad(item) {
+            const dias = Number(item?.cantidad_dias_reportados || 0);
+            const horas = Number(item?.horas_reportadas || 0);
+            if (dias > 0 && horas > 0) return `${dias} dias | ${horas} horas`;
+            if (dias > 0) return `${dias} dias`;
+            if (horas > 0) return `${horas} horas`;
+            return "-";
+        },
+
+        periodoAsignacion(item) {
+            const inicio = this.formatDate(item?.asignacion_fecha_inicio || "");
+            const fin = this.formatDate(item?.asignacion_fecha_fin || "");
+            if (inicio && fin) return `${inicio} a ${fin}`;
+            return inicio || fin || "-";
         },
 
         codigoTicket(item) {

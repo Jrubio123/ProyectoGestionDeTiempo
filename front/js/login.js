@@ -5,9 +5,12 @@ window.authApp = function () {
     const SAVED_USERS_KEY = "LOCAL_LOGIN_USERS";
     const isLocalMode = String(window.APP_MODE || "").toLowerCase() === "local";
     const isTestMode = String(window.APP_MODE || "").toLowerCase() === "test";
+    const isProdMode = String(window.APP_MODE || "").toLowerCase() === "prod";
     const forceSwitch =
         window.location.search.includes("switch=1") ||
         window.location.search.includes("forceLogin=1");
+    const manualAuth = window.location.search.includes("manual=1");
+    const autoMicrosoftLogin = isProdMode && !forceSwitch && !manualAuth;
     const isCallback =
         window.location.pathname.includes("/auth/callback") ||
         window.location.search.includes("code=") ||
@@ -101,6 +104,7 @@ window.authApp = function () {
         password: "",
         isLocalMode,
         isTestMode,
+        isProdMode,
         savedUsers: [],
         msalInstance: null,
 
@@ -108,7 +112,10 @@ window.authApp = function () {
             if (isCallback) return;
             this.savedUsers = getSavedUsers();
 
-            if (!window.msal || !window.msal.PublicClientApplication) return;
+            if (!window.msal || !window.msal.PublicClientApplication) {
+                if (isProdMode) this.error = "No se pudo iniciar autenticación Microsoft.";
+                return;
+            }
             const config = buildMsalConfig();
             if (!config) return;
             this.msalInstance = new window.msal.PublicClientApplication(config);
@@ -118,6 +125,9 @@ window.authApp = function () {
                 if (String(e?.errorCode || "").includes("interaction_in_progress")) {
                     clearMsalInteraction();
                 }
+            }
+            if (autoMicrosoftLogin) {
+                await this.loginMicrosoft();
             }
         },
 

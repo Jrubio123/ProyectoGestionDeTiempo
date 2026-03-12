@@ -63,20 +63,29 @@
         /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(host);
 
     const isKnownTestFront = (config.test_front_hosts || []).includes(host);
+    const isAzureStaticHost = host.includes("azurestaticapps.net");
+    const isProdHost = isAzureStaticHost && !isKnownTestFront;
     const inferredMode = isKnownTestFront
         ? "test"
-        : host.includes("azurestaticapps.net")
+        : isProdHost
             ? "prod"
             : (isLocalHost ? "local" : null);
 
+    // In production/test hosts we ignore a stale localStorage mode to prevent local/test UI flicker.
     const localSafeStoredMode = isLocalHost && storedMode === "prod" ? null : storedMode;
-    let mode = modeParam || localSafeStoredMode || inferredMode || config.mode;
+    const storedModeCandidate = (isProdHost || isKnownTestFront) ? null : localSafeStoredMode;
+    let mode = modeParam || inferredMode || storedModeCandidate || config.mode;
     if (mode === "auto") {
-        mode = inferredMode || "local";
+        mode = inferredMode || (isProdHost ? "prod" : "local");
     }
+    if (isProdHost && !modeParam) mode = "prod";
+    if (isKnownTestFront && !modeParam) mode = "test";
 
     if (modeParam) setSafe("APP_MODE", modeParam);
     if (apiParam) setSafe("APP_API_BASE", normalizeApiBase(apiParam));
+    if ((isProdHost || isKnownTestFront) && !modeParam) {
+        setSafe("APP_MODE", mode);
+    }
 
     const sameHostApi =
         host && !host.includes("azurestaticapps.net")
@@ -96,6 +105,8 @@
     }
 
     window.APP_MODE = mode;
+    window.APP_IS_PROD = mode === "prod";
+    window.APP_IS_TEST = mode === "test";
     window.API_BASE = normalizeApiBase(apiParam || (shouldIgnoreStoredApi ? "" : storedApi) || apiFromMode);
     window.AZURE_TENANT_ID = config.azure_tenant_id;
     window.AZURE_CLIENT_ID = config.azure_client_id;

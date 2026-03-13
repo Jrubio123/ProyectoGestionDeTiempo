@@ -67,7 +67,7 @@
                         <div class="prereg-card-footer">
                             <span class="prereg-time" x-text="`Actualizado: ${formatFecha(p.updated_at || p.created_at)}`"></span>
                             <button type="button" :class="accionPrincipalClass(p)" @click="ejecutarAccionPrincipal(p)" x-text="accionPrincipalLabel(p)"></button>
-                            <button type="button" class="prereg-btn prereg-btn-ghost" @click="abrirDetalle(p)">Ver</button>
+                            <button type="button" class="prereg-btn prereg-btn-ghost" @click="abrirDetalleResuelto(p)">Ver</button>
                         </div>
                     </article>
                 </template>

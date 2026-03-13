@@ -108,7 +108,13 @@ window.onboardingThApp = function () {
 
             const preregistroIds = new Set(
                 itemsPreregistro
-                    .map((item) => String(item?.id || "").trim())
+                    .map((item) => this.normalizarId(item?.id))
+                    .filter(Boolean)
+            );
+
+            const rrhhSolicitudIds = new Set(
+                itemsPreregistro
+                    .map((item) => this.normalizarId(item?.solicitud?.id))
                     .filter(Boolean)
             );
 
@@ -117,11 +123,13 @@ window.onboardingThApp = function () {
                     const origen = this.normalizar(item?.datos_extra?.origen || "");
                     if (origen !== "rrhh") return true;
 
-                    const preregistroId = String(item?.datos_extra?.preregistro_id || "").trim();
-                    if (!preregistroId) return true;
+                    const preregistroId = this.normalizarId(item?.datos_extra?.preregistro_id);
+                    if (preregistroId && preregistroIds.has(preregistroId)) return false;
 
-                    // Si el preregistro vinculado existe, se usa ese flujo (Sección 3 editable con Guardar/Aprobar).
-                    return !preregistroIds.has(preregistroId);
+                    const rrhhSolicitudId = this.normalizarId(item?.datos_extra?.rrhh_solicitud_id);
+                    if (rrhhSolicitudId && rrhhSolicitudIds.has(rrhhSolicitudId)) return false;
+
+                    return true;
                 })
                 .map((item) => this.mapContratacionToRegistro(item));
 
@@ -160,6 +168,8 @@ window.onboardingThApp = function () {
                 origen_flujo: "contratacion",
                 origen_contratacion: origenContratacion,
                 preregistro_id: item?.datos_extra?.preregistro_id || null,
+                rrhh_solicitud_id: item?.datos_extra?.rrhh_solicitud_id || null,
+                datos_extra: item?.datos_extra || {},
                 solicitud: {
                     id: item?.id,
                     perfil: item?.perfil || null,
@@ -226,6 +236,12 @@ window.onboardingThApp = function () {
                 .replace(/[\u0300-\u036f]/g, "")
                 .toLowerCase()
                 .trim();
+        },
+
+        normalizarId(value) {
+            return String(value || "")
+                .trim()
+                .toLowerCase();
         },
 
         flujoLabel(item) {
@@ -327,11 +343,33 @@ window.onboardingThApp = function () {
 
         buscarPreregistroVinculado(item) {
             if (!item || item?.origen_flujo !== "contratacion") return null;
-            const preregistroId = String(item?.preregistro_id || "").trim();
-            if (!preregistroId) return null;
-            return this.preregistros.find((p) =>
-                p?.origen_flujo === "preregistro" && String(p?.id || "").trim() === preregistroId
-            ) || null;
+
+            const preregistroId = this.normalizarId(item?.preregistro_id || item?.datos_extra?.preregistro_id);
+            if (preregistroId) {
+                const byPreregistroId = this.preregistros.find(
+                    (p) => p?.origen_flujo === "preregistro" && this.normalizarId(p?.id) === preregistroId
+                );
+                if (byPreregistroId) return byPreregistroId;
+            }
+
+            const rrhhSolicitudId = this.normalizarId(item?.rrhh_solicitud_id || item?.datos_extra?.rrhh_solicitud_id);
+            if (rrhhSolicitudId) {
+                const bySolicitud = this.preregistros.find(
+                    (p) => p?.origen_flujo === "preregistro" && this.normalizarId(p?.solicitud?.id) === rrhhSolicitudId
+                );
+                if (bySolicitud) return bySolicitud;
+            }
+
+            return null;
+        },
+
+        abrirDetalleResuelto(item, focoCorreo = false) {
+            const preregistroVinculado = this.buscarPreregistroVinculado(item);
+            if (preregistroVinculado) {
+                this.abrirDetalle(preregistroVinculado, preregistroVinculado?.estado === "Pendiente Correo Silver");
+                return;
+            }
+            this.abrirDetalle(item, focoCorreo);
         },
 
         async ejecutarAccionPrincipal(p) {
@@ -347,7 +385,7 @@ window.onboardingThApp = function () {
                 await this.marcarRevisionThContratacion(p);
                 return;
             }
-            this.abrirDetalle(p, p?.estado === "Pendiente Correo Silver");
+            this.abrirDetalleResuelto(p, p?.estado === "Pendiente Correo Silver");
         },
 
         async marcarRevisionThContratacion(item) {

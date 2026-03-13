@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS solicitudes_contratacion (
     tipo_solicitud VARCHAR(20) NOT NULL
         CHECK (tipo_solicitud IN ('Nuevo', 'Extension', 'Retiro')),
     estado VARCHAR(50) NOT NULL DEFAULT 'Pendiente'
-        CHECK (estado IN ('Pendiente', 'En Proceso', 'Pendiente Confirmación Cliente', 'Completado', 'Cancelado')),
+        CHECK (estado IN ('Pendiente', 'En Proceso', 'Pendiente Confirmación Cliente', 'Pendiente Revision TH', 'Completado', 'Cancelado')),
 
     coordinador_solicitante_id INT NOT NULL REFERENCES usuarios(id),
     persona_usuario_id INT REFERENCES usuarios(id),
@@ -57,6 +57,9 @@ CREATE TABLE IF NOT EXISTS solicitudes_contratacion (
     correo_enviado_mesa BOOLEAN DEFAULT false,
     correo_enviado_th BOOLEAN DEFAULT false,
     correo_confirmacion_coordinador BOOLEAN DEFAULT false,
+    revisado_th_por INT REFERENCES usuarios(id),
+    fecha_revision_th TIMESTAMP,
+    observaciones_th TEXT,
 
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()

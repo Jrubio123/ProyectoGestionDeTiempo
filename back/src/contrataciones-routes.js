@@ -1183,6 +1183,58 @@ module.exports = function registerContratacionesRoutes(deps) {
   );
 
   app.patch(
+    "/contrataciones/solicitudes/:id/seccion-3",
+    requireAccess({ roles: ["Administrador", "Talento Humano"] }),
+    async (req, res) => {
+      try {
+        const row = await getByPublicId(pool, req.params.id);
+        if (!row) return res.status(404).json({ error: "Solicitud no encontrada" });
+        const internalId = row.id;
+
+        if (row.estado !== ESTADOS.pendienteRevisionTh) {
+          return res.status(422).json({ error: `Solo se puede editar la sección 3 en estado '${ESTADOS.pendienteRevisionTh}'` });
+        }
+
+        const bancoId     = toNullableNumber(req.body?.banco_id);
+        const tipoCuenta  = toNullableString(req.body?.tipo_cuenta);
+        const numeroCuenta = toNullableString(req.body?.numero_cuenta);
+        const direccion   = toNullableString(req.body?.direccion);
+        const tipoPersona = toNullableString(req.body?.tipo_persona);
+        const correoSilver = toNullableString(req.body?.correo_silver);
+
+        // Guarda datos bancarios en datos_extra y correo silver en correo_empresarial
+        await pool.query(
+          `
+          UPDATE solicitudes_contratacion
+          SET
+            correo_empresarial = COALESCE($1, correo_empresarial),
+            datos_extra        = datos_extra || $2::jsonb,
+            updated_at         = NOW()
+          WHERE id = $3
+          `,
+          [
+            correoSilver,
+            JSON.stringify({
+              banco_id:      bancoId,
+              tipo_cuenta:   tipoCuenta,
+              numero_cuenta: numeroCuenta,
+              direccion:     direccion,
+              tipo_persona:  tipoPersona
+            }),
+            internalId
+          ]
+        );
+
+        const updated = await getByInternalId(pool, internalId);
+        return res.json(formatRow(updated));
+      } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: "Error guardando sección 3 de contratación" });
+      }
+    }
+  );
+
+  app.patch(
     "/contrataciones/solicitudes/:id/revision-th",
     requireAccess({ roles: ["Administrador", "Talento Humano"] }),
     async (req, res) => {
@@ -1196,6 +1248,9 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
         if (row.estado !== ESTADOS.pendienteRevisionTh) {
           return res.status(422).json({ error: `La solicitud debe estar en '${ESTADOS.pendienteRevisionTh}' para ser revisada por TH` });
+        }
+        if (!toNullableString(row.correo_empresarial)) {
+          return res.status(422).json({ error: "Se requiere el correo Silver antes de completar la revisión TH" });
         }
 
         const observaciones = toNullableString(req.body?.observaciones_th);

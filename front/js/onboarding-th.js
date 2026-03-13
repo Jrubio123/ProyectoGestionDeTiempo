@@ -1,4 +1,4 @@
-﻿// js/onboarding-th.js
+// js/onboarding-th.js
 window.onboardingThApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
 
@@ -200,11 +200,11 @@ window.onboardingThApp = function () {
                 grupo_usuario: item?.grupo_app_tiempos || null,
                 grupo_distribucion: item?.grupo_distribucion || null,
                 observaciones: item?.observaciones || null,
-                direccion: null,
-                tipo_persona: "Natural",
-                banco: null,
-                tipo_cuenta: null,
-                numero_cuenta: null,
+                direccion: item?.datos_extra?.direccion || null,
+                tipo_persona: item?.datos_extra?.tipo_persona || "Natural",
+                banco: item?.datos_extra?.banco_id ? { id: item.datos_extra.banco_id } : null,
+                tipo_cuenta: item?.datos_extra?.tipo_cuenta || null,
+                numero_cuenta: item?.datos_extra?.numero_cuenta || null,
                 correo_silver: item?.correo_empresarial || null,
                 estado: item?.estado || "",
                 creado_por: item?.coordinador?.id || null,
@@ -382,7 +382,8 @@ window.onboardingThApp = function () {
             }
 
             if (this.esContratacionPendienteRevisionTh(p)) {
-                await this.marcarRevisionThContratacion(p);
+                // Abre el modal para que TH pueda ingresar banco y correo Silver antes de completar
+                this.abrirDetalle(p, false);
                 return;
             }
             this.abrirDetalleResuelto(p, p?.estado === "Pendiente Correo Silver");
@@ -432,9 +433,14 @@ window.onboardingThApp = function () {
         },
 
         get seccion3Editable() {
-            if (this.itemActivo?.origen_flujo !== "preregistro") return false;
-            const e = this.itemActivo?.estado;
-            return e === "Pendiente Revision TH" || e === "Pendiente Correo Silver";
+            if (this.itemActivo?.origen_flujo === "preregistro") {
+                const e = this.itemActivo?.estado;
+                return e === "Pendiente Revision TH" || e === "Pendiente Correo Silver";
+            }
+            if (this.itemActivo?.origen_flujo === "contratacion") {
+                return this.itemActivo?.estado === "Pendiente Revision TH";
+            }
+            return false;
         },
 
         get s3BaseValida() {
@@ -451,6 +457,12 @@ window.onboardingThApp = function () {
             return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(this.formS3.correo_silver || "").trim());
         },
 
+        get puedeCompletarContratacion() {
+            if (this.itemActivo?.origen_flujo !== "contratacion") return false;
+            if (!this.seccion3Editable) return false;
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(this.formS3.correo_silver || "").trim());
+        },
+
         async guardarS3() {
             if (!this.itemActivo?.id || !this.seccion3Editable) return;
             if (!this.s3BaseValida) {
@@ -459,18 +471,33 @@ window.onboardingThApp = function () {
             }
             this.guardandoS3 = true;
             try {
-                await this.requestWithApiFallback(
-                    "patch",
-                    `/api/preregistros/${this.itemActivo.id}/seccion-3`,
-                    {
-                        direccion: String(this.formS3.direccion || "").trim(),
-                        tipo_persona: String(this.formS3.tipo_persona || "").trim(),
-                        banco_id: this.formS3.banco_id,
-                        tipo_cuenta: String(this.formS3.tipo_cuenta || "").trim(),
-                        numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
-                        correo_silver: String(this.formS3.correo_silver || "").trim() || null
-                    }
-                );
+                if (this.itemActivo.origen_flujo === "contratacion") {
+                    await axios.patch(
+                        `${API}/contrataciones/solicitudes/${this.itemActivo.id}/seccion-3`,
+                        {
+                            direccion:     String(this.formS3.direccion || "").trim(),
+                            tipo_persona:  String(this.formS3.tipo_persona || "").trim(),
+                            banco_id:      this.formS3.banco_id || null,
+                            tipo_cuenta:   String(this.formS3.tipo_cuenta || "").trim(),
+                            numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
+                            correo_silver: String(this.formS3.correo_silver || "").trim() || null
+                        },
+                        this.getAuthConfig()
+                    );
+                } else {
+                    await this.requestWithApiFallback(
+                        "patch",
+                        `/api/preregistros/${this.itemActivo.id}/seccion-3`,
+                        {
+                            direccion:     String(this.formS3.direccion || "").trim(),
+                            tipo_persona:  String(this.formS3.tipo_persona || "").trim(),
+                            banco_id:      this.formS3.banco_id,
+                            tipo_cuenta:   String(this.formS3.tipo_cuenta || "").trim(),
+                            numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
+                            correo_silver: String(this.formS3.correo_silver || "").trim() || null
+                        }
+                    );
+                }
                 await this.cargarRegistros();
                 this.cerrarDetalle();
             } catch (e) {
@@ -478,6 +505,40 @@ window.onboardingThApp = function () {
                 alert(msg);
             } finally {
                 this.guardandoS3 = false;
+            }
+        },
+
+        async completarRevisionContratacion() {
+            if (!this.puedeCompletarContratacion) return;
+            if (!confirm("¿Completar la revisión TH de esta contratación?")) return;
+            this.aprobando = true;
+            try {
+                // Primero guarda la sección 3
+                await axios.patch(
+                    `${API}/contrataciones/solicitudes/${this.itemActivo.id}/seccion-3`,
+                    {
+                        direccion:     String(this.formS3.direccion || "").trim(),
+                        tipo_persona:  String(this.formS3.tipo_persona || "").trim(),
+                        banco_id:      this.formS3.banco_id || null,
+                        tipo_cuenta:   String(this.formS3.tipo_cuenta || "").trim(),
+                        numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
+                        correo_silver: String(this.formS3.correo_silver || "").trim() || null
+                    },
+                    this.getAuthConfig()
+                );
+                // Luego marca como revisado/completado
+                await axios.patch(
+                    `${API}/contrataciones/solicitudes/${this.itemActivo.id}/revision-th`,
+                    { observaciones_th: null },
+                    this.getAuthConfig()
+                );
+                await this.cargarRegistros();
+                this.cerrarDetalle();
+            } catch (e) {
+                const msg = e?.response?.data?.error || "Error completando revisión TH";
+                alert(msg);
+            } finally {
+                this.aprobando = false;
             }
         },
 

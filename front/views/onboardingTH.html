@@ -1,4 +1,4 @@
-﻿<div x-data="onboardingThApp()" class="prereg-screen max-w-7xl mx-auto">
+<div x-data="onboardingThApp()" class="prereg-screen max-w-7xl mx-auto">
     <div class="prereg-frame">
         <section class="prereg-hero">
             <div class="prereg-hero-inner">
@@ -122,8 +122,17 @@
 
             <div class="prereg-modal-footer">
                 <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarDetalle">Cancelar</button>
-                <button type="button" x-show="seccion3Editable" @click="guardarS3" :disabled="guardandoS3" class="prereg-btn prereg-btn-ghost">Guardar</button>
-                <button type="button" x-show="seccion3Editable" @click="aprobarPreregistro" :disabled="!puedeAprobar || aprobando" class="prereg-btn prereg-btn-teal">Aprobar</button>
+                <button type="button" x-show="seccion3Editable" @click="guardarS3" :disabled="guardandoS3" class="prereg-btn prereg-btn-ghost">
+                    <span x-text="guardandoS3 ? 'Guardando...' : 'Guardar'"></span>
+                </button>
+                <!-- Botón Aprobar: solo para preregistros -->
+                <button type="button" x-show="seccion3Editable && itemActivo?.origen_flujo === 'preregistro'" @click="aprobarPreregistro" :disabled="!puedeAprobar || aprobando" class="prereg-btn prereg-btn-teal">
+                    <span x-text="aprobando ? 'Aprobando...' : 'Aprobar'"></span>
+                </button>
+                <!-- Botón Completar revisión: solo para contrataciones en Pendiente Revision TH -->
+                <button type="button" x-show="seccion3Editable && itemActivo?.origen_flujo === 'contratacion'" @click="completarRevisionContratacion" :disabled="!puedeCompletarContratacion || aprobando" class="prereg-btn prereg-btn-teal">
+                    <span x-text="aprobando ? 'Completando...' : 'Completar revisión'"></span>
+                </button>
                 <button type="button" x-show="itemActivo?.origen_flujo === 'preregistro' && itemActivo?.estado !== 'Completado' && itemActivo?.estado !== 'Anulado'" @click="abrirModalAnular" class="prereg-btn prereg-btn-danger">Anular contratación</button>
             </div>
 

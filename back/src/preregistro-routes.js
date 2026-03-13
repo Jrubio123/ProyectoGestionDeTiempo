@@ -821,6 +821,20 @@ module.exports = function registerPreregistroRoutes(deps) {
       );
       await client.query("COMMIT");
 
+      // Sincronizar el borrador de solicitud_contratacion que se creó automáticamente
+      // cuando RRHH marcó la solicitud como Contratado (identificado por preregistro_id en datos_extra)
+      pool.query(
+        `UPDATE solicitudes_contratacion
+         SET
+           estado             = 'Completado',
+           persona_usuario_id = $1,
+           correo_empresarial = $2,
+           updated_at         = NOW()
+         WHERE estado = 'Pendiente'
+           AND (datos_extra->>'preregistro_id') = $3`,
+        [usuario.id, correoSilver, String(current.public_id)]
+      ).catch((e) => console.error("Error sincronizando borrador contratacion:", e?.message || e));
+
       const tasks = [
         sendEmailSafe({ ...getGraphContext(req), to: current.correo_personal, subject: "Bienvenido(a) - cuenta creada", text: `Tu usuario fue creado. Correo Silver: ${correoSilver}` })
       ];

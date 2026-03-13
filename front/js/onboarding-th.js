@@ -106,7 +106,24 @@ window.onboardingThApp = function () {
                 origen_flujo: "preregistro"
             }));
 
-            const itemsContratacion = solicitudes.map((item) => this.mapContratacionToRegistro(item));
+            const preregistroIds = new Set(
+                itemsPreregistro
+                    .map((item) => String(item?.id || "").trim())
+                    .filter(Boolean)
+            );
+
+            const itemsContratacion = solicitudes
+                .filter((item) => {
+                    const origen = this.normalizar(item?.datos_extra?.origen || "");
+                    if (origen !== "rrhh") return true;
+
+                    const preregistroId = String(item?.datos_extra?.preregistro_id || "").trim();
+                    if (!preregistroId) return true;
+
+                    // Si el preregistro vinculado existe, se usa ese flujo (Sección 3 editable con Guardar/Aprobar).
+                    return !preregistroIds.has(preregistroId);
+                })
+                .map((item) => this.mapContratacionToRegistro(item));
 
             this.preregistros = [...itemsPreregistro, ...itemsContratacion].sort((a, b) => {
                 const ta = new Date(a?.updated_at || a?.created_at || 0).getTime();
@@ -142,6 +159,7 @@ window.onboardingThApp = function () {
                 id: item?.id,
                 origen_flujo: "contratacion",
                 origen_contratacion: origenContratacion,
+                preregistro_id: item?.datos_extra?.preregistro_id || null,
                 solicitud: {
                     id: item?.id,
                     perfil: item?.perfil || null,
@@ -307,8 +325,24 @@ window.onboardingThApp = function () {
             return "prereg-btn prereg-btn-ghost";
         },
 
+        buscarPreregistroVinculado(item) {
+            if (!item || item?.origen_flujo !== "contratacion") return null;
+            const preregistroId = String(item?.preregistro_id || "").trim();
+            if (!preregistroId) return null;
+            return this.preregistros.find((p) =>
+                p?.origen_flujo === "preregistro" && String(p?.id || "").trim() === preregistroId
+            ) || null;
+        },
+
         async ejecutarAccionPrincipal(p) {
             if (!p?.id) return;
+
+            const preregistroVinculado = this.buscarPreregistroVinculado(p);
+            if (preregistroVinculado) {
+                this.abrirDetalle(preregistroVinculado, preregistroVinculado?.estado === "Pendiente Correo Silver");
+                return;
+            }
+
             if (this.esContratacionPendienteRevisionTh(p)) {
                 await this.marcarRevisionThContratacion(p);
                 return;

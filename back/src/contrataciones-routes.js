@@ -14,6 +14,7 @@ module.exports = function registerContratacionesRoutes(deps) {
     pendiente: "Pendiente",
     enProceso: "En Proceso",
     pendienteConfirmacionCliente: "Pendiente Confirmación Cliente",
+    pendienteRevisionTh: "Pendiente Revision TH",
     completado: "Completado"
   });
 
@@ -84,6 +85,11 @@ module.exports = function registerContratacionesRoutes(deps) {
       COALESCE(sc.correo_enviado_mesa, false) AS correo_enviado_mesa,
       COALESCE(sc.correo_enviado_th, false) AS correo_enviado_th,
       COALESCE(sc.correo_confirmacion_coordinador, false) AS correo_confirmacion_coordinador,
+      sc.revisado_th_por,
+      rev_th.public_id AS revisado_th_por_public_id,
+      rev_th.nombre_usuario AS revisado_th_por_nombre,
+      sc.fecha_revision_th,
+      sc.observaciones_th,
       sc.created_at,
       sc.updated_at
     FROM solicitudes_contratacion sc
@@ -92,6 +98,7 @@ module.exports = function registerContratacionesRoutes(deps) {
     LEFT JOIN usuarios sup ON sup.id = sc.supervisor_id
     LEFT JOIN clientes c ON c.id = sc.cliente_id
     LEFT JOIN documento_identidad di ON di.id = sc.tipo_documento_id
+    LEFT JOIN usuarios rev_th ON rev_th.id = sc.revisado_th_por
   `;
 
   function parseEmailList(value) {
@@ -230,6 +237,11 @@ module.exports = function registerContratacionesRoutes(deps) {
       correo_enviado_mesa: Boolean(row.correo_enviado_mesa),
       correo_enviado_th: Boolean(row.correo_enviado_th),
       correo_confirmacion_coordinador: Boolean(row.correo_confirmacion_coordinador),
+      revisado_th_por: row.revisado_th_por_public_id
+        ? { id: row.revisado_th_por_public_id, nombre: row.revisado_th_por_nombre }
+        : null,
+      fecha_revision_th: row.fecha_revision_th || null,
+      observaciones_th: row.observaciones_th || null,
       created_at: row.created_at,
       updated_at: row.updated_at
     };
@@ -430,7 +442,14 @@ module.exports = function registerContratacionesRoutes(deps) {
     };
     const required = requiredByType[tipoSolicitud] || [];
     const allOk = required.every((key) => Boolean(mailResults[key]));
-    return allOk ? ESTADOS.completado : ESTADOS.enProceso;
+
+    if (!allOk) return ESTADOS.enProceso;
+
+    // Para TIPO_NUEVO los correos se enviaron, pero TH debe confirmar datos bancarios
+    // antes de marcar como Completado
+    if (tipoSolicitud === TIPO_NUEVO) return ESTADOS.pendienteRevisionTh;
+
+    return ESTADOS.completado;
   }
 
   async function dispatchAndFinalizeSolicitud({ internalId, req }) {
@@ -1129,6 +1148,47 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
         console.error(err);
         return res.status(500).json({ error: "Error completando solicitud de contratacion" });
+      }
+    }
+  );
+
+  app.patch(
+    "/contrataciones/solicitudes/:id/revision-th",
+    requireAccess({ roles: ["Administrador", "Talento Humano"] }),
+    async (req, res) => {
+      try {
+        const row = await getByPublicId(pool, req.params.id);
+        if (!row) return res.status(404).json({ error: "Solicitud no encontrada" });
+        const internalId = row.id;
+
+        if (row.tipo_solicitud !== TIPO_NUEVO) {
+          return res.status(422).json({ error: "La revision TH solo aplica para solicitudes tipo Nuevo" });
+        }
+        if (row.estado !== ESTADOS.pendienteRevisionTh) {
+          return res.status(422).json({ error: `La solicitud debe estar en '${ESTADOS.pendienteRevisionTh}' para ser revisada por TH` });
+        }
+
+        const observaciones = toNullableString(req.body?.observaciones_th);
+
+        await pool.query(
+          `
+          UPDATE solicitudes_contratacion
+          SET
+            estado                = $1,
+            revisado_th_por       = $2,
+            fecha_revision_th     = NOW(),
+            observaciones_th      = $3,
+            updated_at            = NOW()
+          WHERE id = $4
+          `,
+          [ESTADOS.completado, req.user?.id, observaciones, internalId]
+        );
+
+        const updated = await getByInternalId(pool, internalId);
+        return res.json(formatRow(updated));
+      } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: "Error procesando revision TH" });
       }
     }
   );

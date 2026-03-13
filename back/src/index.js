@@ -4816,50 +4816,53 @@ app.post("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador"] }),
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
 
-    const result = await pool.query(`
-      WITH 
-        c_cliente AS (SELECT id FROM clientes WHERE public_id = $1),
-        c_consultor AS (SELECT id FROM usuarios WHERE public_id = $2),
-        c_modulo AS (SELECT id FROM modulo WHERE public_id = $3),
-        c_tipo_asignacion AS (SELECT id FROM tipo_asignacion WHERE public_id = $4),
-        
-        i_tarifa AS (
-          INSERT INTO tarifa_consultor (
-            id_cliente, consultor_id, modulo_id, id_tipo_asignacion, valor_tarifa, activo
-          )
-          SELECT 
-            c_cliente.id, 
-            c_consultor.id, 
-            (SELECT id FROM c_modulo), 
-            c_tipo_asignacion.id, 
-            $5, 
-            true
-          FROM c_cliente, c_consultor, c_tipo_asignacion
-          WHERE c_cliente.id IS NOT NULL 
-            AND c_consultor.id IS NOT NULL 
-            AND c_tipo_asignacion.id IS NOT NULL
-          RETURNING id
-        )
-      SELECT
-        tc.public_id AS id,
-        c.public_id AS cliente_id,
-        u.public_id AS consultor_id,
-        m.public_id AS modulo_id,
-        ta.public_id AS tipo_asignacion_id,
-        tc.valor_tarifa AS valor,
-        tc.activo,
-        c.titulo AS nombre_cliente,
-        u.nombre_usuario AS nombre_consultor,
-        m.titulo AS nombre_modulo,
-        ta.titulo AS tipo_asignacion,
-        u.moneda_cobro AS moneda
-      FROM i_tarifa
-      JOIN tarifa_consultor tc ON tc.id = i_tarifa.id
-      JOIN clientes c ON c.id = tc.id_cliente
-      JOIN usuarios u ON u.id = tc.consultor_id
-      LEFT JOIN modulo m ON m.id = tc.modulo_id
-      LEFT JOIN tipo_asignacion ta ON ta.id = tc.id_tipo_asignacion
-    `, [cliente_id, consultor_id, modulo_id || null, tipo_asignacion_id, valor]);
+    // Resolución de IDs en un paso separado para evitar el problema de
+    // visibilidad de CTEs con INSERT en PostgreSQL.
+    const refsRes = await pool.query(
+      `SELECT
+         (SELECT id FROM clientes        WHERE public_id = $1) AS cliente_id,
+         (SELECT id FROM usuarios        WHERE public_id = $2) AS consultor_id,
+         (SELECT id FROM modulo          WHERE public_id = $3) AS modulo_id,
+         (SELECT id FROM tipo_asignacion WHERE public_id = $4) AS tipo_asignacion_id`,
+      [cliente_id, consultor_id, modulo_id || null, tipo_asignacion_id]
+    );
+    const refs = refsRes.rows[0];
+    if (!refs.cliente_id || !refs.consultor_id || !refs.tipo_asignacion_id) {
+      return res.status(400).json({ error: "Cliente, consultor o tipo de asignación no válido" });
+    }
+
+    const ins = await pool.query(
+      `INSERT INTO tarifa_consultor (id_cliente, consultor_id, modulo_id, id_tipo_asignacion, valor_tarifa, activo)
+       VALUES ($1, $2, $3, $4, $5, true)
+       RETURNING id`,
+      [refs.cliente_id, refs.consultor_id, refs.modulo_id || null, refs.tipo_asignacion_id, valor]
+    );
+    if (!ins.rows[0]?.id) {
+      return res.status(500).json({ error: "Error al guardar tarifa" });
+    }
+
+    const result = await pool.query(
+      `SELECT
+         tc.public_id AS id,
+         c.public_id  AS cliente_id,
+         u.public_id  AS consultor_id,
+         m.public_id  AS modulo_id,
+         ta.public_id AS tipo_asignacion_id,
+         tc.valor_tarifa AS valor,
+         tc.activo,
+         c.titulo         AS nombre_cliente,
+         u.nombre_usuario AS nombre_consultor,
+         m.titulo         AS nombre_modulo,
+         ta.titulo        AS tipo_asignacion,
+         u.moneda_cobro   AS moneda
+       FROM tarifa_consultor tc
+       JOIN clientes c ON c.id = tc.id_cliente
+       JOIN usuarios u ON u.id = tc.consultor_id
+       LEFT JOIN modulo m ON m.id = tc.modulo_id
+       LEFT JOIN tipo_asignacion ta ON ta.id = tc.id_tipo_asignacion
+       WHERE tc.id = $1`,
+      [ins.rows[0].id]
+    );
 
     if (result.rowCount === 0) {
       return res.status(400).json({ error: "Cliente, consultor o tipo de asignación no válido" });
@@ -5017,44 +5020,48 @@ app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
 
+    // Resolución en dos pasos para evitar el problema de visibilidad de CTEs
+    // en PostgreSQL: el JOIN posterior al INSERT no ve la fila recién insertada.
+    const refsRes = await pool.query(
+      `SELECT
+         (SELECT id FROM clientes       WHERE public_id = $1) AS cliente_id,
+         (SELECT id FROM usuarios       WHERE public_id = $2) AS coordinador_id,
+         (SELECT id FROM tipo_asignacion WHERE public_id = $3) AS tipo_asignacion_id`,
+      [cliente_id, coordinador_id, tipo_asignacion_id]
+    );
+    const refs = refsRes.rows[0];
+    if (!refs.cliente_id || !refs.coordinador_id || !refs.tipo_asignacion_id) {
+      return res.status(400).json({ error: "Cliente, coordinador o tipo de asignación no válido" });
+    }
+
+    const inserted = await pool.query(
+      `INSERT INTO consultorias (id_cliente, coordinador_responsable_id, id_tipo_asignacion, descripcion_consultoria, activo)
+       VALUES ($1, $2, $3, $4, true)
+       RETURNING id`,
+      [refs.cliente_id, refs.coordinador_id, refs.tipo_asignacion_id, descripcion_consultoria || null]
+    );
+    if (!inserted.rows[0]?.id) {
+      return res.status(500).json({ error: "Error al guardar consultoría" });
+    }
+
     const result = await pool.query(
-      `
-      WITH 
-        c_cliente AS (SELECT id FROM clientes WHERE public_id = $1),
-        c_coordinador AS (SELECT id FROM usuarios WHERE public_id = $2),
-        c_tipo_asignacion AS (SELECT id FROM tipo_asignacion WHERE public_id = $3),
-        
-        ins AS (
-          INSERT INTO consultorias (id_cliente, coordinador_responsable_id, id_tipo_asignacion, descripcion_consultoria, activo)
-          SELECT 
-            (SELECT id FROM c_cliente), 
-            (SELECT id FROM c_coordinador), 
-            (SELECT id FROM c_tipo_asignacion), 
-            $4, 
-            true
-          WHERE EXISTS (SELECT 1 FROM c_cliente)
-            AND EXISTS (SELECT 1 FROM c_coordinador)
-            AND EXISTS (SELECT 1 FROM c_tipo_asignacion)
-          RETURNING id
-        )
-      SELECT
-        c.public_id AS id,
-        cli.public_id AS cliente_id,
-        u.public_id AS coordinador_id,
-        ta.public_id AS tipo_asignacion_id,
-        c.descripcion_consultoria,
-        c.activo,
-        cli.titulo AS nombre_cliente,
-        u.nombre_usuario AS nombre_coordinador,
-        u.email AS coordinador_email,
-        ta.titulo AS tipo_asignacion
-      FROM ins
-      JOIN consultorias c ON c.id = ins.id
-      JOIN clientes cli ON cli.id = c.id_cliente
-      LEFT JOIN usuarios u ON u.id = c.coordinador_responsable_id
-      LEFT JOIN tipo_asignacion ta ON ta.id = c.id_tipo_asignacion
-      `,
-      [cliente_id, coordinador_id, tipo_asignacion_id, descripcion_consultoria || null]
+      `SELECT
+         c.public_id AS id,
+         cli.public_id AS cliente_id,
+         u.public_id   AS coordinador_id,
+         ta.public_id  AS tipo_asignacion_id,
+         c.descripcion_consultoria,
+         c.activo,
+         cli.titulo        AS nombre_cliente,
+         u.nombre_usuario  AS nombre_coordinador,
+         u.email           AS coordinador_email,
+         ta.titulo         AS tipo_asignacion
+       FROM consultorias c
+       JOIN clientes cli ON cli.id = c.id_cliente
+       LEFT JOIN usuarios u ON u.id = c.coordinador_responsable_id
+       LEFT JOIN tipo_asignacion ta ON ta.id = c.id_tipo_asignacion
+       WHERE c.id = $1`,
+      [inserted.rows[0].id]
     );
 
     if (result.rowCount === 0) {

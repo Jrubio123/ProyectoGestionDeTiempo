@@ -168,6 +168,36 @@ module.exports = function registerContratacionesRoutes(deps) {
     return Number.isFinite(parsed) ? parsed : null;
   }
 
+  function formatDateForEmail(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "N/A";
+
+    const ymd = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (ymd) {
+      const year = Number(ymd[1]);
+      const month = Number(ymd[2]);
+      const day = Number(ymd[3]);
+      if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+        const utcDate = new Date(Date.UTC(year, month - 1, day));
+        return utcDate.toLocaleDateString("es-CO", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          timeZone: "UTC"
+        });
+      }
+    }
+
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return raw;
+    return parsed.toLocaleDateString("es-CO", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC"
+    });
+  }
+
   function formatRow(row) {
     if (!row) return null;
     return {
@@ -281,16 +311,16 @@ module.exports = function registerContratacionesRoutes(deps) {
       { label: "Tarifa Medio Tiempo", value: solicitud.tarifa_medio_tiempo ?? "N/A" },
       { label: "Tarifa Capacitacion", value: solicitud.tarifa_capacitacion ?? "N/A" },
       { label: "Modalidad", value: solicitud.modalidad_contrato || "N/A" },
-      { label: "Fecha inicio", value: solicitud.fecha_inicio || "N/A" },
-      { label: "Fecha fin", value: solicitud.fecha_fin || "N/A" },
-      { label: "Fecha extension desde", value: solicitud.fecha_extension_desde || "N/A" },
-      { label: "Fecha extension hasta", value: solicitud.fecha_extension_hasta || "N/A" },
-      { label: "Fecha retiro", value: solicitud.fecha_retiro || "N/A" },
+      { label: "Fecha inicio", value: formatDateForEmail(solicitud.fecha_inicio) },
+      { label: "Fecha fin", value: formatDateForEmail(solicitud.fecha_fin) },
+      { label: "Fecha extension desde", value: formatDateForEmail(solicitud.fecha_extension_desde) },
+      { label: "Fecha extension hasta", value: formatDateForEmail(solicitud.fecha_extension_hasta) },
+      { label: "Fecha retiro", value: formatDateForEmail(solicitud.fecha_retiro) },
       { label: "Grupo APP tiempos", value: solicitud.grupo_app_tiempos || "N/A" },
       { label: "Grupo distribucion", value: solicitud.grupo_distribucion || "N/A" },
       { label: "Necesidad TI", value: solicitud.necesidad_ti || "N/A" },
       { label: "Observaciones", value: solicitud.observaciones || "N/A" },
-      { label: "Solicitado por", value: solicitud?.coordinador?.email || "N/A" }
+      { label: "Solicitado por", value: solicitud?.coordinador?.nombre || solicitud?.coordinador?.email || "N/A" }
     ];
   }
 
@@ -752,7 +782,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (payload.cliente_id && !refs.cliente_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
 
         const personaUsuarioId = refs.persona_usuario_id || null;
-        const supervisorId = refs.supervisor_id || null;
+        const supervisorId = refs.supervisor_id || req.user?.id || null;
         const tipoDocumentoId = refs.tipo_documento_id || null;
         const clienteId = refs.cliente_id || null;
 

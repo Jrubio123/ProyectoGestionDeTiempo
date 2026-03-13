@@ -106,9 +106,7 @@ window.onboardingThApp = function () {
                 origen_flujo: "preregistro"
             }));
 
-            const itemsContratacion = solicitudes
-                .filter((item) => this.normalizar(item?.datos_extra?.origen || "") !== "rrhh")
-                .map((item) => this.mapContratacionToRegistro(item));
+            const itemsContratacion = solicitudes.map((item) => this.mapContratacionToRegistro(item));
 
             this.preregistros = [...itemsPreregistro, ...itemsContratacion].sort((a, b) => {
                 const ta = new Date(a?.updated_at || a?.created_at || 0).getTime();
@@ -139,9 +137,11 @@ window.onboardingThApp = function () {
             const tipoDocumentoTitulo = item?.tipo_documento?.titulo || item?.tipo_documento?.codigo || null;
             const clienteNombre = item?.cliente?.nombre || item?.datos_extra?.cliente_nombre || null;
             const moduloNombre = item?.datos_extra?.modulo || item?.datos_extra?.modulo_nombre || null;
+            const origenContratacion = this.normalizar(item?.datos_extra?.origen || "");
             return {
                 id: item?.id,
                 origen_flujo: "contratacion",
+                origen_contratacion: origenContratacion,
                 solicitud: {
                     id: item?.id,
                     perfil: item?.perfil || null,
@@ -193,9 +193,10 @@ window.onboardingThApp = function () {
                 id_usuario_creado: item?.persona?.id || null,
                 usuario_creado: item?.persona || null,
                 fecha_completado_coordinador: item?.updated_at || item?.created_at || null,
-                fecha_completado_th: null,
+                fecha_completado_th: item?.fecha_revision_th || null,
                 fecha_aprobacion: item?.estado === "Completado" ? (item?.updated_at || item?.created_at || null) : null,
                 fecha_anulacion: null,
+                observaciones_th: item?.observaciones_th || null,
                 created_at: item?.created_at || null,
                 updated_at: item?.updated_at || item?.created_at || null
             };
@@ -210,6 +211,9 @@ window.onboardingThApp = function () {
         },
 
         flujoLabel(item) {
+            if (item?.origen_flujo === "contratacion" && item?.origen_contratacion === "rrhh") {
+                return "Contratación desde RRHH";
+            }
             return item?.origen_flujo === "contratacion" ? "Contratación directa" : "Preregistro RRHH";
         },
 
@@ -283,7 +287,12 @@ window.onboardingThApp = function () {
             return FILTER_LABELS[this.filtro] || FILTER_LABELS.all;
         },
 
+        esContratacionPendienteRevisionTh(item) {
+            return item?.origen_flujo === "contratacion" && this.normalizar(item?.estado) === "pendiente revision th";
+        },
+
         accionPrincipalLabel(p) {
+            if (this.esContratacionPendienteRevisionTh(p)) return "Marcar revisión TH";
             if (p?.origen_flujo !== "preregistro") return "Ver detalle";
             if (p.estado === "Pendiente Revision TH") return "Completar revisión";
             if (p.estado === "Pendiente Correo Silver") return "Ingresar correo Silver";
@@ -291,10 +300,36 @@ window.onboardingThApp = function () {
         },
 
         accionPrincipalClass(p) {
+            if (this.esContratacionPendienteRevisionTh(p)) return "prereg-btn prereg-btn-teal";
             if (p?.origen_flujo !== "preregistro") return "prereg-btn prereg-btn-ghost";
             if (p.estado === "Pendiente Correo Silver") return "prereg-btn prereg-btn-purple";
             if (p.estado === "Pendiente Revision TH") return "prereg-btn prereg-btn-teal";
             return "prereg-btn prereg-btn-ghost";
+        },
+
+        async ejecutarAccionPrincipal(p) {
+            if (!p?.id) return;
+            if (this.esContratacionPendienteRevisionTh(p)) {
+                await this.marcarRevisionThContratacion(p);
+                return;
+            }
+            this.abrirDetalle(p, p?.estado === "Pendiente Correo Silver");
+        },
+
+        async marcarRevisionThContratacion(item) {
+            if (!this.esContratacionPendienteRevisionTh(item)) return;
+            if (!confirm("¿Marcar esta solicitud de contratación como revisada por Talento Humano?")) return;
+            try {
+                await axios.patch(
+                    `${API}/contrataciones/solicitudes/${item.id}/revision-th`,
+                    { observaciones_th: null },
+                    this.getAuthConfig()
+                );
+                await this.cargarRegistros();
+            } catch (e) {
+                const msg = e?.response?.data?.error || "Error completando revisión TH";
+                alert(msg);
+            }
         },
 
         abrirDetalle(p, focoCorreo = false) {

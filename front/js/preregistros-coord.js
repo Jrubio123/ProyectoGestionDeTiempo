@@ -84,11 +84,13 @@ window.preregistrosCoordApp = function () {
                 this.modulos = Array.isArray(modulos.data) ? modulos.data : [];
                 this.documentos = Array.isArray(documentos.data) ? documentos.data : [];
                 this.supervisores = Array.isArray(supervisores.data) ? supervisores.data : [];
+                this.incluirSolicitanteEnSupervisores();
             } catch (e) {
                 this.clientes = [];
                 this.modulos = [];
                 this.documentos = [];
                 this.supervisores = [];
+                this.incluirSolicitanteEnSupervisores();
             }
         },
 
@@ -101,13 +103,30 @@ window.preregistrosCoordApp = function () {
             }
         },
 
+        usuarioSolicitanteActual() {
+            const user = window.auth?.getUser?.() || {};
+            const id = String(user?.id || "").trim();
+            if (!id) return null;
+            return {
+                id,
+                nombre: String(user?.nombre_usuario || user?.email || "Usuario actual").trim(),
+                email: String(user?.email || "").trim() || null
+            };
+        },
+
+        incluirSolicitanteEnSupervisores() {
+            const solicitante = this.usuarioSolicitanteActual();
+            if (!solicitante?.id) return;
+            const yaExiste = (this.supervisores || []).some((sup) => String(sup?.id || "") === solicitante.id);
+            if (yaExiste) return;
+            this.supervisores = [solicitante, ...(this.supervisores || [])];
+        },
+
         aplicarSupervisorPorDefecto() {
-            const currentUserId = window.auth?.getUser?.()?.id || "";
+            this.incluirSolicitanteEnSupervisores();
+            const currentUserId = this.usuarioSolicitanteActual()?.id || "";
             if (!currentUserId) return;
-            const exists = (this.supervisores || []).some((sup) => String(sup?.id || "") === String(currentUserId));
-            if (exists) {
-                this.form.supervisor_id = currentUserId;
-            }
+            this.form.supervisor_id = currentUserId;
         },
 
         mapSolicitudToForm(item) {

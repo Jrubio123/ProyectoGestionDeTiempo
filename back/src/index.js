@@ -8265,7 +8265,11 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
             const esTiempoCostoFijo = isTipoAsignacionTiempoCostoFijo(tipoNorm);
             const esCostoTotal = esTiempoCostoFijo && toBooleanInput(meta.es_costo_total, false);
             const esHorasPorDemanda = isTipoAsignacionHorasPorDemanda(tipoNorm);
-            if (!esHorasPorDemanda) {
+            if (esHorasPorDemanda) {
+              // Para horas por demanda se cierra al aprobar para evitar reprocesos
+              // del mismo bloque antes de pasar a cuenta de cobro.
+              estadoAprobadoDestino = estados.cerrado || estados.proceso;
+            } else {
               const uso = await pool.query(
                 `
                 SELECT

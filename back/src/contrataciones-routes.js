@@ -168,6 +168,30 @@ module.exports = function registerContratacionesRoutes(deps) {
     return Number.isFinite(parsed) ? parsed : null;
   }
 
+  function isValidSilverEmail(value) {
+    return /^[^\s@]+@silverconsulting\.com\.co$/i.test(String(value || "").trim());
+  }
+
+  function normalizeTipoPersonaForUsuarios(value) {
+    const raw = normalizeValue(value);
+    if (raw === "natural") return "Natural";
+    if (raw === "juridica") return "Jurídica";
+    return null;
+  }
+
+  function toObjectOrEmpty(value) {
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+      } catch (_) {}
+    }
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value;
+    }
+    return {};
+  }
+
   function formatDateForEmail(value) {
     const raw = String(value || "").trim();
     if (!raw) return "N/A";
@@ -1238,42 +1262,140 @@ module.exports = function registerContratacionesRoutes(deps) {
     "/contrataciones/solicitudes/:id/revision-th",
     requireAccess({ roles: ["Administrador", "Talento Humano"] }),
     async (req, res) => {
+      const client = await pool.connect();
       try {
-        const row = await getByPublicId(pool, req.params.id);
-        if (!row) return res.status(404).json({ error: "Solicitud no encontrada" });
+        await client.query("BEGIN");
+
+        const row = await getByPublicId(client, req.params.id);
+        if (!row) {
+          await client.query("ROLLBACK");
+          return res.status(404).json({ error: "Solicitud no encontrada" });
+        }
         const internalId = row.id;
 
         if (row.tipo_solicitud !== TIPO_NUEVO) {
+          await client.query("ROLLBACK");
           return res.status(422).json({ error: "La revision TH solo aplica para solicitudes tipo Nuevo" });
         }
         if (row.estado !== ESTADOS.pendienteRevisionTh) {
+          await client.query("ROLLBACK");
           return res.status(422).json({ error: `La solicitud debe estar en '${ESTADOS.pendienteRevisionTh}' para ser revisada por TH` });
         }
-        if (!toNullableString(row.correo_empresarial)) {
+        const correoSilver = String(row.correo_empresarial || "").trim().toLowerCase();
+        if (!correoSilver) {
+          await client.query("ROLLBACK");
           return res.status(422).json({ error: "Se requiere el correo Silver antes de completar la revisión TH" });
+        }
+        if (!isValidSilverEmail(correoSilver)) {
+          await client.query("ROLLBACK");
+          return res.status(422).json({ error: "El correo Silver debe pertenecer al dominio @silverconsulting.com.co" });
+        }
+
+        const datosExtra = toObjectOrEmpty(row.datos_extra);
+        const direccion = toNullableString(datosExtra.direccion);
+        const bancoId = toNullableNumber(datosExtra.banco_id);
+        const tipoCuenta = toNullableString(datosExtra.tipo_cuenta);
+        const numeroCuenta = toNullableString(datosExtra.numero_cuenta);
+        const tipoPersona = normalizeTipoPersonaForUsuarios(datosExtra.tipo_persona);
+
+        if (!direccion || !bancoId || !tipoCuenta || !numeroCuenta || !tipoPersona) {
+          await client.query("ROLLBACK");
+          return res.status(422).json({
+            error:
+              "Faltan datos de la sección 3. Completa dirección, tipo persona, banco, tipo de cuenta y número de cuenta."
+          });
+        }
+
+        let personaUsuarioId = row.persona_usuario_id || null;
+        let usuarioCreado = null;
+
+        if (!personaUsuarioId) {
+          const dup = await client.query(`SELECT id FROM usuarios WHERE LOWER(email) = LOWER($1) LIMIT 1`, [correoSilver]);
+          if (dup.rows.length > 0) {
+            await client.query("ROLLBACK");
+            return res.status(409).json({ error: "Ya existe un usuario con ese correo Silver" });
+          }
+
+          const [rolRes, tipoCuentaRes] = await Promise.all([
+            client.query(`SELECT id FROM roles WHERE LOWER(titulo) = LOWER('Consultor') LIMIT 1`),
+            client.query(`SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) LIMIT 1`, [`${tipoCuenta}%`])
+          ]);
+          const rolId = rolRes.rows[0]?.id || null;
+          if (!rolId) {
+            await client.query("ROLLBACK");
+            return res.status(500).json({ error: "No existe el rol Consultor" });
+          }
+
+          const nombreCompleto = `${row.nombre || ""} ${row.apellidos || ""}`.trim();
+          const moneda = normalizeMoneda(row.moneda) || "COP";
+          const usuarioRes = await client.query(
+            `INSERT INTO usuarios
+              (nombre_usuario, email, rol_usuario_id, activo, nro_cuenta_bancaria, banco_id, tipo_cuenta_id, tipo_documento_id, cedula, direccion, telefono, ciudad, tipo_persona, moneda_cobro, created_by, azure_oid)
+             VALUES
+              ($1, $2, $3, true, $4, $5, $6, $7, $8, $9, $10, $11, $12::tipo_persona, $13::tipo_moneda, 'contratacion_th', NULL)
+             RETURNING id, public_id, nombre_usuario, email`,
+            [
+              nombreCompleto || correoSilver,
+              correoSilver,
+              rolId,
+              numeroCuenta,
+              bancoId,
+              tipoCuentaRes.rows[0]?.id || null,
+              row.tipo_documento_id || null,
+              row.numero_documento || null,
+              direccion,
+              row.telefono || null,
+              row.ubicacion || null,
+              tipoPersona,
+              moneda
+            ]
+          );
+
+          personaUsuarioId = usuarioRes.rows[0]?.id || null;
+          usuarioCreado = usuarioRes.rows[0] || null;
         }
 
         const observaciones = toNullableString(req.body?.observaciones_th);
 
-        await pool.query(
+        await client.query(
           `
           UPDATE solicitudes_contratacion
           SET
             estado                = $1,
-            revisado_th_por       = $2,
+            persona_usuario_id    = COALESCE($2, persona_usuario_id),
+            correo_empresarial    = $3,
+            revisado_th_por       = $4,
             fecha_revision_th     = NOW(),
-            observaciones_th      = $3,
+            observaciones_th      = $5,
             updated_at            = NOW()
-          WHERE id = $4
+          WHERE id = $6
           `,
-          [ESTADOS.completado, req.user?.id, observaciones, internalId]
+          [ESTADOS.completado, personaUsuarioId, correoSilver, req.user?.id, observaciones, internalId]
         );
 
+        await client.query("COMMIT");
+
         const updated = await getByInternalId(pool, internalId);
-        return res.json(formatRow(updated));
+        const response = formatRow(updated) || {};
+        if (usuarioCreado?.public_id && typeof response === "object") {
+          response.usuario_creado = {
+            id: usuarioCreado.public_id,
+            nombre: usuarioCreado.nombre_usuario,
+            email: usuarioCreado.email
+          };
+        }
+        return res.json(response);
       } catch (err) {
+        try {
+          await client.query("ROLLBACK");
+        } catch (_) {}
+        if (err?.code === "23505") {
+          return res.status(409).json({ error: "Conflicto de unicidad creando usuario" });
+        }
         console.error(err);
         return res.status(500).json({ error: "Error procesando revision TH" });
+      } finally {
+        client.release();
       }
     }
   );

@@ -47,6 +47,8 @@ window.misAsignacionesConsultorApp = function () {
             return (
                 tipo.includes("full") ||
                 tipo.includes("part") ||
+                tipo.includes("mensual") ||
+                compacto.includes("mensual") ||
                 tipo.includes("tiempo completo") ||
                 compacto.includes("tiempocompleto") ||
                 tipo.includes("medio tiempo") ||

@@ -230,6 +230,8 @@ window.asignacionConsultorApp = function () {
             return (
                 t.includes("full") ||
                 t.includes("part") ||
+                t.includes("mensual") ||
+                compacto.includes("mensual") ||
                 t.includes("tiempo completo") ||
                 compacto.includes("tiempocompleto") ||
                 t.includes("medio tiempo") ||
@@ -277,7 +279,13 @@ window.asignacionConsultorApp = function () {
 
         get esMesaServicio() {
             const t = this.normalizeTipo(this.proyectoSelected?.tipo_asignacion || "");
-            return t.includes("mesa de servicio") || t.includes("fabrica");
+            const compacto = t.replace(/\s+/g, "");
+            return (
+                t.includes("mesa") ||
+                t.includes("service desk") ||
+                compacto.includes("servicedesk") ||
+                t.includes("fabrica")
+            );
         },
 
         cambiarModoTiempoCosto() {

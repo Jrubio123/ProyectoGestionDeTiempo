@@ -308,7 +308,11 @@ window.mesaFabricaApp = function () {
             if (explicitScope) return explicitScope;
 
             const tipo = this.normalizeTipo(item?.tipo_asignacion || this.form?.tipo_asignacion || "");
-            const hasMesaByTipo = tipo.includes("mesa de servicio");
+            const tipoCompacto = tipo.replace(/\s+/g, "");
+            const hasMesaByTipo =
+                tipo.includes("mesa") ||
+                tipo.includes("service desk") ||
+                tipoCompacto.includes("servicedesk");
             const hasFabricaByTipo = tipo.includes("fabrica");
 
             const hasFabricaHints = Boolean(

@@ -194,8 +194,12 @@ window.aprobacionApp = function () {
 
         codigoTicket(item) {
             const tipo = this.normalizeTipo(item?.nombre_tipo_asignacion || "");
+            const compacto = tipo.replace(/\s+/g, "");
             const esFabrica = tipo.includes("fabrica");
-            const esMesa = tipo.includes("mesa de servicio");
+            const esMesa =
+                tipo.includes("mesa") ||
+                tipo.includes("service desk") ||
+                compacto.includes("servicedesk");
             const prefijo = esFabrica ? "FB" : (esMesa ? "MS" : "RH");
             const base = String(item?.id || "")
                 .replace(/-/g, "")

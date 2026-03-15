@@ -30,12 +30,14 @@ window.registroHorasApp = function () {
                 const res = await axios.get(`${API}/registro-horas-asignaciones`);
                 this.asignaciones = (res.data || [])
                     .filter((a) => {
-                        const tipo = String(a?.nombre_tipo_asignacion || "")
-                            .normalize("NFD")
-                            .replace(/[\u0300-\u036f]/g, "")
-                            .toLowerCase()
-                            .trim();
-                        return !["mesa de servicio", "fabrica"].includes(tipo);
+                        const tipo = this.normalizarTipoAsignacion(a?.nombre_tipo_asignacion || "");
+                        const compacto = tipo.replace(/\s+/g, "");
+                        const esMesaOFabrica =
+                            tipo.includes("mesa") ||
+                            tipo.includes("service desk") ||
+                            compacto.includes("servicedesk") ||
+                            tipo.includes("fabrica");
+                        return !esMesaOFabrica;
                     })
                     .map((a) => ({
                         ...a,
@@ -85,6 +87,8 @@ window.registroHorasApp = function () {
             return (
                 tipo.includes("full") ||
                 tipo.includes("part") ||
+                tipo.includes("mensual") ||
+                compacto.includes("mensual") ||
                 tipo.includes("tiempo completo") ||
                 compacto.includes("tiempocompleto") ||
                 tipo.includes("medio tiempo") ||

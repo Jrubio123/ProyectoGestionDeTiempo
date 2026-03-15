@@ -98,6 +98,8 @@ window.tarifasApp = function () {
             return (
                 titulo.includes("full") ||
                 titulo.includes("part") ||
+                titulo.includes("mensual") ||
+                compacto.includes("mensual") ||
                 titulo.includes("tiempo completo") ||
                 compacto.includes("tiempocompleto") ||
                 titulo.includes("medio tiempo") ||

@@ -227,7 +227,7 @@ window.misAsignacionesApp = function () {
                 const dias = this.calcularDiasMensual(this.form.fecha_inicio, this.form.fecha_fin) || this.form.cantidad_dias || 20;
                 return valorDiaCalculado * (dias || 0);
             }
-            if (this.consultoriaInfo.tipo_asignacion === "Tiempo y costo fijo") {
+            if (this.esTiempoCostoFijoTipo()) {
                 return valorHora * (this.form.cantidad_dias || 0);
             }
             return valorHora * (this.form.cantidad_dias || 0);
@@ -239,6 +239,8 @@ window.misAsignacionesApp = function () {
             return (
                 t.includes("full") ||
                 t.includes("part") ||
+                t.includes("mensual") ||
+                compacto.includes("mensual") ||
                 t.includes("tiempo completo") ||
                 compacto.includes("tiempocompleto") ||
                 t.includes("medio tiempo") ||
@@ -352,7 +354,13 @@ window.misAsignacionesApp = function () {
                 .replace(/[\u0300-\u036f]/g, "")
                 .toLowerCase()
                 .trim();
-            return tipo.includes("mesa de servicio") || tipo.includes("fabrica");
+            const compacto = tipo.replace(/\s+/g, "");
+            return (
+                tipo.includes("mesa") ||
+                tipo.includes("service desk") ||
+                compacto.includes("servicedesk") ||
+                tipo.includes("fabrica")
+            );
         },
 
         esAsignacionCerrable(asignacion) {

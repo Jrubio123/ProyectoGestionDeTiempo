@@ -372,6 +372,8 @@ function isTipoAsignacionMensual(value) {
   return (
     norm.includes("full") ||
     norm.includes("part") ||
+    norm.includes("mensual") ||
+    compact.includes("mensual") ||
     norm.includes("tiempo completo") ||
     compact.includes("tiempocompleto") ||
     norm.includes("medio tiempo") ||
@@ -389,6 +391,25 @@ function isTipoAsignacionHorasPorDemanda(value) {
   const norm = normalizeTipoAsignacionTitulo(value);
   const compact = compactTipoAsignacionTitulo(value);
   return norm.includes("horas por demanda") || compact.includes("horaspordemanda");
+}
+
+function isTipoAsignacionMesa(value) {
+  const norm = normalizeTipoAsignacionTitulo(value);
+  const compact = compactTipoAsignacionTitulo(value);
+  return (
+    norm.includes("mesa") ||
+    norm.includes("service desk") ||
+    compact.includes("servicedesk")
+  );
+}
+
+function isTipoAsignacionFabrica(value) {
+  const norm = normalizeTipoAsignacionTitulo(value);
+  return norm.includes("fabrica");
+}
+
+function isTipoAsignacionMesaOFabrica(value) {
+  return isTipoAsignacionMesa(value) || isTipoAsignacionFabrica(value);
 }
 
 function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, hints = {}, preferredScope = null) {
@@ -420,8 +441,8 @@ function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, hints = {},
   if (hasFabricaHints && !hasMesaHints) return "fabrica";
   if (hasMesaHints && !hasFabricaHints) return "mesa";
 
-  const hasMesaByTitle = tituloNorm.includes("mesa de servicio");
-  const hasFabricaByTitle = tituloNorm.includes("fabrica");
+  const hasMesaByTitle = isTipoAsignacionMesa(tituloNorm);
+  const hasFabricaByTitle = isTipoAsignacionFabrica(tituloNorm);
 
   const tipoAsignacionNumeric = Number(tipoAsignacionId || 0);
   if (hasFabricaByTitle && !hasMesaByTitle) return "fabrica";
@@ -5436,7 +5457,11 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
         AND ra.estado IN ($3::tipo_estado_asignacion, $4::tipo_estado_asignacion)
         AND NOT (
           COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
-          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) IN ('mesa de servicio', 'fabrica', 'fábrica')
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mesa%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%service desk%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%servicedesk%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%fabrica%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%fábrica%'
         )
         AND (
           LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%horas por demanda%'
@@ -5452,6 +5477,7 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
             (
               LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%full%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%part%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mensual%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempo completo%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempocompleto%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%medio tiempo%'
@@ -5466,6 +5492,7 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
             NOT (
               LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%full%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%part%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mensual%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempo completo%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempocompleto%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%medio tiempo%'
@@ -5582,9 +5609,9 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .trim();
-    const esMesaOFabrica =
-      [5, 6].includes(tipoAsignacionId) ||
-      ["mesa de servicio", "fabrica"].includes(tipoAsignacionTitulo);
+    const esMesaOFabrica = Boolean(
+      getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, info)
+    );
     if (esMesaOFabrica) {
       return res.status(400).json({
         error: "Las asignaciones de Mesa/Fábrica se registran en el módulo de Mesa/Fábrica, no en Registro Horas."
@@ -5876,7 +5903,11 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         AND ra.estado IN ($2::tipo_estado_asignacion, $3::tipo_estado_asignacion)
         AND (
           COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
-          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) IN ('mesa de servicio', 'fabrica', 'fábrica')
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mesa%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%service desk%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%servicedesk%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%fabrica%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%fábrica%'
         )
       ORDER BY ra.id DESC, rh.created_at DESC NULLS LAST, rh.id DESC
       `,
@@ -5994,9 +6025,9 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .trim();
-    const esMesaOFabrica =
-      [5, 6].includes(tipoAsignacionId) ||
-      ["mesa de servicio", "fabrica"].includes(tipoAsignacionTitulo);
+    const esMesaOFabrica = Boolean(
+      getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, info)
+    );
     if (!esMesaOFabrica) {
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "Solo Mesa/Fábrica se envía desde este módulo." });
@@ -6349,9 +6380,9 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .trim();
-    const esMesaOFabrica =
-      [5, 6].includes(tipoAsignacionId) ||
-      ["mesa de servicio", "fabrica"].includes(tipoAsignacionTitulo);
+    const esMesaOFabrica = Boolean(
+      getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, tipoValido.rows[0] || {})
+    );
     if (!esMesaOFabrica) {
       return res.status(400).json({ error: "Solo se permite actualizar tickets de Mesa/Fábrica en este módulo." });
     }
@@ -6808,7 +6839,11 @@ app.post("/cuentas-cobro", requireAccess({ roles: ["Consultor", "Consultor Princ
             AND ra.id IN (SELECT id_registro_asignacion FROM c_upd_rep)
             AND NOT (
               COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
-              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) IN ('mesa de servicio', 'fabrica', 'fábrica')
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mesa%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%service desk%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%servicedesk%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%fabrica%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%fábrica%'
             )
         )
       SELECT * FROM c_insert
@@ -8344,7 +8379,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
         .replace(/[\u0300-\u036f]/g, "")
         .toLowerCase()
         .trim();
-      const esMesaOFabrica = ["mesa de servicio", "fabrica"].includes(tipoNorm);
+      const esMesaOFabrica = isTipoAsignacionMesaOFabrica(tipoNorm);
       const portalUrl = buildPortalUrl(esMesaOFabrica ? "asignacion-fabrica-mesa-servicio" : "registro-horas-consultor");
       const titulo = esAprobado
         ? "✅ Horas aprobadas"
@@ -8468,7 +8503,7 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
         
         c_calc AS (
           SELECT
-            CASE WHEN m.n_tipo LIKE '%tiempo y costo fijo%' THEN true ELSE false END AS es_t_c_fijo
+            CASE WHEN m.n_tipo LIKE '%tiempo y costo fijo%' OR m.n_tipo LIKE '%costo fijo%' THEN true ELSE false END AS es_t_c_fijo
           FROM c_meta m
         ),
         
@@ -8736,12 +8771,17 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
             m.id_consultor,
             m.id_modulo,
             CASE 
-              WHEN m.id_tipo_asignacion IN (5, 6) OR m.n_tipo IN ('mesa de servicio', 'fabrica') THEN true
+              WHEN m.id_tipo_asignacion IN (5, 6)
+                OR m.n_tipo LIKE '%mesa%'
+                OR m.n_tipo LIKE '%service desk%'
+                OR m.n_tipo LIKE '%servicedesk%'
+                OR m.n_tipo LIKE '%fabrica%' THEN true
               ELSE false
             END AS es_mesa_fabrica,
             CASE 
               WHEN m.n_tipo LIKE '%full%'
                 OR m.n_tipo LIKE '%part%'
+                OR m.n_tipo LIKE '%mensual%'
                 OR m.n_tipo LIKE '%tiempo completo%'
                 OR m.n_tipo LIKE '%tiempocompleto%'
                 OR m.n_tipo LIKE '%medio tiempo%'
@@ -8749,11 +8789,11 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
               ELSE false
             END AS es_mensual,
             CASE 
-              WHEN m.n_tipo LIKE '%tiempo y costo fijo%' THEN true
+              WHEN m.n_tipo LIKE '%tiempo y costo fijo%' OR m.n_tipo LIKE '%costo fijo%' THEN true
               ELSE false
             END AS es_t_c_fijo,
             CASE 
-              WHEN m.n_tipo LIKE '%horas por demanda%' OR m.n_tipo LIKE '%horaspordemanda%' THEN true
+              WHEN m.n_tipo LIKE '%horas por demanda%' OR m.n_tipo LIKE '%horaspordemanda%' OR m.n_tipo LIKE '%demanda%' THEN true
               ELSE false
             END AS es_h_demanda,
             obtener_tarifa_consultor(m.id_consultor, m.id_cliente, m.id_modulo, m.id_tipo_asignacion) AS tarifa_calculada

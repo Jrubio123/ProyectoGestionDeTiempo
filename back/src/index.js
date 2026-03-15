@@ -5429,7 +5429,7 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
         LEFT JOIN modulo m ON ra.id_modulo = m.id
         LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
         LEFT JOIN LATERAL (
-          SELECT rh.estado_reporte, rh.motivo_rechazo
+          SELECT rh.estado_reporte, rh.motivo_rechazo, rh.id_cuenta_cobro
           FROM reporte_horas rh
           WHERE rh.id_registro_asignacion = ra.id
           ORDER BY rh.created_at DESC
@@ -5453,7 +5453,11 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
             AND u.id_consultor_principal = (SELECT id FROM c_consultor)
         )
       )
-        AND (lr.estado_reporte IS NULL OR lr.estado_reporte IN ('Rechazado', 'Aprobado'))
+        AND (
+          lr.estado_reporte IS NULL
+          OR lr.estado_reporte = 'Rechazado'
+          OR (lr.estado_reporte = 'Aprobado' AND lr.id_cuenta_cobro IS NOT NULL)
+        )
         AND ra.estado IN ($3::tipo_estado_asignacion, $4::tipo_estado_asignacion)
         AND NOT (
           COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)

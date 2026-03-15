@@ -88,8 +88,21 @@ window.tarifasApp = function () {
             const tipo = this.cat.tipos.find(
                 (t) => t.id == this.form.tipo_asignacion_id
             );
-            const titulo = String(tipo?.titulo || "").toLowerCase();
-            return titulo.includes("full") || titulo.includes("part");
+            const titulo = String(tipo?.titulo || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .replace(/\s+/g, " ")
+                .trim();
+            const compacto = titulo.replace(/\s+/g, "");
+            return (
+                titulo.includes("full") ||
+                titulo.includes("part") ||
+                titulo.includes("tiempo completo") ||
+                compacto.includes("tiempocompleto") ||
+                titulo.includes("medio tiempo") ||
+                compacto.includes("mediotiempo")
+            );
         },
 
         validarDuplicado() {

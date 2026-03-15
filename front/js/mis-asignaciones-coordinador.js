@@ -184,6 +184,15 @@ window.misAsignacionesApp = function () {
             return tipos.some((x) => t === String(x).toLowerCase());
         },
 
+        normalizarTipoAsignacion(tipoAsignacion) {
+            return String(tipoAsignacion || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .replace(/\s+/g, " ")
+                .trim();
+        },
+
         parseLocalDate(value) {
             if (!value) return null;
             const [y, m, d] = String(value).split("-").map(Number);
@@ -225,16 +234,22 @@ window.misAsignacionesApp = function () {
         },
 
         esMensualTipo() {
-            const t = String(this.consultoriaInfo.tipo_asignacion || "").toLowerCase();
-            return t.includes("full") || t.includes("part");
+            const t = this.normalizarTipoAsignacion(this.consultoriaInfo.tipo_asignacion || "");
+            const compacto = t.replace(/\s+/g, "");
+            return (
+                t.includes("full") ||
+                t.includes("part") ||
+                t.includes("tiempo completo") ||
+                compacto.includes("tiempocompleto") ||
+                t.includes("medio tiempo") ||
+                compacto.includes("mediotiempo")
+            );
         },
 
         esTiempoCostoFijoTipo() {
-            const t = String(this.consultoriaInfo.tipo_asignacion || "")
-                .normalize("NFD")
-                .replace(/[\u0300-\u036f]/g, "")
-                .toLowerCase();
-            return t.includes("tiempo y costo fijo");
+            const t = this.normalizarTipoAsignacion(this.consultoriaInfo.tipo_asignacion || "");
+            const compacto = t.replace(/\s+/g, "");
+            return t.includes("tiempo y costo fijo") || compacto.includes("tiempoycostofijo");
         },
 
         esCostoTotalTipo() {
@@ -271,8 +286,15 @@ window.misAsignacionesApp = function () {
         },
 
         tarifaMostrar(asignacion) {
-            const tipo = String(asignacion?.tipo_asignacion || "").toLowerCase();
-            const esMensual = tipo.includes("full") || tipo.includes("part");
+            const tipo = this.normalizarTipoAsignacion(asignacion?.tipo_asignacion || "");
+            const compacto = tipo.replace(/\s+/g, "");
+            const esMensual =
+                tipo.includes("full") ||
+                tipo.includes("part") ||
+                tipo.includes("tiempo completo") ||
+                compacto.includes("tiempocompleto") ||
+                tipo.includes("medio tiempo") ||
+                compacto.includes("mediotiempo");
             if (esMensual) {
                 const valorDia = Number(asignacion?.valor_dia || 0);
                 const tarifaMensual = valorDia ? valorDia * 20 : Number(asignacion?.valor_hora || 0);

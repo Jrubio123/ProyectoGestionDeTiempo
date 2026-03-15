@@ -36,9 +36,26 @@ window.misAsignacionesConsultorApp = function () {
             this.modalOpen = true;
         },
 
+        esTipoMensual(tipoAsignacion) {
+            const tipo = String(tipoAsignacion || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .replace(/\s+/g, " ")
+                .trim();
+            const compacto = tipo.replace(/\s+/g, "");
+            return (
+                tipo.includes("full") ||
+                tipo.includes("part") ||
+                tipo.includes("tiempo completo") ||
+                compacto.includes("tiempocompleto") ||
+                tipo.includes("medio tiempo") ||
+                compacto.includes("mediotiempo")
+            );
+        },
+
         tarifaMostrar(asignacion) {
-            const tipo = String(asignacion?.nombre_tipo_asignacion || "").toLowerCase();
-            const esMensual = tipo.includes("full") || tipo.includes("part");
+            const esMensual = this.esTipoMensual(asignacion?.nombre_tipo_asignacion || "");
             if (esMensual) {
                 const valorDia = Number(asignacion?.valor_dia || 0);
                 const tarifaMensual = valorDia ? valorDia * 20 : Number(asignacion?.valor_hora || 0);
@@ -48,10 +65,17 @@ window.misAsignacionesConsultorApp = function () {
         },
 
         totalMostrar(asignacion) {
-            const tipo = String(asignacion?.nombre_tipo_asignacion || "").toLowerCase();
-            const esMensual = tipo.includes("full") || tipo.includes("part");
+            const tipo = String(asignacion?.nombre_tipo_asignacion || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .replace(/\s+/g, " ")
+                .trim();
+            const compacto = tipo.replace(/\s+/g, "");
+            const esMensual = this.esTipoMensual(tipo);
             const esHorasDemanda = tipo.includes("horas por demanda");
-            if (esHorasDemanda) return 0;
+            const esHorasDemandaCompacto = compacto.includes("horaspordemanda");
+            if (esHorasDemanda || esHorasDemandaCompacto) return 0;
 
             const totalBackend = Number(asignacion?.total_pagar || 0);
             const tarifa = this.tarifaMostrar(asignacion);

@@ -353,6 +353,44 @@ function normalizeScopeInput(value) {
   return null;
 }
 
+function normalizeTipoAsignacionTitulo(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactTipoAsignacionTitulo(value) {
+  return normalizeTipoAsignacionTitulo(value).replace(/\s+/g, "");
+}
+
+function isTipoAsignacionMensual(value) {
+  const norm = normalizeTipoAsignacionTitulo(value);
+  const compact = compactTipoAsignacionTitulo(value);
+  return (
+    norm.includes("full") ||
+    norm.includes("part") ||
+    norm.includes("tiempo completo") ||
+    compact.includes("tiempocompleto") ||
+    norm.includes("medio tiempo") ||
+    compact.includes("mediotiempo")
+  );
+}
+
+function isTipoAsignacionTiempoCostoFijo(value) {
+  const norm = normalizeTipoAsignacionTitulo(value);
+  const compact = compactTipoAsignacionTitulo(value);
+  return norm.includes("tiempo y costo fijo") || compact.includes("tiempoycostofijo");
+}
+
+function isTipoAsignacionHorasPorDemanda(value) {
+  const norm = normalizeTipoAsignacionTitulo(value);
+  const compact = compactTipoAsignacionTitulo(value);
+  return norm.includes("horas por demanda") || compact.includes("horaspordemanda");
+}
+
 function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, hints = {}, preferredScope = null) {
   const explicitScope =
     normalizeScopeInput(preferredScope) ||
@@ -5402,6 +5440,7 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
         )
         AND (
           LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%horas por demanda%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%horaspordemanda%'
           OR (
             COALESCE(ra.es_costo_total, false) = true
             AND (
@@ -5413,6 +5452,10 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
             (
               LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%full%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%part%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempo completo%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempocompleto%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%medio tiempo%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mediotiempo%'
             )
             AND COALESCE(ra.es_costo_total, false) = false
             AND (ra.cantidad_dias IS NULL OR ra.cantidad_dias > COALESCE(uso.dias_aprobados, 0))
@@ -5423,6 +5466,10 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
             NOT (
               LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%full%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%part%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempo completo%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempocompleto%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%medio tiempo%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mediotiempo%'
             )
             AND (ra.horas_asignadas IS NULL OR ra.horas_asignadas > COALESCE(uso.horas_aprobadas, 0))
           )
@@ -5545,11 +5592,10 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
     }
 
     const esMensual =
-      tipoAsignacionTitulo.includes("full") ||
-      tipoAsignacionTitulo.includes("part");
-    const esTiempoCostoFijo = tipoAsignacionTitulo.includes("tiempo y costo fijo");
+      isTipoAsignacionMensual(tipoAsignacionTitulo);
+    const esTiempoCostoFijo = isTipoAsignacionTiempoCostoFijo(tipoAsignacionTitulo);
     const esCostoTotal = esTiempoCostoFijo && toBooleanInput(info.es_costo_total, false);
-    const esHorasPorDemanda = tipoAsignacionTitulo.includes("horas por demanda");
+    const esHorasPorDemanda = isTipoAsignacionHorasPorDemanda(tipoAsignacionTitulo);
     let cantidadSolicitada = 0;
     let horasReportadasFinal = 0;
     let diasReportadosFinal = 0;
@@ -8214,15 +8260,11 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
             // Mesa/Fabrica: se cierra la solicitud (reporte), pero la asignacion base sigue activa.
             estadoAprobadoDestino = estados.abierto || estados.proceso;
           } else {
-            const tipoNorm = String(meta.tipo_asignacion_titulo || "")
-              .normalize("NFD")
-              .replace(/[\u0300-\u036f]/g, "")
-              .toLowerCase()
-              .trim();
-            const esMensual = tipoNorm.includes("full") || tipoNorm.includes("part");
-            const esTiempoCostoFijo = tipoNorm.includes("tiempo y costo fijo");
+            const tipoNorm = normalizeTipoAsignacionTitulo(meta.tipo_asignacion_titulo);
+            const esMensual = isTipoAsignacionMensual(tipoNorm);
+            const esTiempoCostoFijo = isTipoAsignacionTiempoCostoFijo(tipoNorm);
             const esCostoTotal = esTiempoCostoFijo && toBooleanInput(meta.es_costo_total, false);
-            const esHorasPorDemanda = tipoNorm.includes("horas por demanda");
+            const esHorasPorDemanda = isTipoAsignacionHorasPorDemanda(tipoNorm);
             if (!esHorasPorDemanda) {
               const uso = await pool.query(
                 `
@@ -8694,7 +8736,12 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
               ELSE false
             END AS es_mesa_fabrica,
             CASE 
-              WHEN m.n_tipo LIKE '%full%' OR m.n_tipo LIKE '%part%' THEN true
+              WHEN m.n_tipo LIKE '%full%'
+                OR m.n_tipo LIKE '%part%'
+                OR m.n_tipo LIKE '%tiempo completo%'
+                OR m.n_tipo LIKE '%tiempocompleto%'
+                OR m.n_tipo LIKE '%medio tiempo%'
+                OR m.n_tipo LIKE '%mediotiempo%' THEN true
               ELSE false
             END AS es_mensual,
             CASE 
@@ -8702,7 +8749,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
               ELSE false
             END AS es_t_c_fijo,
             CASE 
-              WHEN m.n_tipo LIKE '%horas por demanda%' THEN true
+              WHEN m.n_tipo LIKE '%horas por demanda%' OR m.n_tipo LIKE '%horaspordemanda%' THEN true
               ELSE false
             END AS es_h_demanda,
             obtener_tarifa_consultor(m.id_consultor, m.id_cliente, m.id_modulo, m.id_tipo_asignacion) AS tarifa_calculada

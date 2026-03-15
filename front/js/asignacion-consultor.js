@@ -220,12 +220,21 @@ window.asignacionConsultorApp = function () {
                 .normalize("NFD")
                 .replace(/[\u0300-\u036f]/g, "")
                 .toLowerCase()
+                .replace(/\s+/g, " ")
                 .trim();
         },
 
         get esMensual() {
             const t = this.normalizeTipo(this.proyectoSelected?.tipo_asignacion || "");
-            return t.includes("full") || t.includes("part");
+            const compacto = t.replace(/\s+/g, "");
+            return (
+                t.includes("full") ||
+                t.includes("part") ||
+                t.includes("tiempo completo") ||
+                compacto.includes("tiempocompleto") ||
+                t.includes("medio tiempo") ||
+                compacto.includes("mediotiempo")
+            );
         },
 
         calcularDiasMensual(fechaInicio, fechaFin) {
@@ -252,7 +261,8 @@ window.asignacionConsultorApp = function () {
 
         get esTiempoCostoFijo() {
             const t = this.normalizeTipo(this.proyectoSelected?.tipo_asignacion || "");
-            return t.includes("tiempo y costo fijo");
+            const compacto = t.replace(/\s+/g, "");
+            return t.includes("tiempo y costo fijo") || compacto.includes("tiempoycostofijo");
         },
 
         get esCostoTotalModo() {
@@ -261,7 +271,8 @@ window.asignacionConsultorApp = function () {
 
         get esHorasPorDemanda() {
             const t = this.normalizeTipo(this.proyectoSelected?.tipo_asignacion || "");
-            return t.includes("horas por demanda");
+            const compacto = t.replace(/\s+/g, "");
+            return t.includes("horas por demanda") || compacto.includes("horaspordemanda");
         },
 
         get esMesaServicio() {

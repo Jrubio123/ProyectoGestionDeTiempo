@@ -70,18 +70,32 @@ window.registroHorasApp = function () {
             return [...new Set(this.asignaciones.map((a) => a.nombre_tipo_asignacion).filter(Boolean))];
         },
 
-        esTipoMensual(tipoAsignacion) {
-            const tipo = String(tipoAsignacion || "").toLowerCase();
-            return tipo.includes("full") || tipo.includes("part");
-        },
-
-        esTipoTiempoCostoFijo(tipoAsignacion) {
-            const tipo = String(tipoAsignacion || "")
+        normalizarTipoAsignacion(tipoAsignacion) {
+            return String(tipoAsignacion || "")
                 .normalize("NFD")
                 .replace(/[\u0300-\u036f]/g, "")
                 .toLowerCase()
+                .replace(/\s+/g, " ")
                 .trim();
-            return tipo.includes("tiempo y costo fijo");
+        },
+
+        esTipoMensual(tipoAsignacion) {
+            const tipo = this.normalizarTipoAsignacion(tipoAsignacion);
+            const compacto = tipo.replace(/\s+/g, "");
+            return (
+                tipo.includes("full") ||
+                tipo.includes("part") ||
+                tipo.includes("tiempo completo") ||
+                compacto.includes("tiempocompleto") ||
+                tipo.includes("medio tiempo") ||
+                compacto.includes("mediotiempo")
+            );
+        },
+
+        esTipoTiempoCostoFijo(tipoAsignacion) {
+            const tipo = this.normalizarTipoAsignacion(tipoAsignacion);
+            const compacto = tipo.replace(/\s+/g, "");
+            return tipo.includes("tiempo y costo fijo") || compacto.includes("tiempoycostofijo");
         },
 
         esCostoTotal(item) {
@@ -137,7 +151,7 @@ window.registroHorasApp = function () {
             const unidad = esCostoTotal ? "COP" : (esDias ? "Dias" : "Horas");
             const cantidad = parseFloat(item.input_cantidad) || 0;
             if (!esCostoTotal && esDias && !Number.isInteger(cantidad)) {
-                alert("Para Full time/Part time solo se permiten dias enteros.");
+                alert("Para asignaciones mensuales solo se permiten dias enteros.");
                 return;
             }
 

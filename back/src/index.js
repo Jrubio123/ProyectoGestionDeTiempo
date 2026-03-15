@@ -8661,28 +8661,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
             con.id_cliente,
             con.id_tipo_asignacion,
             con.coordinador_responsable_id,
-            ta.titulo AS tipo_asig_titulo,
-            REPLACE(
-              REPLACE(
-                REPLACE(
-                  REPLACE(
-                    REPLACE(
-                      REPLACE(LOWER(TRIM(COALESCE(ta.titulo, ''))), 'á', 'a'),
-                      'é',
-                      'e'
-                    ),
-                    'í',
-                    'i'
-                  ),
-                  'ó',
-                  'o'
-                ),
-                'ú',
-                'u'
-              ),
-              'ü',
-              'u'
-            ) AS tipo_asig_titulo_norm
+            ta.titulo AS tipo_asig_titulo
           FROM consultorias con
           LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
           WHERE con.public_id = $1::uuid AND con.activo = true
@@ -8694,8 +8673,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
         ),
         
         -- Validar duplicidad activa en la misma consultoría, consultor y módulo.
-        -- Para tipos no mensuales, bloquea si el rango se solapa.
-        -- En tipos mensuales (full/part/tiempo completo/medio tiempo) se permite recrear.
+        -- Para asignaciones con fechas, solo bloquea si el rango se solapa.
         c_dup AS (
           SELECT ra.id
           FROM registro_asignaciones ra
@@ -8703,14 +8681,6 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
           JOIN c_consultor uc ON ra.consultor_responsable_id = uc.id
           JOIN c_modulo m ON ra.id_modulo = m.id
           WHERE ra.estado IN ((SELECT st_abierto FROM c_estados), (SELECT st_proceso FROM c_estados))
-            AND NOT (
-              con.tipo_asig_titulo_norm LIKE '%full%'
-              OR con.tipo_asig_titulo_norm LIKE '%part%'
-              OR con.tipo_asig_titulo_norm LIKE '%tiempo completo%'
-              OR con.tipo_asig_titulo_norm LIKE '%tiempocompleto%'
-              OR con.tipo_asig_titulo_norm LIKE '%medio tiempo%'
-              OR con.tipo_asig_titulo_norm LIKE '%mediotiempo%'
-            )
             AND daterange(
               COALESCE(ra.fecha_inicio, DATE '-infinity'),
               COALESCE(ra.fecha_fin, DATE 'infinity'),

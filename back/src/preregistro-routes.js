@@ -397,6 +397,9 @@ module.exports = function registerPreregistroRoutes(deps) {
                 telefono,
                 ubicacion,
                 modalidad_contrato,
+                moneda,
+                tarifa_hora,
+                tarifa_mes,
                 fecha_inicio,
                 necesidad_ti,
                 observaciones,
@@ -423,8 +426,11 @@ module.exports = function registerPreregistroRoutes(deps) {
                 $12,
                 $13,
                 $14,
-                $15::jsonb,
+                $15,
                 $16,
+                $17,
+                $18::jsonb,
+                $19,
                 false,
                 false,
                 false
@@ -442,6 +448,9 @@ module.exports = function registerPreregistroRoutes(deps) {
                 telefono || null,
                 solicitud.ubicacion || pais_ubicacion || null,
                 solicitud.modalidad || null,
+                monedaNorm,
+                tarifaHoraParsed.value,
+                tarifaMesParsed.value,
                 solicitud.fecha_inicio_esperada || null,
                 necesidadTiResumen || null,
                 solicitud.observaciones_rrhh || null,
@@ -487,7 +496,19 @@ module.exports = function registerPreregistroRoutes(deps) {
   });
 
   app.patch("/api/preregistros/:public_id/seccion-1", requireAccess({ roles: ["Reclutador"] }), async (req, res) => {
-    const editable = ["nombre", "apellidos", "tipo_documento", "numero_documento", "telefono", "correo_personal", "pais_ubicacion", "ciudad"];
+    const editable = [
+      "nombre",
+      "apellidos",
+      "tipo_documento",
+      "numero_documento",
+      "telefono",
+      "correo_personal",
+      "pais_ubicacion",
+      "ciudad",
+      "moneda",
+      "tarifa_mes",
+      "tarifa_hora"
+    ];
     const client = await pool.connect();
     try {
       const current = await getByPublicId(client, req.params.public_id);
@@ -495,6 +516,36 @@ module.exports = function registerPreregistroRoutes(deps) {
       const id = current.id;
       if (current.estado !== ESTADOS.pendienteCoordinador) {
         return res.status(422).json({ error: "No se puede editar seccion 1 en el estado actual" });
+      }
+
+      let nextMoneda = current.moneda;
+      let nextTarifaMes = current.tarifa_mes;
+      let nextTarifaHora = current.tarifa_hora;
+
+      if (req.body?.moneda !== undefined) {
+        const monedaNorm = String(req.body.moneda || "").trim().toUpperCase();
+        if (!monedaNorm || !MONEDAS.has(monedaNorm)) {
+          return res.status(400).json({ error: "moneda es obligatoria y debe ser COP, USD o EUR" });
+        }
+        nextMoneda = monedaNorm;
+      }
+
+      if (req.body?.tarifa_mes !== undefined) {
+        const parsed = parseTarifaInput(req.body.tarifa_mes, "tarifa_mes");
+        if (parsed.error) return res.status(400).json({ error: parsed.error });
+        nextTarifaMes = parsed.value;
+      }
+
+      if (req.body?.tarifa_hora !== undefined) {
+        const parsed = parseTarifaInput(req.body.tarifa_hora, "tarifa_hora");
+        if (parsed.error) return res.status(400).json({ error: parsed.error });
+        nextTarifaHora = parsed.value;
+      }
+
+      if (req.body?.tarifa_mes !== undefined || req.body?.tarifa_hora !== undefined) {
+        if (nextTarifaMes === null && nextTarifaHora === null) {
+          return res.status(400).json({ error: "Se requiere tarifa mensual o tarifa por hora" });
+        }
       }
 
       const sets = [];
@@ -512,6 +563,21 @@ module.exports = function registerPreregistroRoutes(deps) {
           }
           sets.push(`tipo_documento_id = $${idx++}`);
           vals.push(tipoDocumentoId);
+          continue;
+        }
+        if (field === "moneda") {
+          sets.push(`moneda = $${idx++}`);
+          vals.push(nextMoneda);
+          continue;
+        }
+        if (field === "tarifa_mes") {
+          sets.push(`tarifa_mes = $${idx++}`);
+          vals.push(nextTarifaMes);
+          continue;
+        }
+        if (field === "tarifa_hora") {
+          sets.push(`tarifa_hora = $${idx++}`);
+          vals.push(nextTarifaHora);
           continue;
         }
         sets.push(`${field} = $${idx++}`);

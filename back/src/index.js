@@ -950,6 +950,31 @@ function makePublicIdNotFoundError(tableName, value) {
   return err;
 }
 
+async function resolveInternalIdFromPublicIdOrId(db, tableName, value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (!ALLOWED_PUBLIC_ID_TABLES.has(tableName)) {
+    throw new Error(`Tabla no permitida para resolver id: ${tableName}`);
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  if (isNumericId(raw)) {
+    const numeric = Number(raw);
+    if (Number.isInteger(numeric) && numeric > 0) {
+      const res = await db.query(`SELECT id FROM ${tableName} WHERE id = $1`, [numeric]);
+      return res.rows[0]?.id || null;
+    }
+  }
+
+  if (isGuid(raw)) {
+    const res = await db.query(`SELECT id FROM ${tableName} WHERE public_id = $1`, [raw]);
+    return res.rows[0]?.id || null;
+  }
+
+  return null;
+}
+
 
 const MAX_TICKETS_POR_ASIGNACION = 10;
 
@@ -3937,11 +3962,13 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
     if (!cliente_id || !modulo_id || !perfil || !nivel) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
+    const clienteInternalId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.clientes, cliente_id);
+    const moduloInternalId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.modulo, modulo_id);
+    if (!clienteInternalId || !moduloInternalId) {
+      return res.status(404).json({ error: "Cliente y/o modulo no encontrado(s), o invalido(s)" });
+    }
     const result = await pool.query(
       `
-      WITH
-       c_cliente AS (SELECT id FROM clientes WHERE public_id = $2),
-       c_modulo AS (SELECT id FROM modulo WHERE public_id = $3)
       INSERT INTO solicitudes_rrhh
         (
           coordinador_id,
@@ -3960,16 +3987,14 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
           informacion_adicional,
           prioridad
         )
-      SELECT
-        $1, (SELECT id FROM c_cliente), (SELECT id FROM c_modulo), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
-      WHERE EXISTS (SELECT 1 FROM c_cliente)
-        AND EXISTS (SELECT 1 FROM c_modulo)
+      VALUES
+        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       RETURNING id
       `,
       [
         req.user?.id,
-        cliente_id,
-        modulo_id,
+        clienteInternalId,
+        moduloInternalId,
         perfil,
         nivel,
         tiempo || null,

@@ -3806,7 +3806,7 @@ app.get("/tipos-asignacion", requireAuthenticated, async (req, res) => {
 app.get("/bancos", requireAuthenticated, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT public_id AS id, titulo
+      SELECT id, titulo
       FROM bancos
       WHERE activo = true
       ORDER BY titulo ASC

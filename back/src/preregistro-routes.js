@@ -131,7 +131,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       p.tarifa_hora, p.tarifa_mes, p.tarifa_medio_tiempo, p.tarifa_capacitacion,
       p.vpn_corona, p.necesita_s_user, p.grupo_usuario, p.grupo_distribucion,
       p.observaciones, p.direccion, p.tipo_persona, p.banco_id,
-      b.public_id AS banco_public_id, b.titulo AS banco_nombre,
+      b.titulo AS banco_nombre,
       p.tipo_cuenta, p.numero_cuenta, p.correo_silver, p.estado,
       p.creado_por, creador.public_id AS creado_por_public_id, creador.nombre_usuario AS creado_por_nombre,
       p.completado_coordinador_por, coordDone.public_id AS completado_coordinador_por_public_id, coordDone.nombre_usuario AS completado_coordinador_por_nombre,
@@ -200,7 +200,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       observaciones: row.observaciones,
       direccion: row.direccion,
       tipo_persona: row.tipo_persona,
-      banco: row.banco_public_id ? { id: row.banco_public_id, nombre: row.banco_nombre } : null,
+      banco: row.banco_id ? { id: row.banco_id, nombre: row.banco_nombre } : null,
       tipo_cuenta: row.tipo_cuenta,
       numero_cuenta: row.numero_cuenta,
       correo_silver: row.correo_silver,
@@ -677,9 +677,12 @@ module.exports = function registerPreregistroRoutes(deps) {
         return res.status(422).json({ error: "No se puede completar seccion 3 en el estado actual" });
       }
 
-      const bancoRes = await client.query("SELECT id FROM bancos WHERE public_id = $1", [banco_id]);
+      const bancoId = Number(banco_id);
+      if (!Number.isInteger(bancoId) || bancoId <= 0) {
+        return res.status(400).json({ error: "Banco no encontrado" });
+      }
+      const bancoRes = await client.query("SELECT id FROM bancos WHERE id = $1", [bancoId]);
       if (!bancoRes.rows.length) return res.status(400).json({ error: "Banco no encontrado" });
-      const bancoId = bancoRes.rows[0].id;
       const correoSilverNorm = correo_silver ? String(correo_silver).trim().toLowerCase() : null;
       if (correoSilverNorm) {
         const [dupUser, dupPre] = await Promise.all([

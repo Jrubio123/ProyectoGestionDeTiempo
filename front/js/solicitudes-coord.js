@@ -87,6 +87,7 @@ window.solicitudesCoordApp = function () {
             }
 
             const esOtros = this.form.modulo_id === "__otros__";
+            const perfil = String(this.form.perfil || "").trim();
             const min = Number(this.form.presupuesto_min);
             const max = Number(this.form.presupuesto_max);
             let presupuesto = null;
@@ -101,7 +102,7 @@ window.solicitudesCoordApp = function () {
             const payload = {
                 cliente_id: this.form.cliente_id,
                 modulo_id: esOtros ? null : this.form.modulo_id,
-                perfil: this.form.perfil,
+                perfil,
                 nivel: this.form.nivel,
                 tiempo: this.form.tiempo,
                 ubicacion: this.form.ubicacion,
@@ -127,9 +128,13 @@ window.solicitudesCoordApp = function () {
 
         get camposFaltantes() {
             const faltan = [];
+            const esOtros = this.form.modulo_id === "__otros__";
+            const perfil = String(this.form.perfil || "").trim();
             if (!this.form.cliente_id) faltan.push("Cliente");
             if (!this.form.modulo_id) faltan.push("Tecnología / Módulo");
-            if (this.form.modulo_id === "__otros__" && !String(this.form.perfil || "").trim()) faltan.push("Perfil (requerido al elegir Otros)");
+            if (!perfil) {
+                faltan.push(esOtros ? "Perfil (requerido al elegir Otros)" : "Perfil");
+            }
             if (!this.form.nivel) faltan.push("Nivel");
             if (!this.form.tiempo) faltan.push("Tiempo");
             if (!this.form.ubicacion) faltan.push("Ubicación");

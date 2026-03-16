@@ -187,7 +187,7 @@ window.onboardingThApp = function () {
                 correo_personal: item?.correo_personal || null,
                 pais_ubicacion: item?.ubicacion || null,
                 ciudad: null,
-                responsable_supervisor: item?.supervisor?.nombre || null,
+                responsable_supervisor: null,
                 fecha_fin: item?.fecha_fin || null,
                 moneda: item?.moneda || null,
                 pais_pago: null,

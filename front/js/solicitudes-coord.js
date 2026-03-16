@@ -1,4 +1,4 @@
-﻿// js/solicitudes-coord.js
+// js/solicitudes-coord.js
 window.solicitudesCoordApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
 
@@ -19,7 +19,8 @@ window.solicitudesCoordApp = function () {
             fecha_inicio_esperada: "",
             tipo_proyecto: "",
             experiencia: "",
-            presupuesto: "",
+            presupuesto_min: "",
+            presupuesto_max: "",
             descripcion: "",
             informacion_adicional: "",
             prioridad: "Media"
@@ -69,7 +70,8 @@ window.solicitudesCoordApp = function () {
                 fecha_inicio_esperada: "",
                 tipo_proyecto: "",
                 experiencia: "",
-                presupuesto: "",
+                presupuesto_min: "",
+                presupuesto_max: "",
                 descripcion: "",
                 informacion_adicional: "",
                 prioridad: "Media"
@@ -83,9 +85,22 @@ window.solicitudesCoordApp = function () {
                 alert("Faltan campos obligatorios por completar.");
                 return;
             }
+
+            const esOtros = this.form.modulo_id === "__otros__";
+            const min = Number(this.form.presupuesto_min);
+            const max = Number(this.form.presupuesto_max);
+            let presupuesto = null;
+            if (min > 0 && max > 0) {
+                presupuesto = `${min.toLocaleString("es-CO")} - ${max.toLocaleString("es-CO")}`;
+            } else if (min > 0) {
+                presupuesto = `${min.toLocaleString("es-CO")}`;
+            } else if (max > 0) {
+                presupuesto = `${max.toLocaleString("es-CO")}`;
+            }
+
             const payload = {
                 cliente_id: this.form.cliente_id,
-                modulo_id: this.form.modulo_id,
+                modulo_id: esOtros ? null : this.form.modulo_id,
                 perfil: this.form.perfil,
                 nivel: this.form.nivel,
                 tiempo: this.form.tiempo,
@@ -94,7 +109,7 @@ window.solicitudesCoordApp = function () {
                 fecha_inicio_esperada: this.form.fecha_inicio_esperada || null,
                 tipo_proyecto: this.form.tipo_proyecto,
                 experiencia: this.form.experiencia,
-                presupuesto: this.form.presupuesto,
+                presupuesto,
                 descripcion: this.form.descripcion,
                 informacion_adicional: this.form.informacion_adicional,
                 prioridad: this.form.prioridad || "Media"
@@ -113,13 +128,13 @@ window.solicitudesCoordApp = function () {
         get camposFaltantes() {
             const faltan = [];
             if (!this.form.cliente_id) faltan.push("Cliente");
-            if (!this.form.modulo_id) faltan.push("Módulo");
-            if (!this.form.perfil) faltan.push("Perfil");
+            if (!this.form.modulo_id) faltan.push("Tecnología / Módulo");
+            if (this.form.modulo_id === "__otros__" && !String(this.form.perfil || "").trim()) faltan.push("Perfil (requerido al elegir Otros)");
             if (!this.form.nivel) faltan.push("Nivel");
             if (!this.form.tiempo) faltan.push("Tiempo");
             if (!this.form.ubicacion) faltan.push("Ubicación");
             if (!this.form.modalidad) faltan.push("Modalidad");
-            if (!this.form.presupuesto) faltan.push("Presupuesto");
+            if (!this.form.presupuesto_min && !this.form.presupuesto_max) faltan.push("Presupuesto");
             if (!this.form.descripcion) faltan.push("Descripción");
             if (!this.form.prioridad) faltan.push("Prioridad");
             return faltan;

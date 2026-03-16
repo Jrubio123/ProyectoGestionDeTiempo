@@ -1,4 +1,4 @@
-﻿<div x-data="solicitudesCoordApp()" class="rrhh-page max-w-7xl mx-auto space-y-6">
+<div x-data="solicitudesCoordApp()" class="rrhh-page max-w-7xl mx-auto space-y-6">
     <section class="relative overflow-hidden bg-white/40 backdrop-blur-xl border-b border-white/20 p-8 rounded-b-3xl shadow-sm">
         <div class="absolute -top-24 -right-24 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl"></div>
 
@@ -89,11 +89,15 @@
                     <select x-model="form.modulo_id" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
                         <option value="">Tecnología / Módulo...</option>
                         <template x-for="m in modulos" :key="m.id"><option :value="m.id" x-text="m.titulo"></option></template>
+                        <option value="__otros__">Otros</option>
                     </select>
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <input type="text" x-model="form.perfil" placeholder="Perfil (Ej: ABAP)" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                    <input type="text" x-model="form.perfil"
+                        :placeholder="form.modulo_id === '__otros__' ? 'Especifica el perfil requerido *' : 'Perfil (Ej: ABAP)'"
+                        :class="form.modulo_id === '__otros__' ? 'ring-2 ring-indigo-400/40 border-indigo-300' : ''"
+                        class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
                     <select x-model="form.nivel" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
                         <option value="Junior">Junior</option>
                         <option value="Semi-senior">Semi-senior</option>
@@ -135,7 +139,16 @@
                     </select>
                 </div>
 
-                <input type="text" x-model="form.presupuesto" placeholder="Presupuesto (Ej: 9M - 12M COP)" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="relative">
+                        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 pointer-events-none">Desde $</span>
+                        <input type="number" min="0" x-model="form.presupuesto_min" placeholder="0" class="w-full bg-white/50 border border-slate-200 rounded-2xl pl-12 pr-3 py-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                    </div>
+                    <div class="relative">
+                        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 pointer-events-none">Hasta $</span>
+                        <input type="number" min="0" x-model="form.presupuesto_max" placeholder="0" class="w-full bg-white/50 border border-slate-200 rounded-2xl pl-14 pr-3 py-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                    </div>
+                </div>
 
                 <textarea x-model="form.experiencia" rows="3" placeholder="Experiencia requerida" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"></textarea>
                 <textarea x-model="form.descripcion" rows="4" placeholder="Descripción de la solicitud" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"></textarea>

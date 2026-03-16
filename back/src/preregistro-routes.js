@@ -20,7 +20,7 @@ module.exports = function registerPreregistroRoutes(deps) {
 
   const TIPOS_CUENTA = new Set(["Ahorros", "Corriente"]);
   const TIPOS_PERSONA = new Set(["Natural", "Juridica"]);
-  const MONEDAS = new Set(["COP", "USD"]);
+  const MONEDAS = new Set(["COP", "USD", "EUR"]);
 
   function normalizeEnumKey(value) {
     return String(value || "")
@@ -37,6 +37,18 @@ module.exports = function registerPreregistroRoutes(deps) {
 
   function isValidSilverEmail(value) {
     return /^[^\s@]+@silverconsulting\.com\.co$/i.test(String(value || "").trim());
+  }
+
+  function parseTarifaInput(value, fieldName) {
+    if (value === undefined || value === null || value === "") return { value: null };
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return { error: `${fieldName} debe ser un numero valido` };
+    }
+    if (parsed < 0) {
+      return { error: `${fieldName} no puede ser negativa` };
+    }
+    return { value: parsed };
   }
 
   function normalizeDocKey(value) {
@@ -127,7 +139,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       s.estado AS solicitud_estado,
       p.nombre, p.apellidos, p.tipo_documento_id, di.titulo AS tipo_documento, p.numero_documento, p.telefono,
       p.correo_personal, p.pais_ubicacion, p.ciudad,
-      p.responsable_supervisor, p.fecha_fin, p.moneda, p.pais_pago,
+      p.fecha_fin, p.moneda, p.pais_pago,
       p.tarifa_hora, p.tarifa_mes, p.tarifa_medio_tiempo, p.tarifa_capacitacion,
       p.vpn_corona, p.necesita_s_user, p.grupo_usuario, p.grupo_distribucion,
       p.observaciones, p.direccion, p.tipo_persona, p.banco_id,
@@ -185,7 +197,6 @@ module.exports = function registerPreregistroRoutes(deps) {
       correo_personal: row.correo_personal,
       pais_ubicacion: row.pais_ubicacion,
       ciudad: row.ciudad,
-      responsable_supervisor: row.responsable_supervisor,
       fecha_fin: row.fecha_fin,
       moneda: row.moneda,
       pais_pago: row.pais_pago,
@@ -238,11 +249,27 @@ module.exports = function registerPreregistroRoutes(deps) {
   }
 
   app.post("/api/solicitudes-rrhh/:public_id/contratar", requireAccess({ roles: ["Reclutador"] }), async (req, res) => {
-    const { nombre, apellidos, tipo_documento, numero_documento, telefono, correo_personal, pais_ubicacion, ciudad } = req.body || {};
+    const { nombre, apellidos, tipo_documento, numero_documento, telefono, correo_personal, pais_ubicacion, ciudad,
+            moneda, tarifa_mes, tarifa_hora } = req.body || {};
     const docType = String(tipo_documento || "").trim();
+    const monedaNorm = String(moneda || "").trim().toUpperCase();
 
     if (!nombre || !apellidos || !docType || !numero_documento || !correo_personal) {
       return res.status(400).json({ error: "Faltan campos obligatorios de la seccion 1" });
+    }
+    if (!monedaNorm || !MONEDAS.has(monedaNorm)) {
+      return res.status(400).json({ error: "moneda es obligatoria y debe ser COP, USD o EUR" });
+    }
+    const tarifaMesParsed = parseTarifaInput(tarifa_mes, "tarifa_mes");
+    if (tarifaMesParsed.error) {
+      return res.status(400).json({ error: tarifaMesParsed.error });
+    }
+    const tarifaHoraParsed = parseTarifaInput(tarifa_hora, "tarifa_hora");
+    if (tarifaHoraParsed.error) {
+      return res.status(400).json({ error: tarifaHoraParsed.error });
+    }
+    if (tarifaMesParsed.value === null && tarifaHoraParsed.value === null) {
+      return res.status(400).json({ error: "Se requiere tarifa mensual o tarifa por hora" });
     }
     if (!isValidEmail(correo_personal)) {
       return res.status(400).json({ error: "correo_personal no tiene formato valido" });
@@ -289,8 +316,8 @@ module.exports = function registerPreregistroRoutes(deps) {
       await client.query(`UPDATE solicitudes_rrhh SET estado = 'Contratado' WHERE id = $1`, [solicitudId]);
       const created = await client.query(
         `INSERT INTO preregistro_personas
-          (id_solicitud_rrhh, nombre, apellidos, tipo_documento_id, numero_documento, telefono, correo_personal, pais_ubicacion, ciudad, estado, creado_por)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          (id_solicitud_rrhh, nombre, apellidos, tipo_documento_id, numero_documento, telefono, correo_personal, pais_ubicacion, ciudad, moneda, tarifa_mes, tarifa_hora, estado, creado_por)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          RETURNING public_id, estado`,
         [
           solicitudId,
@@ -302,6 +329,9 @@ module.exports = function registerPreregistroRoutes(deps) {
           String(correo_personal).trim().toLowerCase(),
           pais_ubicacion || null,
           ciudad || null,
+          monedaNorm,
+          tarifaMesParsed.value,
+          tarifaHoraParsed.value,
           ESTADOS.pendienteCoordinador,
           req.user?.id
         ]
@@ -502,16 +532,32 @@ module.exports = function registerPreregistroRoutes(deps) {
 
   app.patch("/api/preregistros/:public_id/seccion-2", requireAccess({ roles: ["Coordinador"] }), async (req, res) => {
     const {
-      responsable_supervisor, fecha_fin, moneda, pais_pago,
+      fecha_fin, moneda, pais_pago,
       tarifa_hora, tarifa_mes, tarifa_medio_tiempo, tarifa_capacitacion,
       vpn_corona, necesita_s_user, grupo_usuario, grupo_distribucion, observaciones
     } = req.body || {};
 
-    if (!responsable_supervisor || !moneda || typeof vpn_corona !== "boolean" || typeof necesita_s_user !== "boolean") {
+    if (!moneda || typeof vpn_corona !== "boolean" || typeof necesita_s_user !== "boolean") {
       return res.status(400).json({ error: "Faltan campos obligatorios de la seccion 2" });
     }
     if (!MONEDAS.has(String(moneda || "").trim())) {
       return res.status(400).json({ error: "moneda no valida" });
+    }
+    const tarifaHoraParsed = parseTarifaInput(tarifa_hora, "tarifa_hora");
+    if (tarifaHoraParsed.error) return res.status(400).json({ error: tarifaHoraParsed.error });
+    const tarifaMesParsed = parseTarifaInput(tarifa_mes, "tarifa_mes");
+    if (tarifaMesParsed.error) return res.status(400).json({ error: tarifaMesParsed.error });
+    const tarifaMedioParsed = parseTarifaInput(tarifa_medio_tiempo, "tarifa_medio_tiempo");
+    if (tarifaMedioParsed.error) return res.status(400).json({ error: tarifaMedioParsed.error });
+    const tarifaCapParsed = parseTarifaInput(tarifa_capacitacion, "tarifa_capacitacion");
+    if (tarifaCapParsed.error) return res.status(400).json({ error: tarifaCapParsed.error });
+    if (
+      tarifaHoraParsed.value === null &&
+      tarifaMesParsed.value === null &&
+      tarifaMedioParsed.value === null &&
+      tarifaCapParsed.value === null
+    ) {
+      return res.status(400).json({ error: "Se requiere al menos una tarifa" });
     }
 
     const client = await pool.connect();
@@ -530,26 +576,28 @@ module.exports = function registerPreregistroRoutes(deps) {
 
       await client.query(
         `UPDATE preregistro_personas
-         SET responsable_supervisor = $1,
-             fecha_fin = $2,
-             moneda = $3,
-             pais_pago = $4,
-             tarifa_hora = $5,
-             tarifa_mes = $6,
-             tarifa_medio_tiempo = $7,
-             tarifa_capacitacion = $8,
-             vpn_corona = $9,
-             necesita_s_user = $10,
-             grupo_usuario = $11,
-             grupo_distribucion = $12,
-             observaciones = $13,
-             estado = $14,
-             completado_coordinador_por = $15,
+         SET fecha_fin = $1,
+             moneda = $2,
+             pais_pago = $3,
+             tarifa_hora = $4,
+             tarifa_mes = $5,
+             tarifa_medio_tiempo = $6,
+             tarifa_capacitacion = $7,
+             vpn_corona = $8,
+             necesita_s_user = $9,
+             grupo_usuario = $10,
+             grupo_distribucion = $11,
+             observaciones = $12,
+             estado = $13,
+             completado_coordinador_por = $14,
              fecha_completado_coordinador = NOW()
-         WHERE id = $16`,
+         WHERE id = $15`,
         [
-          responsable_supervisor, fecha_fin || null, String(moneda).trim(), pais_pago || null,
-          tarifa_hora ?? null, tarifa_mes ?? null, tarifa_medio_tiempo ?? null, tarifa_capacitacion ?? null,
+          fecha_fin || null, String(moneda).trim(), pais_pago || null,
+          tarifaHoraParsed.value,
+          tarifaMesParsed.value,
+          tarifaMedioParsed.value,
+          tarifaCapParsed.value,
           vpn_corona, necesita_s_user, grupoUsuarioNorm, grupoDistribucionNorm, observaciones || null,
           ESTADOS.pendienteRevisionTh, req.user?.id, id
         ]
@@ -602,7 +650,7 @@ module.exports = function registerPreregistroRoutes(deps) {
 
   app.patch("/api/preregistros/:public_id/seccion-2/editar", requireAccess({ roles: ["Coordinador"] }), async (req, res) => {
     const editable = [
-      "responsable_supervisor", "fecha_fin", "moneda", "pais_pago", "tarifa_hora", "tarifa_mes",
+      "fecha_fin", "moneda", "pais_pago", "tarifa_hora", "tarifa_mes",
       "tarifa_medio_tiempo", "tarifa_capacitacion", "vpn_corona", "necesita_s_user", "grupo_usuario",
       "grupo_distribucion", "observaciones"
     ];
@@ -626,6 +674,15 @@ module.exports = function registerPreregistroRoutes(deps) {
         if (req.body?.[field] === undefined) continue;
         if (field === "moneda" && !MONEDAS.has(String(req.body[field] || "").trim())) {
           return res.status(400).json({ error: "moneda no valida" });
+        }
+        if (field.startsWith("tarifa_")) {
+          const parsed = parseTarifaInput(req.body[field], field);
+          if (parsed.error) {
+            return res.status(400).json({ error: parsed.error });
+          }
+          sets.push(`${field} = $${idx++}`);
+          vals.push(parsed.value);
+          continue;
         }
         if (field === "grupo_usuario") {
           sets.push(`${field} = $${idx++}`);

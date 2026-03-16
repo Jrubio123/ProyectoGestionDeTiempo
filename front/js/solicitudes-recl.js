@@ -1,4 +1,4 @@
-﻿// js/solicitudes-recl.js
+// js/solicitudes-recl.js
 window.solicitudesReclApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
 
@@ -10,7 +10,10 @@ window.solicitudesReclApp = function () {
         telefono: "",
         correo_personal: "",
         pais_ubicacion: "",
-        ciudad: ""
+        ciudad: "",
+        moneda: "",
+        tarifa_mes: "",
+        tarifa_hora: ""
     });
 
     return {
@@ -162,7 +165,10 @@ window.solicitudesReclApp = function () {
                 telefono: p.telefono || "",
                 correo_personal: p.correo_personal || "",
                 pais_ubicacion: p.pais_ubicacion || "",
-                ciudad: p.ciudad || ""
+                ciudad: p.ciudad || "",
+                moneda: p.moneda || "",
+                tarifa_mes: p.tarifa_mes || "",
+                tarifa_hora: p.tarifa_hora || ""
             };
             this.modalSeccion1 = true;
         },
@@ -180,19 +186,24 @@ window.solicitudesReclApp = function () {
             for (const k of req) {
                 if (!String(this.formS1?.[k] || "").trim()) return false;
             }
+            if (!String(this.formS1.moneda || "").trim()) return false;
+            const tarifaMes = this.formS1.tarifa_mes !== "" && this.formS1.tarifa_mes !== null ? Number(this.formS1.tarifa_mes) : null;
+            const tarifaHora = this.formS1.tarifa_hora !== "" && this.formS1.tarifa_hora !== null ? Number(this.formS1.tarifa_hora) : null;
+            if (tarifaMes !== null && (!Number.isFinite(tarifaMes) || tarifaMes < 0)) return false;
+            if (tarifaHora !== null && (!Number.isFinite(tarifaHora) || tarifaHora < 0)) return false;
+            if (tarifaMes === null && tarifaHora === null) return false;
             return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(this.formS1.correo_personal || "").trim());
         },
 
         async guardarSeccion1() {
             if (!this.solicitudObjetivo?.id) return;
             if (!this.validarSeccion1()) {
-                alert("Completa los campos obligatorios y valida el correo personal.");
+                alert("Completa los campos obligatorios, valida el correo personal y registra una tarifa válida.");
                 return;
             }
 
             this.guardandoSeccion1 = true;
             const payload = {
-                ...this.formS1,
                 nombre: String(this.formS1.nombre || "").trim(),
                 apellidos: String(this.formS1.apellidos || "").trim(),
                 tipo_documento: String(this.formS1.tipo_documento || "").trim(),
@@ -200,11 +211,19 @@ window.solicitudesReclApp = function () {
                 telefono: String(this.formS1.telefono || "").trim() || null,
                 correo_personal: String(this.formS1.correo_personal || "").trim().toLowerCase(),
                 pais_ubicacion: String(this.formS1.pais_ubicacion || "").trim() || null,
-                ciudad: String(this.formS1.ciudad || "").trim() || null
+                ciudad: String(this.formS1.ciudad || "").trim() || null,
+                moneda: String(this.formS1.moneda || "").trim() || null,
+                tarifa_mes: this.formS1.tarifa_mes !== "" && this.formS1.tarifa_mes !== null ? Number(this.formS1.tarifa_mes) : null,
+                tarifa_hora: this.formS1.tarifa_hora !== "" && this.formS1.tarifa_hora !== null ? Number(this.formS1.tarifa_hora) : null
             };
 
             try {
                 if (this.modoSeccion1 === "crear") {
+                    if (!payload.moneda) {
+                        alert("Selecciona la moneda de la tarifa.");
+                        this.guardandoSeccion1 = false;
+                        return;
+                    }
                     await this.requestWithApiFallback(
                         "post",
                         `/api/solicitudes-rrhh/${this.solicitudObjetivo.id}/contratar`,

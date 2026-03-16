@@ -3959,13 +3959,18 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
     prioridad
   } = req.body;
   try {
-    if (!cliente_id || !modulo_id || !perfil || !nivel) {
+    if (!cliente_id || !perfil || !nivel) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
     const clienteInternalId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.clientes, cliente_id);
-    const moduloInternalId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.modulo, modulo_id);
-    if (!clienteInternalId || !moduloInternalId) {
-      return res.status(404).json({ error: "Cliente y/o modulo no encontrado(s), o invalido(s)" });
+    if (!clienteInternalId) {
+      return res.status(404).json({ error: "Cliente no encontrado o inválido" });
+    }
+    const moduloInternalId = modulo_id
+      ? await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.modulo, modulo_id)
+      : null;
+    if (modulo_id && !moduloInternalId) {
+      return res.status(404).json({ error: "Módulo no encontrado o inválido" });
     }
     const result = await pool.query(
       `
@@ -4365,6 +4370,24 @@ app.post("/auth/login", async (req, res) => {
     const ok = await bcrypt.compare(password, user.password_hash || "");
     if (!ok) {
       return res.status(401).json({ error: "Credenciales inválidas" });
+    }
+
+    try {
+      await pool.query(
+        "UPDATE usuarios SET ultimo_inicio_sesion = CURRENT_TIMESTAMP WHERE id = $1",
+        [user.id]
+      );
+    } catch (err) {
+      console.error("No se pudo actualizar ultimo_inicio_sesion:", err.message);
+    }
+
+    try {
+      await pool.query(
+        "UPDATE usuarios SET ultimo_inicio_sesion = CURRENT_TIMESTAMP WHERE id = $1",
+        [userRow.id]
+      );
+    } catch (err) {
+      console.error("No se pudo actualizar ultimo_inicio_sesion:", err.message);
     }
 
     const payload = {

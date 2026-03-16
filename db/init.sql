@@ -374,6 +374,7 @@ CREATE TABLE usuarios
     -- Información adicional
     foto_url TEXT,
     observaciones TEXT,
+    ultimo_inicio_sesion TIMESTAMP,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -656,7 +657,7 @@ CREATE TABLE solicitudes_rrhh (
     
     coordinador_id INT NOT NULL REFERENCES usuarios(id),
     cliente_id INT NOT NULL REFERENCES clientes(id),
-    modulo_id INT NOT NULL REFERENCES modulo(id),
+    modulo_id INT REFERENCES modulo(id),
     
     perfil VARCHAR(100) NOT NULL, 
     nivel VARCHAR(20) NOT NULL 

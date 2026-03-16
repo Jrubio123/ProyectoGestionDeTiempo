@@ -112,7 +112,7 @@
                     <select class="prereg-input" x-model="formS3.tipo_persona" :disabled="!seccion3Editable"><option value="Natural">Natural</option><option value="Juridica">Jurídica</option></select>
                     <select class="prereg-input" x-model="formS3.banco_id" :disabled="!seccion3Editable">
                         <option value="">Banco *</option>
-                        <template x-for="b in bancos" :key="b.id"><option :value="b.id" x-text="b.titulo"></option></template>
+                        <template x-for="b in bancos" :key="b.id"><option :value="String(b.id)" x-text="b.titulo"></option></template>
                     </select>
                     <select class="prereg-input" x-model="formS3.tipo_cuenta" :disabled="!seccion3Editable"><option value="Ahorros">Ahorros</option><option value="Corriente">Corriente</option></select>
                     <input class="prereg-input" x-model="formS3.numero_cuenta" :disabled="!seccion3Editable" placeholder="Número de cuenta *">

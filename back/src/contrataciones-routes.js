@@ -168,6 +168,30 @@ module.exports = function registerContratacionesRoutes(deps) {
     return Number.isFinite(parsed) ? parsed : null;
   }
 
+  function isUuid(value) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      String(value || "").trim()
+    );
+  }
+
+  async function resolveBancoInternalId(db, bancoValue) {
+    if (bancoValue === undefined || bancoValue === null || bancoValue === "") return null;
+
+    const numeric = toNullableNumber(bancoValue);
+    if (numeric && Number.isInteger(numeric) && numeric > 0) {
+      const exists = await db.query(`SELECT id FROM bancos WHERE id = $1 LIMIT 1`, [numeric]);
+      return exists.rows.length ? numeric : null;
+    }
+
+    const raw = String(bancoValue || "").trim();
+    if (isUuid(raw)) {
+      const resolved = await db.query(`SELECT id FROM bancos WHERE public_id = $1 LIMIT 1`, [raw]);
+      return resolved.rows[0]?.id || null;
+    }
+
+    return null;
+  }
+
   function isValidSilverEmail(value) {
     return /^[^\s@]+@silverconsulting\.com\.co$/i.test(String(value || "").trim());
   }
@@ -1219,12 +1243,16 @@ module.exports = function registerContratacionesRoutes(deps) {
           return res.status(422).json({ error: `Solo se puede editar la sección 3 en estado '${ESTADOS.pendienteRevisionTh}'` });
         }
 
-        const bancoId     = toNullableNumber(req.body?.banco_id);
+        const bancoId     = await resolveBancoInternalId(pool, req.body?.banco_id);
         const tipoCuenta  = toNullableString(req.body?.tipo_cuenta);
         const numeroCuenta = toNullableString(req.body?.numero_cuenta);
         const direccion   = toNullableString(req.body?.direccion);
         const tipoPersona = toNullableString(req.body?.tipo_persona);
         const correoSilver = toNullableString(req.body?.correo_silver);
+
+        if (!bancoId) {
+          return res.status(400).json({ error: "Banco no válido" });
+        }
 
         // Guarda datos bancarios en datos_extra y correo silver en correo_empresarial
         await pool.query(
@@ -1293,7 +1321,7 @@ module.exports = function registerContratacionesRoutes(deps) {
 
         const datosExtra = toObjectOrEmpty(row.datos_extra);
         const direccion = toNullableString(datosExtra.direccion);
-        const bancoId = toNullableNumber(datosExtra.banco_id);
+        const bancoId = await resolveBancoInternalId(client, datosExtra.banco_id);
         const tipoCuenta = toNullableString(datosExtra.tipo_cuenta);
         const numeroCuenta = toNullableString(datosExtra.numero_cuenta);
         const tipoPersona = normalizeTipoPersonaForUsuarios(datosExtra.tipo_persona);

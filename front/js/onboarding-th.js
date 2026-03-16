@@ -407,10 +407,11 @@ window.onboardingThApp = function () {
 
         abrirDetalle(p, focoCorreo = false) {
             this.itemActivo = JSON.parse(JSON.stringify(p || {}));
+            const rawBancoId = p?.banco?.id ?? p?.banco_id ?? "";
             this.formS3 = {
                 direccion: p?.direccion || "",
                 tipo_persona: p?.tipo_persona || "Natural",
-                banco_id: p?.banco?.id || "",
+                banco_id: rawBancoId !== "" && rawBancoId !== null ? String(rawBancoId) : "",
                 tipo_cuenta: p?.tipo_cuenta || "Ahorros",
                 numero_cuenta: p?.numero_cuenta || "",
                 correo_silver: p?.correo_silver || ""
@@ -477,7 +478,7 @@ window.onboardingThApp = function () {
                         {
                             direccion:     String(this.formS3.direccion || "").trim(),
                             tipo_persona:  String(this.formS3.tipo_persona || "").trim(),
-                            banco_id:      this.formS3.banco_id || null,
+                            banco_id:      Number(this.formS3.banco_id) || null,
                             tipo_cuenta:   String(this.formS3.tipo_cuenta || "").trim(),
                             numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
                             correo_silver: String(this.formS3.correo_silver || "").trim() || null
@@ -491,7 +492,7 @@ window.onboardingThApp = function () {
                         {
                             direccion:     String(this.formS3.direccion || "").trim(),
                             tipo_persona:  String(this.formS3.tipo_persona || "").trim(),
-                            banco_id:      this.formS3.banco_id,
+                            banco_id:      Number(this.formS3.banco_id) || null,
                             tipo_cuenta:   String(this.formS3.tipo_cuenta || "").trim(),
                             numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
                             correo_silver: String(this.formS3.correo_silver || "").trim() || null
@@ -519,7 +520,7 @@ window.onboardingThApp = function () {
                     {
                         direccion:     String(this.formS3.direccion || "").trim(),
                         tipo_persona:  String(this.formS3.tipo_persona || "").trim(),
-                        banco_id:      this.formS3.banco_id || null,
+                        banco_id:      Number(this.formS3.banco_id) || null,
                         tipo_cuenta:   String(this.formS3.tipo_cuenta || "").trim(),
                         numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
                         correo_silver: String(this.formS3.correo_silver || "").trim() || null

@@ -4450,15 +4450,6 @@ app.post("/auth/login", async (req, res) => {
       console.error("No se pudo actualizar ultimo_inicio_sesion:", err.message);
     }
 
-    try {
-      await pool.query(
-        "UPDATE usuarios SET ultimo_inicio_sesion = CURRENT_TIMESTAMP WHERE id = $1",
-        [userRow.id]
-      );
-    } catch (err) {
-      console.error("No se pudo actualizar ultimo_inicio_sesion:", err.message);
-    }
-
     const payload = {
       id: user.id,
       public_id: user.public_id || null,
@@ -4658,6 +4649,16 @@ app.post("/auth/microsoft", async (req, res) => {
     if (!userRow?.id) {
       return res.status(500).json({ error: "No se pudo crear o recuperar el usuario de Microsoft en BD" });
     }
+
+    try {
+      await pool.query(
+        "UPDATE usuarios SET ultimo_inicio_sesion = CURRENT_TIMESTAMP WHERE id = $1",
+        [userRow.id]
+      );
+    } catch (err) {
+      console.error("No se pudo actualizar ultimo_inicio_sesion:", err.message);
+    }
+
     const payload = {
       id: userRow.id,
       public_id: userRow.public_id || null,

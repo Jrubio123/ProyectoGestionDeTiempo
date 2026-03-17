@@ -5621,6 +5621,9 @@ app.get("/contratacion/video", (req, res) => {
     return res.status(503).send("Video no disponible. Contacta a Talento Humano.");
   }
 
+  // Permite reproducir el video cuando el front y el back están en dominios distintos.
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+
   const stat = fs.statSync(filePath);
   const fileSize = stat.size;
   const range = req.headers.range;

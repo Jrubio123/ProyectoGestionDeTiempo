@@ -195,6 +195,7 @@ window.onboardingThApp = function () {
                 tarifa_mes: item?.tarifa_mes ?? null,
                 tarifa_medio_tiempo: item?.tarifa_medio_tiempo ?? null,
                 tarifa_capacitacion: item?.tarifa_capacitacion ?? null,
+                modalidad_contrato: item?.modalidad_contrato || item?.datos_extra?.modalidad_contrato || null,
                 vpn_corona: null,
                 necesita_s_user: null,
                 grupo_usuario: item?.grupo_app_tiempos || null,
@@ -458,6 +459,47 @@ window.onboardingThApp = function () {
             return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(this.formS3.correo_silver || "").trim());
         },
 
+        bancoIdPayload() {
+            const raw = String(this.formS3.banco_id || "").trim();
+            return raw || null;
+        },
+
+        modalidadContratoDetalle() {
+            return this.itemActivo?.modalidad_contrato
+                || this.itemActivo?.solicitud?.modalidad
+                || "-";
+        },
+
+        formatCurrencyValue(value, moneda) {
+            if (value === null || value === undefined || value === "") return null;
+            const num = Number(value);
+            if (!Number.isFinite(num)) return null;
+            try {
+                return new Intl.NumberFormat("es-CO", {
+                    style: "currency",
+                    currency: (moneda || "COP").toUpperCase(),
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 2
+                }).format(num);
+            } catch (_) {
+                return `${(moneda || "COP").toUpperCase()} ${num}`;
+            }
+        },
+
+        tarifaPrincipalDetalle() {
+            const modalidad = this.normalizar(this.modalidadContratoDetalle());
+            const moneda = this.itemActivo?.moneda || "COP";
+            const hora = this.formatCurrencyValue(this.itemActivo?.tarifa_hora, moneda);
+            const mes = this.formatCurrencyValue(this.itemActivo?.tarifa_mes, moneda);
+            const medio = this.formatCurrencyValue(this.itemActivo?.tarifa_medio_tiempo, moneda);
+            const cap = this.formatCurrencyValue(this.itemActivo?.tarifa_capacitacion, moneda);
+
+            if (modalidad === "porhoras") return hora ? `${hora} / hora` : "-";
+            if (modalidad === "mediotiempo") return medio || mes || hora || "-";
+            if (modalidad === "fulltime" || modalidad === "tiempocompleto") return mes || hora || "-";
+            return mes || hora || medio || cap || "-";
+        },
+
         get puedeCompletarContratacion() {
             if (this.itemActivo?.origen_flujo !== "contratacion") return false;
             if (!this.seccion3Editable) return false;
@@ -478,7 +520,7 @@ window.onboardingThApp = function () {
                         {
                             direccion:     String(this.formS3.direccion || "").trim(),
                             tipo_persona:  String(this.formS3.tipo_persona || "").trim(),
-                            banco_id:      Number(this.formS3.banco_id) || null,
+                            banco_id:      this.bancoIdPayload(),
                             tipo_cuenta:   String(this.formS3.tipo_cuenta || "").trim(),
                             numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
                             correo_silver: String(this.formS3.correo_silver || "").trim() || null
@@ -492,7 +534,7 @@ window.onboardingThApp = function () {
                         {
                             direccion:     String(this.formS3.direccion || "").trim(),
                             tipo_persona:  String(this.formS3.tipo_persona || "").trim(),
-                            banco_id:      Number(this.formS3.banco_id) || null,
+                            banco_id:      this.bancoIdPayload(),
                             tipo_cuenta:   String(this.formS3.tipo_cuenta || "").trim(),
                             numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
                             correo_silver: String(this.formS3.correo_silver || "").trim() || null
@@ -520,7 +562,7 @@ window.onboardingThApp = function () {
                     {
                         direccion:     String(this.formS3.direccion || "").trim(),
                         tipo_persona:  String(this.formS3.tipo_persona || "").trim(),
-                        banco_id:      Number(this.formS3.banco_id) || null,
+                        banco_id:      this.bancoIdPayload(),
                         tipo_cuenta:   String(this.formS3.tipo_cuenta || "").trim(),
                         numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
                         correo_silver: String(this.formS3.correo_silver || "").trim() || null

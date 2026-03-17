@@ -51,6 +51,30 @@ module.exports = function registerPreregistroRoutes(deps) {
     return { value: parsed };
   }
 
+  function isUuid(value) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      String(value || "").trim()
+    );
+  }
+
+  async function resolveBancoInternalId(db, bancoValue) {
+    if (bancoValue === undefined || bancoValue === null || bancoValue === "") return null;
+
+    const numeric = Number(bancoValue);
+    if (Number.isInteger(numeric) && numeric > 0) {
+      const exists = await db.query(`SELECT id FROM bancos WHERE id = $1 LIMIT 1`, [numeric]);
+      return exists.rows.length ? numeric : null;
+    }
+
+    const raw = String(bancoValue || "").trim();
+    if (isUuid(raw)) {
+      const resolved = await db.query(`SELECT id FROM bancos WHERE public_id = $1 LIMIT 1`, [raw]);
+      return resolved.rows[0]?.id || null;
+    }
+
+    return null;
+  }
+
   function normalizeDocKey(value) {
     return String(value || "")
       .normalize("NFD")
@@ -183,6 +207,7 @@ module.exports = function registerPreregistroRoutes(deps) {
         id: row.solicitud_public_id,
         perfil: row.perfil,
         nivel: row.nivel,
+        modalidad: row.modalidad,
         estado: row.solicitud_estado,
         cliente: { id: row.cliente_public_id, nombre: row.cliente_nombre },
         modulo: { id: row.modulo_public_id, nombre: row.modulo_nombre },
@@ -800,12 +825,8 @@ module.exports = function registerPreregistroRoutes(deps) {
         return res.status(422).json({ error: "No se puede completar seccion 3 en el estado actual" });
       }
 
-      const bancoId = Number(banco_id);
-      if (!Number.isInteger(bancoId) || bancoId <= 0) {
-        return res.status(400).json({ error: "Banco no encontrado" });
-      }
-      const bancoRes = await client.query("SELECT id FROM bancos WHERE id = $1", [bancoId]);
-      if (!bancoRes.rows.length) return res.status(400).json({ error: "Banco no encontrado" });
+      const bancoId = await resolveBancoInternalId(client, banco_id);
+      if (!bancoId) return res.status(400).json({ error: "Banco no encontrado" });
       const correoSilverNorm = correo_silver ? String(correo_silver).trim().toLowerCase() : null;
       if (correoSilverNorm) {
         const [dupUser, dupPre] = await Promise.all([

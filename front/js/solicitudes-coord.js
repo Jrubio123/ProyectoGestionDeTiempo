@@ -79,6 +79,11 @@ window.solicitudesCoordApp = function () {
             this.touched = false;
         },
 
+        getNombreModuloSeleccionado() {
+            const modulo = this.modulos.find((m) => m.id === this.form.modulo_id);
+            return String(modulo?.titulo || "").trim();
+        },
+
         async enviarSolicitud() {
             this.touched = true;
             if (!this.formValido) {
@@ -87,7 +92,10 @@ window.solicitudesCoordApp = function () {
             }
 
             const esOtros = this.form.modulo_id === "__otros__";
-            const perfil = String(this.form.perfil || "").trim();
+            const perfilIngresado = String(this.form.perfil || "").trim();
+            const perfil = esOtros
+                ? perfilIngresado
+                : (perfilIngresado || this.getNombreModuloSeleccionado());
             const min = Number(this.form.presupuesto_min);
             const max = Number(this.form.presupuesto_max);
             let presupuesto = null;
@@ -131,9 +139,8 @@ window.solicitudesCoordApp = function () {
             const esOtros = this.form.modulo_id === "__otros__";
             const perfil = String(this.form.perfil || "").trim();
             if (!this.form.cliente_id) faltan.push("Cliente");
-            if (!perfil) {
-                faltan.push(esOtros ? "Perfil (requerido al elegir Otros)" : "Perfil");
-            }
+            if (!this.form.modulo_id) faltan.push("Tecnología / Módulo");
+            if (esOtros && !perfil) faltan.push("Perfil (requerido al elegir Otros)");
             if (!this.form.nivel) faltan.push("Nivel");
             if (!this.form.tiempo) faltan.push("Tiempo");
             if (!this.form.ubicacion) faltan.push("Ubicación");

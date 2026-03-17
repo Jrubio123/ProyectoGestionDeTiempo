@@ -260,6 +260,10 @@ body.sidebar-mobile-open {
     transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
+.rrhh-input-prefix {
+    padding-left: 3.25rem;
+}
+
 .no-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;

@@ -4256,7 +4256,7 @@ app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrado
     );
 
     const row = insert.rows[0];
-    const baseUrl = CONTRATOS_BASE_URL || "https://app.silverconsulting.com.co";
+    const baseUrl = CONTRATOS_BASE_URL || "https://icy-ground-03832ec1e.1.azurestaticapps.net";
     const link = `${baseUrl}/contratacion.html?t=${token}`;
 
     await sendEmailSafe({

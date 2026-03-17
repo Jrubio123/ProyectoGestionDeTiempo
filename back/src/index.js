@@ -5492,7 +5492,34 @@ app.post("/auth/microsoft", async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════
 
 const CONTRATOS_STATIC_DIR = path.join(__dirname, "static", "contratos");
-const CONTRATOS_PDF_NAMES = ["informativo_1.pdf", "informativo_2.pdf", "informativo_3.pdf"];
+
+// plantilla: true → el frontend descarga automáticamente al confirmar lectura
+const DOCS_ESTATICOS = [
+  { clave: "politica_pago",     archivo: "POLÍTICA DE PAGO A PROVEEDORES - GENERAL.pdf",                         label: "Política de pago de proveedores" },
+  { clave: "codigo_etica",      archivo: "Silver Consulting - Código de ética y conducta.pdf",                   label: "Código de ética y conducta" },
+  { clave: "requisitos",        archivo: "REQUISITOS DE CONTRATO OUTSOURCING.pdf",                               label: "Requisitos de Contrato",          plantilla: true },
+  { clave: "plantilla_tiempos", archivo: "SC-PS-Seguridad Equipos V1.pdf",                                       label: "Plantilla de reporte de tiempos", plantilla: true },
+  { clave: "guia_autenticador", archivo: "Silver Consulting - Configurar Autenticación Multifactor - Office 365.pdf", label: "Guía Autenticador Office 365" },
+  { clave: "guia_mfa",          archivo: "Silver Consulting - configurar MFA Silver Consulting - Office 365.pdf", label: "Guía MFA Office 365" },
+  { clave: "guia_office365",    archivo: "Silver Consulting - Ingresar a Microsoft 365 Estándar.pdf",            label: "Guía ingreso Microsoft 365 Estándar" },
+];
+
+const LINK_BIENVENIDA = {
+  clave: "link_formulario",
+  url: "https://forms.office.com/Pages/ResponsePage.aspx?id=Od5vnDBA50Sut8bJeqSbpMD32XAVV4FLhCKyABtmKHVUN1pUM09QTjBBRzcwWlo4Rk1OQ0ZPVzJJWS4u",
+  label: "Formulario de base de datos"
+};
+
+const VIDEO_BIENVENIDA = "Silver Consulting - Bienvenida.mp4";
+
+const CLAVES_ESTATICAS_VALIDAS = new Set([
+  ...DOCS_ESTATICOS.map(d => d.clave),
+  LINK_BIENVENIDA.clave,
+  // backward compat con tokens antiguos
+  "pdf1", "pdf2", "pdf3"
+]);
+
+const CLAVES_REQUERIDAS_FIRMA = DOCS_ESTATICOS.map(d => d.clave).concat([LINK_BIENVENIDA.clave]);
 
 const requireTokenFirma = (req, res, next) => {
   const auth = req.headers.authorization || "";
@@ -5567,10 +5594,64 @@ app.get("/contratacion/estado", requireTokenFirma, async (req, res) => {
   }
 });
 
+// GET /contratacion/docs-info — lista de documentos estáticos (sin auth de archivo)
+app.get("/contratacion/docs-info", requireTokenFirma, (req, res) => {
+  res.json({
+    docs: DOCS_ESTATICOS.map(d => ({ clave: d.clave, label: d.label, archivo: d.archivo, plantilla: !!d.plantilla })),
+    link: { clave: LINK_BIENVENIDA.clave, url: LINK_BIENVENIDA.url, label: LINK_BIENVENIDA.label },
+    video_disponible: fs.existsSync(path.join(CONTRATOS_STATIC_DIR, VIDEO_BIENVENIDA))
+  });
+});
+
+// GET /contratacion/video — sirve video de bienvenida con soporte de rango (streaming)
+// El token puede venir en header Authorization o en query param ?t= (necesario para <video src>)
+app.get("/contratacion/video", (req, res) => {
+  const auth = req.headers.authorization || "";
+  const rawToken = (auth.startsWith("Bearer ") ? auth.slice(7) : null) || String(req.query.t || "");
+  if (!rawToken) return res.status(401).send("Token requerido");
+  try {
+    const payload = jwt.verify(rawToken, JWT_SECRET);
+    if (payload.tipo !== "firma_contrato") throw new Error("tipo inválido");
+  } catch {
+    return res.status(401).send("Token inválido o expirado");
+  }
+
+  const filePath = path.join(CONTRATOS_STATIC_DIR, VIDEO_BIENVENIDA);
+  if (!fs.existsSync(filePath)) {
+    return res.status(503).send("Video no disponible. Contacta a Talento Humano.");
+  }
+
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+
+  if (range) {
+    const [startStr, endStr] = range.replace(/bytes=/, "").split("-");
+    const start = parseInt(startStr, 10);
+    const end = endStr ? parseInt(endStr, 10) : fileSize - 1;
+    const chunkSize = end - start + 1;
+    res.writeHead(206, {
+      "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+      "Accept-Ranges": "bytes",
+      "Content-Length": chunkSize,
+      "Content-Type": "video/mp4"
+    });
+    fs.createReadStream(filePath, { start, end }).pipe(res);
+  } else {
+    res.writeHead(200, {
+      "Content-Length": fileSize,
+      "Content-Type": "video/mp4",
+      "Accept-Ranges": "bytes"
+    });
+    fs.createReadStream(filePath).pipe(res);
+  }
+});
+
 // GET /contratacion/pdf/:nombre — sirve PDF informativo estático
 app.get("/contratacion/pdf/:nombre", requireTokenFirma, (req, res) => {
   const nombre = req.params.nombre;
-  if (!CONTRATOS_PDF_NAMES.includes(nombre)) {
+  const docValido = DOCS_ESTATICOS.find(d => d.archivo === nombre);
+  if (!docValido) {
     return res.status(404).json({ error: "Documento no encontrado" });
   }
   const filePath = path.join(CONTRATOS_STATIC_DIR, nombre);
@@ -5582,12 +5663,14 @@ app.get("/contratacion/pdf/:nombre", requireTokenFirma, (req, res) => {
   fs.createReadStream(filePath).pipe(res);
 });
 
-// PATCH /contratacion/check — marca un PDF informativo como leído
+// PATCH /contratacion/check — marca un documento estático como leído
+// Acepta { clave: "politica_pago" } o el formato antiguo { numero: 1 }
 app.patch("/contratacion/check", requireTokenFirma, async (req, res) => {
-  const { numero } = req.body || {};
-  const key = `pdf${numero}`;
-  if (![1, 2, 3].includes(Number(numero))) {
-    return res.status(400).json({ error: "numero debe ser 1, 2 o 3" });
+  const { clave: claveRaw, numero } = req.body || {};
+  // Compatibilidad con formato antiguo {numero: 1|2|3}
+  const key = claveRaw || (numero ? `pdf${numero}` : null);
+  if (!key || !CLAVES_ESTATICAS_VALIDAS.has(key)) {
+    return res.status(400).json({ error: "clave no válida" });
   }
 
   try {
@@ -5629,8 +5712,9 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
 
     const proceso = r.rows[0];
     const checks = proceso.checks_completados || {};
-    if (!checks.pdf1 || !checks.pdf2 || !checks.pdf3) {
-      return res.status(400).json({ error: "Debes completar la lectura de todos los documentos informativos primero" });
+    const faltantes = CLAVES_REQUERIDAS_FIRMA.filter(c => !checks[c]);
+    if (faltantes.length > 0) {
+      return res.status(400).json({ error: "Debes revisar todos los documentos informativos antes de firmar" });
     }
 
     const docsActuales = Array.isArray(proceso.docs_firma) ? proceso.docs_firma : [];

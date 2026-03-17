@@ -1,16 +1,10 @@
 window.contratacionApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
-    const PDF_NAMES = ["informativo_1.pdf", "informativo_2.pdf", "informativo_3.pdf"];
-    const PDF_LABELS = [
-        "Política de Tratamiento de Datos",
-        "Reglamento Interno de Contratistas",
-        "Términos y Condiciones del Servicio"
-    ];
-    const TIMER_SEGUNDOS = 45;
+    const TIMER_PDF = 20; // segundos mínimos de lectura por PDF
 
     return {
         // ── Estado general
-        pantalla: "token",   // token | leyendo | firma | completado | error
+        pantalla: "token",   // token | leyendo | firma | completado
         jwt: null,
         nombre: "",
         cargando: false,
@@ -20,16 +14,21 @@ window.contratacionApp = function () {
         tokenInput: "",
         tokenError: "",
 
-        // ── Lectura de PDFs
-        pdfActual: 0,          // índice 0..2
-        checksCompletados: { pdf1: false, pdf2: false, pdf3: false },
+        // ── Documentos
+        docs: [],            // [{ clave, label, tipo:'pdf', archivo }]
+        linkItem: null,      // { clave, label, tipo:'link', url }
+        videoDisponible: false,
+        checksCompletados: {},
+
+        // ── Navegación inline (sin modal overlay)
+        docActualIdx: 0,
         pdfBlobUrl: null,
         pdfCargando: false,
-        timerSegundos: TIMER_SEGUNDOS,
-        timerActivo: false,
-        timerCompletado: false,
-        checkHecho: false,
-        _timerInterval: null,
+        pdfError: "",
+        timerSeg: TIMER_PDF,
+        timerOk: false,
+        _timer: null,
+        _pdfCargadoParaIdx: null, // evita recargar el mismo PDF
 
         // ── Firma digital
         docsActuales: [],
@@ -37,7 +36,7 @@ window.contratacionApp = function () {
         firmaError: "",
         pollingInterval: null,
 
-        // ── Init: leer token desde URL si viene en query param
+        // ── Init
         init() {
             const params = new URLSearchParams(window.location.search);
             const t = params.get("t");
@@ -60,16 +59,18 @@ window.contratacionApp = function () {
                 });
                 this.jwt = res.data.jwt;
                 this.nombre = res.data.nombre;
-                this.checksCompletados = res.data.checks_completados || { pdf1: false, pdf2: false, pdf3: false };
+                this.checksCompletados = res.data.checks_completados || {};
                 this.docsActuales = res.data.docs_firma || [];
 
-                const todosLeidos = this.checksCompletados.pdf1 && this.checksCompletados.pdf2 && this.checksCompletados.pdf3;
-                if (todosLeidos) {
+                await this.cargarDocsInfo();
+
+                if (this.todosChecks) {
                     this.pantalla = "firma";
                 } else {
-                    this.pdfActual = this._primerPdfPendiente();
+                    // Posicionar en el primer doc pendiente
+                    this.docActualIdx = this._primerPendiente();
                     this.pantalla = "leyendo";
-                    await this.cargarPdf();
+                    await this.cargarDocActual();
                 }
             } catch (e) {
                 this.tokenError = e?.response?.data?.error || "Código no válido. Verifica e intenta de nuevo.";
@@ -79,104 +80,202 @@ window.contratacionApp = function () {
         },
 
         // ─────────────────────────────────────────────────────
-        // LECTURA DE PDFs
+        // CARGAR LISTA DE DOCUMENTOS
         // ─────────────────────────────────────────────────────
-        _primerPdfPendiente() {
-            if (!this.checksCompletados.pdf1) return 0;
-            if (!this.checksCompletados.pdf2) return 1;
-            if (!this.checksCompletados.pdf3) return 2;
-            return 2;
+        async cargarDocsInfo() {
+            try {
+                const res = await axios.get(`${API}/contratacion/docs-info`, {
+                    headers: { Authorization: `Bearer ${this.jwt}` }
+                });
+                this.docs = res.data.docs.map(d => ({ ...d, tipo: "pdf" }));
+                this.linkItem = { ...res.data.link, tipo: "link" };
+                this.videoDisponible = res.data.video_disponible;
+            } catch {
+                // La lista queda vacía; el usuario verá el visor vacío
+            }
         },
 
-        get pdfLabel() {
-            return PDF_LABELS[this.pdfActual] || `Documento ${this.pdfActual + 1}`;
+        // ─────────────────────────────────────────────────────
+        // COMPUTED
+        // ─────────────────────────────────────────────────────
+        get allItems() {
+            return this.linkItem ? [...this.docs, this.linkItem] : [...this.docs];
         },
 
-        get timerProgreso() {
-            return Math.round(((TIMER_SEGUNDOS - this.timerSegundos) / TIMER_SEGUNDOS) * 100);
+        get docActual() {
+            return this.allItems[this.docActualIdx] || null;
         },
 
-        get todoLeido() {
-            return this.timerCompletado && this.checkHecho;
+        get totalItems() { return this.allItems.length; },
+
+        get totalCheckeados() {
+            return this.allItems.filter(d => this.checksCompletados[d.clave]).length;
         },
 
         get todosChecks() {
-            return this.checksCompletados.pdf1 && this.checksCompletados.pdf2 && this.checksCompletados.pdf3;
+            return this.allItems.length > 0 && this.allItems.every(d => this.checksCompletados[d.clave]);
         },
 
-        async cargarPdf() {
+        get puedeAvanzar() {
+            return !!this.checksCompletados[this.docActual?.clave];
+        },
+
+        get videoUrl() {
+            if (!this.jwt || !this.videoDisponible) return null;
+            return `${API}/contratacion/video?t=${encodeURIComponent(this.jwt)}`;
+        },
+
+        isChecked(clave) { return !!this.checksCompletados[clave]; },
+
+        _primerPendiente() {
+            const idx = this.allItems.findIndex(d => !this.checksCompletados[d.clave]);
+            return idx >= 0 ? idx : 0;
+        },
+
+        // ─────────────────────────────────────────────────────
+        // NAVEGACIÓN ENTRE DOCUMENTOS
+        // ─────────────────────────────────────────────────────
+        async irA(idx) {
+            if (idx === this.docActualIdx) return;
+            this.docActualIdx = idx;
+            await this.cargarDocActual();
+        },
+
+        async anterior() {
+            if (this.docActualIdx > 0) {
+                this.docActualIdx--;
+                await this.cargarDocActual();
+            }
+        },
+
+        async siguiente() {
+            if (this.docActualIdx < this.allItems.length - 1) {
+                this.docActualIdx++;
+                await this.cargarDocActual();
+            }
+        },
+
+        async siguienteOFirmar() {
+            if (!this.puedeAvanzar) return;
+            if (this.docActualIdx < this.allItems.length - 1) {
+                await this.siguiente();
+            } else if (this.todosChecks) {
+                this.pantalla = "firma";
+            } else {
+                // Ir al primer pendiente
+                this.docActualIdx = this._primerPendiente();
+                await this.cargarDocActual();
+            }
+        },
+
+        // ─────────────────────────────────────────────────────
+        // CARGAR PDF DEL DOCUMENTO ACTUAL
+        // ─────────────────────────────────────────────────────
+        async cargarDocActual() {
+            const doc = this.docActual;
+            if (!doc) return;
+
+            // Reiniciar timer siempre al cambiar de doc
+            this._reiniciarTimer();
+
+            // Link: no hay PDF que cargar
+            if (doc.tipo === "link") return;
+
+            // PDF: evitar recarga si ya está cargado
+            if (this._pdfCargadoParaIdx === this.docActualIdx && this.pdfBlobUrl) return;
+
+            this.pdfError = "";
+            this.pdfCargando = true;
             if (this.pdfBlobUrl) {
                 URL.revokeObjectURL(this.pdfBlobUrl);
                 this.pdfBlobUrl = null;
             }
-            this.pdfCargando = true;
-            this.timerCompletado = false;
-            this.checkHecho = false;
-            this.timerSegundos = TIMER_SEGUNDOS;
-            clearInterval(this._timerInterval);
-
-            const nombre = PDF_NAMES[this.pdfActual];
-            const keyCheck = `pdf${this.pdfActual + 1}`;
-            if (this.checksCompletados[keyCheck]) {
-                this.checkHecho = true;
-                this.timerCompletado = true;
-            }
+            this._pdfCargadoParaIdx = null;
 
             try {
-                const resp = await axios.get(`${API}/contratacion/pdf/${nombre}`, {
+                const resp = await axios.get(`${API}/contratacion/pdf/${doc.archivo}`, {
                     headers: { Authorization: `Bearer ${this.jwt}` },
                     responseType: "blob"
                 });
                 this.pdfBlobUrl = URL.createObjectURL(new Blob([resp.data], { type: "application/pdf" }));
-                this.iniciarTimer();
+                this._pdfCargadoParaIdx = this.docActualIdx;
             } catch (e) {
-                this.errorGlobal = e?.response?.data?.error || "No se pudo cargar el documento. Intenta de nuevo.";
+                this.pdfError = e?.response?.data?.error || "No se pudo cargar el documento. Intenta de nuevo.";
             } finally {
                 this.pdfCargando = false;
             }
         },
 
-        iniciarTimer() {
-            if (this.timerCompletado) return;
-            this.timerActivo = true;
-            this._timerInterval = setInterval(() => {
-                if (this.timerSegundos > 0) {
-                    this.timerSegundos--;
-                } else {
-                    clearInterval(this._timerInterval);
-                    this.timerActivo = false;
-                    this.timerCompletado = true;
-                }
-            }, 1000);
-        },
-
-        async marcarCheck() {
-            if (!this.timerCompletado || this.checkHecho) return;
-            const numero = this.pdfActual + 1;
-            try {
-                const res = await axios.patch(
-                    `${API}/contratacion/check`,
-                    { numero },
-                    { headers: { Authorization: `Bearer ${this.jwt}` } }
-                );
-                this.checksCompletados = res.data.checks_completados;
-                this.checkHecho = true;
-            } catch (e) {
-                this.errorGlobal = e?.response?.data?.error || "Error registrando confirmación.";
+        // ─────────────────────────────────────────────────────
+        // TIMER DE LECTURA
+        // ─────────────────────────────────────────────────────
+        _reiniciarTimer() {
+            clearInterval(this._timer);
+            const clave = this.docActual?.clave;
+            this.timerOk = !!this.checksCompletados[clave];
+            this.timerSeg = TIMER_PDF;
+            if (!this.timerOk && this.docActual?.tipo === "pdf") {
+                this._timer = setInterval(() => {
+                    if (this.timerSeg > 0) {
+                        this.timerSeg--;
+                    } else {
+                        clearInterval(this._timer);
+                        this.timerOk = true;
+                    }
+                }, 1000);
             }
         },
 
-        async siguientePdf() {
-            if (!this.todoLeido) return;
-            if (this.pdfActual < 2) {
-                this.pdfActual++;
-                await this.cargarPdf();
-            } else {
-                this.pantalla = "firma";
-                if (this.pdfBlobUrl) {
-                    URL.revokeObjectURL(this.pdfBlobUrl);
-                    this.pdfBlobUrl = null;
-                }
+        // ─────────────────────────────────────────────────────
+        // DESCARGA DEL PDF ACTUAL (usa el blob ya en memoria)
+        // ─────────────────────────────────────────────────────
+        descargarDoc() {
+            if (!this.pdfBlobUrl || !this.docActual) return;
+            const a = document.createElement("a");
+            a.href = this.pdfBlobUrl;
+            a.download = `${this.docActual.label}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        },
+
+        // ─────────────────────────────────────────────────────
+        // CONFIRMAR LECTURA DE PDF
+        // ─────────────────────────────────────────────────────
+        async confirmarLectura() {
+            if (!this.timerOk || !this.docActual || this.isChecked(this.docActual.clave)) return;
+            await this._registrarCheck(this.docActual.clave);
+            // Auto-descarga si el doc es una plantilla/formato que el usuario va a necesitar usar
+            if (this.docActual.plantilla && this.pdfBlobUrl) {
+                this.descargarDoc();
+            }
+        },
+
+        // ─────────────────────────────────────────────────────
+        // ABRIR LINK EXTERNO
+        // ─────────────────────────────────────────────────────
+        async abrirLink() {
+            if (!this.linkItem) return;
+            window.open(this.linkItem.url, "_blank", "noopener,noreferrer");
+            if (!this.isChecked(this.linkItem.clave)) {
+                await this._registrarCheck(this.linkItem.clave);
+            }
+        },
+
+        // ─────────────────────────────────────────────────────
+        // REGISTRAR CHECK EN BACKEND
+        // ─────────────────────────────────────────────────────
+        async _registrarCheck(clave) {
+            try {
+                const res = await axios.patch(
+                    `${API}/contratacion/check`,
+                    { clave },
+                    { headers: { Authorization: `Bearer ${this.jwt}` } }
+                );
+                this.checksCompletados = res.data.checks_completados || this.checksCompletados;
+                this.checksCompletados = { ...this.checksCompletados, [clave]: true };
+            } catch (e) {
+                console.error("Error registrando check:", e?.message);
             }
         },
 
@@ -207,7 +306,6 @@ window.contratacionApp = function () {
                 const urlFirma = res.data.url_firma;
                 if (urlFirma) {
                     window.open(urlFirma, "_blank", "noopener");
-                    // Actualizar lista local
                     await this.refrescarEstado();
                 } else {
                     this.firmaError = "No se recibió enlace de firma. Contacta a Talento Humano.";
@@ -225,12 +323,12 @@ window.contratacionApp = function () {
                     headers: { Authorization: `Bearer ${this.jwt}` }
                 });
                 this.docsActuales = res.data.docs_firma || [];
-                this.checksCompletados = res.data.checks_completados;
+                this.checksCompletados = res.data.checks_completados || {};
                 if (res.data.estado === "completado") {
                     this.pantalla = "completado";
                     clearInterval(this.pollingInterval);
                 }
-            } catch (e) {
+            } catch {
                 // silencioso
             }
         },
@@ -246,15 +344,13 @@ window.contratacionApp = function () {
             }, 8000);
         },
 
-        async yaFirme(docIndex) {
+        async yaFirme() {
             await this.refrescarEstado();
-            if (this.todosFirmados) {
-                this.pantalla = "completado";
-            }
+            if (this.todosFirmados) this.pantalla = "completado";
         },
 
         destroy() {
-            clearInterval(this._timerInterval);
+            clearInterval(this._timer);
             clearInterval(this.pollingInterval);
             if (this.pdfBlobUrl) URL.revokeObjectURL(this.pdfBlobUrl);
         }

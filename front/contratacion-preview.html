@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<!-- ARCHIVO DE PREVIEW — solo para ver el diseño, sin backend -->
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>[PREVIEW] Bienvenida Contratación</title>
+    <link rel="stylesheet" href="/styles/tailwind.css">
+    <script defer src="/lib/alpinejs.min.js"></script>
+    <style>
+        html, body { height: 100%; margin: 0; background: #f1f5f9; }
+        .fade-in { animation: fadeIn .35s ease; }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+        .timer-ring { transition: stroke-dashoffset 1s linear; }
+        .pdf-placeholder {
+            background: repeating-linear-gradient(
+                0deg, #f8fafc 0px, #f8fafc 24px, #e2e8f0 24px, #e2e8f0 25px
+            );
+        }
+    </style>
+</head>
+<body x-data="preview()">
+
+<!-- Banner de preview -->
+<div class="bg-amber-400 text-amber-900 text-xs font-bold text-center py-1.5 px-4 flex-shrink-0">
+    MODO PREVIEW — documentos y video son ficticios
+</div>
+
+<!-- Barra superior -->
+<header class="bg-white shadow-sm border-b border-slate-200 flex-shrink-0">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-gradient-to-br from-slate-700 to-blue-700 rounded-lg"></div>
+            <span class="font-bold text-slate-800 text-sm">Silver Consulting</span>
+        </div>
+        <span class="text-sm text-slate-500">Hola, <strong>María García</strong></span>
+    </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-4 py-4 flex flex-col gap-4">
+
+    <!-- Encabezado con progreso -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-100 px-5 py-4 fade-in">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+            <div>
+                <h2 class="font-bold text-slate-800 text-lg">¡Bienvenida al equipo, María!</h2>
+                <p class="text-slate-500 text-sm mt-0.5">Mira el video y revisa cada documento antes de continuar con la firma.</p>
+            </div>
+            <span class="text-sm font-semibold px-3 py-1.5 rounded-full"
+                  :class="todosChecks ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-50 text-blue-600'">
+                <span x-text="totalCheckeados"></span>/<span x-text="totalItems"></span> revisados
+            </span>
+        </div>
+        <!-- Barra progreso -->
+        <div class="mt-3 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+            <div class="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                 :style="`width:${totalItems > 0 ? Math.round((totalCheckeados/totalItems)*100) : 0}%`"></div>
+        </div>
+    </div>
+
+    <!-- ════ LAYOUT PRINCIPAL: video izquierda + visor derecha ════ -->
+    <div class="flex gap-4 items-stretch fade-in" style="min-height:72vh;">
+
+        <!-- ── COLUMNA IZQUIERDA: VIDEO ── -->
+        <div class="w-64 xl:w-72 flex-shrink-0 flex flex-col gap-3">
+
+            <!-- Card video -->
+            <div class="bg-slate-900 rounded-2xl overflow-hidden flex-1 flex flex-col shadow-lg">
+                <!-- Video simulado -->
+                <div class="flex-1 flex flex-col items-center justify-center gap-4 px-4 py-6 cursor-pointer"
+                     @click="toggleVideo()" style="min-height:0;">
+                    <!-- Thumbnail / estado -->
+                    <div class="w-14 h-14 bg-white/15 rounded-full flex items-center justify-center hover:bg-white/25 transition-colors">
+                        <svg x-show="!videoPlaying" class="w-6 h-6 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z"/>
+                        </svg>
+                        <svg x-show="videoPlaying" class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                        </svg>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-white/80 text-sm font-semibold">Video de bienvenida</p>
+                        <p class="text-white/40 text-xs mt-1">Formato vertical 9:16</p>
+                    </div>
+                </div>
+
+                <!-- Controles -->
+                <div class="px-4 pb-4 flex flex-col gap-2">
+                    <!-- Progress bar -->
+                    <div class="flex items-center gap-2">
+                        <span class="text-white/40 text-xs w-8" x-text="videoTimeStr"></span>
+                        <div class="flex-1 h-1 bg-white/20 rounded-full cursor-pointer" @click="seekVideo($event)">
+                            <div class="h-full bg-white rounded-full transition-all" :style="`width:${videoProgress}%`"></div>
+                        </div>
+                        <span class="text-white/40 text-xs w-8 text-right">3:24</span>
+                    </div>
+                    <!-- Botones -->
+                    <div class="flex items-center justify-between">
+                        <button @click="toggleVideo()"
+                                class="flex items-center gap-1.5 text-white/70 hover:text-white text-xs transition-colors">
+                            <svg x-show="!videoPlaying" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                            <svg x-show="videoPlaying" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                            <span x-text="videoPlaying ? 'Pausar' : 'Reproducir'"></span>
+                        </button>
+                        <button @click="toggleMute()"
+                                class="flex items-center gap-1 text-white/70 hover:text-white text-xs transition-colors">
+                            <svg x-show="!muted" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+                            </svg>
+                            <svg x-show="muted" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+                            </svg>
+                            <span x-text="muted ? 'Activar' : 'Silenciar'"></span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dots de progreso vertical -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-3">
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Documentos</p>
+                <div class="flex flex-col gap-1.5">
+                    <template x-for="(item, idx) in allItems" :key="item.clave">
+                        <button @click="irA(idx)"
+                                class="flex items-center gap-2.5 text-left w-full rounded-lg px-2 py-1.5 transition-colors text-xs"
+                                :class="docActualIdx === idx
+                                    ? 'bg-blue-50 text-blue-700 font-semibold'
+                                    : 'hover:bg-slate-50 text-slate-500'">
+                            <div class="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0"
+                                 :class="isChecked(item.clave)
+                                    ? 'bg-emerald-500'
+                                    : docActualIdx === idx ? 'bg-blue-500' : 'bg-slate-200'">
+                                <svg x-show="isChecked(item.clave)" class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                                </svg>
+                                <div x-show="!isChecked(item.clave)" class="w-1.5 h-1.5 rounded-full"
+                                     :class="docActualIdx === idx ? 'bg-white' : 'bg-white/0'"></div>
+                            </div>
+                            <span class="truncate" x-text="item.label"></span>
+                        </button>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── COLUMNA DERECHA: VISOR INLINE ── -->
+        <div class="flex-1 min-w-0 flex flex-col gap-3">
+
+            <!-- Header del documento actual -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 px-5 py-3.5 flex items-center gap-4">
+                <button @click="anterior()" :disabled="docActualIdx === 0"
+                        class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
+                        :class="docActualIdx === 0 ? 'text-slate-200 cursor-not-allowed' : 'hover:bg-slate-100 text-slate-600'">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                    </svg>
+                </button>
+                <div class="flex-1 min-w-0">
+                    <p class="text-xs text-slate-400 font-semibold uppercase tracking-wider"
+                       x-text="`Documento ${docActualIdx + 1} de ${allItems.length}`"></p>
+                    <h3 class="font-bold text-slate-800 truncate" x-text="docActual?.label"></h3>
+                </div>
+                    <template x-if="docActual?.plantilla && !isChecked(docActual?.clave)">
+                        <span class="px-2.5 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-semibold flex-shrink-0">Plantilla · se descarga al confirmar</span>
+                    </template>
+                    <template x-if="isChecked(docActual?.clave)">
+                        <span class="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold flex-shrink-0">Revisado ✓</span>
+                    </template>
+                <button @click="siguiente()" :disabled="docActualIdx === allItems.length - 1"
+                        class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
+                        :class="docActualIdx === allItems.length - 1 ? 'text-slate-200 cursor-not-allowed' : 'hover:bg-slate-100 text-slate-600'">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Visor PDF / Link -->
+            <div class="flex-1 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col" style="min-height:0;">
+
+                <!-- PDF simulado -->
+                <template x-if="docActual?.tipo === 'pdf'">
+                    <div class="flex-1 pdf-placeholder flex flex-col items-center justify-center gap-3 p-8" style="min-height:0;">
+                        <svg class="w-14 h-14 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        <p class="text-slate-400 text-sm font-medium text-center" x-text="docActual?.label"></p>
+                        <p class="text-slate-300 text-xs">Aquí se muestra el PDF del servidor</p>
+                    </div>
+                </template>
+
+                <!-- Tarjeta de link externo -->
+                <template x-if="docActual?.tipo === 'link'">
+                    <div class="flex-1 flex flex-col items-center justify-center gap-6 p-10">
+                        <div class="w-20 h-20 bg-indigo-100 rounded-2xl flex items-center justify-center">
+                            <svg class="w-10 h-10 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                            </svg>
+                        </div>
+                        <div class="text-center">
+                            <h4 class="font-bold text-slate-800 text-lg">Formulario de base de datos</h4>
+                            <p class="text-slate-500 text-sm mt-2 max-w-sm">
+                                Este formulario se abrirá en una nueva pestaña. Al abrirlo, quedará marcado como completado automáticamente.
+                            </p>
+                        </div>
+                        <button @click="abrirLink()"
+                                class="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition-colors shadow-lg shadow-indigo-200">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                            </svg>
+                            Abrir formulario en nueva pestaña
+                        </button>
+                        <p x-show="isChecked('link_formulario')" class="text-emerald-600 text-sm font-semibold flex items-center gap-1.5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                            Formulario completado
+                        </p>
+                    </div>
+                </template>
+            </div>
+
+                <!-- Footer: descarga + timer + confirmación + navegación -->
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 px-5 py-3.5 flex items-center gap-3 flex-shrink-0">
+
+                    <!-- Botón descargar (siempre visible para PDFs) -->
+                    <button x-show="docActual?.tipo === 'pdf'"
+                            @click="descargarDoc()"
+                            title="Descargar documento"
+                            class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 hover:border-blue-300 hover:bg-blue-50 text-slate-500 hover:text-blue-600 text-xs font-medium transition-colors flex-shrink-0">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                        </svg>
+                        Descargar
+                    </button>
+
+                    <!-- Timer activo (PDF) -->
+                    <template x-if="docActual?.tipo === 'pdf' && !timerOk">
+                    <div class="flex items-center gap-3 flex-1">
+                        <div class="relative w-9 h-9 flex-shrink-0">
+                            <svg class="w-9 h-9 -rotate-90" viewBox="0 0 36 36">
+                                <circle cx="18" cy="18" r="14" fill="none" stroke="#fde68a" stroke-width="3"/>
+                                <circle cx="18" cy="18" r="14" fill="none" stroke="#f59e0b" stroke-width="3"
+                                        stroke-dasharray="87.96"
+                                        :stroke-dashoffset="87.96 * (timerSeg / 20)"
+                                        class="timer-ring"/>
+                            </svg>
+                            <span class="absolute inset-0 flex items-center justify-center text-xs font-bold text-amber-700" x-text="timerSeg"></span>
+                        </div>
+                        <p class="text-sm text-amber-800">Lee el documento — disponible en <strong x-text="timerSeg"></strong>s</p>
+                    </div>
+                </template>
+
+                <!-- Check habilitado (PDF no leído) -->
+                <template x-if="docActual?.tipo === 'pdf' && timerOk && !isChecked(docActual?.clave)">
+                    <label class="flex items-center gap-3 cursor-pointer flex-1 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5">
+                        <input type="checkbox" @change="confirmar()"
+                               class="w-4 h-4 accent-blue-600 flex-shrink-0">
+                        <span class="text-sm text-blue-800 font-medium">
+                            Confirmo que leí <strong x-text="docActual?.label"></strong>
+                        </span>
+                    </label>
+                </template>
+
+                <!-- Ya leído -->
+                <template x-if="isChecked(docActual?.clave)">
+                    <div class="flex items-center gap-2 text-emerald-700 flex-1">
+                        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <span class="text-sm font-semibold">Revisado correctamente</span>
+                    </div>
+                </template>
+
+                <!-- Botón siguiente / continuar a firma -->
+                <button @click="siguienteOFirmar()"
+                        :disabled="!puedeAvanzar"
+                        class="px-5 py-2.5 rounded-xl font-bold text-sm transition-all flex-shrink-0 flex items-center gap-1.5"
+                        :class="puedeAvanzar
+                            ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-200'
+                            : 'bg-slate-100 text-slate-400 cursor-not-allowed'">
+                    <span x-text="docActualIdx < allItems.length - 1 ? 'Siguiente documento' : (todosChecks ? 'Continuar a firma →' : 'Revisar pendientes')"></span>
+                    <svg x-show="puedeAvanzar" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+</main>
+
+<script>
+document.addEventListener('alpine:init', () => {
+    Alpine.data('preview', () => ({
+        docs: [
+            { clave: 'politica_pago',     label: 'Política de pago de proveedores',  tipo: 'pdf' },
+            { clave: 'codigo_etica',      label: 'Código de ética y conducta',        tipo: 'pdf' },
+            { clave: 'requisitos',        label: 'Requisitos de Contrato',            tipo: 'pdf',  plantilla: true },
+            { clave: 'plantilla_tiempos', label: 'Plantilla de reporte de tiempos',   tipo: 'pdf',  plantilla: true },
+            { clave: 'guia_autenticador', label: 'Guía Autenticador Office 365',      tipo: 'pdf' },
+            { clave: 'guia_mfa',          label: 'Guía MFA Office 365',              tipo: 'pdf' },
+            { clave: 'guia_office365',    label: 'Guía ingreso Microsoft 365',        tipo: 'pdf' },
+        ],
+        linkItem: { clave: 'link_formulario', label: 'Formulario de base de datos', tipo: 'link' },
+
+        checks: {},
+        docActualIdx: 0,
+
+        // video fake
+        videoPlaying: false,
+        muted: false,
+        videoProgress: 0,
+        _videoInterval: null,
+
+        // timer lectura
+        timerSeg: 20,
+        timerOk: false,
+        _timer: null,
+
+        get allItems() { return [...this.docs, this.linkItem]; },
+        get docActual() { return this.allItems[this.docActualIdx] || null; },
+        get totalItems() { return this.allItems.length; },
+        get totalCheckeados() { return this.allItems.filter(d => this.checks[d.clave]).length; },
+        get todosChecks() { return this.allItems.every(d => this.checks[d.clave]); },
+        get puedeAvanzar() {
+            if (!this.isChecked(this.docActual?.clave)) return false;
+            return true;
+        },
+        get videoTimeStr() {
+            const seg = Math.round((this.videoProgress / 100) * 204);
+            const m = Math.floor(seg / 60);
+            const s = seg % 60;
+            return `${m}:${String(s).padStart(2, '0')}`;
+        },
+
+        isChecked(clave) { return !!this.checks[clave]; },
+
+        irA(idx) {
+            this.docActualIdx = idx;
+            this._reiniciarTimer();
+        },
+
+        anterior() {
+            if (this.docActualIdx > 0) {
+                this.docActualIdx--;
+                this._reiniciarTimer();
+            }
+        },
+
+        siguiente() {
+            if (this.docActualIdx < this.allItems.length - 1) {
+                this.docActualIdx++;
+                this._reiniciarTimer();
+            }
+        },
+
+        siguienteOFirmar() {
+            if (!this.puedeAvanzar) return;
+            if (this.docActualIdx < this.allItems.length - 1) {
+                this.siguiente();
+            }
+            // Si todos revisados → iría a pantalla firma (en preview solo muestra alert)
+            else if (this.todosChecks) {
+                alert('¡Todos revisados! Aquí iría a la pantalla de firma.');
+            }
+        },
+
+        _reiniciarTimer() {
+            clearInterval(this._timer);
+            const clave = this.allItems[this.docActualIdx]?.clave;
+            this.timerOk = this.isChecked(clave);
+            this.timerSeg = 20;
+            if (!this.timerOk && this.docActual?.tipo === 'pdf') {
+                this._timer = setInterval(() => {
+                    if (this.timerSeg > 0) {
+                        this.timerSeg--;
+                    } else {
+                        clearInterval(this._timer);
+                        this.timerOk = true;
+                    }
+                }, 1000);
+            }
+        },
+
+        confirmar() {
+            if (!this.timerOk || !this.docActual) return;
+            this.checks = { ...this.checks, [this.docActual.clave]: true };
+            if (this.docActual.plantilla) {
+                this.descargarDoc();
+            }
+        },
+
+        descargarDoc() {
+            if (!this.docActual) return;
+            // Preview: crea un .txt ficticio para simular la descarga
+            const blob = new Blob([`[PREVIEW] ${this.docActual.label}`], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${this.docActual.label}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        },
+
+        abrirLink() {
+            window.open('https://forms.office.com', '_blank', 'noopener');
+            this.checks = { ...this.checks, link_formulario: true };
+        },
+
+        toggleVideo() {
+            this.videoPlaying = !this.videoPlaying;
+            if (this.videoPlaying) {
+                this._videoInterval = setInterval(() => {
+                    this.videoProgress = Math.min(100, this.videoProgress + 0.25);
+                    if (this.videoProgress >= 100) {
+                        this.videoPlaying = false;
+                        clearInterval(this._videoInterval);
+                    }
+                }, 100);
+            } else {
+                clearInterval(this._videoInterval);
+            }
+        },
+
+        toggleMute() { this.muted = !this.muted; },
+
+        seekVideo(e) {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            this.videoProgress = pct * 100;
+        },
+
+        init() { this._reiniciarTimer(); }
+    }));
+});
+</script>
+</body>
+</html>

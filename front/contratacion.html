@@ -14,8 +14,6 @@
         .fade-in { animation: fadeIn .35s ease; }
         @keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
         .timer-ring { transition: stroke-dashoffset .9s linear; }
-        .pdf-frame { width:100%; height:520px; border:none; border-radius:8px; display:block; }
-        @media (max-width:640px) { .pdf-frame { height:380px; } }
     </style>
 </head>
 <body x-data="contratacionApp()" x-init="init()" @beforeunload.window="destroy()">
@@ -42,7 +40,7 @@
     </div>
 </div>
 
-<main class="max-w-3xl mx-auto px-4 py-8">
+<main class="max-w-7xl mx-auto px-4 py-4 flex flex-col gap-4">
 
     <!-- ═══════════════════════════════════════════════════════════
          PANTALLA 1: INGRESAR TOKEN
@@ -95,121 +93,231 @@
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════
-         PANTALLA 2: LECTURA DE PDFs
+         PANTALLA 2: VIDEO (izq) + VISOR INLINE (der)
     ════════════════════════════════════════════════════════════ -->
-    <div x-show="pantalla === 'leyendo'" x-cloak class="fade-in space-y-4">
+    <div x-show="pantalla === 'leyendo'" x-cloak class="fade-in flex flex-col gap-4" style="min-height:0;">
 
-        <!-- Progreso general -->
-        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-            <div class="flex items-center justify-between mb-3">
-                <h2 class="font-bold text-slate-800">Documentos informativos</h2>
-                <span class="text-xs font-semibold text-slate-500">
-                    <span x-text="(checksCompletados.pdf1 ? 1 : 0) + (checksCompletados.pdf2 ? 1 : 0) + (checksCompletados.pdf3 ? 1 : 0)"></span>/3 leídos
+        <!-- Encabezado con progreso -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 px-5 py-4">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                    <h2 class="font-bold text-slate-800 text-lg">¡Bienvenida/o al equipo, <span x-text="nombre"></span>!</h2>
+                    <p class="text-slate-500 text-sm mt-0.5">Mira el video y revisa cada documento antes de continuar con la firma.</p>
+                </div>
+                <span class="text-sm font-semibold px-3 py-1.5 rounded-full"
+                      :class="todosChecks ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-50 text-blue-600'">
+                    <span x-text="totalCheckeados"></span>/<span x-text="totalItems"></span> revisados
                 </span>
             </div>
-            <div class="flex gap-2">
-                <template x-for="i in [1,2,3]" :key="i">
-                    <div class="flex-1 h-2 rounded-full overflow-hidden bg-slate-100">
-                        <div class="h-full rounded-full transition-all duration-500"
-                             :class="{
-                               'bg-emerald-500': checksCompletados['pdf'+i],
-                               'bg-blue-500': !checksCompletados['pdf'+i] && pdfActual === (i-1),
-                               'bg-slate-200': !checksCompletados['pdf'+i] && pdfActual !== (i-1)
-                             }"
-                             :style="checksCompletados['pdf'+i] ? 'width:100%' : (pdfActual === (i-1) ? 'width:50%' : 'width:0%')">
-                        </div>
-                    </div>
-                </template>
-            </div>
-            <div class="flex gap-2 mt-2">
-                <template x-for="(label, i) in ['Documento 1','Documento 2','Documento 3']" :key="i">
-                    <div class="flex-1 text-center">
-                        <span class="text-xs"
-                              :class="{
-                                'text-emerald-600 font-semibold': checksCompletados['pdf'+(i+1)],
-                                'text-blue-600 font-semibold': !checksCompletados['pdf'+(i+1)] && pdfActual === i,
-                                'text-slate-400': !checksCompletados['pdf'+(i+1)] && pdfActual !== i
-                              }" x-text="label"></span>
-                    </div>
-                </template>
+            <div class="mt-3 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div class="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                     :style="`width:${totalItems > 0 ? Math.round((totalCheckeados/totalItems)*100) : 0}%`"></div>
             </div>
         </div>
 
-        <!-- Visor del PDF actual -->
-        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-                <div>
-                    <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Documento <span x-text="pdfActual + 1"></span> de 3</span>
-                    <h3 class="font-bold text-slate-800 mt-0.5" x-text="pdfLabel"></h3>
+        <!-- Layout principal: 2 columnas -->
+        <div class="flex gap-4 items-stretch" style="min-height:72vh;">
+
+            <!-- ── COLUMNA IZQUIERDA: VIDEO ── -->
+            <div class="w-64 xl:w-72 flex-shrink-0 flex flex-col gap-3">
+
+                <!-- Video -->
+                <div class="bg-slate-900 rounded-2xl overflow-hidden flex-1 flex flex-col shadow-lg" style="min-height:0;">
+                    <!-- Video real -->
+                    <div x-show="videoDisponible && videoUrl" class="flex-1 flex flex-col" style="min-height:0;">
+                        <video
+                            :src="videoUrl"
+                            controls
+                            playsinline
+                            preload="metadata"
+                            class="flex-1 w-full bg-black"
+                            style="object-fit:contain;min-height:0;">
+                        </video>
+                    </div>
+                    <!-- Placeholder si no hay video -->
+                    <div x-show="!videoDisponible || !videoUrl"
+                         class="flex-1 flex flex-col items-center justify-center gap-3 p-6">
+                        <div class="w-14 h-14 bg-white/15 rounded-full flex items-center justify-center">
+                            <svg class="w-7 h-7 text-white/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.277A1 1 0 0121 8.677v6.646a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
+                            </svg>
+                        </div>
+                        <div class="text-center">
+                            <p class="text-white/70 text-sm font-medium">Video de bienvenida</p>
+                            <p class="text-white/30 text-xs mt-1">Próximamente disponible</p>
+                        </div>
+                    </div>
                 </div>
-                <template x-if="checksCompletados['pdf'+(pdfActual+1)]">
-                    <span class="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">Leído ✓</span>
-                </template>
+
+                <!-- Lista de docs (índice navegable) -->
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-3 flex-shrink-0">
+                    <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Documentos</p>
+                    <div class="flex flex-col gap-1">
+                        <template x-for="(item, idx) in allItems" :key="item.clave">
+                            <button @click="irA(idx)"
+                                    class="flex items-center gap-2 text-left w-full rounded-lg px-2 py-1.5 transition-colors text-xs"
+                                    :class="docActualIdx === idx
+                                        ? 'bg-blue-50 text-blue-700 font-semibold'
+                                        : 'hover:bg-slate-50 text-slate-500'">
+                                <div class="w-4 h-4 rounded-full flex-shrink-0 flex items-center justify-center"
+                                     :class="isChecked(item.clave) ? 'bg-emerald-500' : docActualIdx === idx ? 'bg-blue-500' : 'bg-slate-200'">
+                                    <svg x-show="isChecked(item.clave)" class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                </div>
+                                <span class="truncate" x-text="item.label"></span>
+                            </button>
+                        </template>
+                    </div>
+                </div>
             </div>
 
-            <!-- Loading del PDF -->
-            <div x-show="pdfCargando" class="flex items-center justify-center py-20 text-slate-400">
-                <svg class="w-7 h-7 animate-spin mr-3 text-blue-500" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                </svg>
-                <span class="text-sm">Cargando documento...</span>
-            </div>
+            <!-- ── COLUMNA DERECHA: VISOR INLINE ── -->
+            <div class="flex-1 min-w-0 flex flex-col gap-3">
 
-            <!-- iframe del PDF -->
-            <div x-show="!pdfCargando && pdfBlobUrl" class="p-4">
-                <iframe :src="pdfBlobUrl" class="pdf-frame bg-slate-50 shadow-inner"></iframe>
-            </div>
-
-            <!-- Timer y confirmación -->
-            <div x-show="!pdfCargando && pdfBlobUrl" class="px-6 pb-6">
-
-                <!-- Timer -->
-                <div x-show="!timerCompletado" class="flex items-center gap-4 bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
-                    <div class="relative w-14 h-14 flex-shrink-0">
-                        <svg class="w-14 h-14 -rotate-90" viewBox="0 0 56 56">
-                            <circle cx="28" cy="28" r="24" fill="none" stroke="#fde68a" stroke-width="4"/>
-                            <circle cx="28" cy="28" r="24" fill="none" stroke="#f59e0b" stroke-width="4"
-                                    stroke-dasharray="150.8"
-                                    :stroke-dashoffset="150.8 - (timerProgreso / 100) * 150.8"
-                                    class="timer-ring"/>
+                <!-- Header del doc actual + navegación -->
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 px-5 py-3.5 flex items-center gap-3 flex-shrink-0">
+                    <button @click="anterior()" :disabled="docActualIdx === 0"
+                            class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
+                            :class="docActualIdx === 0 ? 'text-slate-200 cursor-not-allowed' : 'hover:bg-slate-100 text-slate-600'">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
                         </svg>
-                        <span class="absolute inset-0 flex items-center justify-center text-sm font-bold text-amber-700" x-text="timerSegundos"></span>
+                    </button>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-xs text-slate-400 font-semibold uppercase tracking-wider"
+                           x-text="`Documento ${docActualIdx + 1} de ${allItems.length}`"></p>
+                        <h3 class="font-bold text-slate-800 truncate" x-text="docActual?.label"></h3>
                     </div>
-                    <div>
-                        <p class="font-semibold text-amber-800 text-sm">Lee el documento completo</p>
-                        <p class="text-amber-600 text-xs mt-1">La confirmación se habilitará en <strong x-text="timerSegundos"></strong> segundos</p>
+                    <template x-if="docActual?.plantilla && !isChecked(docActual?.clave)">
+                        <span class="px-2.5 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-semibold flex-shrink-0">Plantilla · se descarga al confirmar</span>
+                    </template>
+                    <template x-if="isChecked(docActual?.clave)">
+                        <span class="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold flex-shrink-0">Revisado ✓</span>
+                    </template>
+                    <button @click="siguiente()" :disabled="docActualIdx >= allItems.length - 1"
+                            class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
+                            :class="docActualIdx >= allItems.length - 1 ? 'text-slate-200 cursor-not-allowed' : 'hover:bg-slate-100 text-slate-600'">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Visor (PDF o link) -->
+                <div class="flex-1 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col" style="min-height:0;">
+
+                    <!-- Loading PDF -->
+                    <div x-show="pdfCargando" class="flex-1 flex items-center justify-center gap-3 text-slate-400">
+                        <svg class="w-6 h-6 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        <span class="text-sm">Cargando documento...</span>
                     </div>
+
+                    <!-- Error PDF -->
+                    <div x-show="!pdfCargando && pdfError" class="flex-1 flex items-center justify-center p-8">
+                        <div class="bg-red-50 border border-red-200 text-red-700 rounded-xl p-5 text-sm max-w-sm text-center" x-text="pdfError"></div>
+                    </div>
+
+                    <!-- PDF iframe -->
+                    <template x-if="!pdfCargando && !pdfError && pdfBlobUrl && docActual?.tipo === 'pdf'">
+                        <iframe :src="pdfBlobUrl" class="flex-1 w-full border-none" style="min-height:0;"></iframe>
+                    </template>
+
+                    <!-- Tarjeta de link externo -->
+                    <template x-if="docActual?.tipo === 'link'">
+                        <div class="flex-1 flex flex-col items-center justify-center gap-6 p-10">
+                            <div class="w-20 h-20 bg-indigo-100 rounded-2xl flex items-center justify-center">
+                                <svg class="w-10 h-10 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                                </svg>
+                            </div>
+                            <div class="text-center">
+                                <h4 class="font-bold text-slate-800 text-lg" x-text="docActual?.label"></h4>
+                                <p class="text-slate-500 text-sm mt-2 max-w-sm">
+                                    Este formulario se abrirá en una nueva pestaña. Al abrirlo, quedará marcado como completado automáticamente.
+                                </p>
+                            </div>
+                            <button @click="abrirLink()"
+                                    class="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition-colors shadow-lg shadow-indigo-200">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                                </svg>
+                                Abrir formulario en nueva pestaña
+                            </button>
+                            <p x-show="isChecked(docActual?.clave)" class="text-emerald-600 text-sm font-semibold flex items-center gap-1.5">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                                Formulario completado
+                            </p>
+                        </div>
+                    </template>
                 </div>
 
-                <!-- Check -->
-                <div x-show="timerCompletado && !checkHecho"
-                     class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
-                    <label class="flex items-start gap-3 cursor-pointer">
-                        <input type="checkbox" @change="marcarCheck()"
-                               class="mt-1 w-4 h-4 accent-blue-600 cursor-pointer">
-                        <span class="text-sm text-blue-800">
-                            Confirmo que he leído y entendido el contenido de <strong x-text="pdfLabel"></strong>.
-                        </span>
-                    </label>
-                </div>
+                <!-- Footer: timer + check + descarga + navegación -->
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 px-5 py-3.5 flex items-center gap-3 flex-shrink-0">
 
-                <div x-show="checkHecho" class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4 flex items-center gap-3">
-                    <svg class="w-5 h-5 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                    </svg>
-                    <span class="text-sm font-semibold text-emerald-800">Lectura confirmada.</span>
-                </div>
+                    <!-- Botón descargar (siempre visible cuando hay PDF cargado) -->
+                    <button x-show="pdfBlobUrl && docActual?.tipo === 'pdf'"
+                            @click="descargarDoc()"
+                            title="Descargar documento"
+                            class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 hover:border-blue-300 hover:bg-blue-50 text-slate-500 hover:text-blue-600 text-xs font-medium transition-colors flex-shrink-0">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                        </svg>
+                        Descargar
+                    </button>
 
-                <button
-                    @click="siguientePdf()"
-                    :disabled="!todoLeido"
-                    class="w-full py-3 rounded-xl font-bold text-sm transition-all"
-                    :class="todoLeido
-                        ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
-                        : 'bg-slate-100 text-slate-400 cursor-not-allowed'">
-                    <span x-text="pdfActual < 2 ? 'Continuar con el siguiente documento →' : 'Continuar a la firma de contratos →'"></span>
-                </button>
+                    <!-- Timer (PDF no leído) -->
+                    <div x-show="docActual?.tipo === 'pdf' && !timerOk && !pdfCargando && !pdfError"
+                         class="flex items-center gap-3 flex-1">
+                        <div class="relative w-9 h-9 flex-shrink-0">
+                            <svg class="w-9 h-9 -rotate-90" viewBox="0 0 36 36">
+                                <circle cx="18" cy="18" r="14" fill="none" stroke="#fde68a" stroke-width="3"/>
+                                <circle cx="18" cy="18" r="14" fill="none" stroke="#f59e0b" stroke-width="3"
+                                        stroke-dasharray="87.96"
+                                        :stroke-dashoffset="87.96 * (timerSeg / 20)"
+                                        class="timer-ring"/>
+                            </svg>
+                            <span class="absolute inset-0 flex items-center justify-center text-xs font-bold text-amber-700" x-text="timerSeg"></span>
+                        </div>
+                        <p class="text-sm text-amber-800">Lee el documento — disponible en <strong x-text="timerSeg"></strong>s</p>
+                    </div>
+
+                    <!-- Check habilitado (PDF no confirmado) -->
+                    <div x-show="docActual?.tipo === 'pdf' && timerOk && !isChecked(docActual?.clave) && !pdfCargando" class="flex-1">
+                        <label class="flex items-center gap-3 cursor-pointer bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5">
+                            <input type="checkbox" @change="confirmarLectura()"
+                                   class="w-4 h-4 accent-blue-600 flex-shrink-0">
+                            <span class="text-sm text-blue-800 font-medium">
+                                Confirmo que leí <strong x-text="docActual?.label"></strong>
+                            </span>
+                        </label>
+                    </div>
+
+                    <!-- Confirmado -->
+                    <div x-show="isChecked(docActual?.clave)" class="flex items-center gap-2 text-emerald-700 flex-1">
+                        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <span class="text-sm font-semibold">Revisado correctamente</span>
+                    </div>
+
+                    <!-- Botón siguiente / continuar a firma -->
+                    <button @click="siguienteOFirmar()"
+                            :disabled="!puedeAvanzar"
+                            class="px-5 py-2.5 rounded-xl font-bold text-sm transition-all flex-shrink-0 flex items-center gap-1.5"
+                            :class="puedeAvanzar
+                                ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-200'
+                                : 'bg-slate-100 text-slate-400 cursor-not-allowed'">
+                        <span x-show="docActualIdx < allItems.length - 1">Siguiente →</span>
+                        <span x-show="docActualIdx >= allItems.length - 1 && todosChecks">Continuar a firma →</span>
+                        <span x-show="docActualIdx >= allItems.length - 1 && !todosChecks">Ver pendientes</span>
+                    </button>
+                </div>
             </div>
         </div>
     </div>

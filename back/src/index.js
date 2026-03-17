@@ -2747,8 +2747,80 @@ function formatCuentaCobroDate(value) {
   return `${date.getDate()} de ${months[date.getMonth()]} de ${date.getFullYear()}`;
 }
 
+/*function writeCuentaCobroPdf(doc, cuenta, detalles) {
+  const totalNumeros = Number(cuenta.total_cuenta_cobro || 0);
+  const totalLetras = cuenta.total_letras || buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
+
+  doc.fontSize(12).text(`Cuenta de Cobro N° ${cuenta.public_id || cuenta.id}`, { align: "right" });
+  doc.moveDown(1);
+  doc.fontSize(11).text(`${formatCuentaCobroDate(cuenta.created_at)}, ${cuenta.ciudad_cobro || ""}`);
+  doc.moveDown(1.5);
+
+  doc.fontSize(12).font("Helvetica-Bold").text("SILVER CONSULTING S.A.S.", { align: "center" });
+  doc.text("NIT 901.149.190-0", { align: "center" });
+  doc.moveDown(1.5);
+
+  doc.font("Helvetica-Bold").text("DEBE A:", { align: "center" });
+  doc.font("Helvetica").text(cuenta.nombre_usuario || "", { align: "center" });
+  doc.text(`${cuenta.tipo_documento || "Documento"}: ${cuenta.cedula || ""}`, { align: "center" });
+  doc.moveDown(1);
+
+  doc.font("Helvetica-Bold").text("LA SUMA DE:", { align: "center" });
+  doc.font("Helvetica-Bold").text(`${formatCuentaCobroCurrency(totalNumeros)} (${totalLetras})`, { align: "center" });
+  doc.moveDown(1.5);
+
+  doc.font("Helvetica-Bold").text("Por concepto de:", { continued: true });
+  doc.font("Helvetica").text(
+    ` Honorarios de Consultorias: ${cuenta.descripcion || "Cuenta de cobro"} del ${cuenta.fecha_periodo_inicio || ""} al ${cuenta.fecha_periodo_fin || ""}`
+  );
+  doc.moveDown(1);
+
+  doc.font("Helvetica").text(`Direccion: ${cuenta.direccion || "-"}`);
+  doc.text(`Telefono: ${cuenta.telefono || "-"}`);
+  doc.text(`No de Cuenta Bancaria: ${cuenta.nro_cuenta_bancaria || "-"}`);
+  doc.text(`Banco: ${cuenta.banco || "-"}`);
+  doc.text(`Tipo de Cuenta: ${cuenta.tipo_cuenta || "-"}`);
+  doc.text(`Titular: ${cuenta.nombre_usuario || "-"}`);
+  doc.text(`${cuenta.tipo_documento || "Documento"}: ${cuenta.cedula || "-"}`);
+  doc.moveDown(1.5);
+
+  doc.font("Helvetica-Bold").text("Detalle de Cuenta de Cobro");
+  doc.moveDown(0.5);
+
+  const tableStartY = doc.y;
+  const colX = { cliente: 40, consultor: 170, tipo: 300, caso: 400, cant: 470, total: 520 };
+  doc.fontSize(9).font("Helvetica-Bold");
+  doc.text("Cliente", colX.cliente, tableStartY);
+  doc.text("Consultor", colX.consultor, tableStartY);
+  doc.text("Tipo", colX.tipo, tableStartY);
+  doc.text("Caso", colX.caso, tableStartY);
+  doc.text("Cant.", colX.cant, tableStartY, { width: 40, align: "right" });
+  doc.text("Total", colX.total, tableStartY, { width: 60, align: "right" });
+  doc.moveDown(0.5);
+  doc.font("Helvetica").fontSize(9);
+
+  let y = doc.y + 2;
+  for (const detalle of detalles || []) {
+    doc.text(detalle.cliente || "-", colX.cliente, y, { width: 120 });
+    doc.text(detalle.consultor_responsable || "-", colX.consultor, y, { width: 120 });
+    doc.text(detalle.tipo_asignacion || "-", colX.tipo, y, { width: 90 });
+    doc.text(detalle.nro_caso_int_ext || "-", colX.caso, y, { width: 60 });
+    const cantidad = Number(detalle.cantidad_dias_reportados || 0) > 0
+      ? `${detalle.cantidad_dias_reportados} D`
+      : `${Number(detalle.horas_reportadas || 0)} H`;
+    doc.text(cantidad, colX.cant, y, { width: 40, align: "right" });
+    doc.text(formatCuentaCobroCurrency(detalle.total_cobrar), colX.total, y, { width: 60, align: "right" });
+    y += 14;
+    if (y > doc.page.height - 60) {
+      doc.addPage();
+      y = 50;
+    }
+  }
+}*/
+
 // ============================================================
-//  writeCuentaCobroPdf 
+//  writeCuentaCobroPdf  —  versión corregida
+//  Fix: header sin solapamiento, fechas formateadas, espaciado
 // ============================================================
 
 const COLOR = {
@@ -3514,7 +3586,7 @@ app.delete("/sub-consultores/:asociadoId", requireAccess({ roles: ["Administrado
 app.get("/modulos", requireAuthenticated, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT public_id AS id, titulo
+      SELECT id, titulo
       FROM modulo
       WHERE activo = true
       ORDER BY titulo ASC
@@ -4665,7 +4737,7 @@ app.get("/tipos-asignacion", requireAuthenticated, async (req, res) => {
 app.get("/bancos", requireAuthenticated, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, titulo
+      SELECT public_id AS id, titulo
       FROM bancos
       WHERE activo = true
       ORDER BY titulo ASC
@@ -5621,7 +5693,7 @@ app.get("/contratacion/video", (req, res) => {
     return res.status(503).send("Video no disponible. Contacta a Talento Humano.");
   }
 
-  // Permite reproducir el video cuando el front y el back están en dominios distintos.
+  // Permite reproducir el video cuando el front y el back están en distintos dominios.
   res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
 
   const stat = fs.statSync(filePath);

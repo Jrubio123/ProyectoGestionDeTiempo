@@ -143,6 +143,8 @@ Implementacion backend:
   - Evolucion para incorporar `public_id` en tablas existentes.
 - `db/migrations/20260219_estado_mesa_fabrica.sql`:
   - Agrega valores a `tipo_estado_mesa` si no existen.
+- `db/migrations/2026-03-17-usuario-licencias-backup.sql`:
+  - Crea `usuario_licencias_backup` para guardar/restaurar snapshots de licencias de Entra ID.
 - Nota:
   - El cambio de `En_Firma` ya quedo integrado en `init.sql`; no se necesita migracion separada para instalaciones nuevas.
 
@@ -223,6 +225,9 @@ Pasos:
   - CRUD de `clientes`, `consultorias`, `tarifas`
   - `GET /consultores`, `GET /coordinadores`
   - `GET /tipos-asignacion`, `GET /modulos`
+  - `PUT /admin/usuarios/:id/activo` (con `liberar_licencias` o `restaurar_licencias`)
+  - `POST /admin/usuarios/:id/licencia`
+  - `GET /admin/usuarios/:id/licencias-historial`
 - Asignaciones y horas:
   - `GET/POST/PUT /registro-asignaciones...`
   - `GET /mis-asignaciones...`

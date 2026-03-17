@@ -101,7 +101,7 @@ window.solicitudesCoordApp = function () {
 
             const payload = {
                 cliente_id: this.form.cliente_id,
-                modulo_id: esOtros ? null : this.form.modulo_id,
+                modulo_id: this.form.modulo_id && !esOtros ? this.form.modulo_id : null,
                 perfil,
                 nivel: this.form.nivel,
                 tiempo: this.form.tiempo,
@@ -131,7 +131,6 @@ window.solicitudesCoordApp = function () {
             const esOtros = this.form.modulo_id === "__otros__";
             const perfil = String(this.form.perfil || "").trim();
             if (!this.form.cliente_id) faltan.push("Cliente");
-            if (!this.form.modulo_id) faltan.push("Tecnología / Módulo");
             if (!perfil) {
                 faltan.push(esOtros ? "Perfil (requerido al elegir Otros)" : "Perfil");
             }

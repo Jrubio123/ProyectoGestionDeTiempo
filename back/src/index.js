@@ -1306,6 +1306,29 @@ async function graphGetAll(path, accessToken, maxPages = 20) {
   return values;
 }
 
+// Equivalente a: Get-MgSubscribedSku
+// Requiere permiso de aplicación: Organization.Read.All
+async function getSubscribedSkus(accessToken) {
+  const data = await graphGet("/v1.0/subscribedSkus", accessToken);
+  return (data?.value || []).map((sku) => ({
+    skuId: sku.skuId,
+    skuPartNumber: sku.skuPartNumber,
+    consumedUnits: sku.consumedUnits,
+    prepaidUnits: sku.prepaidUnits
+  }));
+}
+
+// Equivalente a: Set-MgUserLicense -UserId "..." -RemoveLicenses @("sku-id") -AddLicenses @()
+// Requiere permiso de aplicación: User.ReadWrite.All
+// userId puede ser email (UPN) o Azure OID
+async function assignUserLicense(accessToken, userId, addLicenses = [], removeLicenses = []) {
+  const encodedUser = encodeURIComponent(userId);
+  return graphPost(`/v1.0/users/${encodedUser}/assignLicense`, accessToken, {
+    addLicenses: addLicenses.map((skuId) => ({ skuId, disabledPlans: [] })),
+    removeLicenses
+  });
+}
+
 function buildClickSignUrl(pathName) {
   const suffix = String(pathName || "").replace(/^\/+/, "");
   return `${CLICKSIGN_API_BASE}/${suffix}`;
@@ -4061,6 +4084,127 @@ app.delete("/admin/firma-contratos/:id", requireAccess({ roles: ["Administrador"
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error anulando token" });
+  }
+});
+
+// Activar / desactivar usuario en BD y en Entra ID (accountEnabled)
+// Requiere permiso de aplicación: User.ReadWrite.All
+app.put("/admin/usuarios/:id/activo", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const { id } = req.params;
+  const { activo } = req.body || {};
+
+  if (typeof activo !== "boolean") {
+    return res.status(400).json({ error: "El campo 'activo' debe ser true o false" });
+  }
+
+  try {
+    const userRes = await pool.query(
+      "SELECT id, email, azure_oid FROM usuarios WHERE public_id = $1",
+      [id]
+    );
+    if (userRes.rowCount === 0) return res.status(404).json({ error: "Usuario no encontrado" });
+
+    const { email, azure_oid } = userRes.rows[0];
+
+    // 1. Actualizar en BD
+    await pool.query(
+      "UPDATE usuarios SET activo = $1, updated_at = CURRENT_TIMESTAMP WHERE public_id = $2",
+      [activo, id]
+    );
+
+    // 2. Sincronizar accountEnabled en Entra ID si el usuario tiene OID o email de Azure
+    const azureUserId = azure_oid || email;
+    let entraSyncOk = false;
+    let entraSyncError = null;
+
+    if (azureUserId) {
+      try {
+        const token = await getGraphAccessToken();
+        const encodedUser = encodeURIComponent(azureUserId);
+        await graphPatch(`/v1.0/users/${encodedUser}`, token, { accountEnabled: activo });
+        entraSyncOk = true;
+      } catch (err) {
+        console.error("Error sincronizando accountEnabled en Entra ID:", err?.message || err);
+        entraSyncError = err?.message || "Error desconocido";
+      }
+    }
+
+    // Respuesta: siempre informa el estado de cada operación
+    return res.json({
+      ok: true,
+      activo,
+      email,
+      entra_sync: azureUserId
+        ? { ok: entraSyncOk, error: entraSyncError }
+        : { ok: false, error: "El usuario no tiene azure_oid ni email asociado a Entra ID" }
+    });
+  } catch (err) {
+    console.error("Error actualizando estado de usuario:", err?.message || err);
+    res.status(500).json({ error: "Error al actualizar el estado del usuario" });
+  }
+});
+
+// Equivalente a: Get-MgSubscribedSku | Select-Object SkuId, SkuPartNumber
+app.get("/admin/licencias-disponibles", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  try {
+    const token = await getGraphAccessToken();
+    const skus = await getSubscribedSkus(token);
+    res.json(skus);
+  } catch (err) {
+    console.error("Error obteniendo SKUs de Entra ID:", err?.message || err);
+    const status = parseGraphErrorStatus(err?.message || "");
+    if (status === 401 || status === 403) {
+      return res.status(502).json({
+        error: "Sin permisos para leer licencias en Entra ID. Verifica que la app tenga Organization.Read.All como permiso de aplicación."
+      });
+    }
+    res.status(502).json({ error: "No se pudieron obtener las licencias de Entra ID." });
+  }
+});
+
+// Equivalente a: Set-MgUserLicense -UserId "..." -RemoveLicenses @("sku-id") -AddLicenses @()
+app.post("/admin/usuarios/:id/licencia", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const { id } = req.params;
+  const { add_licenses = [], remove_licenses = [] } = req.body || {};
+  try {
+    if (!add_licenses.length && !remove_licenses.length) {
+      return res.status(400).json({ error: "Debes especificar add_licenses o remove_licenses (array de SkuIds)" });
+    }
+
+    const userRes = await pool.query(
+      "SELECT email, azure_oid FROM usuarios WHERE public_id = $1",
+      [id]
+    );
+    if (userRes.rowCount === 0) return res.status(404).json({ error: "Usuario no encontrado" });
+
+    const { email, azure_oid } = userRes.rows[0];
+    // Preferir OID si existe, sino UPN/email — igual que buscar por UPN en PowerShell
+    const userId = azure_oid || email;
+    if (!userId) return res.status(400).json({ error: "El usuario no tiene email ni OID de Azure asociado" });
+
+    const token = await getGraphAccessToken();
+    await assignUserLicense(token, userId, add_licenses, remove_licenses);
+
+    res.json({
+      ok: true,
+      usuario: email,
+      add_licenses,
+      remove_licenses
+    });
+  } catch (err) {
+    console.error("Error gestionando licencia en Entra ID:", err?.message || err);
+    const status = parseGraphErrorStatus(err?.message || "");
+    if (status === 401 || status === 403) {
+      return res.status(502).json({
+        error: "Sin permisos para modificar licencias en Entra ID. Verifica que la app tenga User.ReadWrite.All como permiso de aplicación."
+      });
+    }
+    if (status === 404) {
+      return res.status(404).json({
+        error: "Usuario no encontrado en Entra ID. Verifica que el email o OID sea correcto."
+      });
+    }
+    res.status(502).json({ error: "No se pudo modificar la licencia en Entra ID." });
   }
 });
 

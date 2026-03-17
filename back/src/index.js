@@ -3767,7 +3767,7 @@ app.patch("/admin/usuarios-licencias/:public_id/estado", requireAccess({ roles: 
 
   try {
     const userRes = await pool.query(
-      `SELECT id, azure_oid, nombre_usuario FROM usuarios WHERE public_id = $1`,
+      `SELECT id, azure_oid, email, nombre_usuario FROM usuarios WHERE public_id = $1`,
       [public_id]
     );
     if (userRes.rows.length === 0) {
@@ -3781,10 +3781,34 @@ app.patch("/admin/usuarios-licencias/:public_id/estado", requireAccess({ roles: 
       [activo, user.id]
     );
 
-    if (user.azure_oid) {
+    let entraId = user.azure_oid;
+
+    // Si no tiene azure_oid guardado, intentar encontrarlo por email en Entra
+    if (!entraId && user.email) {
       try {
         const token = await getGraphAccessToken();
-        await graphPatch(`/v1.0/users/${user.azure_oid}`, token, { accountEnabled: activo });
+        const busqueda = await graphGet(
+          `/v1.0/users?$filter=mail eq '${user.email}'&$select=id`,
+          token
+        );
+        const entraUser = busqueda?.value?.[0];
+        if (entraUser?.id) {
+          entraId = entraUser.id;
+          // Guardar para futuras operaciones
+          await pool.query(
+            `UPDATE usuarios SET azure_oid = $1 WHERE id = $2`,
+            [entraId, user.id]
+          );
+        }
+      } catch (lookupErr) {
+        console.error("No se pudo buscar usuario en Entra por email:", lookupErr.message);
+      }
+    }
+
+    if (entraId) {
+      try {
+        const token = await getGraphAccessToken();
+        await graphPatch(`/v1.0/users/${entraId}`, token, { accountEnabled: activo });
       } catch (graphErr) {
         console.error("Error actualizando estado en Entra ID:", graphErr.message);
         return res.status(207).json({
@@ -3796,6 +3820,7 @@ app.patch("/admin/usuarios-licencias/:public_id/estado", requireAccess({ roles: 
 
     res.json({
       mensaje: `Usuario ${activo ? "activado" : "desactivado"} correctamente`,
+      entra_sincronizado: !!entraId,
       activo
     });
   } catch (err) {

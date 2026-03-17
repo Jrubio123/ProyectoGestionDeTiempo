@@ -1,4 +1,4 @@
-﻿function initSidebar() {
+function initSidebar() {
     const sidebar = document.querySelector(".sidebar");
     const toggleBtn = document.getElementById("sidebarToggle");
     const mobileBackdrop = document.getElementById("sidebarMobileBackdrop");
@@ -77,7 +77,7 @@
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro", "catalogos-admin"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin"],
         coordinador: [
             "inicio",
             "asignacion-consultor",

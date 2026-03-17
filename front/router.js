@@ -1,4 +1,4 @@
-﻿async function loadView(view) {
+async function loadView(view) {
     try {
         const res = await fetch(`/views/${view}.html`);
         if (!res.ok) throw new Error("Error HTTP: " + res.status);
@@ -36,6 +36,7 @@ const routes = {
     "generar-cuenta-cobro": "generar-cuenta-cobro",
     "asignacion-fabrica-mesa-servicio": "asignacion-fabrica-mesa-servicio",
     "catalogos-admin": "catalogos-admin",
+    "gestion-licencias-admin": "gestion-licencias-admin",
     solicitudesCoord: "solicitudesCoord",
     preregistrosCoord: "preregistrosCoord",
     solicitudesRecl: "solicitudesRecl",
@@ -52,7 +53,7 @@ function router() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador","asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro", "catalogos-admin"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador","asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin"],
         coordinador: [
             "inicio",
             "asignacion-consultor",

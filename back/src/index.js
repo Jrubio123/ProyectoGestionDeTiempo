@@ -1120,6 +1120,40 @@ function graphPost(path, accessToken, body) {
   });
 }
 
+function graphPatch(path, accessToken, body) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body || {});
+    const options = {
+      hostname: "graph.microsoft.com",
+      path,
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload)
+      }
+    };
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          try {
+            resolve(data ? JSON.parse(data) : {});
+          } catch (e) {
+            resolve({});
+          }
+        } else {
+          reject(new Error(`Graph error ${res.statusCode}: ${data}`));
+        }
+      });
+    });
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
 function graphPutBinary(path, accessToken, buffer, contentType = "application/octet-stream") {
   return new Promise((resolve, reject) => {
     const payload = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || "");
@@ -3696,6 +3730,77 @@ app.get("/admin/usuarios-roles", requireAccess({ roles: ["Administrador"] }), as
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al listar usuarios" });
+  }
+});
+
+// ── Gestión de licencias / acceso ──────────────────────────────────────────
+app.get("/admin/usuarios-licencias", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        u.public_id      AS id,
+        u.nombre_usuario,
+        u.email,
+        u.activo,
+        u.azure_oid,
+        u.tipo_consultor,
+        u.ultimo_inicio_sesion,
+        r.titulo         AS rol
+      FROM usuarios u
+        LEFT JOIN roles r ON u.rol_usuario_id = r.id
+      ORDER BY u.nombre_usuario ASC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener usuarios" });
+  }
+});
+
+app.patch("/admin/usuarios-licencias/:public_id/estado", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const { public_id } = req.params;
+  const { activo } = req.body;
+
+  if (typeof activo !== "boolean") {
+    return res.status(400).json({ error: "El campo activo debe ser booleano" });
+  }
+
+  try {
+    const userRes = await pool.query(
+      `SELECT id, azure_oid, nombre_usuario FROM usuarios WHERE public_id = $1`,
+      [public_id]
+    );
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    const user = userRes.rows[0];
+
+    await pool.query(
+      `UPDATE usuarios SET activo = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+      [activo, user.id]
+    );
+
+    if (user.azure_oid) {
+      try {
+        const token = await getGraphAccessToken();
+        await graphPatch(`/v1.0/users/${user.azure_oid}`, token, { accountEnabled: activo });
+      } catch (graphErr) {
+        console.error("Error actualizando estado en Entra ID:", graphErr.message);
+        return res.status(207).json({
+          warning: "El usuario se actualizó en la BD pero no se pudo sincronizar con Entra ID. Intenta de nuevo.",
+          activo
+        });
+      }
+    }
+
+    res.json({
+      mensaje: `Usuario ${activo ? "activado" : "desactivado"} correctamente`,
+      activo
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar estado del usuario" });
   }
 });
 

@@ -24,7 +24,7 @@ module.exports = function registerContratacionesRoutes(deps) {
 
   const DESTINOS_MESA = parseEmailList(
     process.env.CONTRATACIONES_DESTINO_MESA ||
-      "mesadeayuda@zettatech.com.co,jorge.castaneda@zettatech.com.co,richard.rendon@zettatech.com.co"
+      "mesadeayuda@zettatech.com.co,jonathan.martinez@zettatech.com.co,richard.rendon@zettatech.com.co"
   );
   const DESTINOS_TH = parseEmailList(
     process.env.CONTRATACIONES_DESTINO_TH ||

@@ -80,7 +80,7 @@ window.solicitudesCoordApp = function () {
         },
 
         getNombreModuloSeleccionado() {
-            const modulo = this.modulos.find((m) => m.id === this.form.modulo_id);
+            const modulo = this.modulos.find((m) => String(m.id) === String(this.form.modulo_id));
             return String(modulo?.titulo || "").trim();
         },
 

@@ -3887,7 +3887,7 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
     prioridad
   } = req.body;
   try {
-    if (!cliente_id || !perfil || !nivel) {
+    if (!cliente_id || !nivel) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
     const clienteInternalId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.clientes, cliente_id);
@@ -3899,6 +3899,17 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
       : null;
     if (modulo_id && !moduloInternalId) {
       return res.status(404).json({ error: "Módulo no encontrado o inválido" });
+    }
+    let perfilFinal = String(perfil || "").trim();
+    if (!perfilFinal && moduloInternalId) {
+      const moduloTituloRes = await pool.query(
+        `SELECT titulo FROM modulo WHERE id = $1`,
+        [moduloInternalId]
+      );
+      perfilFinal = String(moduloTituloRes.rows[0]?.titulo || "").trim();
+    }
+    if (!perfilFinal) {
+      return res.status(400).json({ error: "Faltan campos requeridos" });
     }
     const result = await pool.query(
       `
@@ -3928,7 +3939,7 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
         req.user?.id,
         clienteInternalId,
         moduloInternalId,
-        perfil,
+        perfilFinal,
         nivel,
         tiempo || null,
         ubicacion || "Remoto",

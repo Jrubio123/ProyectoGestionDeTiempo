@@ -4473,7 +4473,7 @@ app.put("/admin/usuarios/:id/activo", requireAccess({ roles: ["Administrador"] }
                 backupGroupId: pendingSnapshot.backupGroupId,
                 restoredByUserId: actorUserId,
                 restoredByEmail: actorEmail
-              );
+              });
               licenciaSync = {
                 ok: true,
                 mode: "restore",

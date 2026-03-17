@@ -1,0 +1,12 @@
+{
+  "name": "gestion-tiempo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -i ./front/styles/tailwind.input.css -o ./front/styles/tailwind.css --minify",
+    "watch:css": "tailwindcss -i ./front/styles/tailwind.input.css -o ./front/styles/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}

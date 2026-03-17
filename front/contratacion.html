@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proceso de Contratación — Silver Consulting</title>
+    <link rel="stylesheet" href="/styles/tailwind.css">
+    <script defer src="/lib/alpinejs.min.js"></script>
+    <script defer src="/lib/axios.min.js"></script>
+    <script defer src="/js/env.js"></script>
+    <script defer src="/js/contratacion-publica.js"></script>
+    <style>
+        body { background: #f1f5f9; }
+        .fade-in { animation: fadeIn .35s ease; }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+        .timer-ring { transition: stroke-dashoffset .9s linear; }
+        .pdf-frame { width:100%; height:520px; border:none; border-radius:8px; display:block; }
+        @media (max-width:640px) { .pdf-frame { height:380px; } }
+    </style>
+</head>
+<body x-data="contratacionApp()" x-init="init()" @beforeunload.window="destroy()">
+
+<!-- ── Barra superior ────────────────────────────────────────────────────── -->
+<header class="bg-white shadow-sm border-b border-slate-200">
+    <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-gradient-to-br from-slate-700 to-blue-700 rounded-lg"></div>
+            <span class="font-bold text-slate-800 text-sm">Silver Consulting</span>
+        </div>
+        <span x-show="nombre" class="text-sm text-slate-500">Hola, <strong x-text="nombre"></strong></span>
+    </div>
+</header>
+
+<!-- ── Error global ──────────────────────────────────────────────────────── -->
+<div x-show="errorGlobal" x-cloak
+     class="max-w-3xl mx-auto px-4 mt-4">
+    <div class="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm flex items-start gap-3">
+        <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <span x-text="errorGlobal"></span>
+    </div>
+</div>
+
+<main class="max-w-3xl mx-auto px-4 py-8">
+
+    <!-- ═══════════════════════════════════════════════════════════
+         PANTALLA 1: INGRESAR TOKEN
+    ════════════════════════════════════════════════════════════ -->
+    <div x-show="pantalla === 'token'" x-cloak class="fade-in">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
+            <div class="bg-gradient-to-r from-slate-800 to-blue-700 px-8 py-10 text-center">
+                <div class="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                    <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                    </svg>
+                </div>
+                <h1 class="text-2xl font-bold text-white">Proceso de Contratación</h1>
+                <p class="text-blue-200 text-sm mt-2">Silver Consulting — Documentos de ingreso</p>
+            </div>
+            <div class="px-8 py-8">
+                <p class="text-slate-600 text-sm mb-6 leading-relaxed">
+                    Para comenzar, ingresa el <strong>código de acceso</strong> que recibiste en tu correo personal.
+                    Revisa tu bandeja de entrada y busca el correo de Silver Consulting.
+                </p>
+                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Código de acceso</label>
+                <input
+                    type="text"
+                    x-model="tokenInput"
+                    @keydown.enter="validarToken()"
+                    placeholder="pega aquí tu código..."
+                    class="w-full px-4 py-3 border rounded-xl text-sm font-mono outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 uppercase tracking-widest"
+                    :class="tokenError ? 'border-red-400' : 'border-slate-300'"
+                    spellcheck="false"
+                    autocomplete="off">
+                <p x-show="tokenError" x-text="tokenError" class="text-red-500 text-xs mt-2"></p>
+                <button
+                    @click="validarToken()"
+                    :disabled="cargando"
+                    class="w-full mt-5 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+                    <span x-show="!cargando">Ingresar al proceso →</span>
+                    <span x-show="cargando" class="flex items-center justify-center gap-2">
+                        <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        Verificando...
+                    </span>
+                </button>
+                <p class="text-xs text-slate-400 text-center mt-4">
+                    ¿No recibiste el correo? Contacta a Talento Humano de Silver Consulting.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         PANTALLA 2: LECTURA DE PDFs
+    ════════════════════════════════════════════════════════════ -->
+    <div x-show="pantalla === 'leyendo'" x-cloak class="fade-in space-y-4">
+
+        <!-- Progreso general -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="font-bold text-slate-800">Documentos informativos</h2>
+                <span class="text-xs font-semibold text-slate-500">
+                    <span x-text="(checksCompletados.pdf1 ? 1 : 0) + (checksCompletados.pdf2 ? 1 : 0) + (checksCompletados.pdf3 ? 1 : 0)"></span>/3 leídos
+                </span>
+            </div>
+            <div class="flex gap-2">
+                <template x-for="i in [1,2,3]" :key="i">
+                    <div class="flex-1 h-2 rounded-full overflow-hidden bg-slate-100">
+                        <div class="h-full rounded-full transition-all duration-500"
+                             :class="{
+                               'bg-emerald-500': checksCompletados['pdf'+i],
+                               'bg-blue-500': !checksCompletados['pdf'+i] && pdfActual === (i-1),
+                               'bg-slate-200': !checksCompletados['pdf'+i] && pdfActual !== (i-1)
+                             }"
+                             :style="checksCompletados['pdf'+i] ? 'width:100%' : (pdfActual === (i-1) ? 'width:50%' : 'width:0%')">
+                        </div>
+                    </div>
+                </template>
+            </div>
+            <div class="flex gap-2 mt-2">
+                <template x-for="(label, i) in ['Documento 1','Documento 2','Documento 3']" :key="i">
+                    <div class="flex-1 text-center">
+                        <span class="text-xs"
+                              :class="{
+                                'text-emerald-600 font-semibold': checksCompletados['pdf'+(i+1)],
+                                'text-blue-600 font-semibold': !checksCompletados['pdf'+(i+1)] && pdfActual === i,
+                                'text-slate-400': !checksCompletados['pdf'+(i+1)] && pdfActual !== i
+                              }" x-text="label"></span>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Visor del PDF actual -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                    <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Documento <span x-text="pdfActual + 1"></span> de 3</span>
+                    <h3 class="font-bold text-slate-800 mt-0.5" x-text="pdfLabel"></h3>
+                </div>
+                <template x-if="checksCompletados['pdf'+(pdfActual+1)]">
+                    <span class="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">Leído ✓</span>
+                </template>
+            </div>
+
+            <!-- Loading del PDF -->
+            <div x-show="pdfCargando" class="flex items-center justify-center py-20 text-slate-400">
+                <svg class="w-7 h-7 animate-spin mr-3 text-blue-500" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                <span class="text-sm">Cargando documento...</span>
+            </div>
+
+            <!-- iframe del PDF -->
+            <div x-show="!pdfCargando && pdfBlobUrl" class="p-4">
+                <iframe :src="pdfBlobUrl" class="pdf-frame bg-slate-50 shadow-inner"></iframe>
+            </div>
+
+            <!-- Timer y confirmación -->
+            <div x-show="!pdfCargando && pdfBlobUrl" class="px-6 pb-6">
+
+                <!-- Timer -->
+                <div x-show="!timerCompletado" class="flex items-center gap-4 bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
+                    <div class="relative w-14 h-14 flex-shrink-0">
+                        <svg class="w-14 h-14 -rotate-90" viewBox="0 0 56 56">
+                            <circle cx="28" cy="28" r="24" fill="none" stroke="#fde68a" stroke-width="4"/>
+                            <circle cx="28" cy="28" r="24" fill="none" stroke="#f59e0b" stroke-width="4"
+                                    stroke-dasharray="150.8"
+                                    :stroke-dashoffset="150.8 - (timerProgreso / 100) * 150.8"
+                                    class="timer-ring"/>
+                        </svg>
+                        <span class="absolute inset-0 flex items-center justify-center text-sm font-bold text-amber-700" x-text="timerSegundos"></span>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-amber-800 text-sm">Lee el documento completo</p>
+                        <p class="text-amber-600 text-xs mt-1">La confirmación se habilitará en <strong x-text="timerSegundos"></strong> segundos</p>
+                    </div>
+                </div>
+
+                <!-- Check -->
+                <div x-show="timerCompletado && !checkHecho"
+                     class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
+                    <label class="flex items-start gap-3 cursor-pointer">
+                        <input type="checkbox" @change="marcarCheck()"
+                               class="mt-1 w-4 h-4 accent-blue-600 cursor-pointer">
+                        <span class="text-sm text-blue-800">
+                            Confirmo que he leído y entendido el contenido de <strong x-text="pdfLabel"></strong>.
+                        </span>
+                    </label>
+                </div>
+
+                <div x-show="checkHecho" class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4 flex items-center gap-3">
+                    <svg class="w-5 h-5 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <span class="text-sm font-semibold text-emerald-800">Lectura confirmada.</span>
+                </div>
+
+                <button
+                    @click="siguientePdf()"
+                    :disabled="!todoLeido"
+                    class="w-full py-3 rounded-xl font-bold text-sm transition-all"
+                    :class="todoLeido
+                        ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                        : 'bg-slate-100 text-slate-400 cursor-not-allowed'">
+                    <span x-text="pdfActual < 2 ? 'Continuar con el siguiente documento →' : 'Continuar a la firma de contratos →'"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         PANTALLA 3: FIRMA DIGITAL
+    ════════════════════════════════════════════════════════════ -->
+    <div x-show="pantalla === 'firma'" x-cloak class="fade-in space-y-4" x-init="iniciarPolling()">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+            <div class="flex items-center gap-3 mb-2">
+                <div class="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536M9 11l6-6 3 3-6 6H9v-3z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h2 class="font-bold text-slate-800">Firma de contratos</h2>
+                    <p class="text-xs text-slate-500">Firma ambos documentos para completar tu proceso</p>
+                </div>
+            </div>
+        </div>
+
+        <div x-show="firmaError" class="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm" x-text="firmaError"></div>
+
+        <template x-for="idx in [1, 2]" :key="idx">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                <div class="px-6 py-5 flex items-center justify-between">
+                    <div class="flex items-center gap-4">
+                        <div class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm"
+                             :class="docFirmado(idx) ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'"
+                             x-text="idx"></div>
+                        <div>
+                            <p class="font-semibold text-slate-800 text-sm"
+                               x-text="idx === 1 ? 'Contrato de Prestación de Servicios' : 'Acuerdo de Confidencialidad'"></p>
+                            <p class="text-xs text-slate-400 mt-0.5">
+                                <span x-show="docFirmado(idx)" class="text-emerald-600 font-semibold">Firmado correctamente</span>
+                                <span x-show="!docFirmado(idx) && docFirmaInfo(idx)?.estado === 'pending'" class="text-amber-600">Proceso iniciado — pendiente de firma</span>
+                                <span x-show="!docFirmado(idx) && !docFirmaInfo(idx)">Pendiente de inicio</span>
+                            </p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <template x-if="docFirmado(idx)">
+                            <svg class="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                        </template>
+                        <template x-if="!docFirmado(idx)">
+                            <div class="flex gap-2">
+                                <button
+                                    @click="iniciarFirma(idx)"
+                                    :disabled="firmaCargando || (idx === 2 && !docFirmado(1))"
+                                    class="px-4 py-2 rounded-xl text-xs font-bold transition-all"
+                                    :class="(idx === 2 && !docFirmado(1)) || firmaCargando
+                                        ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                        : 'bg-blue-600 hover:bg-blue-700 text-white'">
+                                    <span x-text="docFirmaInfo(idx)?.url_firma ? 'Abrir enlace de firma' : 'Iniciar firma'"></span>
+                                </button>
+                                <button x-show="docFirmaInfo(idx)?.estado === 'pending'"
+                                        @click="yaFirme(idx)"
+                                        class="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all">
+                                    Ya firmé
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+                <div x-show="idx === 2 && !docFirmado(1)"
+                     class="px-6 pb-4 text-xs text-slate-400">
+                    Debes firmar el primer documento antes de continuar con este.
+                </div>
+            </div>
+        </template>
+
+        <div x-show="todosFirmados" class="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 text-center">
+            <p class="text-emerald-800 font-bold">¡Todos los documentos firmados!</p>
+            <p class="text-emerald-600 text-sm mt-1">El proceso quedará marcado como completado automáticamente.</p>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         PANTALLA 4: COMPLETADO
+    ════════════════════════════════════════════════════════════ -->
+    <div x-show="pantalla === 'completado'" x-cloak class="fade-in">
+        <div class="bg-white rounded-2xl shadow-xl border border-emerald-100 overflow-hidden text-center">
+            <div class="bg-gradient-to-r from-emerald-600 to-teal-600 px-8 py-12">
+                <div class="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                </div>
+                <h1 class="text-2xl font-bold text-white">¡Proceso completado!</h1>
+                <p class="text-emerald-200 mt-2 text-sm">Todos los documentos han sido firmados exitosamente</p>
+            </div>
+            <div class="px-8 py-8">
+                <p class="text-slate-600 text-sm leading-relaxed">
+                    Hola <strong x-text="nombre"></strong>, tu proceso de contratación con Silver Consulting ha sido completado.
+                    Los documentos firmados han sido almacenados de forma segura.<br><br>
+                    En breve recibirás información sobre los siguientes pasos de tu incorporación.
+                </p>
+                <div class="mt-6 bg-slate-50 rounded-xl p-4">
+                    <p class="text-xs text-slate-500">¿Tienes preguntas? Contacta a Talento Humano de Silver Consulting.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</main>
+</body>
+</html>

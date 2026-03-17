@@ -1,4 +1,6 @@
 const path = require("path");
+const crypto = require("crypto");
+const fs = require("fs");
 const envFile =
   process.env.NODE_ENV === "production" ? ".env_produccion" : ".env";
 require("dotenv").config({ path: path.resolve(process.cwd(), envFile) });
@@ -584,10 +586,14 @@ const FRONT_PORTAL_BASE =
 const ONEDRIVE_ENABLED = String(process.env.ONEDRIVE_ENABLED || "true").toLowerCase() === "true";
 const ONEDRIVE_TARGET_USER = process.env.ONEDRIVE_TARGET_USER || "admin.apps@silverconsulting.com.co";
 const ONEDRIVE_ROOT_FOLDER = process.env.ONEDRIVE_ROOT_FOLDER || "AdjuntosCuentasCobro";
+const CONTRATOS_ONEDRIVE_FOLDER = process.env.CONTRATOS_ONEDRIVE_FOLDER || "ContratosFirmados";
+const CONTRATOS_TOKEN_EXPIRY_HOURS = Math.max(1, Number(process.env.CONTRATOS_TOKEN_EXPIRY_HOURS || 72));
+const CONTRATOS_BASE_URL = String(process.env.CONTRATOS_BASE_URL || "").trim().replace(/\/+$/, "");
 const CLICKSIGN_API_BASE = String(process.env.CLICKSIGN_API_BASE || "https://api.lleida.net/cs/v1").trim().replace(/\/+$/, "");
 const CLICKSIGN_API_KEY = String(process.env.CLICKSIGN_API_KEY || "").trim();
 const CLICKSIGN_USER = String(process.env.CLICKSIGN_USER || "").trim();
 const CLICKSIGN_CONFIG_ID = Number(process.env.CLICKSIGN_CONFIG_ID || 0);
+const CLICKSIGN_CONTRATOS_CONFIG_ID = Number(process.env.CLICKSIGN_CONTRATOS_CONFIG_ID || 0) || CLICKSIGN_CONFIG_ID;
 const CLICKSIGN_SIGNATURE_CB_URL = String(process.env.CLICKSIGN_SIGNATURE_CB_URL || "").trim();
 const CLICKSIGN_SIGNATORY_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_CB_URL || "").trim();
 const CLICKSIGN_SIGNATORY_EMAIL_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_EMAIL_CB_URL || "").trim();
@@ -3869,6 +3875,195 @@ app.put("/admin/usuarios/:id/rol", requireAccess({ roles: ["Administrador"] }), 
   }
 });
 
+// ── Firma de contratos: rutas admin ─────────────────────────────────────────
+const TALENTO_HUMANO_ROL = "Talento Humano";
+
+function buildContratoEmailHtml({ nombre, token, link }) {
+  return `
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f4f6fa;font-family:'Segoe UI',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6fa;padding:32px 0;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08);">
+        <tr><td style="background:linear-gradient(135deg,#1e3a5f,#2563eb);padding:32px 40px;text-align:center;">
+          <h1 style="color:#fff;margin:0;font-size:22px;font-weight:700;">Silver Consulting</h1>
+          <p style="color:#bfdbfe;margin:8px 0 0;font-size:14px;">Proceso de contratación</p>
+        </td></tr>
+        <tr><td style="padding:36px 40px;">
+          <p style="font-size:16px;color:#1e293b;margin:0 0 12px;">Hola <strong>${nombre}</strong>,</p>
+          <p style="font-size:14px;color:#475569;line-height:1.6;margin:0 0 24px;">
+            Has sido seleccionado para iniciar tu proceso de contratación con Silver Consulting.
+            A continuación encontrarás tu código de acceso y el enlace para revisar y firmar tus documentos.
+          </p>
+          <div style="background:#f1f5f9;border-radius:10px;padding:20px 24px;text-align:center;margin:0 0 24px;">
+            <p style="font-size:12px;color:#64748b;margin:0 0 8px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;">Tu código de acceso</p>
+            <p style="font-size:28px;font-weight:800;color:#1e3a5f;letter-spacing:4px;margin:0;font-family:monospace;">${token.toUpperCase()}</p>
+          </div>
+          <p style="font-size:13px;color:#64748b;margin:0 0 20px;text-align:center;">
+            Este código expira en <strong>${CONTRATOS_TOKEN_EXPIRY_HOURS} horas</strong>.
+          </p>
+          <div style="text-align:center;margin:0 0 28px;">
+            <a href="${link}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:14px 36px;border-radius:8px;font-size:15px;font-weight:700;letter-spacing:.02em;">
+              Revisar y firmar documentos →
+            </a>
+          </div>
+          <p style="font-size:12px;color:#94a3b8;text-align:center;margin:0;">
+            Si no esperabas este correo, puedes ignorarlo. El enlace no realiza ninguna acción hasta que ingreses tu código.
+          </p>
+        </td></tr>
+        <tr><td style="background:#f8fafc;padding:16px 40px;text-align:center;border-top:1px solid #e2e8f0;">
+          <p style="font-size:11px;color:#94a3b8;margin:0;">Silver Consulting — Este correo fue generado automáticamente.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+app.get("/admin/firma-contratos", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        t.public_id        AS id,
+        t.nombre_persona,
+        t.correo_personal,
+        t.estado,
+        t.checks_completados,
+        t.docs_firma,
+        t.expires_at,
+        t.created_at,
+        sc.public_id       AS solicitud_public_id,
+        sc.perfil          AS solicitud_perfil,
+        pp.public_id       AS preregistro_public_id,
+        u.nombre_usuario   AS generado_por_nombre
+      FROM tokens_firma_contrato t
+        LEFT JOIN solicitudes_contratacion sc ON sc.id = t.solicitud_id
+        LEFT JOIN preregistro_personas pp ON pp.id = t.preregistro_id
+        LEFT JOIN usuarios u ON u.id = t.generado_por
+      ORDER BY t.created_at DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener tokens de firma" });
+  }
+});
+
+app.get("/admin/firma-contratos/candidatos", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
+  try {
+    const [solRes, preRes] = await Promise.all([
+      pool.query(`
+        SELECT
+          sc.public_id AS id,
+          'solicitud'  AS origen,
+          sc.nombre || ' ' || sc.apellidos AS nombre_completo,
+          sc.correo_personal,
+          sc.estado,
+          sc.created_at
+        FROM solicitudes_contratacion sc
+        WHERE sc.tipo_solicitud = 'Nuevo'
+          AND sc.estado IN ('Completado', 'Pendiente Revision TH', 'Pendiente')
+          AND sc.correo_personal IS NOT NULL
+        ORDER BY sc.created_at DESC
+        LIMIT 200
+      `),
+      pool.query(`
+        SELECT
+          pp.public_id AS id,
+          'preregistro' AS origen,
+          pp.nombre || ' ' || pp.apellidos AS nombre_completo,
+          pp.correo_personal,
+          pp.estado,
+          pp.created_at
+        FROM preregistro_personas pp
+        WHERE pp.estado IN ('Completado', 'Pendiente Revision TH', 'Pendiente Correo Silver')
+          AND pp.correo_personal IS NOT NULL
+        ORDER BY pp.created_at DESC
+        LIMIT 200
+      `)
+    ]);
+    res.json({ solicitudes: solRes.rows, preregistros: preRes.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener candidatos" });
+  }
+});
+
+app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
+  const { solicitud_id, preregistro_id, nombre_persona, correo_personal } = req.body || {};
+
+  if (!nombre_persona || !correo_personal) {
+    return res.status(400).json({ error: "nombre_persona y correo_personal son requeridos" });
+  }
+  if (!solicitud_id && !preregistro_id) {
+    return res.status(400).json({ error: "Debes indicar solicitud_id o preregistro_id" });
+  }
+
+  try {
+    const token = crypto.randomBytes(24).toString("hex");
+    const expiresAt = new Date(Date.now() + CONTRATOS_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000);
+
+    let solId = null;
+    let preId = null;
+    if (solicitud_id) {
+      const r = await pool.query("SELECT id FROM solicitudes_contratacion WHERE public_id = $1", [solicitud_id]);
+      if (r.rowCount === 0) return res.status(404).json({ error: "Solicitud no encontrada" });
+      solId = r.rows[0].id;
+    }
+    if (preregistro_id) {
+      const r = await pool.query("SELECT id FROM preregistro_personas WHERE public_id = $1", [preregistro_id]);
+      if (r.rowCount === 0) return res.status(404).json({ error: "Preregistro no encontrado" });
+      preId = r.rows[0].id;
+    }
+
+    const insert = await pool.query(
+      `INSERT INTO tokens_firma_contrato
+        (token, solicitud_id, preregistro_id, nombre_persona, correo_personal, generado_por, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING public_id AS id, token, expires_at`,
+      [token, solId, preId, nombre_persona, correo_personal, req.user.id, expiresAt]
+    );
+
+    const row = insert.rows[0];
+    const baseUrl = CONTRATOS_BASE_URL || "https://app.silverconsulting.com.co";
+    const link = `${baseUrl}/contratacion.html?t=${token}`;
+
+    await sendEmailSafe({
+      to: correo_personal,
+      subject: "Proceso de contratación — Silver Consulting",
+      html: buildContratoEmailHtml({ nombre: nombre_persona, token, link })
+    });
+
+    res.status(201).json({
+      id: row.id,
+      token,
+      expires_at: row.expires_at,
+      link,
+      correo_enviado: true
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error generando token de firma" });
+  }
+});
+
+app.delete("/admin/firma-contratos/:id", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
+  try {
+    const r = await pool.query(
+      "UPDATE tokens_firma_contrato SET estado = 'expirado', updated_at = NOW() WHERE public_id = $1 RETURNING id",
+      [req.params.id]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: "Token no encontrado" });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error anulando token" });
+  }
+});
+
 // Tipos de asignación activos
 app.get("/tipos-asignacion", requireAuthenticated, async (req, res) => {
   try {
@@ -4708,6 +4903,277 @@ app.post("/auth/microsoft", async (req, res) => {
       return res.status(500).json({ error: "Campo obligatorio nulo al crear usuario en BD" });
     }
     return res.status(500).json({ error: "Error interno al procesar autenticación Microsoft" });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+//  RUTAS PÚBLICAS — MÓDULO FIRMA DE CONTRATOS (sin auth de Microsoft)
+// ════════════════════════════════════════════════════════════════════════════
+
+const CONTRATOS_STATIC_DIR = path.join(__dirname, "static", "contratos");
+const CONTRATOS_PDF_NAMES = ["informativo_1.pdf", "informativo_2.pdf", "informativo_3.pdf"];
+
+const requireTokenFirma = (req, res, next) => {
+  const auth = req.headers.authorization || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
+  if (!token) return res.status(401).json({ error: "Token requerido" });
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    if (payload.tipo !== "firma_contrato") throw new Error("Tipo de token inválido");
+    req.tokenFirma = payload;
+    return next();
+  } catch (err) {
+    return res.status(401).json({ error: "Token de firma inválido o expirado" });
+  }
+};
+
+// POST /contratacion/validar — valida token de correo y devuelve JWT temporal
+app.post("/contratacion/validar", async (req, res) => {
+  const { token } = req.body || {};
+  if (!token) return res.status(400).json({ error: "Token requerido" });
+
+  try {
+    const r = await pool.query(
+      `SELECT id, public_id, nombre_persona, correo_personal, estado, checks_completados, docs_firma, expires_at
+       FROM tokens_firma_contrato WHERE token = $1 LIMIT 1`,
+      [String(token).trim().toLowerCase()]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: "Token no válido" });
+
+    const row = r.rows[0];
+    if (row.estado === "expirado" || row.estado === "completado") {
+      return res.status(400).json({ error: `Este proceso ya fue ${row.estado === "completado" ? "completado" : "anulado"}` });
+    }
+    if (new Date() > new Date(row.expires_at)) {
+      await pool.query("UPDATE tokens_firma_contrato SET estado='expirado' WHERE id=$1", [row.id]);
+      return res.status(401).json({ error: "El enlace ha expirado. Solicita uno nuevo a Talento Humano." });
+    }
+    if (row.estado === "pendiente") {
+      await pool.query("UPDATE tokens_firma_contrato SET estado='en_proceso', updated_at=NOW() WHERE id=$1", [row.id]);
+    }
+
+    const jwtTemporal = jwt.sign(
+      { tipo: "firma_contrato", token_id: row.id, token_public_id: row.public_id },
+      JWT_SECRET,
+      { expiresIn: "8h" }
+    );
+
+    res.json({
+      jwt: jwtTemporal,
+      nombre: row.nombre_persona,
+      checks_completados: row.checks_completados,
+      docs_firma: row.docs_firma
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error validando token" });
+  }
+});
+
+// GET /contratacion/estado — estado actual del proceso (polling)
+app.get("/contratacion/estado", requireTokenFirma, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT nombre_persona, estado, checks_completados, docs_firma, expires_at
+       FROM tokens_firma_contrato WHERE id = $1`,
+      [req.tokenFirma.token_id]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: "Proceso no encontrado" });
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error obteniendo estado" });
+  }
+});
+
+// GET /contratacion/pdf/:nombre — sirve PDF informativo estático
+app.get("/contratacion/pdf/:nombre", requireTokenFirma, (req, res) => {
+  const nombre = req.params.nombre;
+  if (!CONTRATOS_PDF_NAMES.includes(nombre)) {
+    return res.status(404).json({ error: "Documento no encontrado" });
+  }
+  const filePath = path.join(CONTRATOS_STATIC_DIR, nombre);
+  if (!fs.existsSync(filePath)) {
+    return res.status(503).json({ error: "Documento aún no disponible. Contacta a Talento Humano." });
+  }
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `inline; filename="${nombre}"`);
+  fs.createReadStream(filePath).pipe(res);
+});
+
+// PATCH /contratacion/check — marca un PDF informativo como leído
+app.patch("/contratacion/check", requireTokenFirma, async (req, res) => {
+  const { numero } = req.body || {};
+  const key = `pdf${numero}`;
+  if (![1, 2, 3].includes(Number(numero))) {
+    return res.status(400).json({ error: "numero debe ser 1, 2 o 3" });
+  }
+
+  try {
+    const r = await pool.query(
+      `UPDATE tokens_firma_contrato
+       SET checks_completados = jsonb_set(checks_completados, $1::text[], 'true', true),
+           updated_at = NOW()
+       WHERE id = $2 AND estado = 'en_proceso'
+       RETURNING checks_completados`,
+      [`{${key}}`, req.tokenFirma.token_id]
+    );
+    if (r.rowCount === 0) return res.status(400).json({ error: "No se pudo registrar el check" });
+    res.json({ checks_completados: r.rows[0].checks_completados });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error registrando check" });
+  }
+});
+
+// POST /contratacion/firmar — inicia proceso ClickSign para un doc de firma
+app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
+  const { doc_index } = req.body || {};
+  const idx = Number(doc_index);
+  if (idx !== 1 && idx !== 2) {
+    return res.status(400).json({ error: "doc_index debe ser 1 o 2" });
+  }
+
+  if (!isClickSignConfigured()) {
+    return res.status(503).json({ error: "Click&Sign no está configurado en el servidor" });
+  }
+
+  try {
+    const r = await pool.query(
+      `SELECT id, nombre_persona, correo_personal, checks_completados, docs_firma, solicitud_id, preregistro_id
+       FROM tokens_firma_contrato WHERE id = $1 AND estado = 'en_proceso'`,
+      [req.tokenFirma.token_id]
+    );
+    if (r.rowCount === 0) return res.status(400).json({ error: "Proceso no válido o ya completado" });
+
+    const proceso = r.rows[0];
+    const checks = proceso.checks_completados || {};
+    if (!checks.pdf1 || !checks.pdf2 || !checks.pdf3) {
+      return res.status(400).json({ error: "Debes completar la lectura de todos los documentos informativos primero" });
+    }
+
+    const docsActuales = Array.isArray(proceso.docs_firma) ? proceso.docs_firma : [];
+    const docExistente = docsActuales.find(d => d.doc_index === idx);
+    if (docExistente?.request_id && docExistente?.url_firma) {
+      return res.json({ url_firma: docExistente.url_firma, ya_iniciado: true });
+    }
+
+    // Obtener datos de la persona desde solicitud o preregistro
+    let datosPersona = { nombre: proceso.nombre_persona, correo: proceso.correo_personal };
+    if (proceso.solicitud_id) {
+      const sp = await pool.query(
+        `SELECT nombre, apellidos, numero_documento, perfil, fecha_inicio, tarifa_mes, moneda
+         FROM solicitudes_contratacion WHERE id = $1`, [proceso.solicitud_id]);
+      if (sp.rowCount > 0) Object.assign(datosPersona, sp.rows[0]);
+    } else if (proceso.preregistro_id) {
+      const pp = await pool.query(
+        `SELECT nombre, apellidos, numero_documento, tarifa_mes, moneda, fecha_fin
+         FROM preregistro_personas WHERE id = $1`, [proceso.preregistro_id]);
+      if (pp.rowCount > 0) Object.assign(datosPersona, pp.rows[0]);
+    }
+
+    // Generar PDF placeholder del contrato (con datos de la persona)
+    // TODO: reemplazar con plantilla real de ClickSign cuando esté configurada
+    const pdfBuffer = await new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 50 });
+      const chunks = [];
+      doc.on("data", c => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+
+      doc.fontSize(18).font("Helvetica-Bold")
+         .text(`Contrato de Prestación de Servicios — Documento ${idx}`, { align: "center" });
+      doc.moveDown();
+      doc.fontSize(11).font("Helvetica")
+         .text(`Nombre: ${datosPersona.nombre || ""} ${datosPersona.apellidos || ""}`)
+         .text(`Documento: ${datosPersona.numero_documento || "N/A"}`)
+         .text(`Correo: ${proceso.correo_personal}`)
+         .text(`Perfil: ${datosPersona.perfil || "N/A"}`)
+         .text(`Fecha inicio: ${datosPersona.fecha_inicio || "N/A"}`)
+         .text(`Tarifa mensual: ${datosPersona.tarifa_mes || "N/A"} ${datosPersona.moneda || ""}`);
+      doc.moveDown(2);
+      doc.text("Firma del contratista:", { underline: true });
+      doc.moveDown(4);
+      doc.text("_______________________________");
+      doc.text(datosPersona.nombre || "Contratista");
+      doc.end();
+    });
+
+    // Llamar a ClickSign API (reutilizando el patrón existente)
+    const pdfBase64 = pdfBuffer.toString("base64");
+    const docTitulo = `Contrato_${proceso.nombre_persona.replace(/\s+/g, "_")}_doc${idx}`;
+    const publicIdToken = req.tokenFirma.token_public_id;
+
+    const clicksignPayload = {
+      user: CLICKSIGN_USER,
+      config_id: CLICKSIGN_CONTRATOS_CONFIG_ID,
+      contract_id: `contrato_${publicIdToken}_doc${idx}`,
+      title: docTitulo,
+      signatories: [{
+        name: proceso.nombre_persona,
+        email: proceso.correo_personal,
+        phone: "",
+        type: "signer",
+        notify: true
+      }],
+      documents: [{
+        name: `${docTitulo}.pdf`,
+        content: pdfBase64,
+        type: "pdf"
+      }],
+      callback_url: CLICKSIGN_SIGNATURE_CB_URL || undefined,
+      signatory_callback_url: CLICKSIGN_SIGNATORY_CB_URL || undefined
+    };
+
+    const clicksignRes = await new Promise((resolve, reject) => {
+      const payload = JSON.stringify(clicksignPayload);
+      const url = new URL(`${CLICKSIGN_API_BASE}/contracts`);
+      const options = {
+        hostname: url.hostname,
+        path: url.pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+          "X-CSApi-Key": CLICKSIGN_API_KEY
+        }
+      };
+      const req2 = https.request(options, (r2) => {
+        let data = "";
+        r2.on("data", c => (data += c));
+        r2.on("end", () => {
+          try { resolve({ status: r2.statusCode, body: JSON.parse(data || "{}") }); }
+          catch { resolve({ status: r2.statusCode, body: {} }); }
+        });
+      });
+      req2.on("error", reject);
+      req2.write(payload);
+      req2.end();
+    });
+
+    const urlFirma = getClickSignLandingUrl(clicksignRes.body);
+    const requestId = pickStringByPaths(clicksignRes.body, ["request_id", "data.request_id", "signature.request_id"]);
+
+    const docEntry = {
+      doc_index: idx,
+      titulo: docTitulo,
+      request_id: requestId || null,
+      contract_id: `contrato_${publicIdToken}_doc${idx}`,
+      estado: "pending",
+      url_firma: urlFirma || null,
+      iniciado_en: new Date().toISOString()
+    };
+
+    const nuevaLista = [...docsActuales.filter(d => d.doc_index !== idx), docEntry];
+    await pool.query(
+      `UPDATE tokens_firma_contrato SET docs_firma = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify(nuevaLista), req.tokenFirma.token_id]
+    );
+
+    res.json({ url_firma: urlFirma || null, request_id: requestId || null });
+  } catch (err) {
+    console.error("Error iniciando firma de contrato:", err);
+    res.status(500).json({ error: "Error iniciando proceso de firma" });
   }
 });
 
@@ -8007,6 +8473,130 @@ app.post("/cuentas-cobro/:id/firma/adjuntar", requireAccess({ roles: ["Consultor
   }
 });
 
+async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName) {
+  const token = await getGraphAccessToken();
+  const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
+  await graphGet(`/v1.0/users/${encodedUser}/drive`, token);
+
+  const fechaStr = new Date().toISOString().slice(0, 10);
+  const nombreCarpeta = sanitizePathSegment(
+    `${proceso.nombre_persona}_${fechaStr}`,
+    `Contrato_${fechaStr}`
+  );
+
+  let targetPath = sanitizePathSegment(CONTRATOS_ONEDRIVE_FOLDER, "ContratosFirmados");
+  targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
+  targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, nombreCarpeta);
+
+  const safeName = sanitizePdfFileName(fileName || `Contrato_${proceso.nombre_persona}.pdf`, "Contrato.pdf");
+  const uploadPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${safeName}`)}:/content`;
+  const uploaded = await graphPutBinary(uploadPath, token, pdfBuffer, "application/pdf");
+
+  return {
+    carpeta: targetPath,
+    archivo: {
+      id: uploaded.id || "",
+      nombre: uploaded.name || safeName,
+      url: uploaded.webUrl || ""
+    }
+  };
+}
+
+async function handleClickSignContratoWebhook({ event, requestId, contractId, status, rawStatus }) {
+  if (status !== "signed") return;
+
+  try {
+    // Buscar el proceso por request_id o contract_id en docs_firma
+    let proceso = null;
+    let docIndex = null;
+
+    if (requestId) {
+      const r = await pool.query(
+        `SELECT id, nombre_persona, correo_personal, docs_firma
+         FROM tokens_firma_contrato
+         WHERE docs_firma @> $1::jsonb AND estado = 'en_proceso'
+         LIMIT 1`,
+        [JSON.stringify([{ request_id: requestId }])]
+      );
+      if (r.rowCount > 0) {
+        proceso = r.rows[0];
+        docIndex = (proceso.docs_firma || []).find(d => d.request_id === requestId)?.doc_index;
+      }
+    }
+
+    if (!proceso && contractId) {
+      const r = await pool.query(
+        `SELECT id, nombre_persona, correo_personal, docs_firma
+         FROM tokens_firma_contrato
+         WHERE docs_firma @> $1::jsonb AND estado = 'en_proceso'
+         LIMIT 1`,
+        [JSON.stringify([{ contract_id: contractId }])]
+      );
+      if (r.rowCount > 0) {
+        proceso = r.rows[0];
+        docIndex = (proceso.docs_firma || []).find(d => d.contract_id === contractId)?.doc_index;
+      }
+    }
+
+    if (!proceso) {
+      console.warn("Webhook contrato: no se encontró proceso para", { requestId, contractId });
+      return;
+    }
+
+    // Descargar PDF firmado
+    const artifacts = await resolveClickSignArtifacts({
+      event,
+      requestId,
+      contractId,
+      publicId: "",
+      signatureId: ""
+    });
+    const resolvedPdf = artifacts?.signedPdf || null;
+
+    if (!resolvedPdf || !isPdfBuffer(resolvedPdf.buffer)) {
+      console.warn("Webhook contrato: no se pudo resolver PDF firmado", { requestId, contractId });
+      return;
+    }
+
+    let oneDriveInfo = null;
+    try {
+      oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName);
+    } catch (upErr) {
+      console.error("Error subiendo contrato firmado a OneDrive:", upErr.message);
+    }
+
+    const nowIso = new Date().toISOString();
+    const docsActuales = Array.isArray(proceso.docs_firma) ? proceso.docs_firma : [];
+    const nuevaLista = docsActuales.map(d => {
+      if (d.request_id === requestId || d.contract_id === contractId) {
+        return {
+          ...d,
+          estado: "signed",
+          firmado_en: nowIso,
+          onedrive_url: oneDriveInfo?.archivo?.url || null,
+          onedrive_carpeta: oneDriveInfo?.carpeta || null
+        };
+      }
+      return d;
+    });
+
+    const todosFirmados = nuevaLista.length >= 2 && nuevaLista.every(d => d.estado === "signed");
+
+    await pool.query(
+      `UPDATE tokens_firma_contrato
+       SET docs_firma = $1::jsonb,
+           estado = $2,
+           updated_at = NOW()
+       WHERE id = $3`,
+      [JSON.stringify(nuevaLista), todosFirmados ? "completado" : "en_proceso", proceso.id]
+    );
+
+    console.log(`Contrato doc${docIndex || "?"} firmado para proceso ${proceso.id}. Completado: ${todosFirmados}`);
+  } catch (err) {
+    console.error("Error procesando webhook de contrato:", err.message);
+  }
+}
+
 app.post("/webhooks/clicksign/signature", async (req, res) => {
   try {
     if (CLICKSIGN_WEBHOOK_TOKEN) {
@@ -8102,6 +8692,13 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
         }
 
         const cuenta = cuentaResult?.rows?.[0] || null;
+
+        // ── Detectar si corresponde a un token_firma_contrato ──────────────
+        if (!cuenta && (requestId || contractId)) {
+          await handleClickSignContratoWebhook({ event, requestId, contractId, status, rawStatus });
+          return;
+        }
+
         if (!cuenta) {
           console.warn("Webhook Click&Sign sin cuenta asociada:", { requestId, contractId, rawStatus });
           return;

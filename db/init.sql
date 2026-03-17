@@ -851,6 +851,37 @@ CREATE INDEX idx_preregistro_updated ON preregistro_personas(updated_at DESC);
 CREATE UNIQUE INDEX uq_preregistro_solicitud_activa ON preregistro_personas(id_solicitud_rrhh) WHERE estado <> 'Anulado';
 
 -- ============================================================================
+-- FIRMA DE CONTRATOS: TOKENS PARA PROCESO DE LECTURA Y FIRMA
+-- ============================================================================
+
+CREATE TABLE tokens_firma_contrato (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    token VARCHAR(64) UNIQUE NOT NULL,
+    solicitud_id INT REFERENCES solicitudes_contratacion(id) ON DELETE SET NULL,
+    preregistro_id INT REFERENCES preregistro_personas(id) ON DELETE SET NULL,
+    nombre_persona VARCHAR(200) NOT NULL,
+    correo_personal VARCHAR(255) NOT NULL,
+    estado VARCHAR(20) NOT NULL DEFAULT 'pendiente'
+        CHECK (estado IN ('pendiente', 'en_proceso', 'completado', 'expirado')),
+    checks_completados JSONB NOT NULL DEFAULT '{"pdf1":false,"pdf2":false,"pdf3":false}',
+    docs_firma JSONB NOT NULL DEFAULT '[]',
+    generado_por INT REFERENCES usuarios(id) ON DELETE SET NULL,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_tokens_firma_token ON tokens_firma_contrato(token);
+CREATE INDEX idx_tokens_firma_estado ON tokens_firma_contrato(estado);
+CREATE INDEX idx_tokens_firma_correo ON tokens_firma_contrato(correo_personal);
+CREATE INDEX idx_tokens_firma_expires ON tokens_firma_contrato(expires_at);
+
+COMMENT ON TABLE tokens_firma_contrato IS 'Tokens de acceso para el proceso público de revisión y firma de contratos';
+COMMENT ON COLUMN tokens_firma_contrato.checks_completados IS 'Estado de lectura de cada PDF informativo {pdf1, pdf2, pdf3}';
+COMMENT ON COLUMN tokens_firma_contrato.docs_firma IS 'Array de documentos de firma con request_id ClickSign, estado y URL OneDrive';
+
+-- ============================================================================
 -- COMPAT: PUBLIC ID FOR EXISTING DATABASES
 -- ============================================================================
 

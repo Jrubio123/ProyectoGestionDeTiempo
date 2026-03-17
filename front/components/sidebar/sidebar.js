@@ -105,7 +105,7 @@ function initSidebar() {
             "asignacion-fabrica-mesa-servicio"
         ],
         reclutador: ["inicio", "solicitudesRecl"],
-        talento_humano: ["inicio", "onboardingTH"]
+        talento_humano: ["inicio", "onboardingTH", "firma-contratos-admin"]
     };
 
     const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);

@@ -14,8 +14,18 @@ const jwt = require("jsonwebtoken");
 const http = require("http");
 const https = require("https");
 const PDFDocument = require("pdfkit");
-const PizZip = require("pizzip");
-const Docxtemplater = require("docxtemplater");
+let PizZip = null;
+let Docxtemplater = null;
+try {
+  PizZip = require("pizzip");
+} catch (err) {
+  console.error("[startup] No se pudo cargar 'pizzip'. Ejecuta npm install en el backend.", err?.message || err);
+}
+try {
+  Docxtemplater = require("docxtemplater");
+} catch (err) {
+  console.error("[startup] No se pudo cargar 'docxtemplater'. Ejecuta npm install en el backend.", err?.message || err);
+}
 const { NumerosALetras } = require("numero-a-letras");
 const { sendEmail, getGraphAccessToken } = require("./email");
 const { pool, getPoolStats, isTransientDbError } = require("./db");
@@ -1199,8 +1209,31 @@ function normalizeDocsFirmaList(docsRaw) {
   return normalized;
 }
 
+function normalizeDocsFirmaListCompat(docsRaw) {
+  if (typeof normalizeDocsFirmaList === "function") {
+    try {
+      return normalizeDocsFirmaList(docsRaw);
+    } catch (err) {
+      console.warn("No se pudo normalizar docs_firma con funcion principal:", err?.message || err);
+    }
+  }
+  const docs = Array.isArray(docsRaw) ? docsRaw : [];
+  return docs
+    .map((doc, index) => {
+      if (!doc || typeof doc !== "object") return null;
+      const rawIndex = Number(doc.doc_index);
+      const docIndex = Number.isInteger(rawIndex) && rawIndex > 0 ? rawIndex : index + 1;
+      return {
+        ...doc,
+        doc_index: docIndex,
+        estado: normalizeDocStatus(doc.estado)
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Number(a.doc_index || 0) - Number(b.doc_index || 0));
+}
 function upsertDocFirmaEntry(docsRaw, entry) {
-  const docs = normalizeDocsFirmaList(docsRaw);
+  const docs = normalizeDocsFirmaListCompat(docsRaw);
   const targetIndex = Number(entry?.doc_index || 0);
   const filtered = docs.filter((doc) => Number(doc.doc_index || 0) !== targetIndex);
   return [...filtered, entry].sort((a, b) => Number(a.doc_index || 0) - Number(b.doc_index || 0));
@@ -1221,7 +1254,7 @@ async function hasContratoBaseFirmado(correoPersonal) {
 }
 
 async function ensureTokenDocsFirmaPlan(tokenRow) {
-  const docsCurrent = normalizeDocsFirmaList(tokenRow?.docs_firma);
+  const docsCurrent = normalizeDocsFirmaListCompat(tokenRow?.docs_firma);
   if (docsCurrent.length > 0) return docsCurrent;
   const hasBase = await hasContratoBaseFirmado(tokenRow?.correo_personal);
   const planned = buildDocsFirmaPlan({ hasContratoBase: hasBase });
@@ -1886,6 +1919,9 @@ function getDocxTemplateBinary(templateFile) {
 }
 
 function renderDocxTemplateToBuffer({ templateFile, data }) {
+  if (!PizZip || !Docxtemplater) {
+    throw new Error("Dependencias DOCX no disponibles en servidor (pizzip/docxtemplater)");
+  }
   const binary = getDocxTemplateBinary(templateFile);
   const zip = new PizZip(binary);
   const doc = new Docxtemplater(zip, {
@@ -5496,7 +5532,7 @@ app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrado
       id: row.id,
       token,
       expires_at: row.expires_at,
-      docs_firma: normalizeDocsFirmaList(row.docs_firma),
+      docs_firma: normalizeDocsFirmaListCompat(row.docs_firma),
       paquete_documentos: hasBaseContract ? "anexo_tecnico" : "completo",
       link,
       correo_enviado: true
@@ -6919,7 +6955,7 @@ app.post("/contratacion/validar", async (req, res) => {
       jwt: jwtTemporal,
       nombre: row.nombre_persona,
       checks_completados: row.checks_completados,
-      docs_firma: normalizeDocsFirmaList(docsFirma)
+      docs_firma: normalizeDocsFirmaListCompat(docsFirma)
     });
   } catch (err) {
     console.error(err);
@@ -6942,7 +6978,7 @@ app.get("/contratacion/estado", requireTokenFirma, async (req, res) => {
       nombre_persona: row.nombre_persona,
       estado: row.estado,
       checks_completados: row.checks_completados,
-      docs_firma: normalizeDocsFirmaList(docsFirma),
+      docs_firma: normalizeDocsFirmaListCompat(docsFirma),
       expires_at: row.expires_at
     });
   } catch (err) {
@@ -7082,7 +7118,7 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
       return res.status(400).json({ error: "Debes revisar todos los documentos informativos antes de descargar o firmar" });
     }
 
-    let docsActuales = normalizeDocsFirmaList(proceso.docs_firma);
+    let docsActuales = normalizeDocsFirmaListCompat(proceso.docs_firma);
     if (!docsActuales.length) {
       docsActuales = await ensureTokenDocsFirmaPlan(proceso);
     }
@@ -7167,9 +7203,9 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
     return res.send(outputBuffer);
   } catch (err) {
     console.error("Error descargando PDF de contrato:", err);
-    if (String(err?.message || "").toLowerCase().includes("libreoffice") || String(err?.message || "").toLowerCase().includes("no genero el pdf") || String(err?.message || "").toLowerCase().includes("timeout") || String(err?.message || "").toLowerCase().includes("codigo")) {
+    if (String(err?.message || "").toLowerCase().includes("libreoffice") || String(err?.message || "").toLowerCase().includes("no genero el pdf") || String(err?.message || "").toLowerCase().includes("timeout") || String(err?.message || "").toLowerCase().includes("codigo") || String(err?.message || "").toLowerCase().includes("dependencias docx") || String(err?.message || "").toLowerCase().includes("pizzip") || String(err?.message || "").toLowerCase().includes("docxtemplater")) {
       return res.status(503).json({
-        error: "No fue posible generar el PDF del contrato. Verifica la configuracion de LibreOffice en el servidor."
+        error: "No fue posible generar el PDF del contrato. Verifica LibreOffice y dependencias DOCX (pizzip/docxtemplater) en el servidor."
       });
     }
     return res.status(500).json({ error: "Error generando PDF del documento de firma" });
@@ -7203,7 +7239,7 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       return res.status(400).json({ error: "Debes revisar todos los documentos informativos antes de firmar" });
     }
 
-    let docsActuales = normalizeDocsFirmaList(proceso.docs_firma);
+    let docsActuales = normalizeDocsFirmaListCompat(proceso.docs_firma);
     if (!docsActuales.length) {
       docsActuales = await ensureTokenDocsFirmaPlan(proceso);
     }
@@ -7420,9 +7456,9 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
     });
   } catch (err) {
     console.error("Error iniciando firma de contrato:", err);
-    if (String(err?.message || "").toLowerCase().includes("libreoffice") || String(err?.message || "").toLowerCase().includes("no genero el pdf") || String(err?.message || "").toLowerCase().includes("timeout") || String(err?.message || "").toLowerCase().includes("codigo")) {
+    if (String(err?.message || "").toLowerCase().includes("libreoffice") || String(err?.message || "").toLowerCase().includes("no genero el pdf") || String(err?.message || "").toLowerCase().includes("timeout") || String(err?.message || "").toLowerCase().includes("codigo") || String(err?.message || "").toLowerCase().includes("dependencias docx") || String(err?.message || "").toLowerCase().includes("pizzip") || String(err?.message || "").toLowerCase().includes("docxtemplater")) {
       return res.status(503).json({
-        error: "No fue posible generar el PDF del contrato. Verifica la configuración de LibreOffice en el servidor."
+        error: "No fue posible generar el PDF del contrato. Verifica LibreOffice y dependencias DOCX (pizzip/docxtemplater) en el servidor."
       });
     }
     res.status(500).json({ error: "Error iniciando proceso de firma" });
@@ -10773,7 +10809,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
       );
       if (r.rowCount > 0) {
         proceso = r.rows[0];
-        matchedDoc = normalizeDocsFirmaList(proceso.docs_firma).find((d) => d.request_id === requestId) || null;
+        matchedDoc = normalizeDocsFirmaListCompat(proceso.docs_firma).find((d) => d.request_id === requestId) || null;
         docIndex = matchedDoc?.doc_index || null;
       }
     }
@@ -10788,7 +10824,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
       );
       if (r.rowCount > 0) {
         proceso = r.rows[0];
-        matchedDoc = normalizeDocsFirmaList(proceso.docs_firma).find((d) => d.contract_id === contractId) || null;
+        matchedDoc = normalizeDocsFirmaListCompat(proceso.docs_firma).find((d) => d.contract_id === contractId) || null;
         docIndex = matchedDoc?.doc_index || null;
       }
     }
@@ -10832,7 +10868,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
     }
 
     const nowIso = new Date().toISOString();
-    const docsActuales = normalizeDocsFirmaList(proceso.docs_firma);
+    const docsActuales = normalizeDocsFirmaListCompat(proceso.docs_firma);
     let docMatched = false;
     const nuevaLista = docsActuales.map((d) => {
       if (d.request_id === requestId || d.contract_id === contractId) {

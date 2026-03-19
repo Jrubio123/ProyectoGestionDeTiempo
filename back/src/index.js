@@ -3535,15 +3535,28 @@ function getClickSignLandingUrl(responseBody) {
     "signature_url",
     "url",
     "signature.url",
+    "signature.landing_url",
+    "signature.sign_url",
     "signature.signatories.0.url",
     "signature.signatories.0.sign_url",
     "signature.signatories.0.landing_url",
     "signatories.0.url",
     "signatories.0.landing_url",
     "signatories.0.sign_url",
+    "data.url",
+    "data.sign_url",
     "data.landing_url",
+    "data.signature.url",
+    "data.signature.sign_url",
+    "data.signature.landing_url",
     "data.signature.signatories.0.url",
-    "data.signatories.0.landing_url"
+    "data.signatories.0.url",
+    "data.signatories.0.landing_url",
+    "result.url",
+    "result.sign_url",
+    "result.landing_url",
+    "result.signature.url",
+    "result.signature.signatories.0.url"
   ];
   return pickStringByPaths(responseBody, directPaths);
 }
@@ -7101,61 +7114,121 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       fileBaseName: `${personaSlug}_${docDefinition.doc_key}_${idx}`
     });
 
-    // Llamar a ClickSign API (reutilizando el patrón existente)
+    // Llamar a ClickSign API siguiendo el mismo flujo START_SIGNATURE de cuentas de cobro.
     const pdfBase64 = pdfBuffer.toString("base64");
     const docTitulo = `${docDefinition.titulo}_${personaSlug}`;
     const publicIdToken = req.tokenFirma.token_public_id;
-    const contractId = `contrato_${publicIdToken}_${docDefinition.doc_key}_${idx}`;
+    const tokenRef = publicIdToken || String(req.tokenFirma.token_id || "token");
+    const requestId = `CF-${tokenRef}-${docDefinition.doc_key}-${Date.now()}`;
+    const contractId = `contrato_${tokenRef}_${docDefinition.doc_key}_${idx}`;
+    const signatoryExternalId = String(req.tokenFirma.token_id || req.tokenFirma.token_public_id || idx || Date.now());
+    const fileName = sanitizePdfFileName(
+      `${docTitulo}.pdf`,
+      `Contrato_${docDefinition.doc_key}_${idx}.pdf`
+    );
 
     const clicksignPayload = {
+      request: "START_SIGNATURE",
+      request_id: requestId,
       user: CLICKSIGN_USER,
-      config_id: CLICKSIGN_CONTRATOS_CONFIG_ID,
-      contract_id: contractId,
-      title: docTitulo,
-      signatories: [{
-        name: proceso.nombre_persona,
-        email: proceso.correo_personal,
-        phone: "",
-        type: "signer",
-        notify: true
-      }],
-      documents: [{
-        name: `${docTitulo}.pdf`,
-        content: pdfBase64,
-        type: "pdf"
-      }],
-      callback_url: CLICKSIGN_SIGNATURE_CB_URL || undefined,
-      signatory_callback_url: CLICKSIGN_SIGNATORY_CB_URL || undefined
+      signature: {
+        config_id: CLICKSIGN_CONTRATOS_CONFIG_ID,
+        contract_id: contractId,
+        title: docTitulo,
+        level: [
+          {
+            level_order: 0,
+            required_signatories_to_complete_level: 1,
+            signatories: [
+              {
+                email: proceso.correo_personal,
+                name: proceso.nombre_persona || proceso.correo_personal,
+                external_id: signatoryExternalId
+              }
+            ]
+          }
+        ],
+        file: [
+          {
+            filename: fileName,
+            content: pdfBase64,
+            sign_on_landing: "Y",
+            signature_position: [
+              {
+                signatory_external_id: signatoryExternalId,
+                page: "last",
+                x: 140,
+                y: 240,
+                width: 84,
+                height: 36,
+                rotation: 0
+              }
+            ]
+          }
+        ]
+      }
     };
+    const fallbackWebhookBase = getRequestPublicBaseUrl(req);
+    const fallbackSignatureCbUrl = fallbackWebhookBase
+      ? `${fallbackWebhookBase}/webhooks/clicksign/signature${CLICKSIGN_WEBHOOK_TOKEN
+        ? `?token=${encodeURIComponent(CLICKSIGN_WEBHOOK_TOKEN)}`
+        : ""
+      }`
+      : "";
+    const signatureCbUrl = CLICKSIGN_SIGNATURE_CB_URL || fallbackSignatureCbUrl;
+    const signatoryCbUrl = CLICKSIGN_SIGNATORY_CB_URL || signatureCbUrl;
+    const signatoryEmailCbUrl = CLICKSIGN_SIGNATORY_EMAIL_CB_URL || signatureCbUrl;
+    if (signatureCbUrl) {
+      clicksignPayload.signature.signature_cb_url = signatureCbUrl;
+    }
+    if (signatoryCbUrl) {
+      clicksignPayload.signature.signatory_cb_url = signatoryCbUrl;
+    }
+    if (signatoryEmailCbUrl) {
+      clicksignPayload.signature.signatory_email_cb_url = signatoryEmailCbUrl;
+    }
 
-    const clicksignRes = await new Promise((resolve, reject) => {
-      const payload = JSON.stringify(clicksignPayload);
-      const url = new URL(`${CLICKSIGN_API_BASE}/contracts`);
-      const options = {
-        hostname: url.hostname,
-        path: url.pathname,
+    let clicksignRes = null;
+    try {
+      clicksignRes = await jsonRequest({
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(payload),
-          "X-CSApi-Key": CLICKSIGN_API_KEY
-        }
-      };
-      const req2 = https.request(options, (r2) => {
-        let data = "";
-        r2.on("data", c => (data += c));
-        r2.on("end", () => {
-          try { resolve({ status: r2.statusCode, body: JSON.parse(data || "{}") }); }
-          catch { resolve({ status: r2.statusCode, body: {} }); }
-        });
+        url: buildClickSignUrl("start_signature"),
+        headers: buildClickSignAuthHeaders(),
+        body: clicksignPayload
       });
-      req2.on("error", reject);
-      req2.write(payload);
-      req2.end();
-    });
+    } catch (clickSignErr) {
+      return res.status(502).json({
+        error: "Error al iniciar firma en Click&Sign",
+        detalle: clickSignErr?.response || clickSignErr?.message || "Error desconocido",
+        http_status: Number(clickSignErr?.status || 0) || null
+      });
+    }
 
-    const urlFirma = getClickSignLandingUrl(clicksignRes.body);
-    const requestId = pickStringByPaths(clicksignRes.body, ["request_id", "data.request_id", "signature.request_id"]);
+    const clicksignBody =
+      clicksignRes?.data && typeof clicksignRes.data === "object"
+        ? clicksignRes.data
+        : {};
+    const urlFirma = getClickSignLandingUrl(clicksignBody);
+    const responseRequestId = pickStringByPaths(clicksignBody, [
+      "request_id",
+      "data.request_id",
+      "signature.request_id",
+      "request.id",
+      "data.request.id",
+      "result.request_id",
+      "result.request.id"
+    ]);
+    const resolvedRequestId = responseRequestId || requestId;
+    const signatureId = extractClickSignSignatureId(clicksignBody);
+    if (!urlFirma) {
+      return res.status(502).json({
+        error: "Click&Sign no devolvio URL de firma.",
+        detalle: clicksignBody,
+        request_id: resolvedRequestId || null,
+        doc_index: idx,
+        doc_key: docDefinition.doc_key
+      });
+    }
 
     const docEntry = {
       ...docExistente,
@@ -7163,8 +7236,9 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       doc_key: docDefinition.doc_key,
       titulo: docDefinition.titulo,
       template_file: docDefinition.template_file,
-      request_id: requestId || null,
+      request_id: resolvedRequestId || null,
       contract_id: contractId,
+      signature_id: signatureId || null,
       estado: "pending",
       url_firma: urlFirma || null,
       iniciado_en: new Date().toISOString()
@@ -7178,7 +7252,8 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
 
     res.json({
       url_firma: urlFirma || null,
-      request_id: requestId || null,
+      request_id: resolvedRequestId || null,
+      signature_id: signatureId || null,
       doc_index: idx,
       doc_key: docDefinition.doc_key
     });
@@ -10525,6 +10600,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
     // Buscar el proceso por request_id o contract_id en docs_firma
     let proceso = null;
     let docIndex = null;
+    let matchedDoc = null;
 
     if (requestId) {
       const r = await pool.query(
@@ -10536,7 +10612,8 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
       );
       if (r.rowCount > 0) {
         proceso = r.rows[0];
-        docIndex = normalizeDocsFirmaList(proceso.docs_firma).find((d) => d.request_id === requestId)?.doc_index;
+        matchedDoc = normalizeDocsFirmaList(proceso.docs_firma).find((d) => d.request_id === requestId) || null;
+        docIndex = matchedDoc?.doc_index || null;
       }
     }
 
@@ -10550,7 +10627,8 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
       );
       if (r.rowCount > 0) {
         proceso = r.rows[0];
-        docIndex = normalizeDocsFirmaList(proceso.docs_firma).find((d) => d.contract_id === contractId)?.doc_index;
+        matchedDoc = normalizeDocsFirmaList(proceso.docs_firma).find((d) => d.contract_id === contractId) || null;
+        docIndex = matchedDoc?.doc_index || null;
       }
     }
 
@@ -10566,13 +10644,18 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
     }
 
     let oneDriveInfo = null;
+    const signatureId = String(
+      extractClickSignSignatureId(event) ||
+      matchedDoc?.signature_id ||
+      ""
+    ).trim();
     if (status === "signed") {
       const artifacts = await resolveClickSignArtifacts({
         event,
         requestId,
         contractId,
         publicId: "",
-        signatureId: ""
+        signatureId
       });
       const resolvedPdf = artifacts?.signedPdf || null;
 
@@ -10595,6 +10678,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         docMatched = true;
         return {
           ...d,
+          signature_id: signatureId || d.signature_id || null,
           estado: status === "rejected" ? "rejected" : "signed",
           firmado_en: nowIso,
           onedrive_url: oneDriveInfo?.archivo?.url || null,
@@ -10615,6 +10699,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         template_file: fallbackDef?.template_file || null,
         request_id: requestId || null,
         contract_id: contractId || null,
+        signature_id: signatureId || null,
         estado: status === "rejected" ? "rejected" : "signed",
         firmado_en: nowIso,
         onedrive_url: oneDriveInfo?.archivo?.url || null,

@@ -5466,6 +5466,9 @@ app.get("/admin/firma-contratos", requireAccess({ roles: ["Administrador", TALEN
     const checksRequeridos = Array.isArray(CLAVES_REQUERIDAS_FIRMA) && CLAVES_REQUERIDAS_FIRMA.length
       ? [...CLAVES_REQUERIDAS_FIRMA]
       : ["pdf1", "pdf2", "pdf3", "pdf4", "pdf5"];
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
     res.json(result.rows.map((row) => ({
       ...row,
       checks_requeridos: checksRequeridos

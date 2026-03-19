@@ -10,6 +10,8 @@ window.firmaContratosApp = function () {
         tokens: [],
         candidatos: { solicitudes: [], preregistros: [] },
         cargando: false,
+        autoRefreshMs: 10000,
+        _refreshTimer: null,
         filtroTexto: "",
         filtroEstado: "todos",
 
@@ -28,18 +30,26 @@ window.firmaContratosApp = function () {
 
         async init() {
             await Promise.all([this.cargar(), this.cargarCandidatos()]);
+            this.iniciarAutoRefresh();
+            if (!this._onUnload) {
+                this._onUnload = () => this.detenerAutoRefresh();
+                window.addEventListener("beforeunload", this._onUnload);
+            }
         },
 
-        async cargar() {
-            this.cargando = true;
+        async cargar({ silencioso = false } = {}) {
+            if (!silencioso) this.cargando = true;
             try {
-                const res = await axios.get(`${API}/admin/firma-contratos`, { headers: getHeaders() });
+                const res = await axios.get(`${API}/admin/firma-contratos`, {
+                    headers: getHeaders(),
+                    params: { _ts: Date.now() }
+                });
                 this.tokens = res.data || [];
             } catch (e) {
                 console.error("Error cargando tokens:", e);
-                this.tokens = [];
+                if (!silencioso) this.tokens = [];
             } finally {
-                this.cargando = false;
+                if (!silencioso) this.cargando = false;
             }
         },
 
@@ -118,6 +128,20 @@ window.firmaContratosApp = function () {
             const pretty = raw.replace(/_/g, " ").replace(/\s+/g, " ").trim();
             if (!pretty) return `Doc ${idx + 1}`;
             return pretty.charAt(0).toUpperCase() + pretty.slice(1);
+        },
+
+        iniciarAutoRefresh() {
+            this.detenerAutoRefresh();
+            this._refreshTimer = setInterval(() => {
+                this.cargar({ silencioso: true });
+            }, this.autoRefreshMs);
+        },
+
+        detenerAutoRefresh() {
+            if (this._refreshTimer) {
+                clearInterval(this._refreshTimer);
+                this._refreshTimer = null;
+            }
         },
 
         abrirModalGenerar() {

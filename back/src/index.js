@@ -602,6 +602,7 @@ function buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total
 const FRONT_PORTAL_BASE =
   process.env.FRONT_PORTAL_BASE ||
   "https://zealous-mud-057b4ca0f.1.azurestaticapps.net/index.html";
+const readEnvSecret = (value) => String(value || "").trim().replace(/^['"]+|['"]+$/g, "");
 const ONEDRIVE_ENABLED = String(process.env.ONEDRIVE_ENABLED || "true").toLowerCase() === "true";
 const ONEDRIVE_TARGET_USER = process.env.ONEDRIVE_TARGET_USER || "admin.apps@silverconsulting.com.co";
 const ONEDRIVE_ROOT_FOLDER = process.env.ONEDRIVE_ROOT_FOLDER || "AdjuntosCuentasCobro";
@@ -623,23 +624,23 @@ const CLICKSIGN_SIGNED_NOTIFY_TO = String(process.env.CLICKSIGN_SIGNED_NOTIFY_TO
 const CLICKSIGN_SIGNED_NOTIFY_CC = String(process.env.CLICKSIGN_SIGNED_NOTIFY_CC || "").trim();
 const CLICKSIGN_SIGNED_NOTIFY_BCC = String(process.env.CLICKSIGN_SIGNED_NOTIFY_BCC || "").trim();
 const DEBUG_CLICKSIGN_TOKEN = String(process.env.DEBUG_CLICKSIGN_TOKEN || "").trim();
-const ADOBE_PDF_CREDENTIALS_JSON = String(process.env.ADOBE_PDF_CREDENTIALS_JSON || process.env.ADOBE_PDF_CREDENTIALS || "").trim();
+const ADOBE_PDF_CREDENTIALS_JSON = readEnvSecret(process.env.ADOBE_PDF_CREDENTIALS_JSON || process.env.ADOBE_PDF_CREDENTIALS || "");
 const ADOBE_PDF_CREDENTIALS_OBJECT = parseJsonObject(ADOBE_PDF_CREDENTIALS_JSON || "{}");
-const ADOBE_PDF_CLIENT_ID = String(
+const ADOBE_PDF_CLIENT_ID = readEnvSecret(
   process.env.ADOBE_PDF_CLIENT_ID ||
   ADOBE_PDF_CREDENTIALS_OBJECT?.client_credentials?.client_id ||
   ""
-).trim();
-const ADOBE_PDF_CLIENT_SECRET = String(
+);
+const ADOBE_PDF_CLIENT_SECRET = readEnvSecret(
   process.env.ADOBE_PDF_CLIENT_SECRET ||
   ADOBE_PDF_CREDENTIALS_OBJECT?.client_credentials?.client_secret ||
   ""
-).trim();
-const ADOBE_PDF_ORGANIZATION_ID = String(
+);
+const ADOBE_PDF_ORGANIZATION_ID = readEnvSecret(
   process.env.ADOBE_PDF_ORGANIZATION_ID ||
   ADOBE_PDF_CREDENTIALS_OBJECT?.service_principal_credentials?.organization_id ||
   ""
-).trim();
+);
 const ADOBE_PDF_API_BASE = String(process.env.ADOBE_PDF_API_BASE || "https://pdf-services.adobe.io").trim().replace(/\/+$/, "");
 const ADOBE_PDF_TOKEN_URL = String(process.env.ADOBE_PDF_TOKEN_URL || `${ADOBE_PDF_API_BASE}/token`).trim();
 const ADOBE_PDF_SCOPE = String(process.env.ADOBE_PDF_SCOPE || "").trim();
@@ -2100,6 +2101,7 @@ async function getAdobePdfAccessToken() {
   }
 
   const form = new URLSearchParams();
+  form.set("grant_type", "client_credentials");
   form.set("client_id", ADOBE_PDF_CLIENT_ID);
   form.set("client_secret", ADOBE_PDF_CLIENT_SECRET);
   if (ADOBE_PDF_SCOPE) {
@@ -2112,6 +2114,7 @@ async function getAdobePdfAccessToken() {
       method: "POST",
       url: ADOBE_PDF_TOKEN_URL,
       headers: {
+        "x-api-key": ADOBE_PDF_CLIENT_ID,
         "Content-Type": "application/x-www-form-urlencoded"
       },
       body: form.toString(),
@@ -7495,7 +7498,8 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
     }
     if (isDocxInfraFailureMessage(errMessage)) {
       return res.status(503).json({
-        error: "No fue posible generar el PDF del contrato. Verifica la configuracion de Adobe PDF Services y dependencias DOCX (pizzip/docxtemplater)."
+        error: "No fue posible generar el PDF del contrato. Verifica la configuracion de Adobe PDF Services y dependencias DOCX (pizzip/docxtemplater).",
+        detalle: errMessage || "Sin detalle tecnico"
       });
     }
     return res.status(500).json({ error: "Error generando PDF del documento de firma" });
@@ -7754,7 +7758,8 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
     }
     if (isDocxInfraFailureMessage(errMessage)) {
       return res.status(503).json({
-        error: "No fue posible generar el PDF del contrato. Verifica la configuracion de Adobe PDF Services y dependencias DOCX (pizzip/docxtemplater)."
+        error: "No fue posible generar el PDF del contrato. Verifica la configuracion de Adobe PDF Services y dependencias DOCX (pizzip/docxtemplater).",
+        detalle: errMessage || "Sin detalle tecnico"
       });
     }
     res.status(500).json({ error: "Error iniciando proceso de firma" });

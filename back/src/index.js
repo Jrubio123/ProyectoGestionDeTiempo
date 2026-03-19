@@ -1,8 +1,6 @@
 const path = require("path");
-const os = require("os");
 const crypto = require("crypto");
 const fs = require("fs");
-const { spawn } = require("child_process");
 const envFile =
   process.env.NODE_ENV === "production" ? ".env_produccion" : ".env";
 require("dotenv").config({ path: path.resolve(process.cwd(), envFile) });
@@ -625,9 +623,30 @@ const CLICKSIGN_SIGNED_NOTIFY_TO = String(process.env.CLICKSIGN_SIGNED_NOTIFY_TO
 const CLICKSIGN_SIGNED_NOTIFY_CC = String(process.env.CLICKSIGN_SIGNED_NOTIFY_CC || "").trim();
 const CLICKSIGN_SIGNED_NOTIFY_BCC = String(process.env.CLICKSIGN_SIGNED_NOTIFY_BCC || "").trim();
 const DEBUG_CLICKSIGN_TOKEN = String(process.env.DEBUG_CLICKSIGN_TOKEN || "").trim();
-const LIBREOFFICE_BIN = String(process.env.LIBREOFFICE_BIN || "soffice").trim() || "soffice";
-const LIBREOFFICE_TIMEOUT_MS = Math.max(15000, Number(process.env.LIBREOFFICE_TIMEOUT_MS || 45000));
-const LIBREOFFICE_RETRY_COUNT = Math.max(0, Math.min(2, Number(process.env.LIBREOFFICE_RETRY_COUNT || 1)));
+const ADOBE_PDF_CREDENTIALS_JSON = String(process.env.ADOBE_PDF_CREDENTIALS_JSON || process.env.ADOBE_PDF_CREDENTIALS || "").trim();
+const ADOBE_PDF_CREDENTIALS_OBJECT = parseJsonObject(ADOBE_PDF_CREDENTIALS_JSON || "{}");
+const ADOBE_PDF_CLIENT_ID = String(
+  process.env.ADOBE_PDF_CLIENT_ID ||
+  ADOBE_PDF_CREDENTIALS_OBJECT?.client_credentials?.client_id ||
+  ""
+).trim();
+const ADOBE_PDF_CLIENT_SECRET = String(
+  process.env.ADOBE_PDF_CLIENT_SECRET ||
+  ADOBE_PDF_CREDENTIALS_OBJECT?.client_credentials?.client_secret ||
+  ""
+).trim();
+const ADOBE_PDF_ORGANIZATION_ID = String(
+  process.env.ADOBE_PDF_ORGANIZATION_ID ||
+  ADOBE_PDF_CREDENTIALS_OBJECT?.service_principal_credentials?.organization_id ||
+  ""
+).trim();
+const ADOBE_PDF_API_BASE = String(process.env.ADOBE_PDF_API_BASE || "https://pdf-services.adobe.io").trim().replace(/\/+$/, "");
+const ADOBE_PDF_TOKEN_URL = String(process.env.ADOBE_PDF_TOKEN_URL || `${ADOBE_PDF_API_BASE}/token`).trim();
+const ADOBE_PDF_SCOPE = String(process.env.ADOBE_PDF_SCOPE || "").trim();
+const ADOBE_PDF_TIMEOUT_MS = Math.max(15000, Number(process.env.ADOBE_PDF_TIMEOUT_MS || 60000));
+const ADOBE_PDF_POLL_INTERVAL_MS = Math.max(800, Number(process.env.ADOBE_PDF_POLL_INTERVAL_MS || 1500));
+const ADOBE_PDF_POLL_TIMEOUT_MS = Math.max(10000, Number(process.env.ADOBE_PDF_POLL_TIMEOUT_MS || 120000));
+const ADOBE_PDF_RETRY_COUNT = Math.max(0, Math.min(3, Number(process.env.ADOBE_PDF_RETRY_COUNT || 1)));
 const CONTRATOS_REPRESENTANTE_LEGAL = String(process.env.CONTRATOS_REPRESENTANTE_LEGAL || "DANIELA BELTRAN GOMEZ").trim();
 const CONTRATOS_CEDULA_REPRESENTANTE = String(process.env.CONTRATOS_CEDULA_REPRESENTANTE || "1128472903").trim();
 const CONTRATOS_NIT_SILVER = String(process.env.CONTRATOS_NIT_SILVER || "901149190-0").trim();
@@ -680,6 +699,10 @@ const ANEXO_TIPO_LABELS = Object.freeze({
 const docxTemplateCache = new Map();
 const docxToPdfQueue = [];
 let docxToPdfBusy = false;
+let adobePdfTokenCache = {
+  accessToken: "",
+  expiresAtMs: 0
+};
 const providerNotificationInFlight = new Set();
 let estadoCuentaCobroEnFirmaCache = null;
 let estadoCuentaCobroAprobadoCache = null;
@@ -1154,7 +1177,21 @@ function isDocxTemplateFailureMessage(messageRaw) {
 
 function isDocxInfraFailureMessage(messageRaw) {
   const msg = String(messageRaw || "").toLowerCase();
-  return msg.includes("libreoffice") || msg.includes("no genero el pdf") || msg.includes("timeout") || msg.includes("codigo") || msg.includes("dependencias docx") || msg.includes("pizzip") || msg.includes("docxtemplater");
+  return (
+    msg.includes("libreoffice") ||
+    msg.includes("soffice") ||
+    msg.includes("no genero el pdf") ||
+    msg.includes("timeout") ||
+    msg.includes("codigo") ||
+    msg.includes("dependencias docx") ||
+    msg.includes("pizzip") ||
+    msg.includes("docxtemplater") ||
+    msg.includes("adobe") ||
+    msg.includes("pdf-services.adobe.io") ||
+    msg.includes("createpdf") ||
+    msg.includes("assetid") ||
+    msg.includes("uploaduri")
+  );
 }
 
 function sanitizeDocxTagName(tag) {
@@ -2029,93 +2066,274 @@ async function processDocxToPdfQueue() {
   }
 }
 
-function runLibreOfficeConvert({ sourceDocxPath, outDir, timeoutMs }) {
-  return new Promise((resolve, reject) => {
-    const args = [
-      "--headless",
-      "--nologo",
-      "--nodefault",
-      "--norestore",
-      "--nolockcheck",
-      "--convert-to",
-      "pdf:writer_pdf_Export",
-      "--outdir",
-      outDir,
-      sourceDocxPath
-    ];
-    const child = spawn(LIBREOFFICE_BIN, args, {
-      windowsHide: true
-    });
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      try {
-        child.kill("SIGKILL");
-      } catch (_) {}
-    }, timeoutMs);
+function isAdobePdfConfigured() {
+  return Boolean(ADOBE_PDF_CLIENT_ID && ADOBE_PDF_CLIENT_SECRET);
+}
 
-    child.stdout.on("data", (chunk) => {
-      stdout += String(chunk || "");
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildAdobePdfAuthHeaders(accessToken, extraHeaders = {}) {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "x-api-key": ADOBE_PDF_CLIENT_ID,
+    ...extraHeaders
+  };
+  if (ADOBE_PDF_ORGANIZATION_ID) {
+    headers["x-gw-ims-org-id"] = ADOBE_PDF_ORGANIZATION_ID;
+  }
+  return headers;
+}
+
+async function getAdobePdfAccessToken() {
+  const nowMs = Date.now();
+  if (
+    adobePdfTokenCache.accessToken &&
+    adobePdfTokenCache.expiresAtMs > nowMs + 60000
+  ) {
+    return adobePdfTokenCache.accessToken;
+  }
+
+  if (!isAdobePdfConfigured()) {
+    throw new Error("Adobe PDF Services no esta configurado (faltan ADOBE_PDF_CLIENT_ID o ADOBE_PDF_CLIENT_SECRET)");
+  }
+
+  const form = new URLSearchParams();
+  form.set("client_id", ADOBE_PDF_CLIENT_ID);
+  form.set("client_secret", ADOBE_PDF_CLIENT_SECRET);
+  if (ADOBE_PDF_SCOPE) {
+    form.set("scope", ADOBE_PDF_SCOPE);
+  }
+
+  let tokenRes = null;
+  try {
+    tokenRes = await jsonRequest({
+      method: "POST",
+      url: ADOBE_PDF_TOKEN_URL,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: form.toString(),
+      timeoutMs: ADOBE_PDF_TIMEOUT_MS
     });
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk || "");
+  } catch (err) {
+    throw new Error(`No se pudo obtener token de Adobe PDF Services: ${err?.response?.error || err?.message || "sin detalle"}`);
+  }
+
+  const token = pickStringByPaths(tokenRes?.data || {}, ["access_token", "token"]);
+  if (!token) {
+    throw new Error("Adobe PDF Services no devolvio access_token");
+  }
+  const expiresInSec = Math.max(300, Number(tokenRes?.data?.expires_in || 3600));
+  adobePdfTokenCache = {
+    accessToken: token,
+    expiresAtMs: nowMs + expiresInSec * 1000
+  };
+  return token;
+}
+
+function normalizeAdobeJobStatus(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "")
+    .trim();
+}
+
+async function waitAdobeCreatePdfResult(statusUrl, accessToken) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= ADOBE_PDF_POLL_TIMEOUT_MS) {
+    const statusRes = await jsonRequest({
+      method: "GET",
+      url: statusUrl,
+      headers: buildAdobePdfAuthHeaders(accessToken),
+      timeoutMs: ADOBE_PDF_TIMEOUT_MS
     });
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      reject(new Error(`No se pudo ejecutar LibreOffice (${LIBREOFFICE_BIN}): ${err.message}`));
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (timedOut) {
-        return reject(new Error(`LibreOffice excedio el timeout (${timeoutMs} ms)`));
-      }
-      if (code !== 0) {
-        return reject(
-          new Error(`LibreOffice finalizo con codigo ${code}. stderr: ${stderr || "(vacio)"} stdout: ${stdout || "(vacio)"}`)
-        );
-      }
-      return resolve({ stdout, stderr });
-    });
+    const payload = statusRes?.data || {};
+    const statusRaw = pickStringByPaths(payload, [
+      "status",
+      "state",
+      "result.status",
+      "job.status"
+    ]);
+    const status = normalizeAdobeJobStatus(statusRaw);
+    if (["done", "succeeded", "success", "completed"].includes(status)) {
+      return payload;
+    }
+    if (["failed", "error", "cancelled", "canceled", "aborted"].includes(status)) {
+      const detail = pickStringByPaths(payload, [
+        "error.message",
+        "error.description",
+        "message",
+        "errors.0.message"
+      ]);
+      throw new Error(`Adobe PDF Services reporto fallo en createpdf: ${detail || statusRaw || "sin detalle"}`);
+    }
+    await sleepMs(ADOBE_PDF_POLL_INTERVAL_MS);
+  }
+  throw new Error(`Adobe PDF Services excedio timeout de espera (${ADOBE_PDF_POLL_TIMEOUT_MS} ms)`);
+}
+
+function extractAdobeDownloadUri(payload) {
+  return pickStringByPaths(payload || {}, [
+    "asset.downloadUri",
+    "asset.downloadURL",
+    "downloadUri",
+    "downloadURL",
+    "result.downloadUri",
+    "result.downloadURL",
+    "resource.downloadUri",
+    "outputs.0.downloadUri"
+  ]);
+}
+
+function extractAdobeAssetId(payload) {
+  return pickStringByPaths(payload || {}, [
+    "asset.assetID",
+    "asset.assetId",
+    "assetID",
+    "assetId",
+    "result.assetID",
+    "result.assetId",
+    "outputs.0.assetID"
+  ]);
+}
+
+async function resolveAdobeOutputDownloadUri({ payload, accessToken }) {
+  const direct = extractAdobeDownloadUri(payload);
+  if (direct) return direct;
+
+  const assetId = extractAdobeAssetId(payload);
+  if (!assetId) {
+    throw new Error("Adobe PDF Services no devolvio downloadUri ni assetID del PDF generado");
+  }
+
+  const assetRes = await jsonRequest({
+    method: "GET",
+    url: `${ADOBE_PDF_API_BASE}/assets/${encodeURIComponent(assetId)}`,
+    headers: buildAdobePdfAuthHeaders(accessToken),
+    timeoutMs: ADOBE_PDF_TIMEOUT_MS
   });
+
+  const uri = extractAdobeDownloadUri(assetRes?.data || {});
+  if (!uri) {
+    throw new Error("Adobe PDF Services no devolvio URL de descarga para el asset convertido");
+  }
+  return uri;
+}
+
+async function runAdobeDocxToPdfConvert({ docxBuffer }) {
+  if (!Buffer.isBuffer(docxBuffer) || !docxBuffer.length) {
+    throw new Error("Buffer DOCX vacio para conversion Adobe");
+  }
+
+  const accessToken = await getAdobePdfAccessToken();
+  const docxMime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+  const assetCreate = await jsonRequest({
+    method: "POST",
+    url: `${ADOBE_PDF_API_BASE}/assets`,
+    headers: buildAdobePdfAuthHeaders(accessToken, {
+      "Content-Type": "application/json"
+    }),
+    body: { mediaType: docxMime },
+    timeoutMs: ADOBE_PDF_TIMEOUT_MS
+  });
+
+  const uploadUri = pickStringByPaths(assetCreate?.data || {}, ["uploadUri", "uploadURL"]);
+  const inputAssetId = extractAdobeAssetId(assetCreate?.data || {});
+  if (!uploadUri || !inputAssetId) {
+    throw new Error("Adobe PDF Services no devolvio uploadUri/assetID para subir el DOCX");
+  }
+
+  await binaryRequest({
+    method: "PUT",
+    url: uploadUri,
+    headers: {
+      "Content-Type": docxMime
+    },
+    body: docxBuffer,
+    timeoutMs: ADOBE_PDF_TIMEOUT_MS
+  });
+
+  const createPdfRes = await jsonRequest({
+    method: "POST",
+    url: `${ADOBE_PDF_API_BASE}/operation/createpdf`,
+    headers: buildAdobePdfAuthHeaders(accessToken, {
+      "Content-Type": "application/json"
+    }),
+    body: { assetID: inputAssetId },
+    timeoutMs: ADOBE_PDF_TIMEOUT_MS
+  });
+
+  const locationHeader = String(
+    createPdfRes?.headers?.location ||
+    createPdfRes?.headers?.Location ||
+    ""
+  ).trim();
+  const statusUrl = locationHeader
+    ? new URL(locationHeader, ADOBE_PDF_API_BASE).toString()
+    : pickStringByPaths(createPdfRes?.data || {}, ["statusUrl", "statusURL", "location", "self"]);
+
+  if (!statusUrl) {
+    throw new Error("Adobe PDF Services no devolvio URL de seguimiento para createpdf");
+  }
+
+  const finalPayload = await waitAdobeCreatePdfResult(statusUrl, accessToken);
+  const downloadUri = await resolveAdobeOutputDownloadUri({
+    payload: finalPayload,
+    accessToken
+  });
+
+  try {
+    const downloadRes = await binaryRequest({
+      method: "GET",
+      url: downloadUri,
+      timeoutMs: ADOBE_PDF_TIMEOUT_MS
+    });
+    if (isPdfBuffer(downloadRes?.buffer)) {
+      return downloadRes.buffer;
+    }
+  } catch (_) {
+    // Continúa con variante alterna autenticada.
+  }
+
+  const authedDownloadRes = await binaryRequest({
+    method: "GET",
+    url: downloadUri,
+    headers: buildAdobePdfAuthHeaders(accessToken),
+    timeoutMs: ADOBE_PDF_TIMEOUT_MS
+  });
+
+  if (!isPdfBuffer(authedDownloadRes?.buffer)) {
+    throw new Error("Adobe PDF Services devolvio un archivo no valido al descargar el PDF generado");
+  }
+
+  return authedDownloadRes.buffer;
 }
 
 async function convertDocxBufferToPdfBuffer(docxBuffer, fileBaseName) {
   const safeBase = sanitizePathSegment(fileBaseName || "contrato", "contrato");
   let lastError = null;
-  for (let attempt = 0; attempt <= LIBREOFFICE_RETRY_COUNT; attempt += 1) {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "silver-ctr-"));
+  for (let attempt = 0; attempt <= ADOBE_PDF_RETRY_COUNT; attempt += 1) {
     try {
-      const sourceDocxPath = path.join(tmpDir, `${safeBase}.docx`);
-      const targetPdfPath = path.join(tmpDir, `${safeBase}.pdf`);
-      fs.writeFileSync(sourceDocxPath, docxBuffer);
-
-      await enqueueDocxToPdf(() =>
-        runLibreOfficeConvert({
-          sourceDocxPath,
-          outDir: tmpDir,
-          timeoutMs: LIBREOFFICE_TIMEOUT_MS
+      return await enqueueDocxToPdf(() =>
+        runAdobeDocxToPdfConvert({
+          docxBuffer,
+          fileBaseName: safeBase
         })
       );
-
-      if (!fs.existsSync(targetPdfPath)) {
-        throw new Error("LibreOffice no genero el PDF esperado");
-      }
-
-      return fs.readFileSync(targetPdfPath);
     } catch (err) {
       lastError = err;
-      if (attempt < LIBREOFFICE_RETRY_COUNT) {
-        console.warn(`Reintentando conversion DOCX->PDF (intento ${attempt + 2}/${LIBREOFFICE_RETRY_COUNT + 1}):`, err.message);
+      if (attempt < ADOBE_PDF_RETRY_COUNT) {
+        console.warn(
+          `Reintentando conversion DOCX->PDF con Adobe (intento ${attempt + 2}/${ADOBE_PDF_RETRY_COUNT + 1}):`,
+          err?.message || err
+        );
       }
-    } finally {
-      try {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      } catch (_) {}
     }
   }
-  throw lastError || new Error("No se pudo convertir DOCX a PDF");
+  throw lastError || new Error("No se pudo convertir DOCX a PDF con Adobe PDF Services");
 }
 
 async function buildContratoTemplatePayload({ docDefinition, personaContext, proceso }) {
@@ -2815,7 +3033,9 @@ function jsonRequest({ method = "GET", url, headers = {}, body = null, timeoutMs
     const payload =
       body === null || body === undefined
         ? null
-        : Buffer.from(typeof body === "string" ? body : JSON.stringify(body));
+        : Buffer.isBuffer(body)
+          ? body
+          : Buffer.from(typeof body === "string" ? body : JSON.stringify(body));
 
     const requestHeaders = { ...headers };
     if (payload && !requestHeaders["Content-Type"] && !requestHeaders["content-type"]) {
@@ -2843,7 +3063,7 @@ function jsonRequest({ method = "GET", url, headers = {}, body = null, timeoutMs
           const status = Number(res.statusCode || 0);
           const parsedBody = parseJsonSafe(data);
           if (status >= 200 && status < 300) {
-            resolve({ status, data: parsedBody });
+            resolve({ status, data: parsedBody, headers: res.headers || {} });
             return;
           }
           const err = new Error(`HTTP ${status} ${method} ${parsed.pathname}`);
@@ -2869,7 +3089,9 @@ function binaryRequest({ method = "GET", url, headers = {}, body = null, timeout
     const payload =
       body === null || body === undefined
         ? null
-        : Buffer.from(typeof body === "string" ? body : JSON.stringify(body));
+        : Buffer.isBuffer(body)
+          ? body
+          : Buffer.from(typeof body === "string" ? body : JSON.stringify(body));
 
     const requestHeaders = { ...headers };
     if (payload && !requestHeaders["Content-Length"] && !requestHeaders["content-length"]) {
@@ -7247,27 +7469,9 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
       data: payload
     });
 
-    let outputBuffer = null;
-    let outputContentType = "application/pdf";
-    let outputExtension = "pdf";
-
-    try {
-      outputBuffer = await convertDocxBufferToPdfBuffer(docxBuffer, fileBaseName);
-    } catch (convertErr) {
-      const convertMessage = String(convertErr?.message || "").toLowerCase();
-      const conversionIssue =
-        convertMessage.includes("libreoffice") ||
-        convertMessage.includes("timeout") ||
-        convertMessage.includes("no genero el pdf") ||
-        convertMessage.includes("codigo");
-
-      if (!conversionIssue) throw convertErr;
-
-      console.warn("[contratacion][docs-firma][pdf] Fallback DOCX por fallo de conversion:", convertErr?.message || convertErr);
-      outputBuffer = docxBuffer;
-      outputContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-      outputExtension = "docx";
-    }
+    const outputBuffer = await convertDocxBufferToPdfBuffer(docxBuffer, fileBaseName);
+    const outputContentType = "application/pdf";
+    const outputExtension = "pdf";
 
     const baseName = sanitizePathSegment(
       `${docDefinition.titulo}_${personaSlug}`,
@@ -7291,7 +7495,7 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
     }
     if (isDocxInfraFailureMessage(errMessage)) {
       return res.status(503).json({
-        error: "No fue posible generar el PDF del contrato. Verifica LibreOffice y dependencias DOCX (pizzip/docxtemplater) en el servidor."
+        error: "No fue posible generar el PDF del contrato. Verifica la configuracion de Adobe PDF Services y dependencias DOCX (pizzip/docxtemplater)."
       });
     }
     return res.status(500).json({ error: "Error generando PDF del documento de firma" });
@@ -7550,7 +7754,7 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
     }
     if (isDocxInfraFailureMessage(errMessage)) {
       return res.status(503).json({
-        error: "No fue posible generar el PDF del contrato. Verifica LibreOffice y dependencias DOCX (pizzip/docxtemplater) en el servidor."
+        error: "No fue posible generar el PDF del contrato. Verifica la configuracion de Adobe PDF Services y dependencias DOCX (pizzip/docxtemplater)."
       });
     }
     res.status(500).json({ error: "Error iniciando proceso de firma" });

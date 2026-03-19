@@ -469,12 +469,10 @@ window.contratacionApp = function () {
 
         async refrescarEstado() {
             try {
+                // Solo Authorization: Cache-Control/Pragma disparan preflight y el back
+                // debe listarlos en CORS; el query _ts evita caché del GET sin headers extra.
                 const res = await axios.get(`${API}/contratacion/estado`, {
-                    headers: {
-                        Authorization: `Bearer ${this.jwt}`,
-                        "Cache-Control": "no-cache",
-                        Pragma: "no-cache"
-                    },
+                    headers: { Authorization: `Bearer ${this.jwt}` },
                     params: { _ts: Date.now() }
                 });
                 this.docsActuales = res.data.docs_firma || [];

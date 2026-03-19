@@ -56,7 +56,14 @@ const extraOrigins = (process.env.CORS_ORIGINS || "")
 const corsOptions = {
   origin: ["http://localhost:3000", "http://localhost:4000", ...extraOrigins],
   credentials: true,
-  allowedHeaders: ["Content-Type", "Authorization", "X-Graph-Access-Token"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Graph-Access-Token",
+    "Cache-Control",
+    "Pragma",
+    "Expires"
+  ],
   exposedHeaders: ["Authorization"],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 };
@@ -893,7 +900,7 @@ function buildRrhhEstadoEmailContent({
 
   if (estado === "Reclutamiento") {
     return {
-      subject: `🔍 Actualización: Tu solicitud para ${base.perfil} ya está en Reclutamiento`,
+      subject: `?? Actualización: Tu solicitud para ${base.perfil} ya está en Reclutamiento`,
       text:
         `Hola ${base.toName},\n\n` +
         `Te informamos que hemos iniciado la búsqueda activa de candidatos para tu solicitud de ${base.perfil} para el cliente ${base.cliente}.\n` +
@@ -916,10 +923,10 @@ function buildRrhhEstadoEmailContent({
 
   if (estado === "Entrevistas") {
     return {
-      subject: `🤝 Actualización: Iniciamos fase de entrevistas para ${base.perfil}`,
+      subject: `?? Actualización: Iniciamos fase de entrevistas para ${base.perfil}`,
       text:
         `Hola ${base.toName},\n\n` +
-        `¡Buenas noticias! Ya tenemos candidatos pre-seleccionados para la vacante de ${base.perfil}.\n` +
+        `?Buenas noticias! Ya tenemos candidatos pre-seleccionados para la vacante de ${base.perfil}.\n` +
         `En los próximos días estaremos coordinando las agendas para las entrevistas técnicas/administrativas.\n\n` +
         `Ver solicitud en el sistema: ${base.url}\n`,
       html: buildEmailLayout({
@@ -938,7 +945,7 @@ function buildRrhhEstadoEmailContent({
 
   if (estado === "Contratado") {
     return {
-      subject: `✅ ¡Misión Cumplida! Vacante cubierta para ${base.perfil}`,
+      subject: `? ?Misión Cumplida! Vacante cubierta para ${base.perfil}`,
       text:
         `Hola ${base.toName},\n\n` +
         `Nos alegra informarte que el proceso para ${base.perfil} ha finalizado con éxito.\n` +
@@ -961,7 +968,7 @@ function buildRrhhEstadoEmailContent({
 
   if (estado === "Cancelado") {
     return {
-      subject: `🚫 Notificación: Solicitud Cancelada - ${base.perfil}`,
+      subject: `?? Notificación: Solicitud Cancelada - ${base.perfil}`,
       text:
         `Hola ${base.toName},\n\n` +
         `Se ha registrado la cancelación de la solicitud para ${base.perfil}.\n` +
@@ -4030,7 +4037,7 @@ function formatCuentaCobroDate(value) {
 }*/
 
 // ============================================================
-//  writeCuentaCobroPdf  —  versión corregida
+//  writeCuentaCobroPdf  ?  versión corregida
 //  Fix: header sin solapamiento, fechas formateadas, espaciado
 // ============================================================
 
@@ -4065,7 +4072,7 @@ function hLine(doc, x, y, w, color = COLOR.grisLinea, lineWidth = 0.5) {
     .restore();
 }
 
-// Formatea fecha sin mostrar UTC — acepta string ISO o Date
+// Formatea fecha sin mostrar UTC ? acepta string ISO o Date
 function fmtFecha(value) {
   if (value === undefined || value === null || value === "") return "-";
 
@@ -4115,7 +4122,7 @@ function sectionTitle(doc, title, y) {
   return y + 20;
 }
 
-// ── Función principal ─────────────────────────────────────────
+// ?? Función principal ?????????????????????????????????????????
 function buildCaseSummaryText(row = {}) {
   const parsed = parseTicketCaseFields(row?.nro_caso_int_ext);
   const casoCliente =
@@ -4156,20 +4163,20 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const nombreConsultor = cuenta.nombre_usuario || "Consultor";
   const cedulaConsultor = cuenta.cedula || "-";
 
-  // ══════════════════════════════════════════════
-  // 1. HEADER — dos bloques separados sin solaparse
-  // ══════════════════════════════════════════════
+  // ??????????????????????????????????????????????
+  // 1. HEADER ? dos bloques separados sin solaparse
+  // ??????????????????????????????????????????????
   const headerH = 80;
   fillRect(doc, 0, 0, PW_TOTAL, headerH, COLOR.azulMedio);
 
-  // — Bloque izquierdo: empresa
+  // ? Bloque izquierdo: empresa
   doc.fontSize(15).font("Helvetica-Bold").fillColor(COLOR.blanco)
     .text("SILVER CONSULTING S.A.S.", ML, 16, { width: PW / 2, lineBreak: false });
 
   doc.fontSize(8).font("Helvetica").fillColor(COLOR.blanco)
     .text("NIT 901.149.190-0", ML, 34, { width: PW / 2, lineBreak: false });
 
-  // — Bloque derecho: tipo doc + número + fecha
+  // ? Bloque derecho: tipo doc + número + fecha
   const rightX = ML + PW / 2;
   const rightW = PW / 2;
 
@@ -4183,16 +4190,16 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const fechaDoc = fmtFecha(cuenta.created_at);
   const ciudadDoc = cuenta.ciudad_cobro || "";
   doc.fontSize(8).fillColor(COLOR.blanco)
-    .text(`${fechaDoc}  ·  ${ciudadDoc}`, rightX, 44, { width: rightW, align: "right", lineBreak: false });
+    .text(`${fechaDoc}  ?  ${ciudadDoc}`, rightX, 44, { width: rightW, align: "right", lineBreak: false });
 
   // Banda turquesa inferior del header
   fillRect(doc, 0, headerH, PW_TOTAL, 4, COLOR.naranjaSilver);
 
   let curY = headerH + 18;
 
-  // ══════════════════════════════════════════════
-  // 2. DEBE A — tarjeta con 2 columnas
-  // ══════════════════════════════════════════════
+  // ??????????????????????????????????????????????
+  // 2. DEBE A ? tarjeta con 2 columnas
+  // ??????????????????????????????????????????????
   curY = sectionTitle(doc, "DEBE A", curY);
 
   const cardPad = 12;
@@ -4224,9 +4231,9 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   curY += cardH + 14;
 
-  // ══════════════════════════════════════════════
+  // ??????????????????????????????????????????????
   // 3. VALOR A COBRAR
-  // ══════════════════════════════════════════════
+  // ??????????????????????????????????????????????
   curY = sectionTitle(doc, "VALOR A COBRAR", curY);
 
   const totalBoxH = 52;
@@ -4249,9 +4256,9 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   curY += totalBoxH + 14;
 
-  // ══════════════════════════════════════════════
+  // ??????????????????????????????????????????????
   // 4. CONCEPTO
-  // ══════════════════════════════════════════════
+  // ??????????????????????????????????????????????
   curY = sectionTitle(doc, "CONCEPTO", curY);
 
   const periodoInicio = fmtFecha(cuenta.fecha_periodo_inicio);
@@ -4259,7 +4266,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   doc.fontSize(8.5).font("Helvetica").fillColor(COLOR.textoSec)
     .text(
-      `Honorarios de Consultoría — ${cuenta.descripcion || "Cuenta de cobro"}\n` +
+      `Honorarios de Consultoría ? ${cuenta.descripcion || "Cuenta de cobro"}\n` +
       `Período: ${periodoInicio}  al  ${periodoFin}`,
       ML, curY, { width: PW, lineBreak: true }
     );
@@ -4276,9 +4283,9 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   curY = doc.y + 12;
 
-  // ══════════════════════════════════════════════
+  // ??????????????????????????????????????????????
   // 5. TABLA DE DETALLES
-  // ══════════════════════════════════════════════
+  // ??????????????????????????????????????????????
   curY = sectionTitle(doc, "DETALLE DE SERVICIOS", curY);
 
   const cols = [
@@ -4355,12 +4362,12 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const totalRowH = 18;
   fillRect(doc, ML, curY, PW, totalRowH, "#E8ECF4");
 
-  // Etiqueta "TOTAL" — ocupa todo el ancho menos la última columna
+  // Etiqueta "TOTAL" ? ocupa todo el ancho menos la última columna
   doc.fontSize(8.5).font("Helvetica-Bold").fillColor(COLOR.azulOscuro)
     .text("TOTAL", ML + 4, curY + 5,
       { width: cols[cols.length - 1].x - ML - 8, align: "right", lineBreak: false });
 
-  // Valor — moneda + número como un solo string en la última columna
+  // Valor ? moneda + número como un solo string en la última columna
   const totalStr = `${monedaSimbolo} ${formatCuentaCobroCurrency(totalNumeros)}`;
   const lastCol = cols[cols.length - 1];
 
@@ -4377,9 +4384,9 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   curY += totalRowH + 12;
 
-  // ══════════════════════════════════════════════
+  // ??????????????????????????????????????????????
   // 6. PIE + FIRMA
-  // ══════════════════════════════════════════════
+  // ??????????????????????????????????????????????
   if (curY > doc.page.height - 120) {
     doc.addPage();
     curY = MARGIN.top;
@@ -4390,7 +4397,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
     .text(
-      "Documento generado electrónicamente — Silver Consulting S.A.S.  ·  NIT 901.149.190-0  ·  Medellín, Colombia",
+      "Documento generado electrónicamente ? Silver Consulting S.A.S.  ?  NIT 901.149.190-0  ?  Medellín, Colombia",
       ML, curY, { width: PW, align: "center", lineBreak: false }
     );
 
@@ -4467,8 +4474,8 @@ const requireAuthenticated = (req, res, next) => {
 /* ===============================
    SERVIR ARCHIVOS DEL FRONTEND
 =============================== */
-// Ajusta esta ruta si tu carpeta 'front' está¡ en otro nivel relativo
-// Frontend se sirve por separado (no está¡ en este contenedor)
+// Ajusta esta ruta si tu carpeta 'front' está en otro nivel relativo
+// Frontend se sirve por separado (no está en este contenedor)
 
 /* ===============================
    RUTAS DE VISTAS (SPA)
@@ -5250,7 +5257,7 @@ app.get("/admin/usuarios-roles", requireAccess({ roles: ["Administrador"] }), as
   }
 });
 
-// ── Gestión de licencias / acceso ──────────────────────────────────────────
+// ?? Gestión de licencias / acceso ??????????????????????????????????????????
 app.get("/admin/usuarios-licencias", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   try {
     const result = await pool.query(`
@@ -5386,7 +5393,7 @@ app.put("/admin/usuarios/:id/rol", requireAccess({ roles: ["Administrador"] }), 
   }
 });
 
-// ── Firma de contratos: rutas admin ─────────────────────────────────────────
+// ?? Firma de contratos: rutas admin ?????????????????????????????????????????
 const TALENTO_HUMANO_ROL = "Talento Humano";
 
 function buildContratoEmailHtml({ nombre, token, link }) {
@@ -5417,7 +5424,7 @@ function buildContratoEmailHtml({ nombre, token, link }) {
           </p>
           <div style="text-align:center;margin:0 0 28px;">
             <a href="${link}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:14px 36px;border-radius:8px;font-size:15px;font-weight:700;letter-spacing:.02em;">
-              Revisar y firmar documentos →
+              Revisar y firmar documentos ?
             </a>
           </div>
           <p style="font-size:12px;color:#94a3b8;text-align:center;margin:0;">
@@ -5425,7 +5432,7 @@ function buildContratoEmailHtml({ nombre, token, link }) {
           </p>
         </td></tr>
         <tr><td style="background:#f8fafc;padding:16px 40px;text-align:center;border-top:1px solid #e2e8f0;">
-          <p style="font-size:11px;color:#94a3b8;margin:0;">Silver Consulting — Este correo fue generado automáticamente.</p>
+          <p style="font-size:11px;color:#94a3b8;margin:0;">Silver Consulting ? Este correo fue generado automáticamente.</p>
         </td></tr>
       </table>
     </td></tr>
@@ -5579,7 +5586,7 @@ app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrado
 
     await sendEmailSafe({
       to: correo_personal,
-      subject: "Proceso de contratación — Silver Consulting",
+      subject: "Proceso de contratación ? Silver Consulting",
       html: buildContratoEmailHtml({ nombre: nombre_persona, token, link })
     });
 
@@ -6590,7 +6597,7 @@ app.post("/auth/register", async (req, res) => {
       [email]
     );
     if (existe.rows.length > 0) {
-      return res.status(400).json({ error: "El correo ya está¡ registrado" });
+      return res.status(400).json({ error: "El correo ya está registrado" });
     }
 
     const rolRes = await pool.query(
@@ -6921,13 +6928,13 @@ app.post("/auth/microsoft", async (req, res) => {
   }
 });
 
-// ════════════════════════════════════════════════════════════════════════════
-//  RUTAS PÚBLICAS — MÓDULO FIRMA DE CONTRATOS (sin auth de Microsoft)
-// ════════════════════════════════════════════════════════════════════════════
+// ????????????????????????????????????????????????????????????????????????????
+//  RUTAS PÚBLICAS ? MÓDULO FIRMA DE CONTRATOS (sin auth de Microsoft)
+// ????????????????????????????????????????????????????????????????????????????
 
 const CONTRATOS_STATIC_DIR = path.join(__dirname, "static", "contratos");
 
-// plantilla: true → el frontend descarga automáticamente al confirmar lectura
+// plantilla: true ? el frontend descarga automáticamente al confirmar lectura
 const DOCS_ESTATICOS = [
   { clave: "politica_pago",     archivo: "POL\u00CDTICA DE PAGO A PROVEEDORES - GENERAL.pdf",                          label: "Politica de pago de proveedores" },
   { clave: "codigo_etica",      archivo: "Silver Consulting - C\u00F3digo de \u00E9tica y conducta.pdf",                    label: "Codigo de etica y conducta" },
@@ -6973,7 +6980,7 @@ const requireTokenFirma = (req, res, next) => {
   }
 };
 
-// POST /contratacion/validar — valida token de correo y devuelve JWT temporal
+// POST /contratacion/validar ? valida token de correo y devuelve JWT temporal
 app.post("/contratacion/validar", async (req, res) => {
   const { token } = req.body || {};
   if (!token) return res.status(400).json({ error: "Token requerido" });
@@ -7018,7 +7025,7 @@ app.post("/contratacion/validar", async (req, res) => {
   }
 });
 
-// GET /contratacion/estado — estado actual del proceso (polling)
+// GET /contratacion/estado ? estado actual del proceso (polling)
 app.get("/contratacion/estado", requireTokenFirma, async (req, res) => {
   try {
     const r = await pool.query(
@@ -7046,7 +7053,7 @@ app.get("/contratacion/estado", requireTokenFirma, async (req, res) => {
   }
 });
 
-// GET /contratacion/docs-info — lista de documentos estáticos (sin auth de archivo)
+// GET /contratacion/docs-info ? lista de documentos estáticos (sin auth de archivo)
 app.get("/contratacion/docs-info", requireTokenFirma, (req, res) => {
   res.json({
     docs: DOCS_ESTATICOS.map(d => ({ clave: d.clave, label: d.label, archivo: d.archivo, plantilla: !!d.plantilla, descarga_archivo: d.descarga_archivo || null })),
@@ -7055,7 +7062,7 @@ app.get("/contratacion/docs-info", requireTokenFirma, (req, res) => {
   });
 });
 
-// GET /contratacion/video — sirve video de bienvenida con soporte de rango (streaming)
+// GET /contratacion/video ? sirve video de bienvenida con soporte de rango (streaming)
 // El token puede venir en header Authorization o en query param ?t= (necesario para <video src>)
 app.get("/contratacion/video", (req, res) => {
   const auth = req.headers.authorization || "";
@@ -7102,7 +7109,7 @@ app.get("/contratacion/video", (req, res) => {
   }
 });
 
-// GET /contratacion/pdf/:nombre — sirve PDF informativo estático
+// GET /contratacion/pdf/:nombre ? sirve PDF informativo estático
 app.get("/contratacion/pdf/:nombre", requireTokenFirma, (req, res) => {
   const nombre = req.params.nombre;
   if (!ARCHIVOS_ESTATICOS_CONTRATACION.has(nombre)) {
@@ -7128,7 +7135,7 @@ app.get("/contratacion/pdf/:nombre", requireTokenFirma, (req, res) => {
   fs.createReadStream(filePath).pipe(res);
 });
 
-// PATCH /contratacion/check — marca un documento estático como leído
+// PATCH /contratacion/check ? marca un documento estático como leído
 // Acepta { clave: "politica_pago" } o el formato antiguo { numero: 1|2|3|4|5 }
 app.patch("/contratacion/check", requireTokenFirma, async (req, res) => {
   const { clave: claveRaw, numero } = req.body || {};
@@ -7155,7 +7162,7 @@ app.patch("/contratacion/check", requireTokenFirma, async (req, res) => {
   }
 });
 
-// GET /contratacion/docs-firma/:doc_index/pdf � genera y descarga el PDF del documento a firmar
+// GET /contratacion/docs-firma/:doc_index/pdf ? genera y descarga el PDF del documento a firmar
 app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req, res) => {
   const idx = Number(req.params.doc_index);
   if (!Number.isInteger(idx) || idx < 1 || idx > 20) {
@@ -7192,7 +7199,7 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
     const docDefinition = getContratoDocDefinition(docKey);
     if (!docDefinition) {
       return res.status(500).json({
-        error: "No se encontro la configuracion de plantilla para el documento solicitado",
+        error: "No se encontro la CONFIGURACIÓN de plantilla para el documento solicitado",
         doc_index: idx,
         doc_key: docKey
       });
@@ -7277,7 +7284,7 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
   }
 });
 
-// POST /contratacion/firmar � inicia proceso ClickSign para un doc de firma
+// POST /contratacion/firmar ? inicia proceso ClickSign para un doc de firma
 app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
   const { doc_index } = req.body || {};
   const idx = Number(doc_index);
@@ -7336,7 +7343,7 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
     const docDefinition = getContratoDocDefinition(docKey);
     if (!docDefinition) {
       return res.status(500).json({
-        error: "No se encontró la configuración de plantilla para el documento solicitado",
+        error: "No se encontró la CONFIGURACIÓN de plantilla para el documento solicitado",
         doc_index: idx,
         doc_key: docKey
       });
@@ -8759,7 +8766,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
       await sendEmailSafe({
         ...getGraphContext(req),
         to: correoRow.coordinador_email,
-        subject: `⏳ Aprobación pendiente: reporte de ${correoRow.consultor_nombre || "consultor"}`,
+        subject: `? Aprobación pendiente: reporte de ${correoRow.consultor_nombre || "consultor"}`,
         text:
           `Hola ${correoRow.coordinador_nombre || ""},\n` +
           `El consultor ${correoRow.consultor_nombre || ""} reportó horas.\n` +
@@ -9213,7 +9220,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
         await sendEmailSafe({
           ...getGraphContext(req),
           to: correoRow.coordinador_email,
-          subject: `⏳ Ticket enviado a aprobación: ${correoRow.consultor_nombre || "consultor"}`,
+          subject: `? Ticket enviado a aprobación: ${correoRow.consultor_nombre || "consultor"}`,
           text:
             `Hola ${correoRow.coordinador_nombre || ""},\n` +
             `El consultor ${correoRow.consultor_nombre || ""} envió un ticket de Mesa/Fábrica.\n` +
@@ -9657,7 +9664,7 @@ app.post("/cuentas-cobro/preview", requireAccess({ roles: ["Consultor", "Consult
       return res.status(403).json({ error: "Acceso denegado" });
     }
 
-    // 3. Validar que todos los registros sean vÁ¡lidos
+    // 3. Validar que todos los registros sean válidos
     if (Number(info.count) !== ids_reportes.length) {
       return res.status(400).json({
         error: "Algunos registros no son válidos para cobro"
@@ -11088,7 +11095,7 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
 
         const cuenta = cuentaResult?.rows?.[0] || null;
 
-        // ── Detectar si corresponde a un token_firma_contrato ──────────────
+        // ?? Detectar si corresponde a un token_firma_contrato ??????????????
         if (!cuenta && (requestId || contractId)) {
           await handleClickSignContratoWebhook({ event, requestId, contractId, status, rawStatus });
           return;
@@ -11496,9 +11503,9 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
       const esMesaOFabrica = isTipoAsignacionMesaOFabrica(tipoNorm);
       const portalUrl = buildPortalUrl(esMesaOFabrica ? "asignacion-fabrica-mesa-servicio" : "registro-horas-consultor");
       const titulo = esAprobado
-        ? "✅ Horas aprobadas"
+        ? "? Horas aprobadas"
         : estado === "Rechazado"
-          ? "⚠️ Acción requerida: corrección de reporte"
+          ? "?? Acción requerida: corrección de reporte"
           : "Actualización de reporte";
       await sendEmailSafe({
         ...getGraphContext(req),
@@ -12073,7 +12080,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
         await sendEmailSafe({
           ...getGraphContext(req),
           to: created.email_consultor,
-          subject: `🚀 Nueva asignación: ${created.nombre_modulo || "Proyecto"} - ${created.nombre_cliente}`,
+          subject: `?? Nueva asignación: ${created.nombre_modulo || "Proyecto"} - ${created.nombre_cliente}`,
           text:
             `Hola ${created.nombre_consultor || ""},\n` +
             `Tienes una nueva asignación.\n` +
@@ -12139,14 +12146,14 @@ app.listen(PORT, () => {
 */
 
 /* ===============================
-   SERVIDOR (CAMBIO CRÁTICO PARA AZURE)
+   SERVIDOR (CAMBIO CRÍTICO PARA AZURE)
 =============================== */
 
 // 1. Usar process.env.PORT (Obligatorio para Azure)
 // 2. Mantener 4000 como fallback para tu entorno local
 const port = process.env.PORT || process.env.BACK_PORT || 4000;
 
-// 3. Añadir "0.0.0.0" asegura que el contenedor acepte conexiones externas
+// 3. A?adir "0.0.0.0" asegura que el contenedor acepte conexiones externas
 const server = app.listen(port, "0.0.0.0", () => {
   console.log(`Server running on port ${port}`);
 });
@@ -12155,7 +12162,7 @@ let isShuttingDown = false;
 async function gracefulShutdown(signal) {
   if (isShuttingDown) return;
   isShuttingDown = true;
-  console.log(`[shutdown] Señal recibida: ${signal}. Cerrando API...`);
+  console.log(`[shutdown] Se?al recibida: ${signal}. Cerrando API...`);
 
   const forceExitTimeout = setTimeout(() => {
     console.error("[shutdown] Timeout agotado. Forzando cierre.");

@@ -100,24 +100,30 @@ window.contratacionApp = function () {
         // COMPUTED
         // ─────────────────────────────────────────────────────
         get allItems() {
-            return this.linkItem ? [...this.docs, this.linkItem] : [...this.docs];
+            return [...this.docs];
+        },
+
+        get requiredItems() {
+            return [...this.docs];
         },
 
         get docActual() {
             return this.allItems[this.docActualIdx] || null;
         },
 
-        get totalItems() { return this.allItems.length; },
+        get totalItems() { return this.requiredItems.length; },
 
         get totalCheckeados() {
-            return this.allItems.filter(d => this.checksCompletados[d.clave]).length;
+            return this.requiredItems.filter(d => this.checksCompletados[d.clave]).length;
         },
 
         get todosChecks() {
-            return this.allItems.length > 0 && this.allItems.every(d => this.checksCompletados[d.clave]);
+            return this.requiredItems.length > 0 && this.requiredItems.every(d => this.checksCompletados[d.clave]);
         },
 
         get puedeAvanzar() {
+            if (!this.docActual) return false;
+            if (this.docActual.tipo !== "pdf") return true;
             return !!this.checksCompletados[this.docActual?.clave];
         },
 

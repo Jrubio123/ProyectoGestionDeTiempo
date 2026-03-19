@@ -6812,8 +6812,6 @@ const DOCS_ESTATICOS = [
   { clave: "requisitos",        archivo: "REQUISITOS DE CONTRATO OUTSOURCING.pdf",                               label: "Requisitos de Contrato",          plantilla: true },
   { clave: "plantilla_tiempos", archivo: "SC-PS-Seguridad Equipos V1.pdf",                                       label: "Plantilla de reporte de tiempos", plantilla: true },
   { clave: "guia_autenticador", archivo: "Silver Consulting - Configurar Autenticación Multifactor - Office 365.pdf", label: "Guía Autenticador Office 365" },
-  { clave: "guia_mfa",          archivo: "Silver Consulting - configurar MFA Silver Consulting - Office 365.pdf", label: "Guía MFA Office 365" },
-  { clave: "guia_office365",    archivo: "Silver Consulting - Ingresar a Microsoft 365 Estándar.pdf",            label: "Guía ingreso Microsoft 365 Estándar" },
 ];
 
 const LINK_BIENVENIDA = {
@@ -6831,7 +6829,7 @@ const CLAVES_ESTATICAS_VALIDAS = new Set([
   "pdf1", "pdf2", "pdf3", "pdf4", "pdf5"
 ]);
 
-const CLAVES_REQUERIDAS_FIRMA = DOCS_ESTATICOS.map(d => d.clave).concat([LINK_BIENVENIDA.clave]);
+const CLAVES_REQUERIDAS_FIRMA = DOCS_ESTATICOS.map(d => d.clave);
 
 const requireTokenFirma = (req, res, next) => {
   const auth = req.headers.authorization || "";
@@ -11998,6 +11996,7 @@ process.on("SIGINT", () => {
 process.on("SIGTERM", () => {
   void gracefulShutdown("SIGTERM");
 });
+
 
 
 

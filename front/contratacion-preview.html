@@ -298,8 +298,6 @@ document.addEventListener('alpine:init', () => {
             { clave: 'requisitos',        label: 'Requisitos de Contrato',            tipo: 'pdf',  plantilla: true },
             { clave: 'plantilla_tiempos', label: 'Plantilla de reporte de tiempos',   tipo: 'pdf',  plantilla: true },
             { clave: 'guia_autenticador', label: 'Guía Autenticador Office 365',      tipo: 'pdf' },
-            { clave: 'guia_mfa',          label: 'Guía MFA Office 365',              tipo: 'pdf' },
-            { clave: 'guia_office365',    label: 'Guía ingreso Microsoft 365',        tipo: 'pdf' },
         ],
         linkItem: { clave: 'link_formulario', label: 'Formulario de base de datos', tipo: 'link' },
 
@@ -317,12 +315,14 @@ document.addEventListener('alpine:init', () => {
         timerOk: false,
         _timer: null,
 
-        get allItems() { return [...this.docs, this.linkItem]; },
+        get allItems() { return [...this.docs]; },
+        get requiredItems() { return [...this.docs]; },
         get docActual() { return this.allItems[this.docActualIdx] || null; },
-        get totalItems() { return this.allItems.length; },
-        get totalCheckeados() { return this.allItems.filter(d => this.checks[d.clave]).length; },
-        get todosChecks() { return this.allItems.every(d => this.checks[d.clave]); },
+        get totalItems() { return this.requiredItems.length; },
+        get totalCheckeados() { return this.requiredItems.filter(d => this.checks[d.clave]).length; },
+        get todosChecks() { return this.requiredItems.every(d => this.checks[d.clave]); },
         get puedeAvanzar() {
+            if (this.docActual?.tipo !== 'pdf') return true;
             if (!this.isChecked(this.docActual?.clave)) return false;
             return true;
         },

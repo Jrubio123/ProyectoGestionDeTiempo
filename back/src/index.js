@@ -2087,6 +2087,33 @@ function buildAdobePdfAuthHeaders(accessToken, extraHeaders = {}) {
   return headers;
 }
 
+function formatExternalServiceError(detail) {
+  if (detail === undefined || detail === null) return "";
+  if (typeof detail === "string") return detail;
+  if (typeof detail === "number" || typeof detail === "boolean") return String(detail);
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => formatExternalServiceError(item))
+      .filter(Boolean)
+      .join(" | ");
+  }
+  if (detail && typeof detail === "object") {
+    const nested =
+      formatExternalServiceError(detail.error) ||
+      formatExternalServiceError(detail.message) ||
+      formatExternalServiceError(detail.description) ||
+      formatExternalServiceError(detail.error_description) ||
+      formatExternalServiceError(detail.errors);
+    if (nested) return nested;
+    try {
+      return JSON.stringify(detail);
+    } catch (err) {
+      return String(detail);
+    }
+  }
+  return String(detail);
+}
+
 async function getAdobePdfAccessToken() {
   const nowMs = Date.now();
   if (
@@ -2100,40 +2127,83 @@ async function getAdobePdfAccessToken() {
     throw new Error("Adobe PDF Services no esta configurado (faltan ADOBE_PDF_CLIENT_ID o ADOBE_PDF_CLIENT_SECRET)");
   }
 
-  const form = new URLSearchParams();
-  form.set("grant_type", "client_credentials");
-  form.set("client_id", ADOBE_PDF_CLIENT_ID);
-  form.set("client_secret", ADOBE_PDF_CLIENT_SECRET);
+  const baseFields = {
+    client_id: ADOBE_PDF_CLIENT_ID,
+    client_secret: ADOBE_PDF_CLIENT_SECRET
+  };
   if (ADOBE_PDF_SCOPE) {
-    form.set("scope", ADOBE_PDF_SCOPE);
+    baseFields.scope = ADOBE_PDF_SCOPE;
   }
 
-  let tokenRes = null;
-  try {
-    tokenRes = await jsonRequest({
-      method: "POST",
-      url: ADOBE_PDF_TOKEN_URL,
+  const tokenAttempts = [
+    {
+      label: "official_form",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      fields: {
+        ...baseFields
+      }
+    },
+    {
+      label: "official_form_with_api_key",
       headers: {
         "x-api-key": ADOBE_PDF_CLIENT_ID,
         "Content-Type": "application/x-www-form-urlencoded"
       },
-      body: form.toString(),
-      timeoutMs: ADOBE_PDF_TIMEOUT_MS
-    });
-  } catch (err) {
-    throw new Error(`No se pudo obtener token de Adobe PDF Services: ${err?.response?.error || err?.message || "sin detalle"}`);
+      fields: {
+        ...baseFields
+      }
+    },
+    {
+      label: "client_credentials_fallback",
+      headers: {
+        "x-api-key": ADOBE_PDF_CLIENT_ID,
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      fields: {
+        grant_type: "client_credentials",
+        ...baseFields
+      }
+    }
+  ];
+
+  const failures = [];
+  let tokenRes = null;
+  for (const attempt of tokenAttempts) {
+    const form = new URLSearchParams();
+    for (const [key, value] of Object.entries(attempt.fields)) {
+      if (value === undefined || value === null || value === "") continue;
+      form.set(key, String(value));
+    }
+    try {
+      tokenRes = await jsonRequest({
+        method: "POST",
+        url: ADOBE_PDF_TOKEN_URL,
+        headers: attempt.headers,
+        body: form.toString(),
+        timeoutMs: ADOBE_PDF_TIMEOUT_MS
+      });
+      const token = pickStringByPaths(tokenRes?.data || {}, ["access_token", "token"]);
+      if (token) {
+        const expiresInSec = Math.max(300, Number(tokenRes?.data?.expires_in || 3600));
+        adobePdfTokenCache = {
+          accessToken: token,
+          expiresAtMs: nowMs + expiresInSec * 1000
+        };
+        return token;
+      }
+      failures.push(`${attempt.label}: respuesta sin access_token`);
+    } catch (err) {
+      const detail =
+        formatExternalServiceError(err?.response) ||
+        formatExternalServiceError(err?.message) ||
+        "sin detalle";
+      failures.push(`${attempt.label}: HTTP ${Number(err?.status || 0) || "?"} ${detail}`);
+    }
   }
 
-  const token = pickStringByPaths(tokenRes?.data || {}, ["access_token", "token"]);
-  if (!token) {
-    throw new Error("Adobe PDF Services no devolvio access_token");
-  }
-  const expiresInSec = Math.max(300, Number(tokenRes?.data?.expires_in || 3600));
-  adobePdfTokenCache = {
-    accessToken: token,
-    expiresAtMs: nowMs + expiresInSec * 1000
-  };
-  return token;
+  throw new Error(`No se pudo obtener token de Adobe PDF Services: ${failures.join(" || ") || "sin detalle"}`);
 }
 
 function normalizeAdobeJobStatus(value) {
@@ -2665,23 +2735,48 @@ async function ensureGraphFolder(accessToken, userEmail, parentPath, folderName)
     ? `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(parentPath)}:/children`
     : `/v1.0/users/${encodedUser}/drive/root/children`;
 
-  try {
-    await graphPost(requestPath, accessToken, {
-      name: safeFolderName,
-      folder: {},
-      "@microsoft.graph.conflictBehavior": "fail"
-    });
-  } catch (err) {
-    const errorText = String(err.message || "");
-    const alreadyExists =
-      errorText.includes("nameAlreadyExists") ||
-      errorText.includes("itemAlreadyExists");
-    if (!alreadyExists) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await graphPost(requestPath, accessToken, {
+        name: safeFolderName,
+        folder: {},
+        "@microsoft.graph.conflictBehavior": "fail"
+      });
+      break;
+    } catch (err) {
+      const errorText = String(err.message || "");
+      const alreadyExists =
+        errorText.includes("nameAlreadyExists") ||
+        errorText.includes("itemAlreadyExists");
+      const resourceModified = errorText.includes("resourceModified");
+      if (alreadyExists) break;
+      if (resourceModified && attempt < 2) {
+        await sleepMs(300 * (attempt + 1));
+        continue;
+      }
       throw err;
     }
   }
 
   return parentPath ? `${parentPath}/${safeFolderName}` : safeFolderName;
+}
+
+async function graphPutBinaryWithRetry(path, accessToken, buffer, contentType = "application/octet-stream", retryCount = 1) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+    try {
+      return await graphPutBinary(path, accessToken, buffer, contentType);
+    } catch (err) {
+      lastError = err;
+      const errorText = String(err?.message || "");
+      const resourceModified = errorText.includes("resourceModified");
+      if (!resourceModified || attempt >= retryCount) {
+        throw err;
+      }
+      await sleepMs(400 * (attempt + 1));
+    }
+  }
+  throw lastError || new Error("Graph upload failed");
 }
 
 function resolveGraphPath(nextLink) {
@@ -3492,7 +3587,7 @@ async function uploadSignedPdfToOneDrive(cuenta, pdfBuffer, fileName, { accessTo
     `CuentaCobroFirmada_${cuentaFolderToken}.pdf`
   );
   const uploadPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${safeName}`)}:/content`;
-  const uploaded = await graphPutBinary(uploadPath, token, pdfBuffer, "application/pdf");
+  const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
 
   return {
     carpeta: targetPath,
@@ -11122,7 +11217,7 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName) {
 
   const safeName = sanitizePdfFileName(fileName || `Contrato_${proceso.nombre_persona}.pdf`, "Contrato.pdf");
   const uploadPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${safeName}`)}:/content`;
-  const uploaded = await graphPutBinary(uploadPath, token, pdfBuffer, "application/pdf");
+  const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
 
   return {
     carpeta: targetPath,

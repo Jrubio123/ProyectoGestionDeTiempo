@@ -387,18 +387,13 @@ window.contratacionApp = function () {
         },
 
         docBloqueado(doc) {
-            if (!doc || this.estadoDocFirma(doc) === "signed") return false;
-            const currentIndex = Number(doc.doc_index || 0);
-            return this.docsFirmaOrdenados
-                .filter((item) => Number(item?.doc_index || 0) < currentIndex)
-                .some((item) => this.estadoDocFirma(item) !== "signed");
+            return false;
         },
 
         puedeIniciarFirma(doc) {
             if (!doc) return false;
             if (this.firmaCargando) return false;
             if (this.estadoDocFirma(doc) === "signed") return false;
-            if (this.docBloqueado(doc)) return false;
             return true;
         },
 

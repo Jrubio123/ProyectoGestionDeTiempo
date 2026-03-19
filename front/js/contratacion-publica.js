@@ -88,7 +88,7 @@ window.contratacionApp = function () {
                 const res = await axios.get(`${API}/contratacion/docs-info`, {
                     headers: { Authorization: `Bearer ${this.jwt}` }
                 });
-                this.docs = res.data.docs.map(d => ({ ...d, tipo: "pdf" }));
+                this.docs = res.data.docs.map(d => ({ ...d, tipo: "pdf", descarga_archivo: d?.descarga_archivo || null }));
                 this.linkItem = { ...res.data.link, tipo: "link" };
                 this.videoDisponible = res.data.video_disponible;
             } catch {
@@ -146,6 +146,33 @@ window.contratacionApp = function () {
         },
 
         isChecked(clave) { return !!this.checksCompletados[clave]; },
+
+        _extensionDesdeNombre(nombre = "") {
+            const clean = String(nombre || "").trim();
+            const idx = clean.lastIndexOf(".");
+            if (idx < 0) return "";
+            return clean.slice(idx);
+        },
+
+        _nombreDescargaDesdeDoc(doc, fallbackName = "Documento.pdf") {
+            const base = String(doc?.label || "Documento")
+                .replace(/[<>:"/\\|?*#%{}~]/g, " ")
+                .replace(/\s+/g, " ")
+                .trim();
+            const ext = this._extensionDesdeNombre(fallbackName) || ".pdf";
+            return `${base || "Documento"}${ext}`;
+        },
+
+        _parseFileNameFromDisposition(disposition = "") {
+            const raw = String(disposition || "");
+            const m = raw.match(/filename\*?=(?:UTF-8'')?\"?([^\";]+)\"?/i);
+            if (!m?.[1]) return "";
+            try {
+                return decodeURIComponent(m[1].replace(/\"/g, ""));
+            } catch {
+                return m[1].replace(/\"/g, "");
+            }
+        },
 
         _primerPendiente() {
             const idx = this.allItems.findIndex(d => !this.checksCompletados[d.clave]);
@@ -213,11 +240,12 @@ window.contratacionApp = function () {
             this._pdfCargadoParaIdx = null;
 
             try {
-                const resp = await axios.get(`${API}/contratacion/pdf/${doc.archivo}`, {
+                const resp = await axios.get(`${API}/contratacion/pdf/${encodeURIComponent(doc.archivo)}`, {
                     headers: { Authorization: `Bearer ${this.jwt}` },
                     responseType: "blob"
                 });
-                this.pdfBlobUrl = URL.createObjectURL(new Blob([resp.data], { type: "application/pdf" }));
+                const contentType = String(resp?.headers?.["content-type"] || "application/pdf");
+                this.pdfBlobUrl = URL.createObjectURL(new Blob([resp.data], { type: contentType }));
                 this._pdfCargadoParaIdx = this.docActualIdx;
             } catch (e) {
                 this.pdfError = e?.response?.data?.error || "No se pudo cargar el documento. Intenta de nuevo.";
@@ -253,10 +281,39 @@ window.contratacionApp = function () {
             if (!this.pdfBlobUrl || !this.docActual) return;
             const a = document.createElement("a");
             a.href = this.pdfBlobUrl;
-            a.download = `${this.docActual.label}.pdf`;
+            a.download = this._nombreDescargaDesdeDoc(this.docActual, this.docActual?.archivo || "Documento.pdf");
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
+        },
+
+        async descargarArchivo(nombreArchivo, fallbackLabel = "") {
+            if (!nombreArchivo) return;
+            const fileNameFromDoc = String(nombreArchivo || "").trim();
+            let blob = null;
+            let fileName = fileNameFromDoc;
+
+            if (this.docActual?.archivo === fileNameFromDoc && this.pdfBlobUrl) {
+                const resp = await fetch(this.pdfBlobUrl);
+                blob = await resp.blob();
+            } else {
+                const resp = await axios.get(`${API}/contratacion/pdf/${encodeURIComponent(fileNameFromDoc)}`, {
+                    headers: { Authorization: `Bearer ${this.jwt}` },
+                    responseType: "blob"
+                });
+                const headerName = this._parseFileNameFromDisposition(resp?.headers?.["content-disposition"] || "");
+                fileName = headerName || fileNameFromDoc;
+                blob = resp.data;
+            }
+
+            const blobUrl = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = blobUrl;
+            a.download = fileName || this._nombreDescargaDesdeDoc({ label: fallbackLabel || this.docActual?.label }, fileNameFromDoc || "Documento.pdf");
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(blobUrl);
         },
 
         // ─────────────────────────────────────────────────────
@@ -266,8 +323,15 @@ window.contratacionApp = function () {
             if (!this.timerOk || !this.docActual || this.isChecked(this.docActual.clave)) return;
             await this._registrarCheck(this.docActual.clave);
             // Auto-descarga si el doc es una plantilla/formato que el usuario va a necesitar usar
-            if (this.docActual.plantilla && this.pdfBlobUrl) {
-                this.descargarDoc();
+            if (this.docActual.plantilla) {
+                const archivoDescarga = this.docActual?.descarga_archivo || this.docActual?.archivo;
+                if (archivoDescarga) {
+                    try {
+                        await this.descargarArchivo(archivoDescarga, this.docActual?.label || "Documento");
+                    } catch (err) {
+                        console.warn("No se pudo descargar automaticamente la plantilla:", err?.message || err);
+                    }
+                }
             }
         },
 
@@ -374,14 +438,20 @@ window.contratacionApp = function () {
                     headers: { Authorization: `Bearer ${this.jwt}` },
                     responseType: "blob"
                 });
-                const blob = new Blob([resp.data], { type: "application/pdf" });
+                const contentType = String(resp?.headers?.["content-type"] || "application/pdf");
+                const blob = new Blob([resp.data], { type: contentType });
                 const blobUrl = URL.createObjectURL(blob);
                 const disposition = String(resp?.headers?.["content-disposition"] || "");
-                const fileNameMatch = disposition.match(/filename\*?=(?:UTF-8'')?\"?([^\";]+)\"?/i);
-                const fallbackName = `${docTitulo || `Documento_${docIndex}`}.pdf`;
-                const fileName = fileNameMatch?.[1]
-                    ? decodeURIComponent(fileNameMatch[1].replace(/\"/g, ""))
-                    : fallbackName;
+                const fileNameFromHeader = this._parseFileNameFromDisposition(disposition);
+                const fallbackExt = contentType.includes("wordprocessingml.document")
+                    ? ".docx"
+                    : contentType.includes("application/msword")
+                        ? ".doc"
+                        : contentType.includes("spreadsheetml.sheet")
+                            ? ".xlsx"
+                            : ".pdf";
+                const fallbackName = `${docTitulo || `Documento_${docIndex}`}${fallbackExt}`;
+                const fileName = fileNameFromHeader || fallbackName;
 
                 const a = document.createElement("a");
                 a.href = blobUrl;
@@ -391,7 +461,7 @@ window.contratacionApp = function () {
                 document.body.removeChild(a);
                 URL.revokeObjectURL(blobUrl);
             } catch (e) {
-                this.firmaError = e?.response?.data?.error || "No se pudo descargar el PDF de este documento.";
+                this.firmaError = e?.response?.data?.error || "No se pudo descargar el archivo de este documento.";
             } finally {
                 this.descargaDocIndex = null;
             }

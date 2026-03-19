@@ -1844,18 +1844,44 @@ function toAnexoApiRow(row) {
   };
 }
 
+function normalizeTemplateFileName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function getDocxTemplateBinary(templateFile) {
   const safeTemplate = toNullableTrimmedString(templateFile);
   if (!safeTemplate) {
     throw new Error("template_file no definido para documento de contrato");
   }
-  const templatePath = path.join(CONTRATOS_DOCX_DIR, safeTemplate);
-  if (docxTemplateCache.has(templatePath)) return docxTemplateCache.get(templatePath);
-  if (!fs.existsSync(templatePath)) {
+
+  const directPath = path.join(CONTRATOS_DOCX_DIR, safeTemplate);
+  const normalizedTemplate = normalizeTemplateFileName(safeTemplate);
+  let resolvedPath = directPath;
+
+  if (!fs.existsSync(resolvedPath)) {
+    try {
+      const files = fs.readdirSync(CONTRATOS_DOCX_DIR);
+      const match = files.find((name) => normalizeTemplateFileName(name) === normalizedTemplate);
+      if (match) {
+        resolvedPath = path.join(CONTRATOS_DOCX_DIR, match);
+      }
+    } catch (_) {
+      // keep default path and fail below with explicit error.
+    }
+  }
+
+  if (docxTemplateCache.has(resolvedPath)) return docxTemplateCache.get(resolvedPath);
+  if (!fs.existsSync(resolvedPath)) {
     throw new Error(`Plantilla de contrato no encontrada: ${safeTemplate}`);
   }
-  const binary = fs.readFileSync(templatePath, "binary");
-  docxTemplateCache.set(templatePath, binary);
+
+  const binary = fs.readFileSync(resolvedPath, "binary");
+  docxTemplateCache.set(resolvedPath, binary);
   return binary;
 }
 
@@ -2290,6 +2316,11 @@ function sanitizePdfFileName(value, fallback = "documento.pdf") {
   const safe = sanitizePathSegment(value || fallback, fallback).replace(/\.+/g, ".");
   if (!safe.toLowerCase().endsWith(".pdf")) return `${safe}.pdf`;
   return safe;
+}
+
+function sanitizeDownloadFileName(value, fallback = "documento.bin") {
+  const safe = sanitizePathSegment(value || fallback, fallback).replace(/\.+/g, ".");
+  return safe || fallback;
 }
 
 function parsePdfDataUrl(dataUrl) {
@@ -6807,12 +6838,18 @@ const CONTRATOS_STATIC_DIR = path.join(__dirname, "static", "contratos");
 
 // plantilla: true → el frontend descarga automáticamente al confirmar lectura
 const DOCS_ESTATICOS = [
-  { clave: "politica_pago",     archivo: "POLÍTICA DE PAGO A PROVEEDORES - GENERAL.pdf",                         label: "Política de pago de proveedores" },
-  { clave: "codigo_etica",      archivo: "Silver Consulting - Código de ética y conducta.pdf",                   label: "Código de ética y conducta" },
-  { clave: "requisitos",        archivo: "REQUISITOS DE CONTRATO OUTSOURCING.pdf",                               label: "Requisitos de Contrato",          plantilla: true },
-  { clave: "plantilla_tiempos", archivo: "SC-PS-Seguridad Equipos V1.pdf",                                       label: "Plantilla de reporte de tiempos", plantilla: true },
-  { clave: "guia_autenticador", archivo: "Silver Consulting - Configurar Autenticación Multifactor - Office 365.pdf", label: "Guía Autenticador Office 365" },
+  { clave: "politica_pago",     archivo: "POL\u00CDTICA DE PAGO A PROVEEDORES - GENERAL.pdf",                          label: "Politica de pago de proveedores" },
+  { clave: "codigo_etica",      archivo: "Silver Consulting - C\u00F3digo de \u00E9tica y conducta.pdf",                    label: "Codigo de etica y conducta" },
+  { clave: "requisitos",        archivo: "REQUISITOS DE CONTRATO OUTSOURCING.pdf",                                label: "Requisitos de Contrato",          plantilla: true, descarga_archivo: "FORMATO CUENTA DE COBRO 2026.doc" },
+  { clave: "plantilla_tiempos", archivo: "SC-PS-Seguridad Equipos V1.pdf",                                        label: "Plantilla de reporte de tiempos", plantilla: true, descarga_archivo: "PLANTILLA DE TIEMPOS.xlsx" },
+  { clave: "guia_autenticador", archivo: "Silver Consulting - Configurar Autenticaci\u00F3n Multifactor - Office 365.pdf", label: "Guia Autenticador Office 365" },
 ];
+
+const ARCHIVOS_ESTATICOS_CONTRATACION = new Set(
+  DOCS_ESTATICOS
+    .flatMap((d) => [d.archivo, d.descarga_archivo])
+    .filter(Boolean)
+);
 
 const LINK_BIENVENIDA = {
   clave: "link_formulario",
@@ -6917,7 +6954,7 @@ app.get("/contratacion/estado", requireTokenFirma, async (req, res) => {
 // GET /contratacion/docs-info — lista de documentos estáticos (sin auth de archivo)
 app.get("/contratacion/docs-info", requireTokenFirma, (req, res) => {
   res.json({
-    docs: DOCS_ESTATICOS.map(d => ({ clave: d.clave, label: d.label, archivo: d.archivo, plantilla: !!d.plantilla })),
+    docs: DOCS_ESTATICOS.map(d => ({ clave: d.clave, label: d.label, archivo: d.archivo, plantilla: !!d.plantilla, descarga_archivo: d.descarga_archivo || null })),
     link: { clave: LINK_BIENVENIDA.clave, url: LINK_BIENVENIDA.url, label: LINK_BIENVENIDA.label },
     video_disponible: fs.existsSync(path.join(CONTRATOS_STATIC_DIR, VIDEO_BIENVENIDA))
   });
@@ -6973,16 +7010,26 @@ app.get("/contratacion/video", (req, res) => {
 // GET /contratacion/pdf/:nombre — sirve PDF informativo estático
 app.get("/contratacion/pdf/:nombre", requireTokenFirma, (req, res) => {
   const nombre = req.params.nombre;
-  const docValido = DOCS_ESTATICOS.find(d => d.archivo === nombre);
-  if (!docValido) {
+  if (!ARCHIVOS_ESTATICOS_CONTRATACION.has(nombre)) {
     return res.status(404).json({ error: "Documento no encontrado" });
   }
+
   const filePath = path.join(CONTRATOS_STATIC_DIR, nombre);
   if (!fs.existsSync(filePath)) {
-    return res.status(503).json({ error: "Documento aún no disponible. Contacta a Talento Humano." });
+    return res.status(503).json({ error: "Documento aun no disponible. Contacta a Talento Humano." });
   }
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="${nombre}"`);
+
+  const ext = String(path.extname(nombre) || "").toLowerCase();
+  let contentType = "application/octet-stream";
+  if (ext === ".pdf") contentType = "application/pdf";
+  if (ext === ".doc") contentType = "application/msword";
+  if (ext === ".docx") contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (ext === ".xlsx") contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+  const dispositionType = ext === ".pdf" ? "inline" : "attachment";
+  const safeName = sanitizeDownloadFileName(nombre, "documento.bin").replace(/"/g, "");
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Disposition", `${dispositionType}; filename="${safeName}"`);
   fs.createReadStream(filePath).pipe(res);
 });
 
@@ -7073,23 +7120,54 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
       (personaContext?.nombreCompleto || proceso.nombre_persona || "Contratista").replace(/\s+/g, "_"),
       "Contratista"
     );
-    const pdfBuffer = await generateContratoPdfFromTemplate({
+    const payload = await buildContratoTemplatePayload({
       docDefinition,
       personaContext,
-      proceso,
-      fileBaseName: `${personaSlug}_${docDefinition.doc_key}_${idx}`
+      proceso
+    });
+    const fileBaseName = `${personaSlug}_${docDefinition.doc_key}_${idx}`;
+    const docxBuffer = renderDocxTemplateToBuffer({
+      templateFile: docDefinition.template_file,
+      data: payload
     });
 
-    const fileName = sanitizePdfFileName(
-      `${docDefinition.titulo}_${personaSlug}.pdf`,
-      `Contrato_${docDefinition.doc_key || idx}.pdf`
+    let outputBuffer = null;
+    let outputContentType = "application/pdf";
+    let outputExtension = "pdf";
+
+    try {
+      outputBuffer = await convertDocxBufferToPdfBuffer(docxBuffer, fileBaseName);
+    } catch (convertErr) {
+      const convertMessage = String(convertErr?.message || "").toLowerCase();
+      const conversionIssue =
+        convertMessage.includes("libreoffice") ||
+        convertMessage.includes("timeout") ||
+        convertMessage.includes("no genero el pdf") ||
+        convertMessage.includes("codigo");
+
+      if (!conversionIssue) throw convertErr;
+
+      console.warn("[contratacion][docs-firma][pdf] Fallback DOCX por fallo de conversion:", convertErr?.message || convertErr);
+      outputBuffer = docxBuffer;
+      outputContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      outputExtension = "docx";
+    }
+
+    const baseName = sanitizePathSegment(
+      `${docDefinition.titulo}_${personaSlug}`,
+      `Contrato_${docDefinition.doc_key || idx}`
+    );
+    const fileName = sanitizeDownloadFileName(
+      `${baseName}.${outputExtension}`,
+      `Contrato_${docDefinition.doc_key || idx}.${outputExtension}`
     ).replace(/"/g, "");
-    res.setHeader("Content-Type", "application/pdf");
+
+    res.setHeader("Content-Type", outputContentType);
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-    return res.send(pdfBuffer);
+    return res.send(outputBuffer);
   } catch (err) {
     console.error("Error descargando PDF de contrato:", err);
-    if (String(err?.message || "").toLowerCase().includes("libreoffice")) {
+    if (String(err?.message || "").toLowerCase().includes("libreoffice") || String(err?.message || "").toLowerCase().includes("no genero el pdf") || String(err?.message || "").toLowerCase().includes("timeout") || String(err?.message || "").toLowerCase().includes("codigo")) {
       return res.status(503).json({
         error: "No fue posible generar el PDF del contrato. Verifica la configuracion de LibreOffice en el servidor."
       });
@@ -7342,7 +7420,7 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
     });
   } catch (err) {
     console.error("Error iniciando firma de contrato:", err);
-    if (String(err?.message || "").toLowerCase().includes("libreoffice")) {
+    if (String(err?.message || "").toLowerCase().includes("libreoffice") || String(err?.message || "").toLowerCase().includes("no genero el pdf") || String(err?.message || "").toLowerCase().includes("timeout") || String(err?.message || "").toLowerCase().includes("codigo")) {
       return res.status(503).json({
         error: "No fue posible generar el PDF del contrato. Verifica la configuración de LibreOffice en el servidor."
       });

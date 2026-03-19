@@ -7015,7 +7015,92 @@ app.patch("/contratacion/check", requireTokenFirma, async (req, res) => {
   }
 });
 
-// POST /contratacion/firmar â€” inicia proceso ClickSign para un doc de firma
+// GET /contratacion/docs-firma/:doc_index/pdf — genera y descarga el PDF del documento a firmar
+app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req, res) => {
+  const idx = Number(req.params.doc_index);
+  if (!Number.isInteger(idx) || idx < 1 || idx > 20) {
+    return res.status(400).json({ error: "doc_index invalido" });
+  }
+
+  try {
+    const r = await pool.query(
+      `SELECT id, nombre_persona, correo_personal, checks_completados, docs_firma, solicitud_id, preregistro_id
+       FROM tokens_firma_contrato WHERE id = $1 AND estado = 'en_proceso'`,
+      [req.tokenFirma.token_id]
+    );
+    if (r.rowCount === 0) return res.status(400).json({ error: "Proceso no valido o ya completado" });
+
+    const proceso = r.rows[0];
+    const checks = proceso.checks_completados || {};
+    const faltantes = CLAVES_REQUERIDAS_FIRMA.filter(c => !checks[c]);
+    if (faltantes.length > 0) {
+      return res.status(400).json({ error: "Debes revisar todos los documentos informativos antes de descargar o firmar" });
+    }
+
+    let docsActuales = normalizeDocsFirmaList(proceso.docs_firma);
+    if (!docsActuales.length) {
+      docsActuales = await ensureTokenDocsFirmaPlan(proceso);
+    }
+    const docExistente = docsActuales.find((d) => Number(d.doc_index) === idx);
+    if (!docExistente) {
+      return res.status(400).json({
+        error: "doc_index no corresponde a un documento habilitado para este proceso"
+      });
+    }
+
+    const docKey = docExistente.doc_key || LEGACY_DOC_INDEX_TO_KEY.get(idx) || null;
+    const docDefinition = getContratoDocDefinition(docKey);
+    if (!docDefinition) {
+      return res.status(500).json({
+        error: "No se encontro la configuracion de plantilla para el documento solicitado",
+        doc_index: idx,
+        doc_key: docKey
+      });
+    }
+
+    const personaContext = await resolveContratoPersonaContext(proceso);
+    if (docDefinition.doc_key === "anexo_tecnico") {
+      try {
+        await ensureAutomaticAnexoFromContext({
+          proceso,
+          personaContext,
+          createdBy: null
+        });
+      } catch (anexoErr) {
+        console.warn("No se pudo asegurar anexo tecnico antes de descargar:", anexoErr?.message || anexoErr);
+      }
+    }
+
+    const personaSlug = sanitizePathSegment(
+      (personaContext?.nombreCompleto || proceso.nombre_persona || "Contratista").replace(/\s+/g, "_"),
+      "Contratista"
+    );
+    const pdfBuffer = await generateContratoPdfFromTemplate({
+      docDefinition,
+      personaContext,
+      proceso,
+      fileBaseName: `${personaSlug}_${docDefinition.doc_key}_${idx}`
+    });
+
+    const fileName = sanitizePdfFileName(
+      `${docDefinition.titulo}_${personaSlug}.pdf`,
+      `Contrato_${docDefinition.doc_key || idx}.pdf`
+    ).replace(/"/g, "");
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Error descargando PDF de contrato:", err);
+    if (String(err?.message || "").toLowerCase().includes("libreoffice")) {
+      return res.status(503).json({
+        error: "No fue posible generar el PDF del contrato. Verifica la configuracion de LibreOffice en el servidor."
+      });
+    }
+    return res.status(500).json({ error: "Error generando PDF del documento de firma" });
+  }
+});
+
+// POST /contratacion/firmar — inicia proceso ClickSign para un doc de firma
 app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
   const { doc_index } = req.body || {};
   const idx = Number(doc_index);

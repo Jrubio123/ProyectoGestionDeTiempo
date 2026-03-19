@@ -34,6 +34,7 @@ window.contratacionApp = function () {
         docsActuales: [],
         firmaCargando: false,
         firmaError: "",
+        descargaDocIndex: null,
         pollingInterval: null,
 
         // ── Init
@@ -123,6 +124,19 @@ window.contratacionApp = function () {
         get videoUrl() {
             if (!this.jwt || !this.videoDisponible) return null;
             return `${API}/contratacion/video?t=${encodeURIComponent(this.jwt)}`;
+        },
+
+        get docsFirmaOrdenados() {
+            const list = Array.isArray(this.docsActuales) ? [...this.docsActuales] : [];
+            return list.sort((a, b) => Number(a?.doc_index || 0) - Number(b?.doc_index || 0));
+        },
+
+        get totalDocsFirma() {
+            return this.docsFirmaOrdenados.length;
+        },
+
+        get totalDocsFirmados() {
+            return this.docsFirmaOrdenados.filter((d) => this.estadoDocFirma(d) === "signed").length;
         },
 
         isChecked(clave) { return !!this.checksCompletados[clave]; },
@@ -283,15 +297,43 @@ window.contratacionApp = function () {
         // FIRMA DIGITAL
         // ─────────────────────────────────────────────────────
         docFirmaInfo(idx) {
-            return this.docsActuales.find(d => d.doc_index === idx) || null;
+            return this.docsFirmaOrdenados.find((d) => Number(d?.doc_index) === Number(idx)) || null;
+        },
+
+        docTituloFirma(doc) {
+            if (!doc) return "Documento";
+            return doc.titulo || doc.doc_key || `Documento ${doc.doc_index || ""}`.trim();
+        },
+
+        estadoDocFirma(doc) {
+            const raw = String(doc?.estado || "").trim().toLowerCase();
+            if (["signed", "firmado", "completado", "approved", "done"].includes(raw)) return "signed";
+            if (["rejected", "rechazado", "declined", "cancelled", "canceled"].includes(raw)) return "rejected";
+            return "pending";
         },
 
         docFirmado(idx) {
-            return this.docFirmaInfo(idx)?.estado === "signed";
+            return this.estadoDocFirma(this.docFirmaInfo(idx)) === "signed";
+        },
+
+        docBloqueado(doc) {
+            if (!doc || this.estadoDocFirma(doc) === "signed") return false;
+            const currentIndex = Number(doc.doc_index || 0);
+            return this.docsFirmaOrdenados
+                .filter((item) => Number(item?.doc_index || 0) < currentIndex)
+                .some((item) => this.estadoDocFirma(item) !== "signed");
+        },
+
+        puedeIniciarFirma(doc) {
+            if (!doc) return false;
+            if (this.firmaCargando) return false;
+            if (this.estadoDocFirma(doc) === "signed") return false;
+            if (this.docBloqueado(doc)) return false;
+            return true;
         },
 
         get todosFirmados() {
-            return this.docFirmado(1) && this.docFirmado(2);
+            return this.totalDocsFirma > 0 && this.totalDocsFirmados === this.totalDocsFirma;
         },
 
         async iniciarFirma(docIndex) {
@@ -314,6 +356,38 @@ window.contratacionApp = function () {
                 this.firmaError = e?.response?.data?.error || "Error iniciando firma digital.";
             } finally {
                 this.firmaCargando = false;
+            }
+        },
+
+        async descargarContratoPdf(docIndex, docTitulo = "") {
+            if (!docIndex || this.descargaDocIndex === docIndex) return;
+            this.firmaError = "";
+            this.descargaDocIndex = docIndex;
+            try {
+                const resp = await axios.get(`${API}/contratacion/docs-firma/${docIndex}/pdf`, {
+                    headers: { Authorization: `Bearer ${this.jwt}` },
+                    responseType: "blob"
+                });
+                const blob = new Blob([resp.data], { type: "application/pdf" });
+                const blobUrl = URL.createObjectURL(blob);
+                const disposition = String(resp?.headers?.["content-disposition"] || "");
+                const fileNameMatch = disposition.match(/filename\*?=(?:UTF-8'')?\"?([^\";]+)\"?/i);
+                const fallbackName = `${docTitulo || `Documento_${docIndex}`}.pdf`;
+                const fileName = fileNameMatch?.[1]
+                    ? decodeURIComponent(fileNameMatch[1].replace(/\"/g, ""))
+                    : fallbackName;
+
+                const a = document.createElement("a");
+                a.href = blobUrl;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(blobUrl);
+            } catch (e) {
+                this.firmaError = e?.response?.data?.error || "No se pudo descargar el PDF de este documento.";
+            } finally {
+                this.descargaDocIndex = null;
             }
         },
 

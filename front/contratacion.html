@@ -335,49 +335,68 @@
                 </div>
                 <div>
                     <h2 class="font-bold text-slate-800">Firma de contratos</h2>
-                    <p class="text-xs text-slate-500">Firma ambos documentos para completar tu proceso</p>
+                    <p class="text-xs text-slate-500">
+                        Firma tus documentos pendientes para completar tu proceso
+                        <span x-show="totalDocsFirma > 0" class="font-semibold text-slate-600">
+                            (<span x-text="totalDocsFirmados"></span>/<span x-text="totalDocsFirma"></span> firmados)
+                        </span>
+                    </p>
                 </div>
             </div>
         </div>
 
         <div x-show="firmaError" class="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm" x-text="firmaError"></div>
 
-        <template x-for="idx in [1, 2]" :key="idx">
+        <div x-show="!docsFirmaOrdenados.length" class="bg-amber-50 border border-amber-200 text-amber-700 rounded-xl p-4 text-sm">
+            No hay documentos habilitados para firma en este momento. Contacta a Talento Humano.
+        </div>
+
+        <template x-for="doc in docsFirmaOrdenados" :key="doc.doc_index">
             <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
                 <div class="px-6 py-5 flex items-center justify-between">
                     <div class="flex items-center gap-4">
                         <div class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm"
-                             :class="docFirmado(idx) ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'"
-                             x-text="idx"></div>
+                             :class="estadoDocFirma(doc) === 'signed' ? 'bg-emerald-100 text-emerald-700' : (estadoDocFirma(doc) === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600')"
+                             x-text="doc.doc_index"></div>
                         <div>
                             <p class="font-semibold text-slate-800 text-sm"
-                               x-text="idx === 1 ? 'Contrato de Prestación de Servicios' : 'Acuerdo de Confidencialidad'"></p>
+                               x-text="docTituloFirma(doc)"></p>
                             <p class="text-xs text-slate-400 mt-0.5">
-                                <span x-show="docFirmado(idx)" class="text-emerald-600 font-semibold">Firmado correctamente</span>
-                                <span x-show="!docFirmado(idx) && docFirmaInfo(idx)?.estado === 'pending'" class="text-amber-600">Proceso iniciado — pendiente de firma</span>
-                                <span x-show="!docFirmado(idx) && !docFirmaInfo(idx)">Pendiente de inicio</span>
+                                <span x-show="estadoDocFirma(doc) === 'signed'" class="text-emerald-600 font-semibold">Firmado correctamente</span>
+                                <span x-show="estadoDocFirma(doc) === 'rejected'" class="text-red-600 font-semibold">Firma rechazada. Inicia nuevamente el proceso.</span>
+                                <span x-show="estadoDocFirma(doc) === 'pending' && doc.url_firma" class="text-amber-600">Proceso iniciado — pendiente de firma</span>
+                                <span x-show="estadoDocFirma(doc) === 'pending' && !doc.url_firma">Pendiente de inicio</span>
                             </p>
                         </div>
                     </div>
                     <div class="flex items-center gap-2">
-                        <template x-if="docFirmado(idx)">
+                        <template x-if="estadoDocFirma(doc) === 'signed'">
                             <svg class="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
                             </svg>
                         </template>
-                        <template x-if="!docFirmado(idx)">
+                        <template x-if="estadoDocFirma(doc) !== 'signed'">
                             <div class="flex gap-2">
                                 <button
-                                    @click="iniciarFirma(idx)"
-                                    :disabled="firmaCargando || (idx === 2 && !docFirmado(1))"
+                                    @click="descargarContratoPdf(doc.doc_index, docTituloFirma(doc))"
+                                    :disabled="descargaDocIndex === doc.doc_index"
+                                    class="px-3 py-2 rounded-xl text-xs font-semibold transition-all"
+                                    :class="descargaDocIndex === doc.doc_index
+                                        ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'">
+                                    <span x-text="descargaDocIndex === doc.doc_index ? 'Descargando...' : 'Descargar PDF'"></span>
+                                </button>
+                                <button
+                                    @click="iniciarFirma(doc.doc_index)"
+                                    :disabled="!puedeIniciarFirma(doc)"
                                     class="px-4 py-2 rounded-xl text-xs font-bold transition-all"
-                                    :class="(idx === 2 && !docFirmado(1)) || firmaCargando
+                                    :class="!puedeIniciarFirma(doc)
                                         ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                                         : 'bg-blue-600 hover:bg-blue-700 text-white'">
-                                    <span x-text="docFirmaInfo(idx)?.url_firma ? 'Abrir enlace de firma' : 'Iniciar firma'"></span>
+                                    <span x-text="doc.url_firma ? 'Abrir enlace de firma' : 'Iniciar firma'"></span>
                                 </button>
-                                <button x-show="docFirmaInfo(idx)?.estado === 'pending'"
-                                        @click="yaFirme(idx)"
+                                <button x-show="estadoDocFirma(doc) === 'pending' && doc.url_firma"
+                                        @click="yaFirme(doc.doc_index)"
                                         class="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all">
                                     Ya firmé
                                 </button>
@@ -385,9 +404,9 @@
                         </template>
                     </div>
                 </div>
-                <div x-show="idx === 2 && !docFirmado(1)"
+                <div x-show="docBloqueado(doc)"
                      class="px-6 pb-4 text-xs text-slate-400">
-                    Debes firmar el primer documento antes de continuar con este.
+                    Debes firmar los documentos anteriores antes de continuar con este.
                 </div>
             </div>
         </template>

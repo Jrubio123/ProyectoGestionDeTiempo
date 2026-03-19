@@ -12,7 +12,7 @@ DOCUMENTOS PDF (7 archivos):
   - REQUISITOS DE CONTRATO OUTSOURCING.pdf
     → Requisitos de Contrato
   - SC-PS-Seguridad Equipos V1.pdf
-    → Plantilla de reporte de tiempos
+    → Seguridad de Equipos (al confirmar lectura se descarga PLANTILLA DE TIEMPOS.xlsx)
   - Silver Consulting - Configurar Autenticación Multifactor - Office 365.pdf
     → Guía Autenticador Office 365
   - Silver Consulting - configurar MFA Silver Consulting - Office 365.pdf

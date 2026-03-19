@@ -6939,8 +6939,10 @@ const DOCS_ESTATICOS = [
   { clave: "politica_pago",     archivo: "POL\u00CDTICA DE PAGO A PROVEEDORES - GENERAL.pdf",                          label: "Politica de pago de proveedores" },
   { clave: "codigo_etica",      archivo: "Silver Consulting - C\u00F3digo de \u00E9tica y conducta.pdf",                    label: "Codigo de etica y conducta" },
   { clave: "requisitos",        archivo: "REQUISITOS DE CONTRATO OUTSOURCING.pdf",                                label: "Requisitos de Contrato",          plantilla: true, descarga_archivo: "FORMATO CUENTA DE COBRO 2026.doc" },
-  { clave: "plantilla_tiempos", archivo: "SC-PS-Seguridad Equipos V1.pdf",                                        label: "Plantilla de reporte de tiempos", plantilla: true, descarga_archivo: "PLANTILLA DE TIEMPOS.xlsx" },
+  { clave: "plantilla_tiempos", archivo: "SC-PS-Seguridad Equipos V1.pdf",                                        label: "Seguridad de Equipos",            plantilla: true, descarga_archivo: "PLANTILLA DE TIEMPOS.xlsx" },
   { clave: "guia_autenticador", archivo: "Silver Consulting - Configurar Autenticaci\u00F3n Multifactor - Office 365.pdf", label: "Guia Autenticador Office 365" },
+  { clave: "guia_mfa_365",      archivo: "Silver Consulting - configurar MFA Silver Consulting - Office 365.pdf", label: "Guia MFA Office 365" },
+  { clave: "guia_ingreso_365",  archivo: "Silver Consulting - Ingresar a Microsoft 365 Est\u00E1ndar.pdf",        label: "Guia ingreso Microsoft 365 Estandar" },
 ];
 
 const ARCHIVOS_ESTATICOS_CONTRATACION = new Set(
@@ -6964,7 +6966,10 @@ const CLAVES_ESTATICAS_VALIDAS = new Set([
   "pdf1", "pdf2", "pdf3", "pdf4", "pdf5"
 ]);
 
-const CLAVES_REQUERIDAS_FIRMA = DOCS_ESTATICOS.map(d => d.clave);
+const CLAVES_REQUERIDAS_FIRMA = [
+  ...DOCS_ESTATICOS.map(d => d.clave),
+  LINK_BIENVENIDA.clave
+];
 
 const requireTokenFirma = (req, res, next) => {
   const auth = req.headers.authorization || "";

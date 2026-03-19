@@ -100,11 +100,11 @@ window.contratacionApp = function () {
         // COMPUTED
         // ─────────────────────────────────────────────────────
         get allItems() {
-            return [...this.docs];
+            return this.linkItem ? [...this.docs, this.linkItem] : [...this.docs];
         },
 
         get requiredItems() {
-            return [...this.docs];
+            return this.allItems;
         },
 
         get docActual() {

@@ -65,9 +65,59 @@ window.firmaContratosApp = function () {
             });
         },
 
+        normalizeDocIndex(value) {
+            const n = Number(value);
+            return Number.isInteger(n) && n > 0 ? n : 0;
+        },
+
         getDocFirmaEstado(token, idx) {
             const docs = Array.isArray(token.docs_firma) ? token.docs_firma : [];
-            return docs.find(d => d.doc_index === idx)?.estado || null;
+            const target = this.normalizeDocIndex(idx);
+            return docs.find(d => this.normalizeDocIndex(d?.doc_index) === target)?.estado || null;
+        },
+
+        getDocFirmaIndices(token) {
+            const docs = Array.isArray(token?.docs_firma) ? token.docs_firma : [];
+            return [...new Set(
+                docs
+                    .map(d => this.normalizeDocIndex(d?.doc_index))
+                    .filter(n => n > 0)
+            )].sort((a, b) => a - b);
+        },
+
+        getChecksRequiredKeys(token) {
+            const fromApi = Array.isArray(token?.checks_requeridos) ? token.checks_requeridos.filter(Boolean) : [];
+            if (fromApi.length) return fromApi;
+            const checks = token?.checks_completados && typeof token.checks_completados === "object"
+                ? token.checks_completados
+                : {};
+            const keys = Object.keys(checks);
+            if (!keys.length) return ["pdf1", "pdf2", "pdf3", "pdf4", "pdf5"];
+            return keys.sort((a, b) => {
+                const aMatch = String(a).match(/^pdf(\d+)$/i);
+                const bMatch = String(b).match(/^pdf(\d+)$/i);
+                if (aMatch && bMatch) return Number(aMatch[1]) - Number(bMatch[1]);
+                if (aMatch) return -1;
+                if (bMatch) return 1;
+                return String(a).localeCompare(String(b));
+            });
+        },
+
+        isCheckDone(token, key) {
+            const checks = token?.checks_completados && typeof token.checks_completados === "object"
+                ? token.checks_completados
+                : {};
+            return !!checks[key];
+        },
+
+        getCheckLabel(key, idx = 0) {
+            const raw = String(key || "").trim();
+            const legacy = raw.match(/^pdf(\d+)$/i);
+            if (legacy) return `Doc ${legacy[1]}`;
+            if (!raw) return `Doc ${idx + 1}`;
+            const pretty = raw.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+            if (!pretty) return `Doc ${idx + 1}`;
+            return pretty.charAt(0).toUpperCase() + pretty.slice(1);
         },
 
         abrirModalGenerar() {

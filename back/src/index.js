@@ -5463,7 +5463,13 @@ app.get("/admin/firma-contratos", requireAccess({ roles: ["Administrador", TALEN
         LEFT JOIN usuarios u ON u.id = t.generado_por
       ORDER BY t.created_at DESC
     `);
-    res.json(result.rows);
+    const checksRequeridos = Array.isArray(CLAVES_REQUERIDAS_FIRMA) && CLAVES_REQUERIDAS_FIRMA.length
+      ? [...CLAVES_REQUERIDAS_FIRMA]
+      : ["pdf1", "pdf2", "pdf3", "pdf4", "pdf5"];
+    res.json(result.rows.map((row) => ({
+      ...row,
+      checks_requeridos: checksRequeridos
+    })));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al obtener tokens de firma" });

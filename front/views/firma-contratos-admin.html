@@ -73,20 +73,20 @@
                             <td class="px-5 py-4 text-gray-500 text-xs" x-text="t.correo_personal"></td>
                             <td class="px-5 py-4 text-center">
                                 <div class="flex items-center justify-center gap-1">
-                                    <template x-for="n in [1,2,3,4,5]" :key="n">
+                                    <template x-for="(k, idx) in getChecksRequiredKeys(t)" :key="`${t.id}-check-${k}`">
                                         <div class="w-5 h-5 rounded-full text-xs flex items-center justify-center font-bold"
-                                             :class="t.checks_completados?.['pdf'+n] ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-400'"
-                                             x-text="n"></div>
+                                             :class="isCheckDone(t, k) ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-400'"
+                                             x-text="idx + 1"></div>
                                     </template>
                                 </div>
                             </td>
                             <td class="px-5 py-4 text-center">
                                 <div class="flex items-center justify-center gap-1">
-                                    <template x-for="n in [1,2]" :key="n">
+                                    <template x-for="n in getDocFirmaIndices(t)" :key="`${t.id}-firma-${n}`">
                                         <div class="w-5 h-5 rounded-full text-xs flex items-center justify-center font-bold"
                                              :class="getDocFirmaEstado(t, n) === 'signed' ? 'bg-emerald-100 text-emerald-700'
-                                                   : getDocFirmaEstado(t, n) === 'pending' ? 'bg-amber-100 text-amber-700'
-                                                   : 'bg-gray-100 text-gray-400'"
+                                                    : getDocFirmaEstado(t, n) === 'pending' ? 'bg-amber-100 text-amber-700'
+                                                    : 'bg-gray-100 text-gray-400'"
                                              x-text="n"></div>
                                     </template>
                                 </div>
@@ -234,17 +234,17 @@
 
                 <div class="bg-gray-50 rounded-lg p-3">
                     <p class="text-xs text-gray-400 font-bold uppercase mb-2">Documentos informativos leídos</p>
-                    <div class="flex gap-3">
-                        <template x-for="n in [1,2,3,4,5]" :key="n">
+                    <div class="flex flex-wrap gap-3">
+                        <template x-for="(k, idx) in getChecksRequiredKeys(modal.item || {})" :key="`modal-check-${k}`">
                             <div class="flex items-center gap-1 text-xs font-semibold"
-                                 :class="modal.item?.checks_completados?.['pdf'+n] ? 'text-emerald-600' : 'text-gray-400'">
+                                 :class="isCheckDone(modal.item || {}, k) ? 'text-emerald-600' : 'text-gray-400'">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          :d="modal.item?.checks_completados?.['pdf'+n]
+                                          :d="isCheckDone(modal.item || {}, k)
                                               ? 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'
                                               : 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'"/>
                                 </svg>
-                                Doc <span x-text="n"></span>
+                                <span x-text="getCheckLabel(k, idx)"></span>
                             </div>
                         </template>
                     </div>

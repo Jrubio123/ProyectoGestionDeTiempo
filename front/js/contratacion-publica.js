@@ -470,7 +470,12 @@ window.contratacionApp = function () {
         async refrescarEstado() {
             try {
                 const res = await axios.get(`${API}/contratacion/estado`, {
-                    headers: { Authorization: `Bearer ${this.jwt}` }
+                    headers: {
+                        Authorization: `Bearer ${this.jwt}`,
+                        "Cache-Control": "no-cache",
+                        Pragma: "no-cache"
+                    },
+                    params: { _ts: Date.now() }
                 });
                 this.docsActuales = res.data.docs_firma || [];
                 this.checksCompletados = res.data.checks_completados || {};

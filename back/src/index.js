@@ -1140,6 +1140,16 @@ function normalizeDocStatus(value) {
   return "pending";
 }
 
+function isDocxTemplateFailureMessage(messageRaw) {
+  const msg = String(messageRaw || "").toLowerCase();
+  return msg.includes("compilando plantilla") || msg.includes("renderizando plantilla") || msg.includes("template") || msg.includes("docxtemplater");
+}
+
+function isDocxInfraFailureMessage(messageRaw) {
+  const msg = String(messageRaw || "").toLowerCase();
+  return msg.includes("libreoffice") || msg.includes("no genero el pdf") || msg.includes("timeout") || msg.includes("codigo") || msg.includes("dependencias docx") || msg.includes("pizzip") || msg.includes("docxtemplater");
+}
+
 function sanitizeDocxTagName(tag) {
   return String(tag || "")
     .replace(/\s+/g, "")
@@ -1918,25 +1928,70 @@ function getDocxTemplateBinary(templateFile) {
   return binary;
 }
 
+function extractDocxtemplaterErrorDetails(err) {
+  const details = Array.isArray(err?.properties?.errors)
+    ? err.properties.errors.map((e) => e?.properties?.explanation || e?.message).filter(Boolean)
+    : [];
+  if (details.length) return details;
+  const single = err?.properties?.explanation || err?.message;
+  return single ? [String(single)] : ["error desconocido"];
+}
+
+function buildDocxtemplaterInstanceFromBinary(binary, templateFile) {
+  const baseOptions = {
+    paragraphLoop: true,
+    linebreaks: true,
+    parser: createDocxtemplaterParser,
+    nullGetter: () => ""
+  };
+
+  const attempts = [
+    {
+      name: "double-braces",
+      options: {
+        ...baseOptions,
+        delimiters: { start: "{{", end: "}}" },
+        syntax: { allowUnopenedTag: true, allowUnclosedTag: true }
+      }
+    },
+    {
+      name: "single-braces-legacy",
+      options: baseOptions
+    }
+  ];
+
+  const attemptErrors = [];
+  for (const attempt of attempts) {
+    try {
+      const zip = new PizZip(binary);
+      return new Docxtemplater(zip, attempt.options);
+    } catch (err) {
+      const details = extractDocxtemplaterErrorDetails(err);
+      attemptErrors.push({ attempt: attempt.name, details });
+      console.warn(
+        `[docxtemplater] Fallo compilando plantilla (${templateFile}) con modo ${attempt.name}:`,
+        details.slice(0, 5).join(" | ")
+      );
+    }
+  }
+
+  const summary = attemptErrors
+    .map((item) => `${item.attempt}: ${item.details.slice(0, 3).join(" | ")}`)
+    .join(" || ");
+  throw new Error(`Error compilando plantilla ${templateFile}: ${summary || "sin detalles"}`);
+}
+
 function renderDocxTemplateToBuffer({ templateFile, data }) {
   if (!PizZip || !Docxtemplater) {
     throw new Error("Dependencias DOCX no disponibles en servidor (pizzip/docxtemplater)");
   }
   const binary = getDocxTemplateBinary(templateFile);
-  const zip = new PizZip(binary);
-  const doc = new Docxtemplater(zip, {
-    paragraphLoop: true,
-    linebreaks: true,
-    parser: createDocxtemplaterParser,
-    nullGetter: () => ""
-  });
+  const doc = buildDocxtemplaterInstanceFromBinary(binary, templateFile);
   try {
     doc.render(data || {});
   } catch (err) {
-    const details = Array.isArray(err?.properties?.errors)
-      ? err.properties.errors.map((e) => e.properties?.explanation || e.message).join("; ")
-      : err?.message || "error desconocido";
-    throw new Error(`Error renderizando plantilla ${templateFile}: ${details}`);
+    const details = extractDocxtemplaterErrorDetails(err);
+    throw new Error(`Error renderizando plantilla ${templateFile}: ${details.slice(0, 6).join(" | ")}`);
   }
   return doc.getZip().generate({
     type: "nodebuffer",
@@ -6974,6 +7029,10 @@ app.get("/contratacion/estado", requireTokenFirma, async (req, res) => {
     if (r.rowCount === 0) return res.status(404).json({ error: "Proceso no encontrado" });
     const row = r.rows[0];
     const docsFirma = await ensureTokenDocsFirmaPlan(row);
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("ETag", `"estado-${Date.now()}"`);
     res.json({
       nombre_persona: row.nombre_persona,
       estado: row.estado,
@@ -7203,7 +7262,13 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
     return res.send(outputBuffer);
   } catch (err) {
     console.error("Error descargando PDF de contrato:", err);
-    if (String(err?.message || "").toLowerCase().includes("libreoffice") || String(err?.message || "").toLowerCase().includes("no genero el pdf") || String(err?.message || "").toLowerCase().includes("timeout") || String(err?.message || "").toLowerCase().includes("codigo") || String(err?.message || "").toLowerCase().includes("dependencias docx") || String(err?.message || "").toLowerCase().includes("pizzip") || String(err?.message || "").toLowerCase().includes("docxtemplater")) {
+    const errMessage = String(err?.message || "");
+    if (isDocxTemplateFailureMessage(errMessage)) {
+      return res.status(422).json({
+        error: "No fue posible generar la vista previa porque la plantilla del documento tiene marcadores invalidos. Contacta a Talento Humano."
+      });
+    }
+    if (isDocxInfraFailureMessage(errMessage)) {
       return res.status(503).json({
         error: "No fue posible generar el PDF del contrato. Verifica LibreOffice y dependencias DOCX (pizzip/docxtemplater) en el servidor."
       });
@@ -7456,7 +7521,13 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
     });
   } catch (err) {
     console.error("Error iniciando firma de contrato:", err);
-    if (String(err?.message || "").toLowerCase().includes("libreoffice") || String(err?.message || "").toLowerCase().includes("no genero el pdf") || String(err?.message || "").toLowerCase().includes("timeout") || String(err?.message || "").toLowerCase().includes("codigo") || String(err?.message || "").toLowerCase().includes("dependencias docx") || String(err?.message || "").toLowerCase().includes("pizzip") || String(err?.message || "").toLowerCase().includes("docxtemplater")) {
+    const errMessage = String(err?.message || "");
+    if (isDocxTemplateFailureMessage(errMessage)) {
+      return res.status(422).json({
+        error: "No fue posible iniciar la firma porque la plantilla del documento tiene marcadores invalidos. Contacta a Talento Humano."
+      });
+    }
+    if (isDocxInfraFailureMessage(errMessage)) {
       return res.status(503).json({
         error: "No fue posible generar el PDF del contrato. Verifica LibreOffice y dependencias DOCX (pizzip/docxtemplater) en el servidor."
       });

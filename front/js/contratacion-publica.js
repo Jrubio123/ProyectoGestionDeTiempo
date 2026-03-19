@@ -406,6 +406,16 @@ window.contratacionApp = function () {
             return this.totalDocsFirma > 0 && this.totalDocsFirmados === this.totalDocsFirma;
         },
 
+        requiereReconciliacionFirma() {
+            return this.docsFirmaOrdenados.some((doc) => {
+                const estado = this.estadoDocFirma(doc);
+                const hasRefs = Boolean(doc?.request_id || doc?.contract_id || doc?.signature_id);
+                if (!hasRefs) return false;
+                if (estado === "pending") return true;
+                return estado === "signed" && !doc?.onedrive_url;
+            });
+        },
+
         async iniciarFirma(docIndex) {
             this.firmaError = "";
             this.firmaCargando = true;
@@ -418,7 +428,7 @@ window.contratacionApp = function () {
                 const urlFirma = res.data.url_firma;
                 if (urlFirma) {
                     window.open(urlFirma, "_blank", "noopener");
-                    await this.refrescarEstado();
+                    await this.refrescarEstado({ reconciliar: false });
                 } else {
                     this.firmaError = "No se recibió enlace de firma. Contacta a Talento Humano.";
                 }
@@ -467,17 +477,33 @@ window.contratacionApp = function () {
             }
         },
 
-        async refrescarEstado() {
+        async refrescarEstado({ reconciliar = false } = {}) {
             try {
+                let data = null;
+                if (reconciliar && this.requiereReconciliacionFirma()) {
+                    try {
+                        const reconcileRes = await axios.post(
+                            `${API}/contratacion/firma/reconciliar`,
+                            {},
+                            { headers: { Authorization: `Bearer ${this.jwt}` } }
+                        );
+                        data = reconcileRes?.data || null;
+                    } catch {
+                        data = null;
+                    }
+                }
                 // Solo Authorization: Cache-Control/Pragma disparan preflight y el back
                 // debe listarlos en CORS; el query _ts evita caché del GET sin headers extra.
-                const res = await axios.get(`${API}/contratacion/estado`, {
-                    headers: { Authorization: `Bearer ${this.jwt}` },
-                    params: { _ts: Date.now() }
-                });
-                this.docsActuales = res.data.docs_firma || [];
-                this.checksCompletados = res.data.checks_completados || {};
-                if (res.data.estado === "completado") {
+                if (!data) {
+                    const res = await axios.get(`${API}/contratacion/estado`, {
+                        headers: { Authorization: `Bearer ${this.jwt}` },
+                        params: { _ts: Date.now() }
+                    });
+                    data = res?.data || null;
+                }
+                this.docsActuales = data?.docs_firma || [];
+                this.checksCompletados = data?.checks_completados || {};
+                if (data?.estado === "completado" && !this.requiereReconciliacionFirma()) {
                     this.pantalla = "completado";
                     clearInterval(this.pollingInterval);
                 }
@@ -489,8 +515,8 @@ window.contratacionApp = function () {
         iniciarPolling() {
             clearInterval(this.pollingInterval);
             this.pollingInterval = setInterval(() => {
-                if (this.pantalla === "firma" && !this.todosFirmados) {
-                    this.refrescarEstado();
+                if (this.pantalla === "firma" && (!this.todosFirmados || this.requiereReconciliacionFirma())) {
+                    this.refrescarEstado({ reconciliar: true });
                 } else {
                     clearInterval(this.pollingInterval);
                 }
@@ -498,8 +524,8 @@ window.contratacionApp = function () {
         },
 
         async yaFirme() {
-            await this.refrescarEstado();
-            if (this.todosFirmados) this.pantalla = "completado";
+            await this.refrescarEstado({ reconciliar: true });
+            if (this.todosFirmados && !this.requiereReconciliacionFirma()) this.pantalla = "completado";
         },
 
         destroy() {

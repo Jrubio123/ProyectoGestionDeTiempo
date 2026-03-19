@@ -7292,6 +7292,49 @@ app.get("/contratacion/estado", requireTokenFirma, async (req, res) => {
   }
 });
 
+// POST /contratacion/firma/reconciliar ? consulta Click&Sign y sincroniza docs_firma/OneDrive
+app.post("/contratacion/firma/reconciliar", requireTokenFirma, async (req, res) => {
+  const idxRaw = req.body?.doc_index;
+  const idx =
+    idxRaw === undefined || idxRaw === null || idxRaw === ""
+      ? null
+      : Number(idxRaw);
+
+  if (idx !== null && (!Number.isInteger(idx) || idx < 1 || idx > 20)) {
+    return res.status(400).json({ error: "doc_index invalido" });
+  }
+
+  try {
+    const r = await pool.query(
+      `SELECT id, nombre_persona, correo_personal, estado, checks_completados, docs_firma, expires_at, solicitud_id, preregistro_id
+       FROM tokens_firma_contrato WHERE id = $1`,
+      [req.tokenFirma.token_id]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: "Proceso no encontrado" });
+
+    const row = r.rows[0];
+    const docsFirma = await ensureTokenDocsFirmaPlan(row);
+    const reconciled = await reconcileContratoDocsForProcess(
+      { ...row, docs_firma: docsFirma },
+      { docIndex: idx, reason: "endpoint" }
+    );
+
+    res.json({
+      ok: true,
+      nombre_persona: row.nombre_persona,
+      estado: reconciled.estado,
+      checks_completados: row.checks_completados,
+      docs_firma: normalizeDocsFirmaListCompat(reconciled.docs_firma),
+      expires_at: row.expires_at,
+      changed: reconciled.changed,
+      reconciled: reconciled.reconciled
+    });
+  } catch (err) {
+    console.error("Error reconciliando firma de contrato:", err);
+    res.status(500).json({ error: "Error reconciliando firma de contrato" });
+  }
+});
+
 // GET /contratacion/docs-info ? lista de documentos estáticos (sin auth de archivo)
 app.get("/contratacion/docs-info", requireTokenFirma, (req, res) => {
   res.json({
@@ -11088,6 +11131,187 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName) {
       nombre: uploaded.name || safeName,
       url: uploaded.webUrl || ""
     }
+  };
+}
+
+function contratoDocNeedsReconciliation(doc = {}) {
+  const status = normalizeDocStatus(doc?.estado);
+  const hasIdentifiers = Boolean(
+    String(doc?.request_id || "").trim() ||
+    String(doc?.contract_id || "").trim() ||
+    String(doc?.signature_id || "").trim()
+  );
+  if (!hasIdentifiers) return false;
+  if (status === "rejected") return false;
+  if (status === "signed" && String(doc?.onedrive_url || "").trim()) return false;
+  return true;
+}
+
+async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reason = "manual" } = {}) {
+  const targetIndex = Number(docIndex);
+  const filterByIndex = Number.isInteger(targetIndex) && targetIndex > 0;
+  const docsActuales = normalizeDocsFirmaListCompat(proceso?.docs_firma);
+  if (!docsActuales.length) {
+    return {
+      proceso: {
+        ...proceso,
+        docs_firma: docsActuales,
+        estado: proceso?.estado || "en_proceso"
+      },
+      docs_firma: docsActuales,
+      estado: proceso?.estado || "en_proceso",
+      changed: false,
+      reconciled: []
+    };
+  }
+
+  let changed = false;
+  const reconciled = [];
+  const nextDocs = [];
+
+  for (const doc of docsActuales) {
+    const currentIndex = Number(doc?.doc_index || 0);
+    let nextDoc = { ...doc };
+
+    if (filterByIndex && currentIndex !== targetIndex) {
+      nextDocs.push(nextDoc);
+      continue;
+    }
+
+    if (!contratoDocNeedsReconciliation(doc)) {
+      nextDocs.push(nextDoc);
+      continue;
+    }
+
+    const requestId = String(doc?.request_id || "").trim();
+    const contractId = String(doc?.contract_id || "").trim();
+    const signatureId = String(doc?.signature_id || "").trim();
+    if (!requestId && !contractId && !signatureId) {
+      nextDocs.push(nextDoc);
+      continue;
+    }
+
+    try {
+      const snapshot = await fetchClickSignSignatureSnapshot({ requestId, contractId, signatureId });
+      const event = snapshot?.event && typeof snapshot.event === "object" ? snapshot.event : {};
+      const snapshotSignatureId = String(extractClickSignSignatureId(event) || "").trim();
+      const previousStatus = normalizeDocStatus(doc?.estado);
+      const rawStatus = String(snapshot?.rawStatus || snapshot?.status || doc?.ultimo_evento || doc?.estado || "pending").trim();
+      let nextStatus = normalizeClickSignStatus(rawStatus);
+      let oneDriveInfo = null;
+      let signedPdfSource = "";
+      let uploadCompleted = Boolean(String(doc?.onedrive_url || "").trim());
+
+      if (!nextStatus) nextStatus = previousStatus || "pending";
+      if (previousStatus === "signed" && nextStatus !== "rejected") {
+        nextStatus = "signed";
+      }
+
+      if (nextStatus === "signed" || nextStatus === "pending" || !nextStatus) {
+        const artifacts = await resolveClickSignArtifacts({
+          event,
+          requestId,
+          contractId,
+          publicId: "",
+          signatureId: signatureId || snapshotSignatureId
+        });
+        const resolvedPdf = artifacts?.signedPdf || null;
+        if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
+          signedPdfSource = resolvedPdf.source || "";
+          if (!String(doc?.onedrive_url || "").trim()) {
+            try {
+              oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName);
+              uploadCompleted = Boolean(oneDriveInfo?.archivo?.url);
+            } catch (uploadErr) {
+              console.error("Error subiendo contrato reconciliado a OneDrive:", uploadErr?.message || uploadErr);
+            }
+          }
+          if (uploadCompleted || previousStatus === "signed") {
+            nextStatus = "signed";
+          } else {
+            nextStatus = "pending";
+          }
+        } else if (nextStatus === "signed" && previousStatus !== "signed") {
+          // Mantener pendiente hasta que el PDF firmado pueda descargarse y subirse a OneDrive.
+          nextStatus = "pending";
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+      nextDoc = {
+        ...doc,
+        signature_id: signatureId || snapshotSignatureId || doc?.signature_id || null,
+        estado: nextStatus || doc?.estado || "pending",
+        ultimo_evento: rawStatus || doc?.ultimo_evento || null,
+        reconciliado_en: nowIso,
+        reconciliado_origen: reason,
+        clicksign_origen: snapshot?.source || doc?.clicksign_origen || null
+      };
+      if (nextStatus === "signed" && !nextDoc.firmado_en) {
+        nextDoc.firmado_en = nowIso;
+      }
+      if (oneDriveInfo?.archivo?.url) {
+        nextDoc.onedrive_url = oneDriveInfo.archivo.url || null;
+        nextDoc.onedrive_carpeta = oneDriveInfo.carpeta || null;
+        nextDoc.onedrive_id = oneDriveInfo.archivo.id || null;
+        nextDoc.onedrive_nombre = oneDriveInfo.archivo.nombre || null;
+      }
+
+      if (JSON.stringify(doc) !== JSON.stringify(nextDoc)) {
+        changed = true;
+      }
+
+      reconciled.push({
+        doc_index: currentIndex || null,
+        request_id: requestId || null,
+        contract_id: contractId || null,
+        estado: nextDoc.estado || null,
+        onedrive_url: nextDoc.onedrive_url || null,
+        source: snapshot?.source || signedPdfSource || null
+      });
+    } catch (err) {
+      console.error("Error reconciliando documento de contrato:", {
+        proceso_id: proceso?.id || null,
+        doc_index: currentIndex || null,
+        message: err?.message || err
+      });
+      reconciled.push({
+        doc_index: currentIndex || null,
+        request_id: requestId || null,
+        contract_id: contractId || null,
+        error: err?.message || String(err)
+      });
+    }
+
+    nextDocs.push(nextDoc);
+  }
+
+  const nextEstado =
+    nextDocs.length > 0 && nextDocs.every((item) => normalizeDocStatus(item?.estado) === "signed")
+      ? "completado"
+      : (proceso?.estado === "expirado" ? "expirado" : "en_proceso");
+
+  if (changed || nextEstado !== proceso?.estado) {
+    await pool.query(
+      `UPDATE tokens_firma_contrato
+       SET docs_firma = $1::jsonb,
+           estado = $2,
+           updated_at = NOW()
+       WHERE id = $3`,
+      [JSON.stringify(nextDocs), nextEstado, proceso.id]
+    );
+  }
+
+  return {
+    proceso: {
+      ...proceso,
+      docs_firma: nextDocs,
+      estado: nextEstado
+    },
+    docs_firma: nextDocs,
+    estado: nextEstado,
+    changed: changed || nextEstado !== proceso?.estado,
+    reconciled
   };
 }
 

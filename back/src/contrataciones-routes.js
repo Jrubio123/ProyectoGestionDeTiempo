@@ -7,7 +7,8 @@ module.exports = function registerContratacionesRoutes(deps) {
     requireAccess,
     getGraphContext,
     sendEmailSafe,
-    buildEmailLayout
+    buildEmailLayout,
+    ensurePersistedAnexoFromProceso
   } = deps;
 
   const ESTADOS = Object.freeze({
@@ -37,6 +38,7 @@ module.exports = function registerContratacionesRoutes(deps) {
       sc.public_id,
       sc.tipo_solicitud,
       sc.estado,
+      sc.origen_flujo,
       sc.coordinador_solicitante_id,
       coord.public_id AS coordinador_public_id,
       coord.nombre_usuario AS coordinador_nombre,
@@ -49,6 +51,7 @@ module.exports = function registerContratacionesRoutes(deps) {
       sup.public_id AS supervisor_public_id,
       sup.nombre_usuario AS supervisor_nombre,
       sup.email AS supervisor_email,
+      sc.preregistro_id,
       sc.cliente_id,
       c.public_id AS cliente_public_id,
       c.titulo AS cliente_nombre,
@@ -134,7 +137,7 @@ module.exports = function registerContratacionesRoutes(deps) {
   function normalizeMoneda(value) {
     const raw = String(value || "").trim().toUpperCase();
     if (!raw) return null;
-    if (raw === "COP" || raw === "USD") return raw;
+    if (raw === "COP" || raw === "USD" || raw === "EUR") return raw;
     return null;
   }
 
@@ -252,6 +255,7 @@ module.exports = function registerContratacionesRoutes(deps) {
       id: row.public_id,
       tipo_solicitud: row.tipo_solicitud,
       estado: row.estado,
+      origen_flujo: row.origen_flujo || "coordinacion",
       coordinador: row.coordinador_public_id
         ? {
             id: row.coordinador_public_id,
@@ -266,6 +270,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             email: row.persona_email || null
           }
         : null,
+      preregistro_id: row.preregistro_id || null,
       supervisor: row.supervisor_public_id
         ? {
             id: row.supervisor_public_id,
@@ -333,6 +338,34 @@ module.exports = function registerContratacionesRoutes(deps) {
   async function getByPublicId(db, publicId) {
     const result = await db.query(`${BASE_SELECT} WHERE sc.public_id = $1 LIMIT 1`, [publicId]);
     return result.rows[0] || null;
+  }
+
+  async function resolvePersonaMoneda(db, personaUsuarioId) {
+    if (!personaUsuarioId) return null;
+    const r = await db.query(
+      `SELECT moneda_cobro
+       FROM usuarios
+       WHERE id = $1
+       LIMIT 1`,
+      [personaUsuarioId]
+    );
+    return normalizeMoneda(r.rows[0]?.moneda_cobro || null);
+  }
+
+  async function syncAnexoDesdeSolicitud(internalId, userId = null) {
+    const row = await getByInternalId(pool, internalId);
+    if (!row || row.tipo_solicitud === TIPO_RETIRO) return row;
+    try {
+      await ensurePersistedAnexoFromProceso({
+        solicitudId: internalId,
+        preregistroId: row.preregistro_id || null,
+        createdBy: userId || null,
+        strict: false
+      });
+    } catch (err) {
+      console.warn("No se pudo persistir anexo tecnico desde solicitud:", err?.message || err);
+    }
+    return row;
   }
 
   function requireOwnerIfCoordinator(req, row) {
@@ -623,6 +656,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             u.email AS correo_empresarial,
             u.cedula AS numero_documento,
             u.telefono,
+            u.moneda_cobro AS moneda,
             di.public_id AS tipo_documento_id,
             di.titulo AS tipo_documento,
             di.codigo AS tipo_documento_codigo
@@ -773,7 +807,7 @@ module.exports = function registerContratacionesRoutes(deps) {
 
       const moneda = payload.moneda === undefined ? null : normalizeMoneda(payload.moneda);
       if (payload.moneda !== undefined && !moneda) {
-        return res.status(400).json({ error: "moneda invalida. Usa COP o USD" });
+        return res.status(400).json({ error: "moneda invalida. Usa COP, USD o EUR" });
       }
       const modalidadContrato =
         payload.modalidad_contrato === undefined ? null : normalizeModalidad(payload.modalidad_contrato);
@@ -833,6 +867,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         const supervisorId = refs.supervisor_id || req.user?.id || null;
         const tipoDocumentoId = refs.tipo_documento_id || null;
         const clienteId = refs.cliente_id || null;
+        const monedaFinal = moneda || await resolvePersonaMoneda(pool, personaUsuarioId);
 
         let clienteNombre = null;
         let requiereConfirmacionCliente = false;
@@ -877,8 +912,10 @@ module.exports = function registerContratacionesRoutes(deps) {
             coordinador_solicitante_id,
             persona_usuario_id,
             supervisor_id,
+            preregistro_id,
             cliente_id,
             tipo_documento_id,
+            origen_flujo,
             nombre,
             apellidos,
             numero_documento,
@@ -912,7 +949,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             $1,  $2,  $3,  $4,  $5,  $6,  $7,  $8,  $9,  $10,
             $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
             $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-            $31, $32, false, false, false
+            $31, $32, $33, $34, false, false, false
           )
           RETURNING id
           `,
@@ -922,8 +959,10 @@ module.exports = function registerContratacionesRoutes(deps) {
             req.user?.id,
             personaUsuarioId,
             supervisorId,
+            null,
             clienteId,
             tipoDocumentoId,
+            "coordinacion",
             nombre,
             apellidos,
             numeroDocumento,
@@ -934,7 +973,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             ubicacion,
             grupoAppTiempos,
             grupoDistribucion,
-            moneda,
+            monedaFinal,
             toNullableNumber(payload.tarifa_hora),
             toNullableNumber(payload.tarifa_mes),
             toNullableNumber(payload.tarifa_medio_tiempo),
@@ -958,11 +997,12 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
 
         if (!enviarCorreos) {
-          const created = await getByInternalId(pool, createdId);
+          const created = await syncAnexoDesdeSolicitud(createdId, req.user?.id);
           return res.status(201).json(formatRow(created));
         }
 
-        const updated = await dispatchAndFinalizeSolicitud({ internalId: createdId, req });
+        await dispatchAndFinalizeSolicitud({ internalId: createdId, req });
+        const updated = await syncAnexoDesdeSolicitud(createdId, req.user?.id);
         return res.status(201).json(formatRow(updated));
       } catch (err) {
         if (err?.code === "PUBLIC_ID_NOT_FOUND") {
@@ -1024,9 +1064,9 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
 
         const monedaInput = payload.moneda !== undefined ? payload.moneda : current.moneda;
-        const moneda = monedaInput ? normalizeMoneda(monedaInput) : null;
+        let moneda = monedaInput ? normalizeMoneda(monedaInput) : null;
         if (monedaInput && !moneda) {
-          return res.status(400).json({ error: "moneda invalida. Usa COP o USD" });
+          return res.status(400).json({ error: "moneda invalida. Usa COP, USD o EUR" });
         }
 
         const modalidadInput = payload.modalidad_contrato !== undefined ? payload.modalidad_contrato : current.modalidad_contrato;
@@ -1099,6 +1139,9 @@ module.exports = function registerContratacionesRoutes(deps) {
         const supervisorId = refs.supervisor_id || null;
         const tipoDocumentoId = refs.tipo_documento_id || null;
         const clienteId = refs.cliente_id || null;
+        if (!moneda) {
+          moneda = await resolvePersonaMoneda(pool, personaUsuarioId);
+        }
 
         if (tipoSolicitud === TIPO_NUEVO && !clienteId) {
           return res.status(400).json({ error: "Cliente obligatorio para solicitudes Nuevo" });
@@ -1218,7 +1261,8 @@ module.exports = function registerContratacionesRoutes(deps) {
           ]
         );
 
-        const updated = await dispatchAndFinalizeSolicitud({ internalId, req });
+        await dispatchAndFinalizeSolicitud({ internalId, req });
+        const updated = await syncAnexoDesdeSolicitud(internalId, req.user?.id);
         return res.json(formatRow(updated));
       } catch (err) {
         if (err?.code === "PUBLIC_ID_NOT_FOUND") {
@@ -1403,7 +1447,7 @@ module.exports = function registerContratacionesRoutes(deps) {
 
         await client.query("COMMIT");
 
-        const updated = await getByInternalId(pool, internalId);
+        const updated = await syncAnexoDesdeSolicitud(internalId, req.user?.id);
         const response = formatRow(updated) || {};
         if (usuarioCreado?.public_id && typeof response === "object") {
           response.usuario_creado = {

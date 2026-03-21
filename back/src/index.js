@@ -609,6 +609,7 @@ const ONEDRIVE_ROOT_FOLDER = process.env.ONEDRIVE_ROOT_FOLDER || "AdjuntosCuenta
 const CONTRATOS_ONEDRIVE_FOLDER = process.env.CONTRATOS_ONEDRIVE_FOLDER || "ContratosFirmados";
 const CONTRATOS_TOKEN_EXPIRY_HOURS = Math.max(1, Number(process.env.CONTRATOS_TOKEN_EXPIRY_HOURS || 72));
 const CONTRATOS_BASE_URL = String(process.env.CONTRATOS_BASE_URL || "").trim().replace(/\/+$/, "");
+const CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO = String(process.env.CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO || "").trim();
 const CLICKSIGN_API_BASE = String(process.env.CLICKSIGN_API_BASE || "https://api.lleida.net/cs/v1").trim().replace(/\/+$/, "");
 const CLICKSIGN_API_KEY = String(process.env.CLICKSIGN_API_KEY || "").trim();
 const CLICKSIGN_USER = String(process.env.CLICKSIGN_USER || "").trim();
@@ -1294,24 +1295,58 @@ function upsertDocFirmaEntry(docsRaw, entry) {
   return [...filtered, entry].sort((a, b) => Number(a.doc_index || 0) - Number(b.doc_index || 0));
 }
 
-async function hasContratoBaseFirmado(correoPersonal) {
+async function hasContratoBaseFirmado({ correoPersonal = null, numeroDocumento = null } = {}) {
   const correo = toNullableTrimmedString(correoPersonal);
+  const documento = toNullableTrimmedString(numeroDocumento);
+  if (!correo && !documento) return false;
+
+  if (documento) {
+    const byDocumento = await pool.query(
+      `
+      SELECT 1
+      FROM tokens_firma_contrato tf
+      LEFT JOIN solicitudes_contratacion sc ON sc.id = tf.solicitud_id
+      LEFT JOIN preregistro_personas pp ON pp.id = tf.preregistro_id
+      WHERE tf.estado = 'completado'
+        AND COALESCE(sc.estado, 'Completado') <> 'Cancelado'
+        AND COALESCE(pp.estado, 'Completado') <> 'Anulado'
+        AND (
+          COALESCE(sc.numero_documento, '') = $1
+          OR COALESCE(pp.numero_documento, '') = $1
+        )
+      LIMIT 1
+      `,
+      [documento]
+    );
+    if (byDocumento.rowCount > 0) return true;
+  }
+
   if (!correo) return false;
-  const r = await pool.query(
-    `SELECT 1
-     FROM tokens_firma_contrato
-     WHERE LOWER(correo_personal) = LOWER($1)
-       AND estado = 'completado'
-     LIMIT 1`,
+  const byCorreo = await pool.query(
+    `
+    SELECT 1
+    FROM tokens_firma_contrato tf
+    LEFT JOIN solicitudes_contratacion sc ON sc.id = tf.solicitud_id
+    LEFT JOIN preregistro_personas pp ON pp.id = tf.preregistro_id
+    WHERE tf.estado = 'completado'
+      AND COALESCE(sc.estado, 'Completado') <> 'Cancelado'
+      AND COALESCE(pp.estado, 'Completado') <> 'Anulado'
+      AND LOWER(tf.correo_personal) = LOWER($1)
+    LIMIT 1
+    `,
     [correo]
   );
-  return r.rowCount > 0;
+  return byCorreo.rowCount > 0;
 }
 
 async function ensureTokenDocsFirmaPlan(tokenRow) {
   const docsCurrent = normalizeDocsFirmaListCompat(tokenRow?.docs_firma);
   if (docsCurrent.length > 0) return docsCurrent;
-  const hasBase = await hasContratoBaseFirmado(tokenRow?.correo_personal);
+  const personaContext = await resolveContratoPersonaContext(tokenRow || {});
+  const hasBase = await hasContratoBaseFirmado({
+    correoPersonal: personaContext?.correoPersonal || tokenRow?.correo_personal || null,
+    numeroDocumento: personaContext?.numeroDocumento || null
+  });
   const planned = buildDocsFirmaPlan({ hasContratoBase: hasBase });
   if (tokenRow?.id) {
     await pool.query(
@@ -1421,6 +1456,7 @@ async function getSolicitudContratacionDetalleById(internalId) {
       sc.id,
       sc.public_id,
       sc.tipo_solicitud,
+      sc.origen_flujo,
       sc.modalidad_contrato,
       sc.nombre,
       sc.apellidos,
@@ -1428,6 +1464,7 @@ async function getSolicitudContratacionDetalleById(internalId) {
       sc.correo_personal,
       sc.telefono,
       sc.ubicacion,
+      sc.preregistro_id,
       sc.cliente_id,
       c.public_id AS cliente_public_id,
       c.titulo AS cliente_nombre,
@@ -1498,6 +1535,9 @@ async function getPreregistroDetalleById(internalId) {
 }
 
 async function resolvePreregistroFromSolicitudDatosExtra(solicitudRow) {
+  if (solicitudRow?.preregistro_id) {
+    return solicitudRow.preregistro_id;
+  }
   const extra = parseJsonObject(solicitudRow?.datos_extra);
   const preregistroPublicId = toNullableTrimmedString(extra?.preregistro_id);
   if (!preregistroPublicId || !isGuid(preregistroPublicId)) return null;
@@ -1522,22 +1562,43 @@ async function resolveContratoPersonaContext(proceso) {
     }
   }
 
-  const nombre = toNullableTrimmedString(solicitud?.nombre) || toNullableTrimmedString(preregistro?.nombre) || toNullableTrimmedString(proceso?.nombre_persona) || "";
-  const apellidos = toNullableTrimmedString(solicitud?.apellidos) || toNullableTrimmedString(preregistro?.apellidos) || "";
+  const canonical = solicitud || preregistro || null;
+  const nombre =
+    toNullableTrimmedString(canonical?.nombre) ||
+    toNullableTrimmedString(solicitud?.nombre) ||
+    toNullableTrimmedString(preregistro?.nombre) ||
+    toNullableTrimmedString(proceso?.nombre_persona) ||
+    "";
+  const apellidos =
+    toNullableTrimmedString(canonical?.apellidos) ||
+    toNullableTrimmedString(solicitud?.apellidos) ||
+    toNullableTrimmedString(preregistro?.apellidos) ||
+    "";
   const nombreCompleto = `${nombre} ${apellidos}`.trim() || toNullableTrimmedString(proceso?.nombre_persona) || "";
-  const tipoDocumentoCodigo = toNullableTrimmedString(solicitud?.tipo_documento_codigo) || toNullableTrimmedString(preregistro?.tipo_documento_codigo) || "";
-  const tipoDocumentoTitulo = toNullableTrimmedString(solicitud?.tipo_documento_titulo) || toNullableTrimmedString(preregistro?.tipo_documento_titulo) || "";
+  const tipoDocumentoCodigo =
+    toNullableTrimmedString(canonical?.tipo_documento_codigo) ||
+    toNullableTrimmedString(solicitud?.tipo_documento_codigo) ||
+    toNullableTrimmedString(preregistro?.tipo_documento_codigo) ||
+    "";
+  const tipoDocumentoTitulo =
+    toNullableTrimmedString(canonical?.tipo_documento_titulo) ||
+    toNullableTrimmedString(solicitud?.tipo_documento_titulo) ||
+    toNullableTrimmedString(preregistro?.tipo_documento_titulo) ||
+    "";
   const tipoDocumento = tipoDocumentoCodigo || tipoDocumentoTitulo || "";
   const numeroDocumento =
+    toNullableTrimmedString(canonical?.numero_documento) ||
     toNullableTrimmedString(solicitud?.numero_documento) ||
     toNullableTrimmedString(preregistro?.numero_documento) ||
     null;
   const correoPersonal =
-    toNullableTrimmedString(proceso?.correo_personal) ||
+    toNullableTrimmedString(canonical?.correo_personal) ||
     toNullableTrimmedString(solicitud?.correo_personal) ||
     toNullableTrimmedString(preregistro?.correo_personal) ||
+    toNullableTrimmedString(proceso?.correo_personal) ||
     null;
   const telefono =
+    toNullableTrimmedString(canonical?.telefono) ||
     toNullableTrimmedString(solicitud?.telefono) ||
     toNullableTrimmedString(preregistro?.telefono) ||
     "";
@@ -1553,6 +1614,7 @@ async function resolveContratoPersonaContext(proceso) {
   return {
     solicitud,
     preregistro,
+    fuente_principal: solicitud ? "solicitud" : (preregistro ? "preregistro" : "token"),
     nombreCompleto,
     tipoDocumento,
     numeroDocumento,
@@ -1788,23 +1850,49 @@ function buildAnexoInsertPayload({
   };
 }
 
+async function findActiveAnexoBySource(payload) {
+  if (!payload?.solicitud_contratacion_id && !payload?.preregistro_id) return null;
+  const r = await pool.query(
+    `
+    SELECT *
+    FROM anexo_tecnico_items
+    WHERE estado <> 'cancelado'
+      AND (
+        ($1::int IS NOT NULL AND solicitud_contratacion_id = $1)
+        OR ($2::int IS NOT NULL AND preregistro_id = $2)
+      )
+    ORDER BY updated_at DESC NULLS LAST, id DESC
+    LIMIT 1
+    `,
+    [
+      payload.solicitud_contratacion_id || null,
+      payload.preregistro_id || null
+    ]
+  );
+  return r.rows[0] || null;
+}
+
 async function findAnexoDuplicate(payload) {
   const r = await pool.query(
     `
     SELECT id
     FROM anexo_tecnico_items
     WHERE estado <> 'cancelado'
-      AND COALESCE(numero_documento, '') = COALESCE($1, '')
-      AND COALESCE(LOWER(correo_personal), '') = COALESCE(LOWER($2), '')
-      AND tipo_asignacion = $3
-      AND COALESCE(cliente_id, 0) = COALESCE($4, 0)
-      AND COALESCE(moneda, 'COP') = COALESCE($5, 'COP')
-      AND valor_tarifa = $6
-      AND fecha_inicio = $7
-      AND fecha_fin = $8
+      AND COALESCE(solicitud_contratacion_id, 0) = COALESCE($1, 0)
+      AND COALESCE(preregistro_id, 0) = COALESCE($2, 0)
+      AND COALESCE(numero_documento, '') = COALESCE($3, '')
+      AND COALESCE(LOWER(correo_personal), '') = COALESCE(LOWER($4), '')
+      AND tipo_asignacion = $5
+      AND COALESCE(cliente_id, 0) = COALESCE($6, 0)
+      AND COALESCE(moneda, 'COP') = COALESCE($7, 'COP')
+      AND valor_tarifa = $8
+      AND fecha_inicio = $9
+      AND fecha_fin = $10
     LIMIT 1
     `,
     [
+      payload.solicitud_contratacion_id || null,
+      payload.preregistro_id || null,
       payload.numero_documento || null,
       payload.correo_personal || null,
       payload.tipo_asignacion,
@@ -1819,6 +1907,55 @@ async function findAnexoDuplicate(payload) {
 }
 
 async function insertAnexoTecnicoItem(payload) {
+  const existingBySource = await findActiveAnexoBySource(payload);
+  if (existingBySource?.id) {
+    const update = await pool.query(
+      `
+      UPDATE anexo_tecnico_items
+      SET
+        solicitud_contratacion_id = $1,
+        preregistro_id = $2,
+        nombre_persona = $3,
+        numero_documento = $4,
+        correo_personal = $5,
+        tipo_asignacion = $6,
+        cliente_id = $7,
+        cliente_nombre = $8,
+        moneda = $9,
+        valor_tarifa = $10,
+        fecha_inicio = $11,
+        fecha_fin = $12,
+        fecha_fin_calculada = $13,
+        origen = $14,
+        estado = $15,
+        creado_por = COALESCE($16, creado_por),
+        updated_at = NOW()
+      WHERE id = $17
+      RETURNING *
+      `,
+      [
+        payload.solicitud_contratacion_id,
+        payload.preregistro_id,
+        payload.nombre_persona,
+        payload.numero_documento,
+        payload.correo_personal,
+        payload.tipo_asignacion,
+        payload.cliente_id,
+        payload.cliente_nombre,
+        payload.moneda,
+        payload.valor_tarifa,
+        payload.fecha_inicio,
+        payload.fecha_fin,
+        payload.fecha_fin_calculada,
+        payload.origen,
+        payload.estado,
+        payload.creado_por,
+        existingBySource.id
+      ]
+    );
+    return { row: update.rows[0] || null, duplicated: false, updated: true };
+  }
+
   const duplicateId = await findAnexoDuplicate(payload);
   if (duplicateId) {
     const existing = await pool.query(`SELECT * FROM anexo_tecnico_items WHERE id = $1 LIMIT 1`, [duplicateId]);
@@ -1874,12 +2011,30 @@ async function insertAnexoTecnicoItem(payload) {
   return { row: insert.rows[0] || null, duplicated: false };
 }
 
-async function ensureAutomaticAnexoFromContext({ proceso, personaContext, createdBy = null }) {
+function buildAnexoPersistenciaError(personaContext, detalle = "") {
+  const nombre = toNullableTrimmedString(personaContext?.nombreCompleto) || "la persona";
+  const suffix = detalle ? ` Detalle: ${detalle}` : "";
+  const err = new Error(
+    `No existe un anexo técnico persistido para ${nombre}. Completa y sincroniza la solicitud antes de enviar a firma.${suffix}`
+  );
+  err.status = 422;
+  return err;
+}
+
+async function ensureAutomaticAnexoFromContext({ proceso, personaContext, createdBy = null, strict = false }) {
   if (!proceso || !personaContext) return null;
   const tipo = inferAnexoTipoFromContext(personaContext);
   const valorTarifa = inferAnexoTarifaFromContext(personaContext, tipo);
   const fechas = inferAnexoDatesFromContext(personaContext, tipo);
-  if (valorTarifa === null || !fechas.fecha_inicio || !fechas.fecha_fin) return null;
+  if (valorTarifa === null || !fechas.fecha_inicio || !fechas.fecha_fin) {
+    if (strict) {
+      throw buildAnexoPersistenciaError(
+        personaContext,
+        "Faltan tipo de asignación, tarifa o fechas requeridas para persistir el anexo."
+      );
+    }
+    return null;
+  }
 
   const input = {
     tipo_asignacion: tipo,
@@ -1892,19 +2047,59 @@ async function ensureAutomaticAnexoFromContext({ proceso, personaContext, create
     correo_personal: personaContext.correoPersonal
   };
 
-  const payload = buildAnexoInsertPayload({
-    input,
-    personaContext,
-    solicitudId: proceso.solicitud_id || null,
-    preregistroId: proceso.preregistro_id || null,
-    clienteId: personaContext.clienteId || null,
-    clienteNombre: personaContext.clienteNombre || "",
-    creadoPor: createdBy || null,
-    origen: "automatico"
-  });
+  let payload;
+  try {
+    payload = buildAnexoInsertPayload({
+      input,
+      personaContext,
+      solicitudId: proceso.solicitud_id || null,
+      preregistroId: proceso.preregistro_id || null,
+      clienteId: personaContext.clienteId || null,
+      clienteNombre: personaContext.clienteNombre || "",
+      creadoPor: createdBy || null,
+      origen: "automatico"
+    });
+  } catch (err) {
+    if (strict) {
+      throw buildAnexoPersistenciaError(personaContext, err?.message || "No fue posible construir el payload del anexo.");
+    }
+    return null;
+  }
 
   const result = await insertAnexoTecnicoItem(payload);
   return result.row;
+}
+
+async function ensurePersistedAnexoFromProceso({ solicitudId = null, preregistroId = null, createdBy = null, strict = false } = {}) {
+  const proceso = {
+    solicitud_id: solicitudId || null,
+    preregistro_id: preregistroId || null
+  };
+  const personaContext = await resolveContratoPersonaContext(proceso);
+  if (!personaContext) {
+    if (strict) {
+      throw buildAnexoPersistenciaError(null, "No fue posible resolver la persona del proceso.");
+    }
+    return null;
+  }
+  return ensureAutomaticAnexoFromContext({ proceso, personaContext, createdBy, strict });
+}
+
+async function requirePersistedAnexoFromProceso(proceso, personaContext = null) {
+  const resolvedContext = personaContext || await resolveContratoPersonaContext(proceso);
+  const items = await listAnexoTecnicoItems({
+    solicitudId: proceso?.solicitud_id || null,
+    preregistroId: proceso?.preregistro_id || null,
+    numeroDocumento: resolvedContext?.numeroDocumento || null,
+    correoPersonal: resolvedContext?.correoPersonal || null
+  });
+  if (!items.length) {
+    throw buildAnexoPersistenciaError(
+      resolvedContext,
+      "El PDF del anexo solo se genera con filas persistidas en base de datos."
+    );
+  }
+  return items;
 }
 
 function toAnexoApiRow(row) {
@@ -2440,48 +2635,8 @@ async function buildContratoTemplatePayload({ docDefinition, personaContext, pro
   };
 
   if (docDefinition?.doc_key === "anexo_tecnico") {
-    let items = await listAnexoTecnicoItems({
-      solicitudId: proceso?.solicitud_id || null,
-      preregistroId: proceso?.preregistro_id || null,
-      numeroDocumento: personaContext?.numeroDocumento || null,
-      correoPersonal: personaContext?.correoPersonal || null
-    });
-
-    if (!items.length) {
-      try {
-        await ensureAutomaticAnexoFromContext({
-          proceso,
-          personaContext,
-          createdBy: null
-        });
-        items = await listAnexoTecnicoItems({
-          solicitudId: proceso?.solicitud_id || null,
-          preregistroId: proceso?.preregistro_id || null,
-          numeroDocumento: personaContext?.numeroDocumento || null,
-          correoPersonal: personaContext?.correoPersonal || null
-        });
-      } catch (autoErr) {
-        console.warn("No se pudo crear item automatico de anexo tecnico:", autoErr?.message || autoErr);
-      }
-    }
-
-    const rows = (items || []).map(buildAnexoItemForTemplateRow);
-    if (!rows.length) {
-      const tipo = inferAnexoTipoFromContext(personaContext);
-      const tarifa = inferAnexoTarifaFromContext(personaContext, tipo);
-      const fechas = inferAnexoDatesFromContext(personaContext, tipo);
-      rows.push(
-        buildAnexoItemForTemplateRow({
-          tipo_asignacion: tipo,
-          cliente_nombre: personaContext?.clienteNombre || "",
-          valor_tarifa: tarifa || 0,
-          moneda: personaContext?.moneda || "COP",
-          fecha_inicio: fechas.fecha_inicio,
-          fecha_fin: fechas.fecha_fin
-        })
-      );
-    }
-    payload.items = rows;
+    const items = await requirePersistedAnexoFromProceso(proceso, personaContext);
+    payload.items = (items || []).map(buildAnexoItemForTemplateRow);
   }
 
   return payload;
@@ -5761,6 +5916,192 @@ function buildContratoEmailHtml({ nombre, token, link }) {
 </html>`;
 }
 
+function parseSimpleEmailList(value) {
+  return String(value || "")
+    .split(/[;,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function escapeHtmlText(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildContratoFirmaCompletadaEmail({ proceso, docs = [] }) {
+  const nombre = String(proceso?.nombre_persona || "Sin nombre").trim();
+  const correo = String(proceso?.correo_personal || "").trim();
+  const tokenPublicId = String(proceso?.public_id || "").trim();
+  const solicitudPublicId = String(proceso?.solicitud_public_id || "").trim();
+  const preregistroPublicId = String(proceso?.preregistro_public_id || "").trim();
+  const links = Array.isArray(docs) ? docs : [];
+
+  const metaLines = [
+    `Persona: ${nombre || "Sin nombre"}`,
+    correo ? `Correo personal: ${correo}` : null,
+    tokenPublicId ? `Proceso de firma: ${tokenPublicId}` : null,
+    solicitudPublicId ? `Solicitud de contratacion: ${solicitudPublicId}` : null,
+    preregistroPublicId ? `Preregistro: ${preregistroPublicId}` : null
+  ].filter(Boolean);
+
+  const docLines = links.map((doc) => `- ${doc.titulo}: ${doc.url}`);
+  const text = [
+    `El contrato de ${nombre || "la persona"} ya fue firmado y los documentos quedaron disponibles en OneDrive.`,
+    "",
+    ...metaLines,
+    "",
+    "Documentos firmados:",
+    ...docLines
+  ].join("\n");
+
+  const metaHtml = metaLines.map((line) => `<li style="margin:0 0 8px;">${escapeHtmlText(line)}</li>`).join("");
+  const docsHtml = links
+    .map((doc) => `
+      <li style="margin:0 0 10px;">
+        <strong>${escapeHtmlText(doc.titulo)}</strong><br>
+        <a href="${escapeHtmlText(doc.url)}" style="color:#2563eb;text-decoration:none;">${escapeHtmlText(doc.url)}</a>
+      </li>
+    `)
+    .join("");
+
+  const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:24px;background:#f4f6fa;font-family:'Segoe UI',Arial,sans-serif;color:#1e293b;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="max-width:680px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
+    <tr>
+      <td style="padding:28px 32px;background:#0f766e;color:#ffffff;">
+        <h1 style="margin:0;font-size:22px;">Contrato firmado</h1>
+        <p style="margin:8px 0 0;font-size:14px;color:#ccfbf1;">Los documentos ya quedaron disponibles para revision interna.</p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:28px 32px;">
+        <p style="margin:0 0 18px;font-size:15px;">
+          El contrato de <strong>${escapeHtmlText(nombre || "la persona")}</strong> ya fue firmado y los documentos quedaron almacenados en OneDrive.
+        </p>
+        <p style="margin:0 0 10px;font-size:13px;color:#475569;font-weight:700;">Datos del proceso</p>
+        <ul style="margin:0 0 22px 18px;padding:0;font-size:14px;color:#334155;">
+          ${metaHtml}
+        </ul>
+        <p style="margin:0 0 10px;font-size:13px;color:#475569;font-weight:700;">Documentos firmados</p>
+        <ul style="margin:0 0 8px 18px;padding:0;font-size:14px;color:#334155;">
+          ${docsHtml}
+        </ul>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  return {
+    subject: `Contrato firmado - ${nombre || "Sin nombre"}`,
+    text,
+    html
+  };
+}
+
+async function notifyContratoFirmaCompletada(tokenId) {
+  const recipients = parseSimpleEmailList(CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO);
+  if (!tokenId || recipients.length === 0) {
+    return { ok: false, skipped: "config_missing" };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `
+      SELECT
+        t.id,
+        t.public_id,
+        t.nombre_persona,
+        t.correo_personal,
+        t.estado,
+        t.docs_firma,
+        t.firma_completada_notificada_at,
+        sc.public_id AS solicitud_public_id,
+        pp.public_id AS preregistro_public_id
+      FROM tokens_firma_contrato t
+      LEFT JOIN solicitudes_contratacion sc ON sc.id = t.solicitud_id
+      LEFT JOIN preregistro_personas pp ON pp.id = t.preregistro_id
+      WHERE t.id = $1
+      FOR UPDATE
+      `,
+      [tokenId]
+    );
+
+    if (result.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, skipped: "not_found" };
+    }
+
+    const proceso = result.rows[0];
+    if (proceso.estado !== "completado") {
+      await client.query("ROLLBACK");
+      return { ok: false, skipped: "not_completed" };
+    }
+    if (proceso.firma_completada_notificada_at) {
+      await client.query("ROLLBACK");
+      return { ok: true, skipped: "already_notified" };
+    }
+
+    const docs = normalizeDocsFirmaListCompat(proceso.docs_firma)
+      .filter((doc) => normalizeDocStatus(doc?.estado) === "signed")
+      .map((doc) => ({
+        doc_index: Number(doc?.doc_index || 0) || null,
+        titulo: String(doc?.titulo || doc?.doc_key || `Documento ${doc?.doc_index || ""}`).trim() || "Documento firmado",
+        url: String(doc?.onedrive_url || "").trim()
+      }));
+
+    if (!docs.length) {
+      await client.query("ROLLBACK");
+      return { ok: false, skipped: "no_signed_docs" };
+    }
+    if (docs.some((doc) => !doc.url)) {
+      await client.query("ROLLBACK");
+      return { ok: false, skipped: "pending_onedrive_upload" };
+    }
+
+    const mail = buildContratoFirmaCompletadaEmail({ proceso, docs });
+    const sendResult = await sendEmailSafe({
+      to: recipients,
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html
+    });
+    if (!sendResult.ok) {
+      await client.query("ROLLBACK");
+      return { ok: false, skipped: "send_failed", error: sendResult.error || null };
+    }
+
+    await client.query(
+      `
+      UPDATE tokens_firma_contrato
+      SET firma_completada_notificada_at = NOW(),
+          firma_completada_notificada_a = $2,
+          updated_at = NOW()
+      WHERE id = $1
+      `,
+      [tokenId, recipients.join(", ")]
+    );
+    await client.query("COMMIT");
+    return { ok: true, notified_to: recipients };
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {}
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 app.get("/admin/firma-contratos", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
   try {
     const result = await pool.query(`
@@ -5814,8 +6155,15 @@ app.get("/admin/firma-contratos/candidatos", requireAccess({ roles: ["Administra
           EXISTS (
             SELECT 1
             FROM tokens_firma_contrato tf
-            WHERE LOWER(tf.correo_personal) = LOWER(sc.correo_personal)
-              AND tf.estado = 'completado'
+            LEFT JOIN solicitudes_contratacion sc2 ON sc2.id = tf.solicitud_id
+            LEFT JOIN preregistro_personas pp2 ON pp2.id = tf.preregistro_id
+            WHERE tf.estado = 'completado'
+              AND COALESCE(sc2.estado, 'Completado') <> 'Cancelado'
+              AND COALESCE(pp2.estado, 'Completado') <> 'Anulado'
+              AND (
+                (sc.numero_documento IS NOT NULL AND (COALESCE(sc2.numero_documento, '') = sc.numero_documento OR COALESCE(pp2.numero_documento, '') = sc.numero_documento))
+                OR (sc.correo_personal IS NOT NULL AND LOWER(tf.correo_personal) = LOWER(sc.correo_personal))
+              )
           ) AS tiene_contrato_base,
           sc.created_at
         FROM solicitudes_contratacion sc
@@ -5836,8 +6184,15 @@ app.get("/admin/firma-contratos/candidatos", requireAccess({ roles: ["Administra
           EXISTS (
             SELECT 1
             FROM tokens_firma_contrato tf
-            WHERE LOWER(tf.correo_personal) = LOWER(pp.correo_personal)
-              AND tf.estado = 'completado'
+            LEFT JOIN solicitudes_contratacion sc2 ON sc2.id = tf.solicitud_id
+            LEFT JOIN preregistro_personas pp2 ON pp2.id = tf.preregistro_id
+            WHERE tf.estado = 'completado'
+              AND COALESCE(sc2.estado, 'Completado') <> 'Cancelado'
+              AND COALESCE(pp2.estado, 'Completado') <> 'Anulado'
+              AND (
+                (pp.numero_documento IS NOT NULL AND (COALESCE(sc2.numero_documento, '') = pp.numero_documento OR COALESCE(pp2.numero_documento, '') = pp.numero_documento))
+                OR (pp.correo_personal IS NOT NULL AND LOWER(tf.correo_personal) = LOWER(pp.correo_personal))
+              )
           ) AS tiene_contrato_base,
           pp.created_at
         FROM preregistro_personas pp
@@ -5857,9 +6212,6 @@ app.get("/admin/firma-contratos/candidatos", requireAccess({ roles: ["Administra
 app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
   const { solicitud_id, preregistro_id, nombre_persona, correo_personal } = req.body || {};
 
-  if (!nombre_persona || !correo_personal) {
-    return res.status(400).json({ error: "nombre_persona y correo_personal son requeridos" });
-  }
   if (!solicitud_id && !preregistro_id) {
     return res.status(400).json({ error: "Debes indicar solicitud_id o preregistro_id" });
   }
@@ -5881,42 +6233,51 @@ app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrado
       preId = r.rows[0].id;
     }
 
-    const hasBaseContract = await hasContratoBaseFirmado(correo_personal);
+    const procesoContext = {
+      solicitud_id: solId,
+      preregistro_id: preId,
+      nombre_persona: nombre_persona || "",
+      correo_personal: correo_personal || ""
+    };
+    const personaContext = await resolveContratoPersonaContext(procesoContext);
+    const nombreFinal =
+      toNullableTrimmedString(personaContext?.nombreCompleto) ||
+      toNullableTrimmedString(nombre_persona) ||
+      "";
+    const correoFinal =
+      toNullableTrimmedString(personaContext?.correoPersonal) ||
+      toNullableTrimmedString(correo_personal) ||
+      "";
+    if (!nombreFinal || !correoFinal) {
+      return res.status(400).json({ error: "No se pudo resolver nombre_persona o correo_personal del proceso" });
+    }
+
+    const hasBaseContract = await hasContratoBaseFirmado({
+      correoPersonal: correoFinal,
+      numeroDocumento: personaContext?.numeroDocumento || null
+    });
     const docsPlan = buildDocsFirmaPlan({ hasContratoBase: hasBaseContract });
+    if (docsPlan.some((doc) => doc?.doc_key === "anexo_tecnico")) {
+      await requirePersistedAnexoFromProceso(procesoContext, personaContext);
+    }
 
     const insert = await pool.query(
       `INSERT INTO tokens_firma_contrato
         (token, solicitud_id, preregistro_id, nombre_persona, correo_personal, docs_firma, generado_por, expires_at)
        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
        RETURNING public_id AS id, token, expires_at, docs_firma`,
-      [token, solId, preId, nombre_persona, correo_personal, JSON.stringify(docsPlan), req.user.id, expiresAt]
+      [token, solId, preId, nombreFinal, correoFinal, JSON.stringify(docsPlan), req.user.id, expiresAt]
     );
 
     const row = insert.rows[0];
-    const procesoContext = {
-      solicitud_id: solId,
-      preregistro_id: preId,
-      nombre_persona,
-      correo_personal
-    };
-    try {
-      const personaContext = await resolveContratoPersonaContext(procesoContext);
-      await ensureAutomaticAnexoFromContext({
-        proceso: procesoContext,
-        personaContext,
-        createdBy: req.user.id
-      });
-    } catch (anexoErr) {
-      console.warn("No se pudo asegurar item automatico de anexo al generar token:", anexoErr?.message || anexoErr);
-    }
 
     const baseUrl = CONTRATOS_BASE_URL || "https://icy-ground-03832ec1e.1.azurestaticapps.net";
     const link = `${baseUrl}/contratacion.html?t=${token}`;
 
     await sendEmailSafe({
-      to: correo_personal,
+      to: correoFinal,
       subject: "Proceso de contratación ? Silver Consulting",
-      html: buildContratoEmailHtml({ nombre: nombre_persona, token, link })
+      html: buildContratoEmailHtml({ nombre: nombreFinal, token, link })
     });
 
     res.status(201).json({
@@ -5930,6 +6291,10 @@ app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrado
     });
   } catch (err) {
     console.error(err);
+    const status = Number(err?.status || 0);
+    if (status >= 400 && status < 500) {
+      return res.status(status).json({ error: err.message || "No fue posible generar el token de firma" });
+    }
     res.status(500).json({ error: "Error generando token de firma" });
   }
 });
@@ -6893,7 +7258,8 @@ registerPreregistroRoutes({
   requireAccess,
   getGraphContext,
   sendEmailSafe,
-  buildEmailLayout
+  buildEmailLayout,
+  ensurePersistedAnexoFromProceso
 });
 
 registerContratacionesRoutes({
@@ -6904,7 +7270,8 @@ registerContratacionesRoutes({
   requireAccess,
   getGraphContext,
   sendEmailSafe,
-  buildEmailLayout
+  buildEmailLayout,
+  ensurePersistedAnexoFromProceso
 });
 /* ===============================
    AUTH
@@ -7583,17 +7950,6 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
     }
 
     const personaContext = await resolveContratoPersonaContext(proceso);
-    if (docDefinition.doc_key === "anexo_tecnico") {
-      try {
-        await ensureAutomaticAnexoFromContext({
-          proceso,
-          personaContext,
-          createdBy: null
-        });
-      } catch (anexoErr) {
-        console.warn("No se pudo asegurar anexo tecnico antes de descargar:", anexoErr?.message || anexoErr);
-      }
-    }
 
     const personaSlug = sanitizePathSegment(
       (personaContext?.nombreCompleto || proceso.nombre_persona || "Contratista").replace(/\s+/g, "_"),
@@ -7629,6 +7985,9 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
   } catch (err) {
     console.error("Error descargando PDF de contrato:", err);
     const errMessage = String(err?.message || "");
+    if (Number(err?.status || 0) === 422) {
+      return res.status(422).json({ error: errMessage || "No fue posible generar el documento solicitado" });
+    }
     if (isDocxTemplateFailureMessage(errMessage)) {
       return res.status(422).json({
         error: "No fue posible generar la vista previa porque la plantilla del documento tiene marcadores invalidos. Contacta a Talento Humano."
@@ -7720,17 +8079,6 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
     }
 
     const personaContext = await resolveContratoPersonaContext(proceso);
-    if (docDefinition.doc_key === "anexo_tecnico") {
-      try {
-        await ensureAutomaticAnexoFromContext({
-          proceso,
-          personaContext,
-          createdBy: null
-        });
-      } catch (anexoErr) {
-        console.warn("No se pudo asegurar anexo tecnico antes de firmar:", anexoErr?.message || anexoErr);
-      }
-    }
 
     const personaSlug = sanitizePathSegment(
       (personaContext?.nombreCompleto || proceso.nombre_persona || "Contratista").replace(/\s+/g, "_"),
@@ -7889,6 +8237,9 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
   } catch (err) {
     console.error("Error iniciando firma de contrato:", err);
     const errMessage = String(err?.message || "");
+    if (Number(err?.status || 0) === 422) {
+      return res.status(422).json({ error: errMessage || "No fue posible iniciar la firma del documento" });
+    }
     if (isDocxTemplateFailureMessage(errMessage)) {
       return res.status(422).json({
         error: "No fue posible iniciar la firma porque la plantilla del documento tiene marcadores invalidos. Contacta a Talento Humano."
@@ -11397,6 +11748,14 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
     );
   }
 
+  if (nextEstado === "completado") {
+    try {
+      await notifyContratoFirmaCompletada(proceso.id);
+    } catch (notifyErr) {
+      console.error("Error notificando contrato completado:", notifyErr?.message || notifyErr);
+    }
+  }
+
   return {
     proceso: {
       ...proceso,
@@ -11492,14 +11851,19 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
     let docMatched = false;
     const nuevaLista = docsActuales.map((d) => {
       if (d.request_id === requestId || d.contract_id === contractId) {
+        const finalStatus =
+          status === "rejected"
+            ? "rejected"
+            : (String(oneDriveInfo?.archivo?.url || d.onedrive_url || "").trim() ? "signed" : "pending");
         docMatched = true;
         return {
           ...d,
           signature_id: signatureId || d.signature_id || null,
-          estado: status === "rejected" ? "rejected" : "signed",
-          firmado_en: nowIso,
-          onedrive_url: oneDriveInfo?.archivo?.url || null,
-          onedrive_carpeta: oneDriveInfo?.carpeta || null
+          estado: finalStatus,
+          firmado_en: finalStatus === "signed" ? (d.firmado_en || nowIso) : d.firmado_en || null,
+          ultimo_evento: rawStatus || d.ultimo_evento || null,
+          onedrive_url: oneDriveInfo?.archivo?.url || d.onedrive_url || null,
+          onedrive_carpeta: oneDriveInfo?.carpeta || d.onedrive_carpeta || null
         };
       }
       return d;
@@ -11509,6 +11873,10 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
     if (!docMatched && docIndex) {
       const fallbackKey = LEGACY_DOC_INDEX_TO_KEY.get(Number(docIndex)) || null;
       const fallbackDef = getContratoDocDefinition(fallbackKey);
+      const fallbackStatus =
+        status === "rejected"
+          ? "rejected"
+          : (String(oneDriveInfo?.archivo?.url || "").trim() ? "signed" : "pending");
       finalDocs = upsertDocFirmaEntry(finalDocs, {
         doc_index: Number(docIndex),
         doc_key: fallbackDef?.doc_key || fallbackKey,
@@ -11517,8 +11885,9 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         request_id: requestId || null,
         contract_id: contractId || null,
         signature_id: signatureId || null,
-        estado: status === "rejected" ? "rejected" : "signed",
-        firmado_en: nowIso,
+        estado: fallbackStatus,
+        firmado_en: fallbackStatus === "signed" ? nowIso : null,
+        ultimo_evento: rawStatus || null,
         onedrive_url: oneDriveInfo?.archivo?.url || null,
         onedrive_carpeta: oneDriveInfo?.carpeta || null
       });
@@ -11534,6 +11903,14 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
        WHERE id = $3`,
       [JSON.stringify(finalDocs), todosFirmados ? "completado" : "en_proceso", proceso.id]
     );
+
+    if (todosFirmados) {
+      try {
+        await notifyContratoFirmaCompletada(proceso.id);
+      } catch (notifyErr) {
+        console.error("Error notificando contrato completado desde webhook:", notifyErr?.message || notifyErr);
+      }
+    }
 
     console.log(`Contrato doc${docIndex || "?"} estado ${status} para proceso ${proceso.id}. Completado: ${todosFirmados}`);
   } catch (err) {

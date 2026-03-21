@@ -7,7 +7,8 @@ module.exports = function registerPreregistroRoutes(deps) {
     requireAccess,
     getGraphContext,
     sendEmailSafe,
-    buildEmailLayout
+    buildEmailLayout,
+    ensurePersistedAnexoFromProceso
   } = deps;
 
   const ESTADOS = Object.freeze({
@@ -273,6 +274,115 @@ module.exports = function registerPreregistroRoutes(deps) {
     return r.rows[0] || null;
   }
 
+  async function findLinkedSolicitudContratacion(db, preregistroRow) {
+    if (!preregistroRow?.id) return null;
+    const preregistroPublicId = String(preregistroRow.public_id || "").trim();
+    const r = await db.query(
+      `
+      SELECT id, datos_extra
+      FROM solicitudes_contratacion
+      WHERE preregistro_id = $1
+         OR COALESCE(datos_extra->>'preregistro_id', '') = $2
+      ORDER BY updated_at DESC NULLS LAST, id DESC
+      LIMIT 1
+      `,
+      [preregistroRow.id, preregistroPublicId]
+    );
+    return r.rows[0] || null;
+  }
+
+  async function syncSolicitudContratacionFromPreregistro(db, preregistroRow, { estado = null, personaUsuarioId = null } = {}) {
+    const linked = await findLinkedSolicitudContratacion(db, preregistroRow);
+    if (!linked?.id) return null;
+
+    const existingDatosExtra =
+      linked.datos_extra && typeof linked.datos_extra === "object" && !Array.isArray(linked.datos_extra)
+        ? linked.datos_extra
+        : {};
+
+    const mergedDatosExtra = {
+      ...existingDatosExtra,
+      preregistro_id: String(preregistroRow.public_id || existingDatosExtra.preregistro_id || ""),
+      direccion: preregistroRow.direccion || existingDatosExtra.direccion || null,
+      tipo_persona: preregistroRow.tipo_persona || existingDatosExtra.tipo_persona || null,
+      banco_id: preregistroRow.banco_id || existingDatosExtra.banco_id || null,
+      tipo_cuenta: preregistroRow.tipo_cuenta || existingDatosExtra.tipo_cuenta || null,
+      numero_cuenta: preregistroRow.numero_cuenta || existingDatosExtra.numero_cuenta || null
+    };
+
+    await db.query(
+      `
+      UPDATE solicitudes_contratacion
+      SET
+        preregistro_id = $1,
+        origen_flujo = 'rrhh',
+        tipo_documento_id = COALESCE($2, tipo_documento_id),
+        nombre = $3,
+        apellidos = $4,
+        numero_documento = $5,
+        correo_personal = $6,
+        correo_empresarial = COALESCE($7, correo_empresarial),
+        telefono = $8,
+        ubicacion = COALESCE($9, ubicacion),
+        moneda = COALESCE($10::tipo_moneda, moneda),
+        tarifa_hora = $11,
+        tarifa_mes = $12,
+        tarifa_medio_tiempo = $13,
+        tarifa_capacitacion = $14,
+        fecha_fin = COALESCE($15, fecha_fin),
+        datos_extra = COALESCE(datos_extra, '{}'::jsonb) || $16::jsonb,
+        persona_usuario_id = COALESCE($17, persona_usuario_id),
+        estado = COALESCE($18, estado),
+        updated_at = NOW()
+      WHERE id = $19
+      `,
+      [
+        preregistroRow.id,
+        preregistroRow.tipo_documento_id || null,
+        preregistroRow.nombre || "",
+        preregistroRow.apellidos || "",
+        preregistroRow.numero_documento || null,
+        preregistroRow.correo_personal || null,
+        preregistroRow.correo_silver || null,
+        preregistroRow.telefono || null,
+        preregistroRow.ciudad || preregistroRow.pais_ubicacion || null,
+        preregistroRow.moneda || null,
+        preregistroRow.tarifa_hora,
+        preregistroRow.tarifa_mes,
+        preregistroRow.tarifa_medio_tiempo,
+        preregistroRow.tarifa_capacitacion,
+        preregistroRow.fecha_fin || null,
+        JSON.stringify(mergedDatosExtra),
+        personaUsuarioId || preregistroRow.id_usuario_creado || null,
+        estado || null,
+        linked.id
+      ]
+    );
+
+    return linked.id;
+  }
+
+  async function syncSolicitudYAnexoDesdePreregistro(db, preregistroRow, userId, { estado = null, personaUsuarioId = null } = {}) {
+    const solicitudId = await syncSolicitudContratacionFromPreregistro(db, preregistroRow, {
+      estado,
+      personaUsuarioId
+    });
+    if (!solicitudId) return null;
+
+    try {
+      await ensurePersistedAnexoFromProceso({
+        solicitudId,
+        preregistroId: preregistroRow.id,
+        createdBy: userId || null,
+        strict: false
+      });
+    } catch (err) {
+      console.warn("No se pudo sincronizar anexo tecnico desde preregistro:", err?.message || err);
+    }
+
+    return solicitudId;
+  }
+
   app.post("/api/solicitudes-rrhh/:public_id/contratar", requireAccess({ roles: ["Reclutador"] }), async (req, res) => {
     const { nombre, apellidos, tipo_documento, numero_documento, telefono, correo_personal, pais_ubicacion, ciudad,
             moneda, tarifa_mes, tarifa_hora } = req.body || {};
@@ -343,7 +453,7 @@ module.exports = function registerPreregistroRoutes(deps) {
         `INSERT INTO preregistro_personas
           (id_solicitud_rrhh, nombre, apellidos, tipo_documento_id, numero_documento, telefono, correo_personal, pais_ubicacion, ciudad, moneda, tarifa_mes, tarifa_hora, estado, creado_por)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-         RETURNING public_id, estado`,
+         RETURNING id, public_id, estado`,
         [
           solicitudId,
           String(nombre).trim(),
@@ -412,8 +522,10 @@ module.exports = function registerPreregistroRoutes(deps) {
                 tipo_solicitud,
                 estado,
                 coordinador_solicitante_id,
+                preregistro_id,
                 cliente_id,
                 tipo_documento_id,
+                origen_flujo,
                 nombre,
                 apellidos,
                 numero_documento,
@@ -454,8 +566,9 @@ module.exports = function registerPreregistroRoutes(deps) {
                 $15,
                 $16,
                 $17,
-                $18::jsonb,
-                $19,
+                $18,
+                $19::jsonb,
+                $20,
                 false,
                 false,
                 false
@@ -463,8 +576,10 @@ module.exports = function registerPreregistroRoutes(deps) {
               `,
               [
                 solicitud.coordinador_id,
+                created.rows[0]?.id || null,
                 solicitud.cliente_id,
                 tipoDocumentoId,
+                "rrhh",
                 String(nombre).trim(),
                 String(apellidos).trim(),
                 String(numero_documento).trim(),
@@ -611,7 +726,9 @@ module.exports = function registerPreregistroRoutes(deps) {
       if (!sets.length) return res.status(400).json({ error: "No hay campos para actualizar" });
       vals.push(id);
       await client.query(`UPDATE preregistro_personas SET ${sets.join(", ")} WHERE id = $${idx}`, vals);
-      return res.json(formatRow(await getByInternalId(client, id)));
+      const updated = await getByInternalId(client, id);
+      await syncSolicitudYAnexoDesdePreregistro(client, updated, req.user?.id);
+      return res.json(formatRow(updated));
     } catch (err) {
       if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.status(404).json({ error: "Preregistro no encontrado" });
       console.error(err);
@@ -695,6 +812,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       );
 
       const updated = await getByInternalId(client, id);
+      await syncSolicitudYAnexoDesdePreregistro(client, updated, req.user?.id);
       const thUsers = await pool.query(
         `SELECT u.email
          FROM usuarios u
@@ -791,7 +909,9 @@ module.exports = function registerPreregistroRoutes(deps) {
       if (!sets.length) return res.status(400).json({ error: "No hay campos para actualizar" });
       vals.push(id);
       await client.query(`UPDATE preregistro_personas SET ${sets.join(", ")} WHERE id = $${idx}`, vals);
-      return res.json(formatRow(await getByInternalId(client, id)));
+      const updated = await getByInternalId(client, id);
+      await syncSolicitudYAnexoDesdePreregistro(client, updated, req.user?.id);
+      return res.json(formatRow(updated));
     } catch (err) {
       if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.status(404).json({ error: "Preregistro no encontrado" });
       console.error(err);
@@ -848,7 +968,9 @@ module.exports = function registerPreregistroRoutes(deps) {
         [direccion, String(tipo_persona).trim(), bancoId, String(tipo_cuenta).trim(), String(numero_cuenta).trim(), correoSilverNorm, nextState, req.user?.id, id]
       );
 
-      return res.json(formatRow(await getByInternalId(client, id)));
+      const updated = await getByInternalId(client, id);
+      await syncSolicitudContratacionFromPreregistro(client, updated);
+      return res.json(formatRow(updated));
     } catch (err) {
       if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.status(400).json({ error: "Preregistro o banco no encontrado" });
       console.error(err);
@@ -882,7 +1004,9 @@ module.exports = function registerPreregistroRoutes(deps) {
       }
 
       await client.query(`UPDATE preregistro_personas SET correo_silver = $1 WHERE id = $2`, [correoSilver, id]);
-      return res.json(formatRow(await getByInternalId(client, id)));
+      const updated = await getByInternalId(client, id);
+      await syncSolicitudContratacionFromPreregistro(client, updated);
+      return res.json(formatRow(updated));
     } catch (err) {
       if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.status(404).json({ error: "Preregistro no encontrado" });
       console.error(err);
@@ -966,21 +1090,12 @@ module.exports = function registerPreregistroRoutes(deps) {
          WHERE id = $4`,
         [ESTADOS.completado, req.user?.id, usuario.id, id]
       );
+      const updatedPreregistro = await getByInternalId(client, id);
+      await syncSolicitudYAnexoDesdePreregistro(client, updatedPreregistro, req.user?.id, {
+        estado: ESTADOS.completado,
+        personaUsuarioId: usuario.id
+      });
       await client.query("COMMIT");
-
-      // Sincronizar el borrador de solicitud_contratacion que se creó automáticamente
-      // cuando RRHH marcó la solicitud como Contratado (identificado por preregistro_id en datos_extra)
-      pool.query(
-        `UPDATE solicitudes_contratacion
-         SET
-           estado             = 'Completado',
-           persona_usuario_id = $1,
-           correo_empresarial = $2,
-           updated_at         = NOW()
-         WHERE estado = 'Pendiente'
-           AND (datos_extra->>'preregistro_id') = $3`,
-        [usuario.id, correoSilver, String(current.public_id)]
-      ).catch((e) => console.error("Error sincronizando borrador contratacion:", e?.message || e));
 
       const tasks = [
         sendEmailSafe({ ...getGraphContext(req), to: current.correo_personal, subject: "Bienvenido(a) - cuenta creada", text: `Tu usuario fue creado. Correo Silver: ${correoSilver}` })
@@ -1037,6 +1152,7 @@ module.exports = function registerPreregistroRoutes(deps) {
 
       await pool.query(`UPDATE preregistro_personas SET estado = $1, motivo_anulacion = $2, anulado_por = $3, fecha_anulacion = NOW() WHERE id = $4`, [ESTADOS.anulado, motivo, req.user?.id, id]);
       const updated = await getByInternalId(pool, id);
+      await syncSolicitudContratacionFromPreregistro(pool, updated, { estado: "Cancelado" });
 
       const tasks = [];
       if (updated?.coordinador_email) {

@@ -739,8 +739,11 @@ CREATE TABLE solicitudes_contratacion (
     coordinador_solicitante_id INT NOT NULL REFERENCES usuarios(id),
     persona_usuario_id INT REFERENCES usuarios(id),
     supervisor_id INT REFERENCES usuarios(id),
+    preregistro_id INT,
     cliente_id INT REFERENCES clientes(id),
     tipo_documento_id INT REFERENCES documento_identidad(id),
+    origen_flujo VARCHAR(20) NOT NULL DEFAULT 'coordinacion'
+        CHECK (origen_flujo IN ('rrhh', 'coordinacion')),
 
     nombre VARCHAR(150) NOT NULL,
     apellidos VARCHAR(150) NOT NULL,
@@ -755,8 +758,7 @@ CREATE TABLE solicitudes_contratacion (
     grupo_app_tiempos VARCHAR(150),
     grupo_distribucion VARCHAR(150),
 
-    moneda VARCHAR(10)
-        CHECK (moneda IN ('COP', 'USD')),
+    moneda tipo_moneda,
     tarifa_hora NUMERIC(15,2),
     tarifa_mes NUMERIC(15,2),
     tarifa_medio_tiempo NUMERIC(15,2),
@@ -790,10 +792,12 @@ CREATE TABLE solicitudes_contratacion (
 COMMENT ON TABLE solicitudes_contratacion IS 'Solicitudes de contrataciones y cambios de contrato (Nuevo, Extension, Retiro)';
 COMMENT ON COLUMN solicitudes_contratacion.estado IS 'Pendiente, En Proceso, Pendiente Confirmación Cliente, Pendiente Revision TH, Completado o Cancelado';
 COMMENT ON COLUMN solicitudes_contratacion.requiere_confirmacion_cliente IS 'Cuando aplica (ej. HOLCIM), se debe confirmar con el cliente antes de enviar a TH';
+COMMENT ON COLUMN solicitudes_contratacion.origen_flujo IS 'Indica si la solicitud nació desde RRHH/preregistro o desde el flujo manual de coordinación';
 
 CREATE INDEX idx_contrataciones_tipo ON solicitudes_contratacion(tipo_solicitud);
 CREATE INDEX idx_contrataciones_estado ON solicitudes_contratacion(estado);
 CREATE INDEX idx_contrataciones_coordinador ON solicitudes_contratacion(coordinador_solicitante_id);
+CREATE INDEX idx_contrataciones_preregistro ON solicitudes_contratacion(preregistro_id) WHERE preregistro_id IS NOT NULL;
 CREATE INDEX idx_contrataciones_cliente ON solicitudes_contratacion(cliente_id);
 CREATE INDEX idx_contrataciones_documento ON solicitudes_contratacion(numero_documento);
 CREATE INDEX idx_contrataciones_created ON solicitudes_contratacion(created_at DESC);
@@ -878,6 +882,19 @@ CREATE INDEX idx_preregistro_usuario_creado ON preregistro_personas(id_usuario_c
 CREATE INDEX idx_preregistro_updated ON preregistro_personas(updated_at DESC);
 CREATE UNIQUE INDEX uq_preregistro_solicitud_activa ON preregistro_personas(id_solicitud_rrhh) WHERE estado <> 'Anulado';
 
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'fk_solicitudes_contratacion_preregistro'
+  ) THEN
+    ALTER TABLE solicitudes_contratacion
+      ADD CONSTRAINT fk_solicitudes_contratacion_preregistro
+      FOREIGN KEY (preregistro_id) REFERENCES preregistro_personas(id);
+  END IF;
+END $$;
+
 -- ============================================================================
 -- FIRMA DE CONTRATOS: TOKENS PARA PROCESO DE LECTURA Y FIRMA
 -- ============================================================================
@@ -894,6 +911,8 @@ CREATE TABLE tokens_firma_contrato (
         CHECK (estado IN ('pendiente', 'en_proceso', 'completado', 'expirado')),
     checks_completados JSONB NOT NULL DEFAULT '{"pdf1":false,"pdf2":false,"pdf3":false,"pdf4":false,"pdf5":false}',
     docs_firma JSONB NOT NULL DEFAULT '[]',
+    firma_completada_notificada_at TIMESTAMP,
+    firma_completada_notificada_a VARCHAR(255),
     generado_por INT REFERENCES usuarios(id) ON DELETE SET NULL,
     expires_at TIMESTAMP NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),

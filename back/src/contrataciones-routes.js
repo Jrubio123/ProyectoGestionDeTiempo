@@ -1321,7 +1321,7 @@ module.exports = function registerContratacionesRoutes(deps) {
           ]
         );
 
-        const updated = await getByInternalId(pool, internalId);
+        const updated = await syncAnexoDesdeSolicitud(internalId, req.user?.id);
         return res.json(formatRow(updated));
       } catch (err) {
         console.error(err);

@@ -3,7 +3,12 @@ window.firmaContratosApp = function () {
 
     function getHeaders() {
         const token = window.auth?.getToken?.() || localStorage.getItem("token");
-        return { Authorization: `Bearer ${token}` };
+        const graphToken = window.auth?.getGraphToken?.() || localStorage.getItem("graph_access_token");
+        const headers = { Authorization: `Bearer ${token}` };
+        if (graphToken) {
+            headers["X-Graph-Access-Token"] = graphToken;
+        }
+        return headers;
     }
 
     return {
@@ -196,7 +201,11 @@ window.firmaContratosApp = function () {
                     payload.preregistro_id = null;
                 }
 
-                await axios.post(`${API}/admin/firma-contratos/generar`, payload, { headers: getHeaders() });
+                const res = await axios.post(`${API}/admin/firma-contratos/generar`, payload, { headers: getHeaders() });
+                const correoDestino = String(res?.data?.correo_destino || "").trim();
+                if (correoDestino) {
+                    this.modal.correo_personal = correoDestino;
+                }
                 this.modal.exito = true;
                 await this.cargar();
             } catch (e) {

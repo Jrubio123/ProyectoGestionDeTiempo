@@ -367,11 +367,10 @@ module.exports = function registerPreregistroRoutes(deps) {
       estado,
       personaUsuarioId
     });
-    if (!solicitudId) return null;
 
     try {
       await ensurePersistedAnexoFromProceso({
-        solicitudId,
+        solicitudId: solicitudId || null,
         preregistroId: preregistroRow.id,
         createdBy: userId || null,
         strict: false
@@ -606,6 +605,15 @@ module.exports = function registerPreregistroRoutes(deps) {
         }
       }
       await client.query("COMMIT");
+
+      try {
+        const createdPreregistro = await getByInternalId(pool, created.rows[0]?.id);
+        if (createdPreregistro) {
+          await syncSolicitudYAnexoDesdePreregistro(pool, createdPreregistro, req.user?.id);
+        }
+      } catch (syncErr) {
+        console.warn("No se pudo sincronizar anexo tecnico tras crear preregistro RRHH:", syncErr?.message || syncErr);
+      }
 
       if (solicitud.coordinador_email) {
         sendEmailSafe({
@@ -969,7 +977,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       );
 
       const updated = await getByInternalId(client, id);
-      await syncSolicitudContratacionFromPreregistro(client, updated);
+      await syncSolicitudYAnexoDesdePreregistro(client, updated, req.user?.id);
       return res.json(formatRow(updated));
     } catch (err) {
       if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.status(400).json({ error: "Preregistro o banco no encontrado" });
@@ -1005,7 +1013,7 @@ module.exports = function registerPreregistroRoutes(deps) {
 
       await client.query(`UPDATE preregistro_personas SET correo_silver = $1 WHERE id = $2`, [correoSilver, id]);
       const updated = await getByInternalId(client, id);
-      await syncSolicitudContratacionFromPreregistro(client, updated);
+      await syncSolicitudYAnexoDesdePreregistro(client, updated, req.user?.id);
       return res.json(formatRow(updated));
     } catch (err) {
       if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.status(404).json({ error: "Preregistro no encontrado" });

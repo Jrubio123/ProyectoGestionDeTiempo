@@ -641,9 +641,11 @@ async function sendEmailSafe({ to, subject, text, html, cc, bcc, attachments, gr
 }
 
 function getGraphContext(req) {
+  const graphAccessToken = String(req?.headers?.["x-graph-access-token"] || "").trim();
+  const graphUserEmail = String(req?.user?.email || "").trim().toLowerCase();
   return {
-    graphAccessToken: req?.headers?.["x-graph-access-token"] || null,
-    graphUserEmail: req?.user?.email || null
+    graphAccessToken: graphAccessToken || null,
+    graphUserEmail: graphUserEmail || null
   };
 }
 
@@ -1496,11 +1498,12 @@ function inferAnexoDatesFromContext(ctx, tipoAsignacion) {
     normalizeDateOnlyInput(ctx?.fecha_fin) ||
     normalizeDateOnlyInput(ctx?.fecha_retiro) ||
     null;
+  const fechaFinFallback = fechaFin || computeYearEndDate(fechaInicio) || fechaInicio;
 
   return {
     fecha_inicio: fechaInicio,
-    fecha_fin: fechaFin,
-    fecha_fin_calculada: false
+    fecha_fin: fechaFinFallback,
+    fecha_fin_calculada: !fechaFin
   };
 }
 
@@ -1856,6 +1859,7 @@ function buildAnexoInsertPayload({
       err.status = 400;
       throw err;
     }
+    fechaFinCalculada = toBooleanInput(input?.fecha_fin_calculada, false);
     if (fechaFin < fechaInicio) {
       const err = new Error("fecha_fin no puede ser menor que fecha_inicio");
       err.status = 400;
@@ -6296,20 +6300,22 @@ app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrado
       correo_personal: correo_personal || ""
     };
     const personaContext = await resolveContratoPersonaContext(procesoContext);
+    const nombreIngresado = toNullableTrimmedString(nombre_persona);
+    const correoIngresado = toNullableTrimmedString(correo_personal);
     const nombreFinal =
+      nombreIngresado ||
       toNullableTrimmedString(personaContext?.nombreCompleto) ||
-      toNullableTrimmedString(nombre_persona) ||
       "";
     const correoFinal =
+      correoIngresado ||
       toNullableTrimmedString(personaContext?.correoPersonal) ||
-      toNullableTrimmedString(correo_personal) ||
       "";
     if (!nombreFinal || !correoFinal) {
       return res.status(400).json({ error: "No se pudo resolver nombre_persona o correo_personal del proceso" });
     }
 
     const hasBaseContract = await hasContratoBaseFirmado({
-      correoPersonal: correoFinal,
+      correoPersonal: toNullableTrimmedString(personaContext?.correoPersonal) || correoFinal,
       numeroDocumento: personaContext?.numeroDocumento || null
     });
     const docsPlan = buildDocsFirmaPlan({ hasContratoBase: hasBaseContract });
@@ -6330,11 +6336,20 @@ app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrado
     const baseUrl = CONTRATOS_BASE_URL || "https://icy-ground-03832ec1e.1.azurestaticapps.net";
     const link = `${baseUrl}/contratacion.html?t=${token}`;
 
-    await sendEmailSafe({
+    const sendResult = await sendEmailSafe({
+      ...getGraphContext(req),
       to: correoFinal,
-      subject: "Proceso de contratación ? Silver Consulting",
+      subject: "Proceso de contratación - Silver Consulting",
       html: buildContratoEmailHtml({ nombre: nombreFinal, token, link })
     });
+    if (!sendResult?.ok) {
+      await pool.query("DELETE FROM tokens_firma_contrato WHERE token = $1", [token]).catch((cleanupErr) => {
+        console.error("No se pudo limpiar token de firma tras fallo de correo:", cleanupErr?.message || cleanupErr);
+      });
+      const sendErr = new Error(sendResult?.error || "No fue posible enviar el correo");
+      sendErr.status = 502;
+      throw sendErr;
+    }
 
     res.status(201).json({
       id: row.id,
@@ -6343,6 +6358,7 @@ app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrado
       docs_firma: normalizeDocsFirmaListCompat(row.docs_firma),
       paquete_documentos: hasBaseContract ? "anexo_tecnico" : "completo",
       link,
+      correo_destino: correoFinal,
       correo_enviado: true
     });
   } catch (err) {

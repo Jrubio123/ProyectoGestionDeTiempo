@@ -7520,6 +7520,13 @@ app.post("/th/anexo-individual/items", requireAccess({ roles: ["Administrador", 
     if (status >= 400 && status < 500) {
       return res.status(status).json({ error: err.message || "Datos invalidos para item de anexo tecnico" });
     }
+    if (err?.code === "23514") {
+      console.error("CHECK anexo_tecnico_items:", err.message);
+      return res.status(400).json({
+        error:
+          "Los datos no cumplen las reglas del anexo en base de datos. Si acabas de habilitar anexo individual, aplica la migracion 2026-03-25-anexo-individual-check-usuario.sql."
+      });
+    }
     console.error(err);
     res.status(500).json({ error: "Error creando item de anexo tecnico" });
   }

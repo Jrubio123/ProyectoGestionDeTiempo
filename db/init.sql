@@ -968,7 +968,11 @@ CREATE TABLE anexo_tecnico_items (
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
 
-    CHECK (solicitud_contratacion_id IS NOT NULL OR preregistro_id IS NOT NULL),
+    CHECK (
+      solicitud_contratacion_id IS NOT NULL
+      OR preregistro_id IS NOT NULL
+      OR usuario_id IS NOT NULL
+    ),
     CHECK (
       (tipo_asignacion IN ('full_time', 'medio_tiempo', 'proyecto') AND cliente_id IS NOT NULL)
       OR (tipo_asignacion IN ('horas', 'capacitacion') AND cliente_id IS NULL)

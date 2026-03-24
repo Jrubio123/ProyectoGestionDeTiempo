@@ -46,13 +46,69 @@ if (process.env.NODE_ENV === "production" && !JWT_SECRET) {
 app.use(helmet({
   contentSecurityPolicy: false
 }));
-const extraOrigins = (process.env.CORS_ORIGINS || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+
+function normalizeCorsOriginValue(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  try {
+    return new URL(raw).origin;
+  } catch (_) {
+    return raw.replace(/\/+$/, "");
+  }
+}
+
+function extractOriginFromPublicUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  try {
+    return new URL(raw).origin;
+  } catch (_) {
+    return null;
+  }
+}
+
+function isAzureStaticWebAppsOrigin(origin) {
+  const raw = normalizeCorsOriginValue(origin);
+  if (!raw) return false;
+  try {
+    const parsed = new URL(raw);
+    return (
+      parsed.protocol === "https:" &&
+      /^([a-z0-9-]+)(\.\d+)?\.azurestaticapps\.net$/i.test(parsed.hostname)
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+const explicitCorsOrigins = new Set(
+  [
+    "http://localhost:3000",
+    "http://localhost:4000",
+    ...(process.env.CORS_ORIGINS || "").split(","),
+    process.env.FRONT_PORTAL_BASE || "",
+    process.env.CONTRATOS_BASE_URL || ""
+  ]
+    .map((value) => {
+      const direct = normalizeCorsOriginValue(value);
+      if (direct && /^https?:\/\//i.test(String(value || "").trim())) return direct;
+      return extractOriginFromPublicUrl(value) || direct;
+    })
+    .filter(Boolean)
+);
 
 const corsOptions = {
-  origin: ["http://localhost:3000", "http://localhost:4000", ...extraOrigins],
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+    const normalizedOrigin = normalizeCorsOriginValue(origin);
+    if (
+      explicitCorsOrigins.has(normalizedOrigin) ||
+      isAzureStaticWebAppsOrigin(normalizedOrigin)
+    ) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  },
   credentials: true,
   allowedHeaders: [
     "Content-Type",
@@ -601,7 +657,7 @@ function buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total
 
 const FRONT_PORTAL_BASE =
   process.env.FRONT_PORTAL_BASE ||
-  "https://zealous-mud-057b4ca0f.1.azurestaticapps.net/index.html";
+  "https://icy-ground-03832ec1e.1.azurestaticapps.net/index.html";
 const readEnvSecret = (value) => String(value || "").trim().replace(/^['"]+|['"]+$/g, "");
 const ONEDRIVE_ENABLED = String(process.env.ONEDRIVE_ENABLED || "true").toLowerCase() === "true";
 const ONEDRIVE_TARGET_USER = process.env.ONEDRIVE_TARGET_USER || "admin.apps@silverconsulting.com.co";
@@ -925,7 +981,7 @@ function buildRrhhEstadoEmailContent({
 
   if (estado === "Reclutamiento") {
     return {
-      subject: `?? Actualización: Tu solicitud para ${base.perfil} ya está en Reclutamiento`,
+      subject: `🔍 Actualización: Tu solicitud para ${base.perfil} ya está en Reclutamiento`,
       text:
         `Hola ${base.toName},\n\n` +
         `Te informamos que hemos iniciado la búsqueda activa de candidatos para tu solicitud de ${base.perfil} para el cliente ${base.cliente}.\n` +
@@ -948,7 +1004,7 @@ function buildRrhhEstadoEmailContent({
 
   if (estado === "Entrevistas") {
     return {
-      subject: `?? Actualización: Iniciamos fase de entrevistas para ${base.perfil}`,
+      subject: `🤝 Actualización: Iniciamos fase de entrevistas para ${base.perfil}`,
       text:
         `Hola ${base.toName},\n\n` +
         `?Buenas noticias! Ya tenemos candidatos pre-seleccionados para la vacante de ${base.perfil}.\n` +

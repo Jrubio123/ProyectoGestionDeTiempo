@@ -938,6 +938,7 @@ CREATE TABLE anexo_tecnico_items (
 
     solicitud_contratacion_id INT REFERENCES solicitudes_contratacion(id) ON DELETE SET NULL,
     preregistro_id INT REFERENCES preregistro_personas(id) ON DELETE SET NULL,
+    usuario_id INT REFERENCES usuarios(id) ON DELETE SET NULL,
 
     nombre_persona VARCHAR(200) NOT NULL,
     numero_documento VARCHAR(50),
@@ -947,6 +948,7 @@ CREATE TABLE anexo_tecnico_items (
         CHECK (tipo_asignacion IN ('full_time', 'medio_tiempo', 'horas', 'capacitacion', 'proyecto')),
     cliente_id INT REFERENCES clientes(id) ON DELETE SET NULL,
     cliente_nombre VARCHAR(200),
+    modulo_id INT REFERENCES modulo(id) ON DELETE SET NULL,
 
     moneda VARCHAR(10) CHECK (moneda IN ('COP', 'USD', 'EUR')),
     valor_tarifa NUMERIC(15,2) NOT NULL CHECK (valor_tarifa >= 0),
@@ -958,7 +960,10 @@ CREATE TABLE anexo_tecnico_items (
         CHECK (origen IN ('manual', 'automatico')),
     estado VARCHAR(20) NOT NULL DEFAULT 'activo'
         CHECK (estado IN ('activo', 'finalizado', 'cancelado')),
+    estado_firma VARCHAR(20) NOT NULL DEFAULT 'pendiente'
+        CHECK (estado_firma IN ('pendiente', 'enviado', 'firmado')),
     creado_por INT REFERENCES usuarios(id) ON DELETE SET NULL,
+    updated_by INT REFERENCES usuarios(id) ON DELETE SET NULL,
 
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
@@ -982,6 +987,9 @@ CREATE TABLE anexo_tecnico_items (
 CREATE INDEX idx_anexo_tecnico_items_doc ON anexo_tecnico_items(numero_documento);
 CREATE INDEX idx_anexo_tecnico_items_correo ON anexo_tecnico_items(correo_personal);
 CREATE INDEX idx_anexo_tecnico_items_estado ON anexo_tecnico_items(estado);
+CREATE INDEX idx_anexo_tecnico_items_estado_firma ON anexo_tecnico_items(estado_firma);
+CREATE INDEX idx_anexo_tecnico_items_usuario ON anexo_tecnico_items(usuario_id);
+CREATE INDEX idx_anexo_tecnico_items_modulo ON anexo_tecnico_items(modulo_id);
 CREATE INDEX idx_anexo_tecnico_items_solicitud ON anexo_tecnico_items(solicitud_contratacion_id) WHERE solicitud_contratacion_id IS NOT NULL;
 CREATE INDEX idx_anexo_tecnico_items_preregistro ON anexo_tecnico_items(preregistro_id) WHERE preregistro_id IS NOT NULL;
 CREATE INDEX idx_anexo_tecnico_items_fecha ON anexo_tecnico_items(fecha_inicio, fecha_fin);
@@ -989,6 +997,53 @@ CREATE INDEX idx_anexo_tecnico_items_fecha ON anexo_tecnico_items(fecha_inicio, 
 COMMENT ON TABLE anexo_tecnico_items IS 'Historial acumulado de filas del Anexo Tecnico por persona';
 COMMENT ON COLUMN anexo_tecnico_items.tipo_asignacion IS 'full_time, medio_tiempo, horas, capacitacion o proyecto';
 COMMENT ON COLUMN anexo_tecnico_items.fecha_fin_calculada IS 'true cuando la fecha_fin se calculó automáticamente (31 de diciembre)';
+
+CREATE TABLE tokens_firma_anexo_individual (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    token VARCHAR(64) UNIQUE NOT NULL,
+
+    usuario_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    anexo_item_ids INT[] NOT NULL,
+
+    correo_firmante VARCHAR(255) NOT NULL,
+    nombre_persona VARCHAR(200) NOT NULL,
+
+    estado VARCHAR(20) NOT NULL DEFAULT 'enviado'
+        CHECK (estado IN ('enviado', 'firmado', 'rechazado', 'cancelado')),
+
+    request_id VARCHAR(150) UNIQUE,
+    contract_id VARCHAR(200) UNIQUE,
+    signature_id VARCHAR(150),
+    url_firma TEXT,
+
+    onedrive_url TEXT,
+    onedrive_carpeta TEXT,
+    onedrive_carpeta_url TEXT,
+
+    firmado_at TIMESTAMP,
+    cancelado_at TIMESTAMP,
+    cancelado_por INT REFERENCES usuarios(id) ON DELETE SET NULL,
+
+    firma_notificada_at TIMESTAMP,
+    firma_notificada_a TEXT,
+
+    generado_por INT REFERENCES usuarios(id) ON DELETE SET NULL,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_tokens_firma_anexo_token ON tokens_firma_anexo_individual(token);
+CREATE INDEX idx_tokens_firma_anexo_usuario ON tokens_firma_anexo_individual(usuario_id);
+CREATE INDEX idx_tokens_firma_anexo_estado ON tokens_firma_anexo_individual(estado);
+CREATE INDEX idx_tokens_firma_anexo_request ON tokens_firma_anexo_individual(request_id) WHERE request_id IS NOT NULL;
+CREATE INDEX idx_tokens_firma_anexo_contract ON tokens_firma_anexo_individual(contract_id) WHERE contract_id IS NOT NULL;
+CREATE INDEX idx_tokens_firma_anexo_usuario_enviado
+    ON tokens_firma_anexo_individual(usuario_id, estado)
+    WHERE estado = 'enviado';
+
+COMMENT ON TABLE tokens_firma_anexo_individual IS 'Procesos de firma individual para anexos tecnicos por usuario';
 
 -- ============================================================================
 -- COMPAT: PUBLIC ID FOR EXISTING DATABASES

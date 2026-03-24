@@ -1,123 +1,418 @@
 <div x-data="onboardingThApp()" class="prereg-screen max-w-7xl mx-auto">
-    <div class="prereg-frame">
+    <div class="prereg-frame space-y-6">
         <section class="prereg-hero">
             <div class="prereg-hero-inner">
-                <div>
-                    <div class="flex items-center gap-3">
-                        <h1 class="prereg-title">Contrataciones</h1>
-                        <span class="prereg-role-badge">● TALENTO HUMANO</span>
+                <div class="w-full space-y-4">
+                    <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div>
+                            <div class="flex items-center gap-3">
+                                <h1 class="prereg-title">Talento Humano</h1>
+                                <span class="prereg-role-badge">TH</span>
+                            </div>
+                            <p class="prereg-subtitle">Gestion de contrataciones, onboarding y anexo tecnico individual.</p>
+                        </div>
                     </div>
-                    <p class="prereg-subtitle">Revisión, aprobación y creación de usuarios.</p>
+
+                    <div class="inline-flex rounded-2xl border border-white/25 bg-white/10 p-1 backdrop-blur">
+                        <button type="button"
+                            @click="setVistaActiva('contrataciones')"
+                            class="rounded-xl px-4 py-2 text-sm font-semibold transition"
+                            :class="vistaActiva === 'contrataciones' ? 'bg-white text-slate-900 shadow' : 'text-white/85 hover:text-white'">
+                            Contrataciones
+                        </button>
+                        <button type="button"
+                            @click="setVistaActiva('anexo')"
+                            class="rounded-xl px-4 py-2 text-sm font-semibold transition"
+                            :class="vistaActiva === 'anexo' ? 'bg-white text-slate-900 shadow' : 'text-white/85 hover:text-white'">
+                            Anexo tecnico individual
+                        </button>
+                    </div>
                 </div>
             </div>
         </section>
 
-        <section class="prereg-stats">
-            <p class="prereg-stats-label">Filtrar por estado</p>
-            <div class="prereg-stats-grid">
-                <template x-for="card in estadoCards" :key="card.key">
-                    <button type="button" class="prereg-stat-card" :class="[card.tone, filtro === card.key ? 'is-active' : '']" @click="setFiltro(card.key)">
-                        <div class="prereg-stat-dot"></div>
-                        <div class="prereg-stat-count" x-text="String(contarPorKey(card.key)).padStart(2, '0')"></div>
-                        <div class="prereg-stat-name" x-text="card.label"></div>
-                    </button>
-                </template>
-            </div>
-        </section>
-
-        <section class="prereg-content">
-            <div class="prereg-content-header">
-                <span class="prereg-content-title" x-text="tituloFiltro"></span>
-                <div class="prereg-search">
-                    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
-                    <input type="text" placeholder="Buscar por nombre, documento..." x-model="busqueda">
+        <div x-show="vistaActiva === 'contrataciones'" x-cloak class="space-y-6">
+            <section class="prereg-stats">
+                <p class="prereg-stats-label">Filtrar por estado</p>
+                <div class="prereg-stats-grid">
+                    <template x-for="card in estadoCards" :key="card.key">
+                        <button type="button"
+                            class="prereg-stat-card"
+                            :class="[card.tone, filtro === card.key ? 'is-active' : '']"
+                            @click="setFiltro(card.key)">
+                            <div class="prereg-stat-dot"></div>
+                            <div class="prereg-stat-count" x-text="String(contarPorKey(card.key)).padStart(2, '0')"></div>
+                            <div class="prereg-stat-name" x-text="card.label"></div>
+                        </button>
+                    </template>
                 </div>
-            </div>
+            </section>
 
-            <div class="prereg-cards-grid">
-                <template x-if="!preregistrosFiltrados.length">
-                    <div class="prereg-empty">
-                        <div class="prereg-empty-icon">◎</div>
-                        <div class="prereg-empty-text">No hay contrataciones en este estado</div>
+            <section class="prereg-content">
+                <div class="prereg-content-header">
+                    <span class="prereg-content-title" x-text="tituloFiltro"></span>
+                    <div class="prereg-search">
+                        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <path d="m21 21-4.35-4.35"></path>
+                        </svg>
+                        <input type="text" placeholder="Buscar por nombre, documento..." x-model="busqueda">
                     </div>
-                </template>
+                </div>
 
-                <template x-for="p in preregistrosFiltrados" :key="p.id">
-                    <article class="prereg-card" :class="cardTone(p.estado)">
-                        <div class="prereg-card-top">
-                            <div>
-                                <div class="prereg-card-name" x-text="`${p.nombre || ''} ${p.apellidos || ''}`.trim() || '-' "></div>
-                                <div class="prereg-card-cargo" x-text="`${p.solicitud?.perfil || '-'} · ${p.solicitud?.cliente?.nombre || '-'}`"></div>
-                                <div class="text-[11px] text-slate-500 mt-1" x-text="flujoLabel(p)"></div>
+                <div class="prereg-cards-grid">
+                    <template x-if="!preregistrosFiltrados.length">
+                        <div class="prereg-empty">
+                            <div class="prereg-empty-icon">o</div>
+                            <div class="prereg-empty-text">No hay contrataciones en este estado</div>
+                        </div>
+                    </template>
+
+                    <template x-for="p in preregistrosFiltrados" :key="p.id">
+                        <article class="prereg-card" :class="cardTone(p.estado)">
+                            <div class="prereg-card-top">
+                                <div>
+                                    <div class="prereg-card-name" x-text="`${p.nombre || ''} ${p.apellidos || ''}`.trim() || '-'"></div>
+                                    <div class="prereg-card-cargo" x-text="`${p.solicitud?.perfil || '-'} · ${p.solicitud?.cliente?.nombre || '-'}`"></div>
+                                    <div class="mt-1 text-[11px] text-slate-500" x-text="flujoLabel(p)"></div>
+                                </div>
+                                <span class="prereg-pill" :class="pillClass(estadoToKey(p.estado))" x-text="pillText(p.estado)"></span>
                             </div>
-                            <span class="prereg-pill" :class="pillClass(estadoToKey(p.estado))" x-text="pillText(p.estado)"></span>
+
+                            <div class="prereg-meta">
+                                <div>
+                                    <div class="prereg-meta-label">Estado</div>
+                                    <div class="prereg-meta-val" x-text="p.estado || '-'"></div>
+                                </div>
+                                <div>
+                                    <div class="prereg-meta-label">S2</div>
+                                    <div class="prereg-meta-val" x-text="p.completado_coordinador_por ? `Por ${p.completado_coordinador_por_nombre || 'Coordinador'}` : 'Pendiente'"></div>
+                                </div>
+                            </div>
+
+                            <div class="prereg-card-footer">
+                                <span class="prereg-time" x-text="`Actualizado: ${formatFecha(p.updated_at || p.created_at)}`"></span>
+                                <button type="button" :class="accionPrincipalClass(p)" @click="ejecutarAccionPrincipal(p)" x-text="accionPrincipalLabel(p)"></button>
+                                <button type="button" class="prereg-btn prereg-btn-ghost" @click="abrirDetalleResuelto(p)">Ver</button>
+                            </div>
+                        </article>
+                    </template>
+                </div>
+            </section>
+        </div>
+
+        <div x-show="vistaActiva === 'anexo'" x-cloak class="space-y-6">
+            <section class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                    <div class="space-y-1">
+                        <h2 class="text-xl font-bold text-slate-900">Anexo tecnico individual</h2>
+                        <p class="text-sm text-slate-500">Busca una persona Silver activa para ver, editar y enviar su anexo tecnico a firma.</p>
+                    </div>
+                    <div class="w-full max-w-xl">
+                        <template x-if="!usuarioAnexo">
+                            <div class="relative">
+                                <input type="text"
+                                    x-model="anexoBusqueda"
+                                    @input="buscarUsuariosAnexo"
+                                    class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-500 focus:bg-white"
+                                    placeholder="Buscar por nombre, correo o documento">
+                                <div x-show="anexoBuscando" class="absolute right-4 top-3 text-xs text-slate-400">Buscando...</div>
+                                <div x-show="anexoResultados.length > 0" x-cloak class="absolute z-20 mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+                                    <template x-for="usuario in anexoResultados" :key="usuario.id">
+                                        <button type="button"
+                                            @click="seleccionarUsuarioAnexo(usuario)"
+                                            class="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 text-left transition last:border-b-0 hover:bg-slate-50">
+                                            <div>
+                                                <div class="text-sm font-semibold text-slate-900" x-text="usuario.nombre"></div>
+                                                <div class="text-xs text-slate-500" x-text="usuario.email"></div>
+                                            </div>
+                                            <div class="flex flex-col items-end gap-1">
+                                                <span class="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600" x-text="usuario.tipo_consultor || 'Consultor'"></span>
+                                                <span x-show="usuario.envio_pendiente" class="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-700">Envio pendiente</span>
+                                            </div>
+                                        </button>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+
+                        <template x-if="usuarioAnexo">
+                            <div class="flex flex-wrap items-center gap-3 rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3">
+                                <div class="min-w-0 flex-1">
+                                    <div class="truncate text-sm font-semibold text-slate-900" x-text="usuarioAnexo.nombre || usuarioAnexo.email"></div>
+                                    <div class="truncate text-xs text-slate-500" x-text="usuarioAnexo.email"></div>
+                                </div>
+                                <button type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50" @click="limpiarUsuarioAnexo()">
+                                    Cambiar persona
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </section>
+
+            <template x-if="anexoError">
+                <div class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" x-text="anexoError"></div>
+            </template>
+            <template x-if="anexoSuccess">
+                <div class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" x-text="anexoSuccess"></div>
+            </template>
+
+            <template x-if="!usuarioAnexo">
+                <section class="rounded-[28px] border border-dashed border-slate-300 bg-white/80 p-10 text-center shadow-sm">
+                    <h3 class="text-lg font-bold text-slate-900">Selecciona una persona para continuar</h3>
+                    <p class="mx-auto mt-2 max-w-2xl text-sm text-slate-500">
+                        Desde aqui TH puede mantener los items activos del anexo tecnico, revisar el historial y enviar el documento completo a firma.
+                    </p>
+                </section>
+            </template>
+
+            <template x-if="usuarioAnexo">
+                <div class="space-y-6">
+                    <section class="grid gap-4 lg:grid-cols-[1.25fr,0.75fr]">
+                        <div class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+                            <div class="flex flex-wrap items-start justify-between gap-4">
+                                <div>
+                                    <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Persona seleccionada</p>
+                                    <h3 class="mt-2 text-2xl font-bold text-slate-900" x-text="usuarioAnexo.nombre || '-'"></h3>
+                                    <p class="mt-1 text-sm text-slate-500" x-text="usuarioAnexo.email || '-'"></p>
+                                </div>
+                                <div class="flex flex-wrap gap-2">
+                                    <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700" x-text="usuarioAnexo.tipo_consultor || 'Consultor'"></span>
+                                    <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700" x-text="usuarioAnexo.cedula || 'Sin documento'"></span>
+                                </div>
+                            </div>
                         </div>
 
-                        <div class="prereg-meta">
-                            <div>
-                                <div class="prereg-meta-label">Estado</div>
-                                <div class="prereg-meta-val" x-text="p.estado || '-' "></div>
+                        <div class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+                            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Resumen rapido</p>
+                            <div class="mt-4 grid grid-cols-2 gap-3">
+                                <div class="rounded-2xl bg-slate-50 p-4">
+                                    <div class="text-xs uppercase tracking-[0.15em] text-slate-400">Activos</div>
+                                    <div class="mt-2 text-2xl font-bold text-slate-900" x-text="anexoItemsActivos.length"></div>
+                                </div>
+                                <div class="rounded-2xl bg-slate-50 p-4">
+                                    <div class="text-xs uppercase tracking-[0.15em] text-slate-400">Finalizados</div>
+                                    <div class="mt-2 text-2xl font-bold text-slate-900" x-text="anexoItemsFinalizados.length"></div>
+                                </div>
                             </div>
+                        </div>
+                    </section>
+
+                    <template x-if="anexoTieneCambiosDesdeFirma">
+                        <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                            Hay items modificados desde la ultima firma. El proximo envio incluira el estado actual completo.
+                        </div>
+                    </template>
+
+                    <section class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+                        <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                             <div>
-                                <div class="prereg-meta-label">S2</div>
-                                <div class="prereg-meta-val" x-text="p.completado_coordinador_por ? `Por ${p.completado_coordinador_por_nombre || 'Coordinador'}` : 'Pendiente' "></div>
+                                <h3 class="text-lg font-bold text-slate-900">Items activos</h3>
+                                <p class="text-sm text-slate-500">Cada envio siempre incluye todos los items activos de la persona.</p>
+                            </div>
+                            <div class="flex flex-wrap gap-2">
+                                <button type="button" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50" @click="toggleHistorialAnexo()">
+                                    <span x-text="anexoMostrarHistorial ? 'Ocultar historial' : 'Ver historial completo'"></span>
+                                </button>
+                                <button type="button" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800" @click="abrirModalNuevoItemAnexo()">
+                                    Agregar item
+                                </button>
                             </div>
                         </div>
 
-                        <div class="prereg-card-footer">
-                            <span class="prereg-time" x-text="`Actualizado: ${formatFecha(p.updated_at || p.created_at)}`"></span>
-                            <button type="button" :class="accionPrincipalClass(p)" @click="ejecutarAccionPrincipal(p)" x-text="accionPrincipalLabel(p)"></button>
-                            <button type="button" class="prereg-btn prereg-btn-ghost" @click="abrirDetalleResuelto(p)">Ver</button>
+                        <div class="mt-6 overflow-x-auto">
+                            <table class="min-w-full divide-y divide-slate-200 text-sm">
+                                <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                    <tr>
+                                        <th class="px-4 py-3">Cliente</th>
+                                        <th class="px-4 py-3">Tipo</th>
+                                        <th class="px-4 py-3">Modulo</th>
+                                        <th class="px-4 py-3">Valor</th>
+                                        <th class="px-4 py-3">Inicio</th>
+                                        <th class="px-4 py-3">Fin</th>
+                                        <th class="px-4 py-3">Origen</th>
+                                        <th class="px-4 py-3">Firma</th>
+                                        <th class="px-4 py-3 text-right">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100">
+                                    <template x-if="anexoCargandoItems">
+                                        <tr>
+                                            <td colspan="9" class="px-4 py-8 text-center text-sm text-slate-500">Cargando items...</td>
+                                        </tr>
+                                    </template>
+                                    <template x-if="!anexoCargandoItems && !anexoItemsActivos.length">
+                                        <tr>
+                                            <td colspan="9" class="px-4 py-8 text-center text-sm text-slate-500">
+                                                Esta persona no tiene items de anexo tecnico.
+                                            </td>
+                                        </tr>
+                                    </template>
+                                    <template x-for="item in anexoItemsActivos" :key="item.id">
+                                        <tr class="align-top">
+                                            <td class="px-4 py-4 text-slate-700" x-text="item.cliente_nombre || '-'"></td>
+                                            <td class="px-4 py-4 font-medium text-slate-900" x-text="labelTipoAnexo(item.tipo_asignacion)"></td>
+                                            <td class="px-4 py-4 text-slate-700" x-text="item.modulo_nombre || '-'"></td>
+                                            <td class="px-4 py-4 text-slate-700" x-text="textoValorAnexo(item)"></td>
+                                            <td class="px-4 py-4 text-slate-700" x-text="formatFecha(item.fecha_inicio)"></td>
+                                            <td class="px-4 py-4 text-slate-700" x-text="formatFecha(item.fecha_fin)"></td>
+                                            <td class="px-4 py-4">
+                                                <span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="origenBadgeClass(item.origen)" x-text="origenBadgeText(item.origen)"></span>
+                                            </td>
+                                            <td class="px-4 py-4">
+                                                <span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="estadoFirmaBadgeClass(item.estado_firma)" x-text="estadoFirmaBadgeText(item.estado_firma)"></span>
+                                            </td>
+                                            <td class="px-4 py-4">
+                                                <div class="flex justify-end gap-2">
+                                                    <button type="button" class="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50" @click="abrirModalEditarItemAnexo(item)">
+                                                        Editar
+                                                    </button>
+                                                    <button type="button" class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 transition hover:bg-amber-100" @click="abrirModalFinalizarAnexo(item)">
+                                                        Finalizar
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
                         </div>
-                    </article>
-                </template>
-            </div>
-        </section>
+
+                        <div class="mt-6 flex flex-col gap-3 border-t border-slate-100 pt-5">
+                            <template x-if="anexoTokenActivo">
+                                <div class="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 md:flex-row md:items-center md:justify-between">
+                                    <div>
+                                        <div class="text-sm font-semibold text-amber-800">Envio pendiente</div>
+                                        <div class="text-sm text-amber-700" x-text="`Desde ${formatFechaHora(anexoTokenActivo.created_at)}`"></div>
+                                    </div>
+                                    <button type="button" class="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100" @click="abrirModalCancelarAnexo()">
+                                        Cancelar envio actual
+                                    </button>
+                                </div>
+                            </template>
+
+                            <template x-if="!anexoTokenActivo">
+                                <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                    <div class="text-sm text-slate-500">
+                                        <template x-if="anexoTodoVigente">
+                                            <span>Todo vigente. Puedes generar un nuevo ciclo si lo necesitas.</span>
+                                        </template>
+                                        <template x-if="!anexoTodoVigente">
+                                            <span>El envio a firma se habilita cuando haya al menos un item activo.</span>
+                                        </template>
+                                    </div>
+                                    <button type="button"
+                                        class="rounded-xl bg-cyan-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-cyan-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                        :disabled="!puedeEnviarAnexo"
+                                        @click="abrirModalFirmaAnexo()">
+                                        Enviar anexo tecnico a firma
+                                    </button>
+                                </div>
+                            </template>
+                        </div>
+                    </section>
+
+                    <template x-if="anexoMostrarHistorial">
+                        <section class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+                            <div>
+                                <h3 class="text-lg font-bold text-slate-900">Historial finalizado</h3>
+                                <p class="text-sm text-slate-500">Aqui se conservan los items que ya no participan en nuevos envios.</p>
+                            </div>
+
+                            <div class="mt-6 overflow-x-auto">
+                                <table class="min-w-full divide-y divide-slate-200 text-sm">
+                                    <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                        <tr>
+                                            <th class="px-4 py-3">Cliente</th>
+                                            <th class="px-4 py-3">Tipo</th>
+                                            <th class="px-4 py-3">Modulo</th>
+                                            <th class="px-4 py-3">Valor</th>
+                                            <th class="px-4 py-3">Inicio</th>
+                                            <th class="px-4 py-3">Fin</th>
+                                            <th class="px-4 py-3">Estado</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100">
+                                        <template x-if="!anexoItemsFinalizados.length">
+                                            <tr>
+                                                <td colspan="7" class="px-4 py-8 text-center text-sm text-slate-500">No hay items finalizados para esta persona.</td>
+                                            </tr>
+                                        </template>
+                                        <template x-for="item in anexoItemsFinalizados" :key="item.id">
+                                            <tr>
+                                                <td class="px-4 py-4 text-slate-700" x-text="item.cliente_nombre || '-'"></td>
+                                                <td class="px-4 py-4 font-medium text-slate-900" x-text="labelTipoAnexo(item.tipo_asignacion)"></td>
+                                                <td class="px-4 py-4 text-slate-700" x-text="item.modulo_nombre || '-'"></td>
+                                                <td class="px-4 py-4 text-slate-700" x-text="textoValorAnexo(item)"></td>
+                                                <td class="px-4 py-4 text-slate-700" x-text="formatFecha(item.fecha_inicio)"></td>
+                                                <td class="px-4 py-4 text-slate-700" x-text="formatFecha(item.fecha_fin)"></td>
+                                                <td class="px-4 py-4">
+                                                    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">Finalizado</span>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </template>
+                </div>
+            </template>
+        </div>
     </div>
 
-    <div x-show="modalDetalle" class="prereg-modal-backdrop">
+    <div x-show="modalDetalle" x-cloak class="prereg-modal-backdrop">
         <div class="prereg-modal-panel">
             <div class="prereg-modal-head">
                 <div>
-                    <h3 class="prereg-modal-title">Detalle de contratación</h3>
+                    <h3 class="prereg-modal-title">Detalle de contratacion</h3>
                     <p class="prereg-modal-subtitle" x-text="`${itemActivo?.estado || '-'} · ${flujoLabel(itemActivo)}`"></p>
                 </div>
                 <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarDetalle">Cerrar</button>
             </div>
 
             <section class="prereg-section">
-                <p class="prereg-section-title">Sección 1 - Datos Personales (solo lectura)</p>
+                <p class="prereg-section-title">Seccion 1 - Datos personales</p>
                 <div class="prereg-info-grid">
-                    <div class="prereg-info-card"><p class="prereg-info-label">Nombre completo</p><p class="prereg-info-value" x-text="`${itemActivo?.nombre || ''} ${itemActivo?.apellidos || ''}`.trim() || '-' "></p></div>
+                    <div class="prereg-info-card"><p class="prereg-info-label">Nombre completo</p><p class="prereg-info-value" x-text="`${itemActivo?.nombre || ''} ${itemActivo?.apellidos || ''}`.trim() || '-'"></p></div>
                     <div class="prereg-info-card"><p class="prereg-info-label">Documento</p><p class="prereg-info-value" x-text="`${itemActivo?.tipo_documento || '-'} · ${itemActivo?.numero_documento || '-'}`"></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Teléfono</p><p class="prereg-info-value" x-text="itemActivo?.telefono || '-' "></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Correo personal</p><p class="prereg-info-value" x-text="itemActivo?.correo_personal || '-' "></p></div>
+                    <div class="prereg-info-card"><p class="prereg-info-label">Telefono</p><p class="prereg-info-value" x-text="itemActivo?.telefono || '-'"></p></div>
+                    <div class="prereg-info-card"><p class="prereg-info-label">Correo personal</p><p class="prereg-info-value" x-text="itemActivo?.correo_personal || '-'"></p></div>
                 </div>
             </section>
 
             <section class="prereg-section">
-                <p class="prereg-section-title">Sección 2 - Datos del Puesto (solo lectura)</p>
+                <p class="prereg-section-title">Seccion 2 - Datos del puesto</p>
                 <div class="prereg-info-grid">
-                    <div class="prereg-info-card"><p class="prereg-info-label">Cliente</p><p class="prereg-info-value" x-text="itemActivo?.solicitud?.cliente?.nombre || '-' "></p></div>
+                    <div class="prereg-info-card"><p class="prereg-info-label">Cliente</p><p class="prereg-info-value" x-text="itemActivo?.solicitud?.cliente?.nombre || '-'"></p></div>
                     <div class="prereg-info-card"><p class="prereg-info-label">Perfil / Nivel</p><p class="prereg-info-value" x-text="`${itemActivo?.solicitud?.perfil || '-'} · ${itemActivo?.solicitud?.nivel || '-'}`"></p></div>
                     <div class="prereg-info-card"><p class="prereg-info-label">Tipo contrato</p><p class="prereg-info-value" x-text="modalidadContratoDetalle()"></p></div>
                     <div class="prereg-info-card"><p class="prereg-info-label">Valor a pagar</p><p class="prereg-info-value" x-text="tarifaPrincipalDetalle()"></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Moneda</p><p class="prereg-info-value" x-text="itemActivo?.moneda || '-' "></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Coordinador</p><p class="prereg-info-value" x-text="itemActivo?.solicitud?.coordinador?.nombre || '-' "></p></div>
+                    <div class="prereg-info-card"><p class="prereg-info-label">Moneda</p><p class="prereg-info-value" x-text="itemActivo?.moneda || '-'"></p></div>
+                    <div class="prereg-info-card"><p class="prereg-info-label">Coordinador</p><p class="prereg-info-value" x-text="itemActivo?.solicitud?.coordinador?.nombre || '-'"></p></div>
                 </div>
             </section>
 
             <section class="prereg-section">
-                <p class="prereg-section-title">Sección 3 - Datos Legales</p>
+                <p class="prereg-section-title">Seccion 3 - Datos legales</p>
                 <div class="prereg-form-grid" :class="{ 'opacity-70': !seccion3Editable }">
-                    <input class="prereg-input md:col-span-2" x-model="formS3.direccion" :disabled="!seccion3Editable" placeholder="Dirección completa *">
-                    <select class="prereg-input" x-model="formS3.tipo_persona" :disabled="!seccion3Editable"><option value="Natural">Natural</option><option value="Juridica">Jurídica</option></select>
+                    <input class="prereg-input md:col-span-2" x-model="formS3.direccion" :disabled="!seccion3Editable" placeholder="Direccion completa *">
+                    <select class="prereg-input" x-model="formS3.tipo_persona" :disabled="!seccion3Editable">
+                        <option value="Natural">Natural</option>
+                        <option value="Juridica">Juridica</option>
+                    </select>
                     <select class="prereg-input" x-model="formS3.banco_id" :disabled="!seccion3Editable">
                         <option value="">Banco *</option>
-                        <template x-for="b in bancos" :key="b.id"><option :value="String(b.id)" x-text="b.titulo"></option></template>
+                        <template x-for="b in bancos" :key="b.id">
+                            <option :value="String(b.id)" x-text="b.titulo"></option>
+                        </template>
                     </select>
-                    <select class="prereg-input" x-model="formS3.tipo_cuenta" :disabled="!seccion3Editable"><option value="Ahorros">Ahorros</option><option value="Corriente">Corriente</option></select>
-                    <input class="prereg-input" x-model="formS3.numero_cuenta" :disabled="!seccion3Editable" placeholder="Número de cuenta *">
+                    <select class="prereg-input" x-model="formS3.tipo_cuenta" :disabled="!seccion3Editable">
+                        <option value="Ahorros">Ahorros</option>
+                        <option value="Corriente">Corriente</option>
+                    </select>
+                    <input class="prereg-input" x-model="formS3.numero_cuenta" :disabled="!seccion3Editable" placeholder="Numero de cuenta *">
                     <input id="thCorreoSilver" class="prereg-input md:col-span-2" x-model="formS3.correo_silver" :disabled="!seccion3Editable" placeholder="Correo Silver (requerido para aprobar)">
                 </div>
             </section>
@@ -127,27 +422,270 @@
                 <button type="button" x-show="seccion3Editable" @click="guardarS3" :disabled="guardandoS3" class="prereg-btn prereg-btn-ghost">
                     <span x-text="guardandoS3 ? 'Guardando...' : 'Guardar'"></span>
                 </button>
-                <!-- Botón Aprobar: solo para preregistros -->
                 <button type="button" x-show="seccion3Editable && itemActivo?.origen_flujo === 'preregistro'" @click="aprobarPreregistro" :disabled="!puedeAprobar || aprobando" class="prereg-btn prereg-btn-teal">
                     <span x-text="aprobando ? 'Aprobando...' : 'Aprobar'"></span>
                 </button>
-                <!-- Botón Completar revisión: solo para contrataciones en Pendiente Revision TH -->
                 <button type="button" x-show="seccion3Editable && itemActivo?.origen_flujo === 'contratacion'" @click="completarRevisionContratacion" :disabled="!puedeCompletarContratacion || aprobando" class="prereg-btn prereg-btn-teal">
-                    <span x-text="aprobando ? 'Completando...' : 'Completar revisión'"></span>
+                    <span x-text="aprobando ? 'Completando...' : 'Completar revision'"></span>
                 </button>
-                <button type="button" x-show="itemActivo?.origen_flujo === 'preregistro' && itemActivo?.estado !== 'Completado' && itemActivo?.estado !== 'Anulado'" @click="abrirModalAnular" class="prereg-btn prereg-btn-danger">Anular contratación</button>
+                <button type="button" x-show="itemActivo?.origen_flujo === 'preregistro' && itemActivo?.estado !== 'Completado' && itemActivo?.estado !== 'Anulado'" @click="abrirModalAnular" class="prereg-btn prereg-btn-danger">Anular contratacion</button>
             </div>
 
-            <div x-show="modalAnular" class="prereg-mini-backdrop">
+            <div x-show="modalAnular" x-cloak class="prereg-mini-backdrop">
                 <div class="prereg-mini-modal">
-                    <h4 class="prereg-mini-title">Confirmar anulación</h4>
-                    <p class="prereg-mini-subtitle">¿Estás seguro de anular esta contratación? Esta acción no se puede deshacer.</p>
-                    <textarea rows="4" class="prereg-input mt-3" x-model="motivoAnulacion" placeholder="Motivo (mínimo 20 caracteres)"></textarea>
+                    <h4 class="prereg-mini-title">Confirmar anulacion</h4>
+                    <p class="prereg-mini-subtitle">Esta accion no se puede deshacer.</p>
+                    <textarea rows="4" class="prereg-input mt-3" x-model="motivoAnulacion" placeholder="Motivo (minimo 20 caracteres)"></textarea>
                     <div class="prereg-mini-footer">
-                        <button type="button" @click="modalAnular=false" class="prereg-btn prereg-btn-ghost">Cancelar</button>
-                        <button type="button" @click="confirmarAnulacion" :disabled="anulando" class="prereg-btn prereg-btn-danger">Confirmar Anulación</button>
+                        <button type="button" @click="modalAnular = false" class="prereg-btn prereg-btn-ghost">Cancelar</button>
+                        <button type="button" @click="confirmarAnulacion" :disabled="anulando" class="prereg-btn prereg-btn-danger">Confirmar anulacion</button>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="anexoModalItem.open" x-cloak class="prereg-modal-backdrop">
+        <div class="prereg-modal-panel max-w-4xl">
+            <div class="prereg-modal-head">
+                <div>
+                    <h3 class="prereg-modal-title" x-text="anexoModalItem.mode === 'edit' ? 'Editar item del anexo' : 'Agregar item al anexo'"></h3>
+                    <p class="prereg-modal-subtitle" x-text="usuarioAnexo?.nombre || '-'"></p>
+                </div>
+                <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarModalItemAnexo()">Cerrar</button>
+            </div>
+
+            <template x-if="anexoModalItem.mode === 'edit' && anexoItemsActivos.find((item) => item.id === anexoModalItem.itemId)?.origen === 'automatico'">
+                <div class="mb-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                    Este item fue generado automaticamente por contratacion. Los cambios quedaran registrados con tu usuario y fecha actual.
+                </div>
+            </template>
+
+            <template x-if="anexoModalItem.error">
+                <div class="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" x-text="anexoModalItem.error"></div>
+            </template>
+
+            <template x-if="anexoModalItem.loading">
+                <div class="py-10 text-center text-sm text-slate-500">Cargando item...</div>
+            </template>
+
+            <template x-if="!anexoModalItem.loading">
+                <div class="space-y-6">
+                    <div class="grid gap-4 md:grid-cols-2">
+                        <div class="space-y-2">
+                            <label class="text-sm font-semibold text-slate-700">Tipo de asignacion</label>
+                            <select class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-cyan-500"
+                                x-model="anexoModalItem.form.tipo_asignacion"
+                                @change="onTipoAnexoChange()">
+                                <option value="full_time">Full time</option>
+                                <option value="medio_tiempo">Medio tiempo</option>
+                                <option value="proyecto">Proyecto</option>
+                                <option value="horas">Horas</option>
+                                <option value="capacitacion">Capacitacion</option>
+                            </select>
+                        </div>
+
+                        <div class="space-y-2">
+                            <label class="text-sm font-semibold text-slate-700">Modulo</label>
+                            <select class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-cyan-500"
+                                x-model="anexoModalItem.form.modulo_id">
+                                <option value="">Selecciona un modulo</option>
+                                <template x-for="modulo in anexoCatalogos.modulos" :key="modulo.id">
+                                    <option :value="String(modulo.id)" x-text="modulo.titulo"></option>
+                                </template>
+                            </select>
+                        </div>
+
+                        <template x-if="tipoAnexoRequiereCliente(anexoModalItem.form.tipo_asignacion)">
+                            <div class="space-y-2 md:col-span-2">
+                                <label class="text-sm font-semibold text-slate-700">Cliente</label>
+                                <select class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-cyan-500"
+                                    x-model="anexoModalItem.form.cliente_id">
+                                    <option value="">Selecciona un cliente</option>
+                                    <template x-for="cliente in anexoCatalogos.clientes" :key="cliente.id">
+                                        <option :value="String(cliente.id)" x-text="cliente.titulo"></option>
+                                    </template>
+                                </select>
+                            </div>
+                        </template>
+
+                        <div class="space-y-2">
+                            <label class="text-sm font-semibold text-slate-700">Moneda</label>
+                            <select class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-cyan-500"
+                                x-model="anexoModalItem.form.moneda">
+                                <option value="COP">COP</option>
+                                <option value="USD">USD</option>
+                                <option value="EUR">EUR</option>
+                            </select>
+                        </div>
+
+                        <div class="space-y-2">
+                            <label class="text-sm font-semibold text-slate-700"
+                                x-text="tipoAnexoEsAnual(anexoModalItem.form.tipo_asignacion) ? 'Valor por hora' : 'Valor tarifa mensual'"></label>
+                            <input type="number"
+                                min="0"
+                                step="0.01"
+                                class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-cyan-500"
+                                x-model="anexoModalItem.form.valor_tarifa"
+                                placeholder="0.00">
+                        </div>
+
+                        <div class="space-y-2">
+                            <label class="text-sm font-semibold text-slate-700">Fecha de inicio</label>
+                            <input type="date"
+                                class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-cyan-500"
+                                x-model="anexoModalItem.form.fecha_inicio"
+                                @change="onFechaInicioAnexoChange()">
+                        </div>
+
+                        <div class="space-y-2">
+                            <label class="text-sm font-semibold text-slate-700">Fecha de fin</label>
+                            <input type="date"
+                                class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-cyan-500"
+                                x-model="anexoModalItem.form.fecha_fin">
+                            <p x-show="tipoAnexoEsAnual(anexoModalItem.form.tipo_asignacion)" class="text-xs text-slate-500">
+                                Para horas y capacitacion sugerimos cerrar el 31 de diciembre del mismo ano.
+                            </p>
+                        </div>
+
+                        <div class="space-y-2 md:col-span-2">
+                            <label class="text-sm font-semibold text-slate-700">Correo personal de referencia</label>
+                            <input type="email"
+                                class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-cyan-500"
+                                x-model="anexoModalItem.form.correo_personal"
+                                placeholder="persona@correo.com">
+                            <p class="text-xs text-slate-500">
+                                Este correo se usa como sugerencia para el siguiente envio a firma y para mantener contexto del item.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="prereg-modal-footer">
+                        <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarModalItemAnexo()">Cancelar</button>
+                        <button type="button"
+                            class="prereg-btn prereg-btn-teal"
+                            :disabled="anexoModalItem.saving"
+                            @click="guardarItemAnexo()">
+                            <span x-text="anexoModalItem.saving ? 'Guardando...' : (anexoModalItem.mode === 'edit' ? 'Guardar cambios' : 'Crear item')"></span>
+                        </button>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <div x-show="anexoModalFirma.open" x-cloak class="prereg-modal-backdrop">
+        <div class="prereg-modal-panel max-w-4xl">
+            <div class="prereg-modal-head">
+                <div>
+                    <h3 class="prereg-modal-title">Confirmar envio a firma</h3>
+                    <p class="prereg-modal-subtitle" x-text="usuarioAnexo?.nombre || '-'"></p>
+                </div>
+                <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarModalFirmaAnexo()">Cerrar</button>
+            </div>
+
+            <p class="text-sm text-slate-500">
+                El documento incluira todos los items activos de esta persona en el estado actual.
+            </p>
+
+            <template x-if="anexoModalFirma.error">
+                <div class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" x-text="anexoModalFirma.error"></div>
+            </template>
+
+            <div class="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
+                <table class="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        <tr>
+                            <th class="px-4 py-3">Cliente</th>
+                            <th class="px-4 py-3">Tipo</th>
+                            <th class="px-4 py-3">Modulo</th>
+                            <th class="px-4 py-3">Valor</th>
+                            <th class="px-4 py-3">Vigencia</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        <template x-for="item in anexoItemsActivos" :key="`firma-${item.id}`">
+                            <tr>
+                                <td class="px-4 py-4 text-slate-700" x-text="item.cliente_nombre || '-'"></td>
+                                <td class="px-4 py-4 font-medium text-slate-900" x-text="labelTipoAnexo(item.tipo_asignacion)"></td>
+                                <td class="px-4 py-4 text-slate-700" x-text="item.modulo_nombre || '-'"></td>
+                                <td class="px-4 py-4 text-slate-700" x-text="textoValorAnexo(item)"></td>
+                                <td class="px-4 py-4 text-slate-700" x-text="`${formatFecha(item.fecha_inicio)} al ${formatFecha(item.fecha_fin)}`"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="mt-5 space-y-2">
+                <label class="text-sm font-semibold text-slate-700">Correo personal del firmante</label>
+                <input type="email"
+                    class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-cyan-500"
+                    x-model="anexoModalFirma.correo_firmante"
+                    placeholder="persona@correo.com">
+                <p class="text-xs text-slate-500">
+                    ClickSign enviara el enlace de firma a este correo.
+                </p>
+            </div>
+
+            <div class="prereg-modal-footer">
+                <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarModalFirmaAnexo()">Cancelar</button>
+                <button type="button"
+                    class="prereg-btn prereg-btn-teal"
+                    :disabled="anexoModalFirma.saving"
+                    @click="confirmarEnvioFirmaAnexo()">
+                    <span x-text="anexoModalFirma.saving ? 'Enviando...' : 'Confirmar y enviar'"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="anexoModalCancelar.open" x-cloak class="prereg-mini-backdrop">
+        <div class="prereg-mini-modal">
+            <h4 class="prereg-mini-title">Cancelar envio pendiente</h4>
+            <p class="prereg-mini-subtitle">Los items volveran a estado Pendiente de firma.</p>
+
+            <template x-if="anexoModalCancelar.error">
+                <div class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" x-text="anexoModalCancelar.error"></div>
+            </template>
+
+            <div class="prereg-mini-footer">
+                <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarModalCancelarAnexo()">Cancelar</button>
+                <button type="button"
+                    class="prereg-btn prereg-btn-danger"
+                    :disabled="anexoModalCancelar.saving"
+                    @click="confirmarCancelarFirmaAnexo()">
+                    <span x-text="anexoModalCancelar.saving ? 'Cancelando...' : 'Confirmar'"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="anexoModalFinalizar.open" x-cloak class="prereg-mini-backdrop">
+        <div class="prereg-mini-modal">
+            <h4 class="prereg-mini-title">Finalizar item</h4>
+            <p class="prereg-mini-subtitle">
+                Este item dejara de aparecer en el anexo activo y pasara al historial.
+            </p>
+
+            <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                <div class="font-semibold text-slate-900" x-text="anexoModalFinalizar.item?.cliente_nombre || 'Sin cliente'"></div>
+                <div class="mt-1" x-text="labelTipoAnexo(anexoModalFinalizar.item?.tipo_asignacion)"></div>
+                <div class="mt-1" x-text="anexoModalFinalizar.item?.modulo_nombre || '-'"></div>
+            </div>
+
+            <template x-if="anexoModalFinalizar.error">
+                <div class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" x-text="anexoModalFinalizar.error"></div>
+            </template>
+
+            <div class="prereg-mini-footer">
+                <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarModalFinalizarAnexo()">Cancelar</button>
+                <button type="button"
+                    class="prereg-btn prereg-btn-danger"
+                    :disabled="anexoModalFinalizar.saving"
+                    @click="confirmarFinalizarAnexo()">
+                    <span x-text="anexoModalFinalizar.saving ? 'Finalizando...' : 'Finalizar item'"></span>
+                </button>
             </div>
         </div>
     </div>

@@ -41,7 +41,8 @@ const routes = {
     solicitudesCoord: "solicitudesCoord",
     preregistrosCoord: "preregistrosCoord",
     solicitudesRecl: "solicitudesRecl",
-    onboardingTH: "onboardingTH"
+    onboardingTH: "onboardingTH",
+    anexoTecnicoIndividual: "anexoTecnicoIndividual"
 };
 
 function router() {
@@ -54,7 +55,7 @@ function router() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador","asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador","asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -82,7 +83,7 @@ function router() {
             "asignacion-fabrica-mesa-servicio"
         ],
         reclutador: ["inicio", "solicitudesRecl"],
-        talento_humano: ["inicio", "onboardingTH", "firma-contratos-admin"]
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin"]
     };
     const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
     if (view && !allowed.has(view)) {

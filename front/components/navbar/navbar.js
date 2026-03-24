@@ -1,6 +1,6 @@
-﻿function getRoleRoutes() {
+function getRoleRoutes() {
     return {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -28,7 +28,7 @@
             "asignacion-fabrica-mesa-servicio"
         ],
         reclutador: ["inicio", "solicitudesRecl"],
-        talento_humano: ["inicio", "onboardingTH", "firma-contratos-admin"]
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin"]
     };
 }
 
@@ -55,6 +55,7 @@ function getAllSearchViews() {
         { label: "Contrataciones", hash: "#preregistrosCoord" },
         { label: "Pool de Solicitudes", hash: "#solicitudesRecl" },
         { label: "Contrataciones TH", hash: "#onboardingTH" },
+        { label: "Anexo tecnico individual", hash: "#anexoTecnicoIndividual" },
         { label: "Firma de Contratos", hash: "#firma-contratos-admin" }
     ];
 }

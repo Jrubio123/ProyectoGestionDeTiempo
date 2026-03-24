@@ -1,6 +1,6 @@
 ﻿function getRoleRoutes() {
     return {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro", "catalogos-admin"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -28,7 +28,7 @@
             "asignacion-fabrica-mesa-servicio"
         ],
         reclutador: ["inicio", "solicitudesRecl"],
-        talento_humano: ["inicio", "onboardingTH"]
+        talento_humano: ["inicio", "onboardingTH", "firma-contratos-admin"]
     };
 }
 
@@ -50,10 +50,12 @@ function getAllSearchViews() {
         { label: "Soportes Cuentas Cobro", hash: "#soportes-cuentas-cobro" },
         { label: "Generar Cuenta Cobro", hash: "#generar-cuenta-cobro" },
         { label: "Catálogos Admin", hash: "#catalogos-admin" },
+        { label: "Licencias de Acceso", hash: "#gestion-licencias-admin" },
         { label: "Solicitudes RRHH", hash: "#solicitudesCoord" },
         { label: "Contrataciones", hash: "#preregistrosCoord" },
         { label: "Pool de Solicitudes", hash: "#solicitudesRecl" },
-        { label: "Contrataciones TH", hash: "#onboardingTH" }
+        { label: "Contrataciones TH", hash: "#onboardingTH" },
+        { label: "Firma de Contratos", hash: "#firma-contratos-admin" }
     ];
 }
 

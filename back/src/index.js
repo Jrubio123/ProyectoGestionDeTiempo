@@ -3541,6 +3541,111 @@ async function generateAnexoIndividualPdfFromItems({ userRow, items, correoFirma
   };
 }
 
+async function collectAnexoIndividualSignatureContext({
+  userInput,
+  correoFirmante = "",
+  requestedItemIds = [],
+  client = pool,
+  lockRows = false
+} = {}) {
+  const userRow = await getUsuarioAnexoIndividualById(userInput);
+  if (!userRow) {
+    const err = new Error("Usuario no encontrado");
+    err.status = 404;
+    throw err;
+  }
+
+  const numeroDocumento = toNullableTrimmedString(userRow.cedula);
+  const itemsSql = `
+    SELECT
+      ati.id,
+      ati.public_id,
+      ati.nombre_persona,
+      ati.numero_documento,
+      ati.correo_personal,
+      ati.tipo_asignacion,
+      ati.cliente_nombre,
+      ati.moneda,
+      ati.valor_tarifa,
+      ati.fecha_inicio,
+      ati.fecha_fin,
+      ati.fecha_fin_calculada,
+      ati.origen,
+      ati.estado,
+      ati.estado_firma,
+      m.titulo AS modulo_titulo
+    FROM anexo_tecnico_items ati
+    LEFT JOIN modulo m ON m.id = ati.modulo_id
+    WHERE ati.estado = 'activo'
+      AND (
+        ati.usuario_id = $1
+        OR ($2::text IS NOT NULL AND ati.usuario_id IS NULL AND ati.numero_documento = $2)
+      )
+    ORDER BY ati.fecha_inicio DESC NULLS LAST, ati.created_at DESC
+    ${lockRows ? "FOR UPDATE" : ""}
+  `;
+  const itemsResult = await client.query(itemsSql, [userRow.id, numeroDocumento]);
+  const items = itemsResult.rows || [];
+  if (!items.length) {
+    const err = new Error("La persona no tiene items activos para firmar");
+    err.status = 400;
+    throw err;
+  }
+
+  const requestedIdsNormalized = Array.isArray(requestedItemIds)
+    ? requestedItemIds.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
+  if (requestedIdsNormalized.length > 0) {
+    const activeIds = new Set(
+      items.flatMap((item) => [String(item.id), String(item.public_id || "")]).filter(Boolean)
+    );
+    const matchesAll =
+      requestedIdsNormalized.length === items.length &&
+      requestedIdsNormalized.every((id) => activeIds.has(id));
+    if (!matchesAll) {
+      const err = new Error("El envio siempre incluye todos los items activos actuales");
+      err.status = 409;
+      throw err;
+    }
+  }
+
+  const correoSugerido =
+    toNullableTrimmedString(correoFirmante) ||
+    await resolveSuggestedAnexoFirmanteEmailForUser(userRow) ||
+    toNullableTrimmedString(userRow.email) ||
+    "";
+
+  return {
+    userRow,
+    items,
+    correoFirmante: correoSugerido
+  };
+}
+
+function isAnexoIndividualInfraError(err) {
+  const code = String(err?.code || "").trim();
+  if (!["42P01", "42703", "42704", "42883"].includes(code)) return false;
+
+  const haystack = `${err?.message || ""} ${err?.detail || ""} ${err?.hint || ""}`.toLowerCase();
+  return [
+    "tokens_firma_anexo_individual",
+    "anexo_tecnico_items",
+    "estado_firma",
+    "usuario_id",
+    "modulo_id",
+    "public_id",
+    "update_tokens_firma_anexo_individual_updated_at"
+  ].some((fragment) => haystack.includes(fragment));
+}
+
+function buildAnexoIndividualInfraErrorPayload() {
+  return {
+    error: "El flujo de anexo tecnico individual no esta completamente habilitado en la base de datos.",
+    detalle:
+      "Aplica las migraciones 2026-03-24-anexo-individual-th.sql, 2026-03-25-anexo-individual-check-usuario.sql y 2026-03-25-anexo-individual-firma-hardening.sql."
+  };
+}
+
 function buildUserResponse(userRow) {
   return {
     id: userRow?.public_id || (userRow?.id ? String(userRow.id) : null),
@@ -7630,6 +7735,58 @@ app.patch("/th/anexo-individual/items/:itemId/finalizar", requireAccess({ roles:
   }
 });
 
+app.post("/th/anexo-individual/preview-pdf", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
+  const correoFirmante = String(req.body?.correo_firmante || "").trim();
+  const usuarioInput = req.body?.usuario_id || null;
+  if (!usuarioInput) return res.status(400).json({ error: "usuario_id es obligatorio" });
+  if (correoFirmante && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correoFirmante)) {
+    return res.status(400).json({ error: "correo_firmante invalido" });
+  }
+
+  try {
+    const { userRow, items, correoFirmante: correoFinal } = await collectAnexoIndividualSignatureContext({
+      userInput: usuarioInput,
+      correoFirmante,
+      requestedItemIds: req.body?.item_ids || []
+    });
+    const generated = await generateAnexoIndividualPdfFromItems({
+      userRow,
+      items,
+      correoFirmante: correoFinal
+    });
+    const fileName = sanitizeDownloadFileName(
+      generated.fileName || "AnexoTecnico.pdf",
+      "AnexoTecnico.pdf"
+    ).replace(/"/g, "");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.send(generated.pdfBuffer);
+  } catch (err) {
+    console.error("Error descargando preview de anexo individual:", err);
+    const status = Number(err?.status || 0);
+    if (status >= 400 && status < 500) {
+      return res.status(status).json({ error: err.message || "No fue posible generar la vista previa" });
+    }
+    if (isAnexoIndividualInfraError(err)) {
+      return res.status(503).json(buildAnexoIndividualInfraErrorPayload());
+    }
+    const errMessage = String(err?.message || "");
+    if (isDocxTemplateFailureMessage(errMessage)) {
+      return res.status(422).json({
+        error: "No fue posible generar la vista previa porque la plantilla del anexo tecnico tiene marcadores invalidos."
+      });
+    }
+    if (isDocxInfraFailureMessage(errMessage)) {
+      return res.status(503).json({
+        error: "No fue posible generar el PDF del anexo tecnico.",
+        detalle: errMessage || "Sin detalle tecnico"
+      });
+    }
+    return res.status(500).json({ error: "Error generando la vista previa del anexo tecnico" });
+  }
+});
+
 app.post("/th/anexo-individual/iniciar-firma", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
   if (!isClickSignConfigured({ forContratos: true })) {
     return res.status(503).json({ error: "Click&Sign no esta configurado en el servidor" });
@@ -7670,62 +7827,18 @@ app.post("/th/anexo-individual/iniciar-firma", requireAccess({ roles: ["Administ
         });
       }
 
-      const numeroDocumento = toNullableTrimmedString(userRow.cedula);
-      const itemsResult = await client.query(
-        `
-        SELECT
-          ati.id,
-          ati.public_id,
-          ati.nombre_persona,
-          ati.numero_documento,
-          ati.correo_personal,
-          ati.tipo_asignacion,
-          ati.cliente_nombre,
-          ati.moneda,
-          ati.valor_tarifa,
-          ati.fecha_inicio,
-          ati.fecha_fin,
-          ati.fecha_fin_calculada,
-          ati.origen,
-          ati.estado,
-          ati.estado_firma,
-          m.titulo AS modulo_titulo
-        FROM anexo_tecnico_items ati
-        LEFT JOIN modulo m ON m.id = ati.modulo_id
-        WHERE ati.estado = 'activo'
-          AND (
-            ati.usuario_id = $1
-            OR ($2::text IS NOT NULL AND ati.usuario_id IS NULL AND ati.numero_documento = $2)
-          )
-        ORDER BY ati.fecha_inicio DESC NULLS LAST, ati.created_at DESC
-        FOR UPDATE
-        `,
-        [userRow.id, numeroDocumento]
-      );
-      const items = itemsResult.rows || [];
-      if (!items.length) {
-        await client.query("ROLLBACK");
-        return res.status(400).json({ error: "La persona no tiene items activos para firmar" });
-      }
-
-      const requestedIds = Array.isArray(req.body?.item_ids)
-        ? req.body.item_ids.map((value) => String(value || "").trim()).filter(Boolean)
-        : [];
-      if (requestedIds.length > 0) {
-        const activeIds = new Set(
-          items.flatMap((item) => [String(item.id), String(item.public_id || "")]).filter(Boolean)
-        );
-        const matchesAll = requestedIds.length === items.length && requestedIds.every((id) => activeIds.has(id));
-        if (!matchesAll) {
-          await client.query("ROLLBACK");
-          return res.status(409).json({ error: "El envio siempre incluye todos los items activos actuales" });
-        }
-      }
+      const { items, correoFirmante: correoFinal } = await collectAnexoIndividualSignatureContext({
+        userInput: userRow.id,
+        correoFirmante,
+        requestedItemIds: req.body?.item_ids || [],
+        client,
+        lockRows: true
+      });
 
       const generated = await generateAnexoIndividualPdfFromItems({
         userRow,
         items,
-        correoFirmante
+        correoFirmante: correoFinal
       });
       const token = crypto.randomBytes(32).toString("hex");
       const requestId = `ANX-${token.slice(0, 12)}-${Date.now()}`;
@@ -7743,14 +7856,14 @@ app.post("/th/anexo-individual/iniciar-firma", requireAccess({ roles: ["Administ
             {
               level_order: 0,
               required_signatories_to_complete_level: 1,
-              signatories: [
-                {
-                  email: correoFirmante,
-                  name: userRow.nombre_usuario || correoFirmante,
-                  external_id: signatoryExternalId
-                }
-              ]
-            }
+                signatories: [
+                  {
+                    email: correoFinal,
+                    name: userRow.nombre_usuario || correoFinal,
+                    external_id: signatoryExternalId
+                  }
+                ]
+              }
           ],
           file: [
             {
@@ -7849,7 +7962,7 @@ app.post("/th/anexo-individual/iniciar-firma", requireAccess({ roles: ["Administ
           token,
           userRow.id,
           items.map((item) => Number(item.id)).filter(Number.isInteger),
-          correoFirmante,
+          correoFinal,
           userRow.nombre_usuario || "",
           resolvedRequestId || null,
           contractId,
@@ -7888,6 +8001,9 @@ app.post("/th/anexo-individual/iniciar-firma", requireAccess({ roles: ["Administ
     const status = Number(err?.status || 0);
     if (status >= 400 && status < 500) {
       return res.status(status).json({ error: err.message || "No fue posible iniciar la firma" });
+    }
+    if (isAnexoIndividualInfraError(err)) {
+      return res.status(503).json(buildAnexoIndividualInfraErrorPayload());
     }
     const errMessage = String(err?.message || "");
     if (isDocxTemplateFailureMessage(errMessage)) {

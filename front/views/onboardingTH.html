@@ -626,13 +626,22 @@
                 <p class="text-xs text-slate-500">
                     ClickSign enviara el enlace de firma a este correo.
                 </p>
+                <p class="text-xs text-slate-500">
+                    Puedes descargar el anexo en PDF para revisar como quedara antes de enviarlo.
+                </p>
             </div>
 
-            <div class="prereg-modal-footer">
+            <div class="prereg-modal-footer gap-3">
                 <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarModalFirmaAnexo()">Cancelar</button>
                 <button type="button"
+                    class="prereg-btn prereg-btn-ghost"
+                    :disabled="anexoModalFirma.saving || anexoModalFirma.downloading"
+                    @click="descargarPreviewAnexo()">
+                    <span x-text="anexoModalFirma.downloading ? 'Descargando...' : 'Descargar anexo'"></span>
+                </button>
+                <button type="button"
                     class="prereg-btn prereg-btn-teal"
-                    :disabled="anexoModalFirma.saving"
+                    :disabled="anexoModalFirma.saving || anexoModalFirma.downloading"
                     @click="confirmarEnvioFirmaAnexo()">
                     <span x-text="anexoModalFirma.saving ? 'Enviando...' : 'Confirmar y enviar'"></span>
                 </button>

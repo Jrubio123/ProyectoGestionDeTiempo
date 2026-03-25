@@ -112,6 +112,7 @@ window.onboardingThApp = function () {
         anexoModalFirma: {
             open: false,
             saving: false,
+            downloading: false,
             error: "",
             correo_firmante: ""
         },
@@ -703,6 +704,40 @@ window.onboardingThApp = function () {
             }
         },
 
+        parseFileNameFromDisposition(disposition = "") {
+            const raw = String(disposition || "");
+            const match = raw.match(/filename\*?=(?:UTF-8'')?\"?([^\";]+)\"?/i);
+            if (!match?.[1]) return "";
+            try {
+                return decodeURIComponent(match[1].replace(/\"/g, ""));
+            } catch (_) {
+                return match[1].replace(/\"/g, "");
+            }
+        },
+
+        async resolveBlobErrorMessage(error, fallback) {
+            const directMessage = error?.response?.data?.error;
+            if (directMessage) return directMessage;
+
+            const blob = error?.response?.data;
+            if (!(blob instanceof Blob)) {
+                return fallback;
+            }
+
+            try {
+                const text = await blob.text();
+                if (!text) return fallback;
+                try {
+                    const parsed = JSON.parse(text);
+                    return parsed?.error || parsed?.detalle || text || fallback;
+                } catch (_) {
+                    return text || fallback;
+                }
+            } catch (_) {
+                return fallback;
+            }
+        },
+
         async buscarUsuariosAnexo() {
             const q = String(this.anexoBusqueda || "").trim();
             if (this._anexoSearchTimer) {
@@ -998,6 +1033,7 @@ window.onboardingThApp = function () {
             this.anexoModalFirma = {
                 open: true,
                 saving: false,
+                downloading: false,
                 error: "",
                 correo_firmante: this.anexoCorreoSugerido || this.usuarioAnexo?.email || ""
             };
@@ -1007,9 +1043,57 @@ window.onboardingThApp = function () {
             this.anexoModalFirma = {
                 open: false,
                 saving: false,
+                downloading: false,
                 error: "",
                 correo_firmante: ""
             };
+        },
+
+        async descargarPreviewAnexo() {
+            if (!this.usuarioAnexo?.id || !this.anexoItemsActivos.length) return;
+            const correo = String(this.anexoModalFirma.correo_firmante || "").trim();
+            if (correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
+                this.anexoModalFirma.error = "Ingresa un correo valido para verificar el documento.";
+                return;
+            }
+
+            this.anexoModalFirma.downloading = true;
+            this.anexoModalFirma.error = "";
+            try {
+                const resp = await axios.post(
+                    `${API}/th/anexo-individual/preview-pdf`,
+                    {
+                        usuario_id: this.usuarioAnexo.id,
+                        correo_firmante: correo,
+                        item_ids: this.anexoItemsActivos.map((item) => item.id)
+                    },
+                    {
+                        ...(this.getAuthConfig() || {}),
+                        responseType: "blob"
+                    }
+                );
+
+                const contentType = String(resp?.headers?.["content-type"] || "application/pdf");
+                const blob = new Blob([resp.data], { type: contentType });
+                const fileName =
+                    this.parseFileNameFromDisposition(resp?.headers?.["content-disposition"] || "") ||
+                    `AnexoTecnico_${String(this.usuarioAnexo?.nombre || "Persona").replace(/\s+/g, "_")}.pdf`;
+                const blobUrl = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = blobUrl;
+                link.download = fileName;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(blobUrl);
+            } catch (e) {
+                this.anexoModalFirma.error = await this.resolveBlobErrorMessage(
+                    e,
+                    "No se pudo descargar la vista previa del anexo."
+                );
+            } finally {
+                this.anexoModalFirma.downloading = false;
+            }
         },
 
         async confirmarEnvioFirmaAnexo() {

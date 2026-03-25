@@ -3582,7 +3582,7 @@ async function collectAnexoIndividualSignatureContext({
         OR ($2::text IS NOT NULL AND ati.usuario_id IS NULL AND ati.numero_documento = $2)
       )
     ORDER BY ati.fecha_inicio DESC NULLS LAST, ati.created_at DESC
-    ${lockRows ? "FOR UPDATE" : ""}
+    ${lockRows ? "FOR UPDATE OF ati" : ""}
   `;
   const itemsResult = await client.query(itemsSql, [userRow.id, numeroDocumento]);
   const items = itemsResult.rows || [];

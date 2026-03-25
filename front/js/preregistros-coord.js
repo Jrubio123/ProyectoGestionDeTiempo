@@ -403,10 +403,11 @@ window.preregistrosCoordApp = function () {
         },
 
         puedeContinuar(item) {
+            const estado = this.normalizarTexto(item?.estado);
             return (
                 !!item &&
                 item.tipo_solicitud === "Nuevo" &&
-                item.estado === "Pendiente" &&
+                (estado === "pendiente" || estado === "pendiente coordinador") &&
                 String(item?.datos_extra?.origen || "").toLowerCase() === DRAFT_SOURCE_RRHH
             );
         },
@@ -415,6 +416,7 @@ window.preregistrosCoordApp = function () {
             if (estado === "Completado") return "bg-emerald-100 text-emerald-700";
             if (this.esPendienteConfirmacionCliente(estado)) return "bg-amber-100 text-amber-700";
             if (estado === "En Proceso") return "bg-blue-100 text-blue-700";
+            if (estado === "Pendiente Coordinador") return "bg-slate-100 text-slate-700";
             if (estado === "Pendiente") return "bg-slate-100 text-slate-700";
             return "bg-slate-100 text-slate-600";
         },

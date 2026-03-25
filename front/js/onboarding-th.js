@@ -205,34 +205,33 @@ window.onboardingThApp = function () {
                 origen_flujo: "preregistro"
             }));
 
-            const preregistroIds = new Set(
-                itemsPreregistro
-                    .map((item) => this.normalizarId(item?.id))
-                    .filter(Boolean)
+            const preregistroById = new Map();
+            const preregistroBySolicitudId = new Map();
+            itemsPreregistro.forEach((item) => {
+                const preregistroId = this.normalizarId(item?.id);
+                if (preregistroId) preregistroById.set(preregistroId, item);
+                const solicitudId = this.normalizarId(item?.solicitud?.id);
+                if (solicitudId) preregistroBySolicitudId.set(solicitudId, item);
+            });
+
+            const preregistrosConsumidos = new Set();
+            const itemsContratacion = solicitudes.map((item) => {
+                const linkedPreregistro = this.resolverPreregistroVinculadoDesdeMap(
+                    item,
+                    preregistroById,
+                    preregistroBySolicitudId
+                );
+                if (linkedPreregistro?.id) {
+                    preregistrosConsumidos.add(this.normalizarId(linkedPreregistro.id));
+                }
+                return this.mapContratacionToRegistro(item, linkedPreregistro);
+            });
+
+            const preregistrosSueltos = itemsPreregistro.filter(
+                (item) => !preregistrosConsumidos.has(this.normalizarId(item?.id))
             );
 
-            const rrhhSolicitudIds = new Set(
-                itemsPreregistro
-                    .map((item) => this.normalizarId(item?.solicitud?.id))
-                    .filter(Boolean)
-            );
-
-            const itemsContratacion = solicitudes
-                .filter((item) => {
-                    const origen = this.normalizar(item?.datos_extra?.origen || "");
-                    if (origen !== "rrhh") return true;
-
-                    const preregistroId = this.normalizarId(item?.datos_extra?.preregistro_id);
-                    if (preregistroId && preregistroIds.has(preregistroId)) return false;
-
-                    const rrhhSolicitudId = this.normalizarId(item?.datos_extra?.rrhh_solicitud_id);
-                    if (rrhhSolicitudId && rrhhSolicitudIds.has(rrhhSolicitudId)) return false;
-
-                    return true;
-                })
-                .map((item) => this.mapContratacionToRegistro(item));
-
-            this.preregistros = [...itemsPreregistro, ...itemsContratacion].sort((a, b) => {
+            this.preregistros = [...itemsContratacion, ...preregistrosSueltos].sort((a, b) => {
                 const ta = new Date(a?.updated_at || a?.created_at || 0).getTime();
                 const tb = new Date(b?.updated_at || b?.created_at || 0).getTime();
                 return tb - ta;
@@ -257,75 +256,98 @@ window.onboardingThApp = function () {
             }
         },
 
-        mapContratacionToRegistro(item) {
+        resolverPreregistroVinculadoDesdeMap(item, preregistroById, preregistroBySolicitudId) {
+            const preregistroId = this.normalizarId(item?.preregistro_id || item?.datos_extra?.preregistro_id);
+            if (preregistroId && preregistroById.has(preregistroId)) {
+                return preregistroById.get(preregistroId);
+            }
+
+            const rrhhSolicitudId = this.normalizarId(item?.rrhh_solicitud_id || item?.datos_extra?.rrhh_solicitud_id);
+            if (rrhhSolicitudId && preregistroBySolicitudId.has(rrhhSolicitudId)) {
+                return preregistroBySolicitudId.get(rrhhSolicitudId);
+            }
+
+            return null;
+        },
+
+        mapContratacionToRegistro(item, linkedPreregistro = null) {
             const tipoDocumentoTitulo = item?.tipo_documento?.titulo || item?.tipo_documento?.codigo || null;
             const clienteNombre = item?.cliente?.nombre || item?.datos_extra?.cliente_nombre || null;
             const moduloNombre = item?.datos_extra?.modulo || item?.datos_extra?.modulo_nombre || null;
             const origenContratacion = this.normalizar(item?.datos_extra?.origen || "");
+            const preregistro = linkedPreregistro || null;
+            const preregistroSolicitud = preregistro?.solicitud || {};
+            const preregistroBanco = preregistro?.banco || null;
             return {
                 id: item?.id,
                 origen_flujo: "contratacion",
                 origen_contratacion: origenContratacion,
-                preregistro_id: item?.datos_extra?.preregistro_id || null,
-                rrhh_solicitud_id: item?.datos_extra?.rrhh_solicitud_id || null,
+                preregistro_id: item?.preregistro_id || item?.datos_extra?.preregistro_id || preregistro?.id || null,
+                rrhh_solicitud_id: item?.datos_extra?.rrhh_solicitud_id || preregistroSolicitud?.id || null,
+                preregistro_estado: preregistro?.estado || null,
                 datos_extra: item?.datos_extra || {},
                 solicitud: {
                     id: item?.id,
-                    perfil: item?.perfil || null,
-                    nivel: item?.datos_extra?.nivel || null,
+                    perfil: item?.perfil || preregistroSolicitud?.perfil || null,
+                    nivel: item?.datos_extra?.nivel || preregistroSolicitud?.nivel || null,
                     estado: item?.estado || null,
                     cliente: { id: item?.cliente?.id || null, nombre: clienteNombre },
                     modulo: { id: item?.datos_extra?.modulo_id || null, nombre: moduloNombre },
                     coordinador: item?.coordinador || null
                 },
-                nombre: item?.nombre || "",
-                apellidos: item?.apellidos || "",
-                tipo_documento: tipoDocumentoTitulo,
-                numero_documento: item?.numero_documento || null,
-                telefono: item?.telefono || null,
-                correo_personal: item?.correo_personal || null,
-                pais_ubicacion: item?.ubicacion || null,
-                ciudad: null,
-                responsable_supervisor: null,
-                fecha_fin: item?.fecha_fin || null,
-                moneda: item?.moneda || null,
-                pais_pago: null,
-                tarifa_hora: item?.tarifa_hora ?? null,
-                tarifa_mes: item?.tarifa_mes ?? null,
-                tarifa_medio_tiempo: item?.tarifa_medio_tiempo ?? null,
-                tarifa_capacitacion: item?.tarifa_capacitacion ?? null,
-                modalidad_contrato: item?.modalidad_contrato || item?.datos_extra?.modalidad_contrato || null,
-                vpn_corona: null,
-                necesita_s_user: null,
-                grupo_usuario: item?.grupo_app_tiempos || null,
-                grupo_distribucion: item?.grupo_distribucion || null,
-                observaciones: item?.observaciones || null,
-                direccion: item?.datos_extra?.direccion || null,
-                tipo_persona: item?.datos_extra?.tipo_persona || "Natural",
-                banco: item?.datos_extra?.banco_id ? { id: item.datos_extra.banco_id } : null,
-                tipo_cuenta: item?.datos_extra?.tipo_cuenta || null,
-                numero_cuenta: item?.datos_extra?.numero_cuenta || null,
-                correo_silver: item?.correo_empresarial || null,
+                nombre: item?.nombre || preregistro?.nombre || "",
+                apellidos: item?.apellidos || preregistro?.apellidos || "",
+                tipo_documento: tipoDocumentoTitulo || preregistro?.tipo_documento || null,
+                numero_documento: item?.numero_documento || preregistro?.numero_documento || null,
+                telefono: item?.telefono || preregistro?.telefono || null,
+                correo_personal: item?.correo_personal || preregistro?.correo_personal || null,
+                pais_ubicacion: item?.ubicacion || preregistro?.pais_ubicacion || null,
+                ciudad: preregistro?.ciudad || null,
+                responsable_supervisor: preregistro?.responsable_supervisor || null,
+                fecha_fin: item?.fecha_fin || preregistro?.fecha_fin || null,
+                moneda: item?.moneda || preregistro?.moneda || null,
+                pais_pago: preregistro?.pais_pago || item?.datos_extra?.pais_pago || null,
+                tarifa_hora: item?.tarifa_hora ?? preregistro?.tarifa_hora ?? null,
+                tarifa_mes: item?.tarifa_mes ?? preregistro?.tarifa_mes ?? null,
+                tarifa_medio_tiempo: item?.tarifa_medio_tiempo ?? preregistro?.tarifa_medio_tiempo ?? null,
+                tarifa_capacitacion: item?.tarifa_capacitacion ?? preregistro?.tarifa_capacitacion ?? null,
+                modalidad_contrato: item?.modalidad_contrato || item?.datos_extra?.modalidad_contrato || preregistroSolicitud?.modalidad || null,
+                vpn_corona: preregistro?.vpn_corona ?? item?.datos_extra?.vpn_corona ?? null,
+                necesita_s_user: preregistro?.necesita_s_user ?? item?.datos_extra?.necesita_s_user ?? null,
+                grupo_usuario: item?.grupo_app_tiempos || item?.datos_extra?.grupo_usuario || null,
+                grupo_distribucion: item?.grupo_distribucion || preregistro?.grupo_distribucion || item?.datos_extra?.grupo_distribucion || null,
+                observaciones: item?.observaciones || preregistro?.observaciones || null,
+                direccion: item?.datos_extra?.direccion || preregistro?.direccion || null,
+                tipo_persona: item?.datos_extra?.tipo_persona || preregistro?.tipo_persona || "Natural",
+                banco: item?.datos_extra?.banco_id
+                    ? { id: item.datos_extra.banco_id, nombre: preregistroBanco?.nombre || null }
+                    : (preregistroBanco || null),
+                tipo_cuenta: item?.datos_extra?.tipo_cuenta || preregistro?.tipo_cuenta || null,
+                numero_cuenta: item?.datos_extra?.numero_cuenta || preregistro?.numero_cuenta || null,
+                correo_silver: item?.correo_empresarial || preregistro?.correo_silver || null,
                 estado: item?.estado || "",
                 creado_por: item?.coordinador?.id || null,
                 creado_por_nombre: item?.coordinador?.nombre || null,
-                completado_coordinador_por: item?.coordinador?.id || null,
-                completado_coordinador_por_nombre: item?.coordinador?.nombre || null,
-                completado_th_por: null,
-                completado_th_por_nombre: null,
-                aprobado_por: null,
-                aprobado_por_nombre: null,
-                anulado_por: null,
-                anulado_por_nombre: null,
-                motivo_anulacion: null,
-                id_usuario_creado: item?.persona?.id || null,
-                usuario_creado: item?.persona || null,
-                fecha_completado_coordinador: item?.updated_at || item?.created_at || null,
-                fecha_completado_th: item?.fecha_revision_th || null,
-                fecha_aprobacion: item?.estado === "Completado" ? (item?.updated_at || item?.created_at || null) : null,
-                fecha_anulacion: null,
-                observaciones_th: item?.observaciones_th || null,
-                created_at: item?.created_at || null,
+                completado_coordinador_por: preregistro?.completado_coordinador_por || item?.coordinador?.id || null,
+                completado_coordinador_por_nombre: preregistro?.completado_coordinador_por_nombre || item?.coordinador?.nombre || null,
+                completado_th_por: preregistro?.completado_th_por || null,
+                completado_th_por_nombre: preregistro?.completado_th_por_nombre || null,
+                aprobado_por: preregistro?.aprobado_por || null,
+                aprobado_por_nombre: preregistro?.aprobado_por_nombre || null,
+                anulado_por: preregistro?.anulado_por || null,
+                anulado_por_nombre: preregistro?.anulado_por_nombre || null,
+                motivo_anulacion: preregistro?.motivo_anulacion || null,
+                id_usuario_creado: item?.persona?.id || preregistro?.id_usuario_creado || null,
+                usuario_creado: item?.persona || preregistro?.usuario_creado || null,
+                fecha_completado_coordinador: preregistro?.fecha_completado_coordinador || item?.updated_at || item?.created_at || null,
+                fecha_completado_th: preregistro?.fecha_completado_th || item?.fecha_revision_th || null,
+                fecha_aprobacion:
+                    item?.estado === "Completado"
+                        ? (preregistro?.fecha_aprobacion || item?.updated_at || item?.created_at || null)
+                        : null,
+                fecha_anulacion: preregistro?.fecha_anulacion || null,
+                observaciones_th: item?.observaciones_th || preregistro?.observaciones_th || null,
+                created_at: item?.created_at || preregistro?.created_at || null,
                 updated_at: item?.updated_at || item?.created_at || null
             };
         },
@@ -346,7 +368,7 @@ window.onboardingThApp = function () {
 
         flujoLabel(item) {
             if (item?.origen_flujo === "contratacion" && item?.origen_contratacion === "rrhh") {
-                return "Contratacion desde RRHH";
+                return "Caso RRHH";
             }
             return item?.origen_flujo === "contratacion" ? "Contratacion directa" : "Preregistro RRHH";
         },
@@ -420,12 +442,16 @@ window.onboardingThApp = function () {
             return FILTER_LABELS[this.filtro] || FILTER_LABELS.all;
         },
 
-        esContratacionPendienteRevisionTh(item) {
-            return item?.origen_flujo === "contratacion" && this.normalizar(item?.estado) === "pendiente revision th";
+        esContratacionEditableTh(item) {
+            if (item?.origen_flujo !== "contratacion") return false;
+            const estado = this.normalizar(item?.estado);
+            return estado === "pendiente revision th" || estado === "pendiente correo silver";
         },
 
         accionPrincipalLabel(item) {
-            if (this.esContratacionPendienteRevisionTh(item)) return "Marcar revision TH";
+            if (this.esContratacionEditableTh(item)) {
+                return item?.estado === "Pendiente Correo Silver" ? "Ingresar correo Silver" : "Completar revision";
+            }
             if (item?.origen_flujo !== "preregistro") return "Ver detalle";
             if (item.estado === "Pendiente Revision TH") return "Completar revision";
             if (item.estado === "Pendiente Correo Silver") return "Ingresar correo Silver";
@@ -433,55 +459,24 @@ window.onboardingThApp = function () {
         },
 
         accionPrincipalClass(item) {
-            if (this.esContratacionPendienteRevisionTh(item)) return "prereg-btn prereg-btn-teal";
+            if (this.esContratacionEditableTh(item)) {
+                return item?.estado === "Pendiente Correo Silver" ? "prereg-btn prereg-btn-purple" : "prereg-btn prereg-btn-teal";
+            }
             if (item?.origen_flujo !== "preregistro") return "prereg-btn prereg-btn-ghost";
             if (item.estado === "Pendiente Correo Silver") return "prereg-btn prereg-btn-purple";
             if (item.estado === "Pendiente Revision TH") return "prereg-btn prereg-btn-teal";
             return "prereg-btn prereg-btn-ghost";
         },
 
-        buscarPreregistroVinculado(item) {
-            if (!item || item?.origen_flujo !== "contratacion") return null;
-
-            const preregistroId = this.normalizarId(item?.preregistro_id || item?.datos_extra?.preregistro_id);
-            if (preregistroId) {
-                const byPreregistroId = this.preregistros.find(
-                    (candidate) => candidate?.origen_flujo === "preregistro" && this.normalizarId(candidate?.id) === preregistroId
-                );
-                if (byPreregistroId) return byPreregistroId;
-            }
-
-            const rrhhSolicitudId = this.normalizarId(item?.rrhh_solicitud_id || item?.datos_extra?.rrhh_solicitud_id);
-            if (rrhhSolicitudId) {
-                const bySolicitud = this.preregistros.find(
-                    (candidate) => candidate?.origen_flujo === "preregistro" && this.normalizarId(candidate?.solicitud?.id) === rrhhSolicitudId
-                );
-                if (bySolicitud) return bySolicitud;
-            }
-
-            return null;
-        },
-
         abrirDetalleResuelto(item, focoCorreo = false) {
-            const preregistroVinculado = this.buscarPreregistroVinculado(item);
-            if (preregistroVinculado) {
-                this.abrirDetalle(preregistroVinculado, preregistroVinculado?.estado === "Pendiente Correo Silver");
-                return;
-            }
             this.abrirDetalle(item, focoCorreo);
         },
 
         async ejecutarAccionPrincipal(item) {
             if (!item?.id) return;
 
-            const preregistroVinculado = this.buscarPreregistroVinculado(item);
-            if (preregistroVinculado) {
-                this.abrirDetalle(preregistroVinculado, preregistroVinculado?.estado === "Pendiente Correo Silver");
-                return;
-            }
-
-            if (this.esContratacionPendienteRevisionTh(item)) {
-                this.abrirDetalle(item, false);
+            if (this.esContratacionEditableTh(item)) {
+                this.abrirDetalle(item, item?.estado === "Pendiente Correo Silver");
                 return;
             }
             this.abrirDetalleResuelto(item, item?.estado === "Pendiente Correo Silver");
@@ -521,7 +516,8 @@ window.onboardingThApp = function () {
                 return estado === "Pendiente Revision TH" || estado === "Pendiente Correo Silver";
             }
             if (this.itemActivo?.origen_flujo === "contratacion") {
-                return this.itemActivo?.estado === "Pendiente Revision TH";
+                return this.itemActivo?.estado === "Pendiente Revision TH"
+                    || this.itemActivo?.estado === "Pendiente Correo Silver";
             }
             return false;
         },

@@ -734,7 +734,16 @@ CREATE TABLE solicitudes_contratacion (
     tipo_solicitud VARCHAR(20) NOT NULL
         CHECK (tipo_solicitud IN ('Nuevo', 'Extension', 'Retiro')),
     estado VARCHAR(50) NOT NULL DEFAULT 'Pendiente'
-        CHECK (estado IN ('Pendiente', 'En Proceso', 'Pendiente Confirmación Cliente', 'Pendiente Revision TH', 'Completado', 'Cancelado')),
+        CHECK (estado IN (
+            'Pendiente',
+            'Pendiente Coordinador',
+            'En Proceso',
+            'Pendiente Confirmación Cliente',
+            'Pendiente Revision TH',
+            'Pendiente Correo Silver',
+            'Completado',
+            'Cancelado'
+        )),
 
     coordinador_solicitante_id INT NOT NULL REFERENCES usuarios(id),
     persona_usuario_id INT REFERENCES usuarios(id),
@@ -790,7 +799,7 @@ CREATE TABLE solicitudes_contratacion (
 );
 
 COMMENT ON TABLE solicitudes_contratacion IS 'Solicitudes de contrataciones y cambios de contrato (Nuevo, Extension, Retiro)';
-COMMENT ON COLUMN solicitudes_contratacion.estado IS 'Pendiente, En Proceso, Pendiente Confirmación Cliente, Pendiente Revision TH, Completado o Cancelado';
+COMMENT ON COLUMN solicitudes_contratacion.estado IS 'Pendiente, Pendiente Coordinador, En Proceso, Pendiente Confirmación Cliente, Pendiente Revision TH, Pendiente Correo Silver, Completado o Cancelado';
 COMMENT ON COLUMN solicitudes_contratacion.requiere_confirmacion_cliente IS 'Cuando aplica (ej. HOLCIM), se debe confirmar con el cliente antes de enviar a TH';
 COMMENT ON COLUMN solicitudes_contratacion.origen_flujo IS 'Indica si la solicitud nació desde RRHH/preregistro o desde el flujo manual de coordinación';
 

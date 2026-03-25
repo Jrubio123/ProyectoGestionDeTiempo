@@ -19,8 +19,19 @@ module.exports = function registerPreregistroRoutes(deps) {
     anulado: "Anulado"
   });
 
+  function mapPreregistroEstadoToSolicitudEstado(estado) {
+    const raw = String(estado || "").trim();
+    if (!raw) return null;
+    if (raw === ESTADOS.pendienteCoordinador) return ESTADOS.pendienteCoordinador;
+    if (raw === ESTADOS.pendienteRevisionTh) return ESTADOS.pendienteRevisionTh;
+    if (raw === ESTADOS.pendienteCorreoSilver) return ESTADOS.pendienteCorreoSilver;
+    if (raw === ESTADOS.completado) return ESTADOS.completado;
+    if (raw === ESTADOS.anulado) return "Cancelado";
+    return null;
+  }
+
   const TIPOS_CUENTA = new Set(["Ahorros", "Corriente"]);
-  const TIPOS_PERSONA = new Set(["Natural", "Juridica"]);
+  const TIPOS_PERSONA = new Set(["Natural", "Juridica", "Jurídica"]);
   const MONEDAS = new Set(["COP", "USD", "EUR"]);
 
   function normalizeEnumKey(value) {
@@ -150,6 +161,13 @@ module.exports = function registerPreregistroRoutes(deps) {
   }
 
   function normalizeTipoPersonaForUsuarios(value) {
+    const raw = normalizeValue(value);
+    if (raw === "natural") return "Natural";
+    if (raw === "juridica") return "Jurídica";
+    return null;
+  }
+
+  function normalizeTipoPersonaForPreregistro(value) {
     const raw = normalizeValue(value);
     if (raw === "natural") return "Natural";
     if (raw === "juridica") return "Jurídica";
@@ -307,8 +325,18 @@ module.exports = function registerPreregistroRoutes(deps) {
       tipo_persona: preregistroRow.tipo_persona || existingDatosExtra.tipo_persona || null,
       banco_id: preregistroRow.banco_id || existingDatosExtra.banco_id || null,
       tipo_cuenta: preregistroRow.tipo_cuenta || existingDatosExtra.tipo_cuenta || null,
-      numero_cuenta: preregistroRow.numero_cuenta || existingDatosExtra.numero_cuenta || null
+      numero_cuenta: preregistroRow.numero_cuenta || existingDatosExtra.numero_cuenta || null,
+      vpn_corona: preregistroRow.vpn_corona === null || preregistroRow.vpn_corona === undefined
+        ? (existingDatosExtra.vpn_corona ?? null)
+        : Boolean(preregistroRow.vpn_corona),
+      necesita_s_user: preregistroRow.necesita_s_user === null || preregistroRow.necesita_s_user === undefined
+        ? (existingDatosExtra.necesita_s_user ?? null)
+        : Boolean(preregistroRow.necesita_s_user),
+      grupo_usuario: preregistroRow.grupo_usuario || existingDatosExtra.grupo_usuario || null,
+      grupo_distribucion: preregistroRow.grupo_distribucion || existingDatosExtra.grupo_distribucion || null,
+      pais_pago: preregistroRow.pais_pago || existingDatosExtra.pais_pago || null
     };
+    const nextEstado = estado || mapPreregistroEstadoToSolicitudEstado(preregistroRow.estado);
 
     await db.query(
       `
@@ -354,7 +382,7 @@ module.exports = function registerPreregistroRoutes(deps) {
         preregistroRow.fecha_fin || null,
         JSON.stringify(mergedDatosExtra),
         personaUsuarioId || preregistroRow.id_usuario_creado || null,
-        estado || null,
+        nextEstado || null,
         linked.id
       ]
     );
@@ -547,7 +575,7 @@ module.exports = function registerPreregistroRoutes(deps) {
               )
               VALUES (
                 'Nuevo',
-                'Pendiente',
+                'Pendiente Coordinador',
                 $1,
                 $2,
                 $3,
@@ -968,13 +996,14 @@ module.exports = function registerPreregistroRoutes(deps) {
       }
 
       const nextState = correoSilverNorm ? ESTADOS.pendienteRevisionTh : ESTADOS.pendienteCorreoSilver;
+      const tipoPersonaNorm = normalizeTipoPersonaForPreregistro(tipo_persona);
       await client.query(
         `UPDATE preregistro_personas
          SET direccion = $1, tipo_persona = $2, banco_id = $3, tipo_cuenta = $4, numero_cuenta = $5,
              correo_silver = COALESCE($6, correo_silver), estado = $7,
              completado_th_por = $8, fecha_completado_th = NOW()
          WHERE id = $9`,
-        [direccion, String(tipo_persona).trim(), bancoId, String(tipo_cuenta).trim(), String(numero_cuenta).trim(), correoSilverNorm, nextState, req.user?.id, id]
+        [direccion, tipoPersonaNorm, bancoId, String(tipo_cuenta).trim(), String(numero_cuenta).trim(), correoSilverNorm, nextState, req.user?.id, id]
       );
 
       const updated = await getByInternalId(client, id);

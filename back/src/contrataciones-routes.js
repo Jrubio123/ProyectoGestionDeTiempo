@@ -13,9 +13,11 @@ module.exports = function registerContratacionesRoutes(deps) {
 
   const ESTADOS = Object.freeze({
     pendiente: "Pendiente",
+    pendienteCoordinador: "Pendiente Coordinador",
     enProceso: "En Proceso",
     pendienteConfirmacionCliente: "Pendiente Confirmación Cliente",
     pendienteRevisionTh: "Pendiente Revision TH",
+    pendienteCorreoSilver: "Pendiente Correo Silver",
     completado: "Completado"
   });
 
@@ -206,6 +208,13 @@ module.exports = function registerContratacionesRoutes(deps) {
     return null;
   }
 
+  function normalizeTipoPersonaForPreregistro(value) {
+    const raw = normalizeValue(value);
+    if (raw === "natural") return "Natural";
+    if (raw === "juridica") return "Jurídica";
+    return null;
+  }
+
   function toObjectOrEmpty(value) {
     if (typeof value === "string") {
       try {
@@ -217,6 +226,111 @@ module.exports = function registerContratacionesRoutes(deps) {
       return value;
     }
     return {};
+  }
+
+  function isSolicitudRrhh(row) {
+    return String(row?.origen_flujo || "").trim().toLowerCase() === "rrhh";
+  }
+
+  function mapSolicitudEstadoToPreregistroEstado(estado) {
+    const raw = String(estado || "").trim();
+    if (!raw) return null;
+    if (raw === ESTADOS.pendiente || raw === ESTADOS.pendienteCoordinador) return ESTADOS.pendienteCoordinador;
+    if (raw === ESTADOS.pendienteRevisionTh) return ESTADOS.pendienteRevisionTh;
+    if (raw === ESTADOS.pendienteCorreoSilver) return ESTADOS.pendienteCorreoSilver;
+    if (raw === ESTADOS.completado) return ESTADOS.completado;
+    if (raw === "Cancelado") return "Anulado";
+    return null;
+  }
+
+  async function syncLinkedPreregistroFromSolicitud(
+    db,
+    solicitudRow,
+    { actorUserId = null, markCoordinadorCompletion = false, markThCompletion = false, markApproval = false } = {}
+  ) {
+    if (!solicitudRow?.preregistro_id || !isSolicitudRrhh(solicitudRow)) return null;
+
+    const datosExtra = toObjectOrEmpty(solicitudRow.datos_extra);
+    const nextEstado = mapSolicitudEstadoToPreregistroEstado(solicitudRow.estado);
+    const direccion = toNullableString(datosExtra.direccion);
+    const tipoPersona = normalizeTipoPersonaForPreregistro(datosExtra.tipo_persona);
+    const tipoCuenta = toNullableString(datosExtra.tipo_cuenta);
+    const numeroCuenta = toNullableString(datosExtra.numero_cuenta);
+    const correoSilver = toNullableString(solicitudRow.correo_empresarial);
+    const bancoId = await resolveBancoInternalId(db, datosExtra.banco_id);
+
+    const sets = [];
+    const values = [];
+    let idx = 1;
+
+    if (nextEstado) {
+      sets.push(`estado = $${idx++}`);
+      values.push(nextEstado);
+    }
+
+    if (direccion !== null) {
+      sets.push(`direccion = COALESCE($${idx++}, direccion)`);
+      values.push(direccion);
+    }
+    if (tipoPersona !== null) {
+      sets.push(`tipo_persona = COALESCE($${idx++}, tipo_persona)`);
+      values.push(tipoPersona);
+    }
+    if (bancoId) {
+      sets.push(`banco_id = COALESCE($${idx++}, banco_id)`);
+      values.push(bancoId);
+    }
+    if (tipoCuenta !== null) {
+      sets.push(`tipo_cuenta = COALESCE($${idx++}, tipo_cuenta)`);
+      values.push(tipoCuenta);
+    }
+    if (numeroCuenta !== null) {
+      sets.push(`numero_cuenta = COALESCE($${idx++}, numero_cuenta)`);
+      values.push(numeroCuenta);
+    }
+    if (correoSilver !== null) {
+      sets.push(`correo_silver = COALESCE($${idx++}, correo_silver)`);
+      values.push(correoSilver);
+    }
+
+    if (markCoordinadorCompletion && actorUserId) {
+      sets.push(`completado_coordinador_por = COALESCE(completado_coordinador_por, $${idx++})`);
+      values.push(actorUserId);
+      sets.push(`fecha_completado_coordinador = COALESCE(fecha_completado_coordinador, NOW())`);
+    }
+
+    if (markThCompletion && actorUserId) {
+      sets.push(`completado_th_por = $${idx++}`);
+      values.push(actorUserId);
+      sets.push(`fecha_completado_th = NOW()`);
+    }
+
+    if (markApproval) {
+      if (actorUserId) {
+        sets.push(`aprobado_por = $${idx++}`);
+        values.push(actorUserId);
+      }
+      sets.push(`id_usuario_creado = COALESCE($${idx++}, id_usuario_creado)`);
+      values.push(solicitudRow.persona_usuario_id || null);
+      sets.push(`fecha_aprobacion = COALESCE(fecha_aprobacion, NOW())`);
+    }
+
+    if (!sets.length) return null;
+
+    sets.push(`updated_at = NOW()`);
+    values.push(solicitudRow.preregistro_id);
+
+    const result = await db.query(
+      `
+      UPDATE preregistro_personas
+      SET ${sets.join(", ")}
+      WHERE id = $${idx}
+      RETURNING id
+      `,
+      values
+    );
+
+    return result.rows[0] || null;
   }
 
   function formatDateForEmail(value) {
@@ -1262,6 +1376,12 @@ module.exports = function registerContratacionesRoutes(deps) {
         );
 
         await dispatchAndFinalizeSolicitud({ internalId, req });
+        const afterDispatch = await getByInternalId(pool, internalId);
+        await syncLinkedPreregistroFromSolicitud(pool, afterDispatch, {
+          actorUserId: req.user?.id || null,
+          markCoordinadorCompletion: true
+        });
+
         const updated = await syncAnexoDesdeSolicitud(internalId, req.user?.id);
         return res.json(formatRow(updated));
       } catch (err) {
@@ -1283,8 +1403,10 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (!row) return res.status(404).json({ error: "Solicitud no encontrada" });
         const internalId = row.id;
 
-        if (row.estado !== ESTADOS.pendienteRevisionTh) {
-          return res.status(422).json({ error: `Solo se puede editar la sección 3 en estado '${ESTADOS.pendienteRevisionTh}'` });
+        if (![ESTADOS.pendienteRevisionTh, ESTADOS.pendienteCorreoSilver].includes(row.estado)) {
+          return res.status(422).json({
+            error: `Solo se puede editar la sección 3 en estado '${ESTADOS.pendienteRevisionTh}' o '${ESTADOS.pendienteCorreoSilver}'`
+          });
         }
 
         const bancoId     = await resolveBancoInternalId(pool, req.body?.banco_id);
@@ -1298,6 +1420,8 @@ module.exports = function registerContratacionesRoutes(deps) {
           return res.status(400).json({ error: "Banco no válido" });
         }
 
+        const nextEstado = correoSilver ? ESTADOS.pendienteRevisionTh : ESTADOS.pendienteCorreoSilver;
+
         // Guarda datos bancarios en datos_extra y correo silver en correo_empresarial
         await pool.query(
           `
@@ -1305,8 +1429,9 @@ module.exports = function registerContratacionesRoutes(deps) {
           SET
             correo_empresarial = COALESCE($1, correo_empresarial),
             datos_extra        = datos_extra || $2::jsonb,
+            estado             = $3,
             updated_at         = NOW()
-          WHERE id = $3
+          WHERE id = $4
           `,
           [
             correoSilver,
@@ -1317,10 +1442,16 @@ module.exports = function registerContratacionesRoutes(deps) {
               direccion:     direccion,
               tipo_persona:  tipoPersona
             }),
+            nextEstado,
             internalId
           ]
         );
 
+        const rowAfterSection3 = await getByInternalId(pool, internalId);
+        await syncLinkedPreregistroFromSolicitud(pool, rowAfterSection3, {
+          actorUserId: req.user?.id || null,
+          markThCompletion: true
+        });
         const updated = await syncAnexoDesdeSolicitud(internalId, req.user?.id);
         return res.json(formatRow(updated));
       } catch (err) {
@@ -1349,9 +1480,11 @@ module.exports = function registerContratacionesRoutes(deps) {
           await client.query("ROLLBACK");
           return res.status(422).json({ error: "La revision TH solo aplica para solicitudes tipo Nuevo" });
         }
-        if (row.estado !== ESTADOS.pendienteRevisionTh) {
+        if (![ESTADOS.pendienteRevisionTh, ESTADOS.pendienteCorreoSilver].includes(row.estado)) {
           await client.query("ROLLBACK");
-          return res.status(422).json({ error: `La solicitud debe estar en '${ESTADOS.pendienteRevisionTh}' para ser revisada por TH` });
+          return res.status(422).json({
+            error: `La solicitud debe estar en '${ESTADOS.pendienteRevisionTh}' o '${ESTADOS.pendienteCorreoSilver}' para ser revisada por TH`
+          });
         }
         const correoSilver = String(row.correo_empresarial || "").trim().toLowerCase();
         if (!correoSilver) {
@@ -1444,6 +1577,13 @@ module.exports = function registerContratacionesRoutes(deps) {
           `,
           [ESTADOS.completado, personaUsuarioId, correoSilver, req.user?.id, observaciones, internalId]
         );
+
+        const updatedSolicitud = await getByInternalId(client, internalId);
+        await syncLinkedPreregistroFromSolicitud(client, updatedSolicitud, {
+          actorUserId: req.user?.id || null,
+          markThCompletion: true,
+          markApproval: true
+        });
 
         await client.query("COMMIT");
 

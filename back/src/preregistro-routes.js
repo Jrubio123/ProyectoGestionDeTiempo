@@ -566,8 +566,9 @@ module.exports = function registerPreregistroRoutes(deps) {
                 $16,
                 $17,
                 $18,
-                $19::jsonb,
-                $20,
+                $19,
+                $20::jsonb,
+                $21,
                 false,
                 false,
                 false

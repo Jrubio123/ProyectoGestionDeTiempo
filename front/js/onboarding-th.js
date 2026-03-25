@@ -738,6 +738,27 @@ window.onboardingThApp = function () {
             }
         },
 
+        async copyTextToClipboard(text) {
+            const value = String(text || "").trim();
+            if (!value) return false;
+
+            if (navigator?.clipboard?.writeText) {
+                await navigator.clipboard.writeText(value);
+                return true;
+            }
+
+            const input = document.createElement("textarea");
+            input.value = value;
+            input.setAttribute("readonly", "");
+            input.style.position = "fixed";
+            input.style.opacity = "0";
+            document.body.appendChild(input);
+            input.select();
+            const ok = document.execCommand("copy");
+            document.body.removeChild(input);
+            return Boolean(ok);
+        },
+
         async buscarUsuariosAnexo() {
             const q = String(this.anexoBusqueda || "").trim();
             if (this._anexoSearchTimer) {
@@ -1107,7 +1128,7 @@ window.onboardingThApp = function () {
             this.anexoModalFirma.saving = true;
             this.anexoModalFirma.error = "";
             try {
-                await axios.post(
+                const res = await axios.post(
                     `${API}/th/anexo-individual/iniciar-firma`,
                     {
                         usuario_id: this.usuarioAnexo.id,
@@ -1116,13 +1137,46 @@ window.onboardingThApp = function () {
                     },
                     this.getAuthConfig()
                 );
+                const urlFirma = String(res?.data?.url_firma || res?.data?.token?.url_firma || "").trim();
                 this.cerrarModalFirmaAnexo();
                 await this.cargarItemsAnexo();
-                this.setAnexoFeedback({ success: "Proceso de firma iniciado correctamente." });
+                if (urlFirma) {
+                    window.open(urlFirma, "_blank", "noopener");
+                    this.setAnexoFeedback({
+                        success: "Proceso de firma iniciado. Se abrio el enlace de firma y tambien queda disponible en el envio pendiente."
+                    });
+                } else {
+                    this.setAnexoFeedback({
+                        success: "Proceso de firma iniciado. Si no llega correo, usa el enlace disponible en el envio pendiente."
+                    });
+                }
             } catch (e) {
                 this.anexoModalFirma.error = e?.response?.data?.error || "No se pudo iniciar la firma.";
             } finally {
                 this.anexoModalFirma.saving = false;
+            }
+        },
+
+        abrirEnlaceFirmaAnexo(url = "") {
+            const target = String(url || this.anexoTokenActivo?.url_firma || "").trim();
+            if (!target) {
+                this.setAnexoFeedback({ error: "Este envio no tiene un enlace de firma disponible." });
+                return;
+            }
+            window.open(target, "_blank", "noopener");
+        },
+
+        async copiarEnlaceFirmaAnexo(url = "") {
+            const target = String(url || this.anexoTokenActivo?.url_firma || "").trim();
+            if (!target) {
+                this.setAnexoFeedback({ error: "Este envio no tiene un enlace de firma disponible." });
+                return;
+            }
+            try {
+                await this.copyTextToClipboard(target);
+                this.setAnexoFeedback({ success: "Enlace de firma copiado al portapapeles." });
+            } catch (_) {
+                this.setAnexoFeedback({ error: "No se pudo copiar el enlace de firma." });
             }
         },
 

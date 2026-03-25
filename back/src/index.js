@@ -2392,9 +2392,10 @@ async function resolveSuggestedAnexoFirmanteEmailForUser(userRow) {
   return toNullableTrimmedString(userRow.email);
 }
 
-async function listAnexoItemsForUsuario(userRow, { includeFinalizados = false } = {}) {
+async function listAnexoItemsForUsuario(userRow, { includeFinalizados = false, correoPersonalFallback = null } = {}) {
   if (!userRow?.id) return [];
   const numeroDocumento = toNullableTrimmedString(userRow.cedula);
+  const correoFallback = toNullableTrimmedString(correoPersonalFallback);
   const r = await pool.query(
     `
     SELECT
@@ -2440,14 +2441,20 @@ async function listAnexoItemsForUsuario(userRow, { includeFinalizados = false } 
       AND (
         ati.usuario_id = $1
         OR ($2::text IS NOT NULL AND ati.usuario_id IS NULL AND ati.numero_documento = $2)
+        OR (
+          $3::text IS NOT NULL
+          AND ati.usuario_id IS NULL
+          AND COALESCE(BTRIM(ati.numero_documento), '') = ''
+          AND LOWER(COALESCE(ati.correo_personal, '')) = LOWER($3)
+        )
       )
-      AND ($3::boolean OR ati.estado = 'activo')
+      AND ($4::boolean OR ati.estado = 'activo')
     ORDER BY
       CASE WHEN ati.estado = 'activo' THEN 0 ELSE 1 END,
       ati.fecha_inicio DESC NULLS LAST,
       ati.created_at DESC
     `,
-    [userRow.id, numeroDocumento, Boolean(includeFinalizados)]
+    [userRow.id, numeroDocumento, correoFallback, Boolean(includeFinalizados)]
   );
   return r.rows || [];
 }
@@ -2651,7 +2658,11 @@ async function getLastSignedAnexoIndividualTokenByUser(userId) {
 }
 
 async function buildAnexoIndividualDashboardPayload(userRow, { includeFinalizados = false } = {}) {
-  const items = await listAnexoItemsForUsuario(userRow, { includeFinalizados });
+  const correoFirmanteSugerido = await resolveSuggestedAnexoFirmanteEmailForUser(userRow);
+  const items = await listAnexoItemsForUsuario(userRow, {
+    includeFinalizados,
+    correoPersonalFallback: correoFirmanteSugerido
+  });
   const activos = items.filter((item) => item.estado === "activo");
   const finalizados = items.filter((item) => item.estado === "finalizado");
   const tokenActivo = await getActiveAnexoIndividualTokenByUser(userRow.id);
@@ -2674,7 +2685,7 @@ async function buildAnexoIndividualDashboardPayload(userRow, { includeFinalizado
       tipo_consultor: userRow.tipo_consultor || null,
       tipo_documento: userRow.tipo_documento_codigo || userRow.tipo_documento_titulo || null
     },
-    correo_firmante_sugerido: await resolveSuggestedAnexoFirmanteEmailForUser(userRow),
+    correo_firmante_sugerido: correoFirmanteSugerido,
     token_activo: mapAnexoIndividualTokenRow(tokenActivo),
     ultimo_token_firmado: mapAnexoIndividualTokenRow(ultimoFirmado),
     tiene_cambios_desde_ultima_firma: tieneCambiosDesdeUltimaFirma,
@@ -3556,6 +3567,9 @@ async function collectAnexoIndividualSignatureContext({
   }
 
   const numeroDocumento = toNullableTrimmedString(userRow.cedula);
+  const correoPersonalFallback =
+    toNullableTrimmedString(correoFirmante) ||
+    toNullableTrimmedString(await resolveSuggestedAnexoFirmanteEmailForUser(userRow));
   const itemsSql = `
     SELECT
       ati.id,
@@ -3580,11 +3594,17 @@ async function collectAnexoIndividualSignatureContext({
       AND (
         ati.usuario_id = $1
         OR ($2::text IS NOT NULL AND ati.usuario_id IS NULL AND ati.numero_documento = $2)
+        OR (
+          $3::text IS NOT NULL
+          AND ati.usuario_id IS NULL
+          AND COALESCE(BTRIM(ati.numero_documento), '') = ''
+          AND LOWER(COALESCE(ati.correo_personal, '')) = LOWER($3)
+        )
       )
     ORDER BY ati.fecha_inicio DESC NULLS LAST, ati.created_at DESC
     ${lockRows ? "FOR UPDATE OF ati" : ""}
   `;
-  const itemsResult = await client.query(itemsSql, [userRow.id, numeroDocumento]);
+  const itemsResult = await client.query(itemsSql, [userRow.id, numeroDocumento, correoPersonalFallback]);
   const items = itemsResult.rows || [];
   if (!items.length) {
     const err = new Error("La persona no tiene items activos para firmar");
@@ -3611,7 +3631,7 @@ async function collectAnexoIndividualSignatureContext({
 
   const correoSugerido =
     toNullableTrimmedString(correoFirmante) ||
-    await resolveSuggestedAnexoFirmanteEmailForUser(userRow) ||
+    correoPersonalFallback ||
     toNullableTrimmedString(userRow.email) ||
     "";
 

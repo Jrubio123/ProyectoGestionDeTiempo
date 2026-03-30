@@ -81,6 +81,9 @@
                                         <p class="text-xs text-gray-500" x-text="item.nombre_cliente"></p>
                                         <div class="mt-1 flex gap-2">
                                             <span class="text-[10px] bg-gray-100 px-2 py-0.5 rounded text-gray-600 border border-gray-200" x-text="item.nombre_tipo_asignacion"></span>
+                                            <span x-show="tienePendientes(item)" class="text-[10px] bg-amber-100 px-2 py-0.5 rounded text-amber-700 border border-amber-200">
+                                                Pendiente x<span x-text="item.reportes_pendientes"></span>
+                                            </span>
                                             <span x-show="esRechazado(item)" class="text-[10px] bg-red-100 px-2 py-0.5 rounded text-red-700 border border-red-200">Rechazado</span>
                                         </div>
                                         <p x-show="esRechazado(item) && item.motivo_rechazo" class="text-[10px] text-red-600 mt-1" x-text="item.motivo_rechazo"></p>
@@ -120,11 +123,11 @@
 
                             <td class="px-6 py-4 text-right align-top" x-show="!$data.esAsociado" x-cloak>
                                 <p class="font-mono font-bold text-gray-700" x-text="calcularCosto(item)"></p>
+                                <p class="text-[10px] text-gray-400">
+                                    Disponible: <span x-text="textoDisponible(item)"></span>
+                                </p>
                                 <p class="text-[10px] text-gray-400" x-show="!esCostoTotal(item)">
                                     Tarifa: <span x-text="formatearDinero(obtenerTarifa(item))"></span>
-                                </p>
-                                <p class="text-[10px] text-gray-400" x-show="esCostoTotal(item)">
-                                    Disponible: <span x-text="formatearDinero(item.total_disponible || item.total_pagar || 0)"></span>
                                 </p>
                             </td>
 

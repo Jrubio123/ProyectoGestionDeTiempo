@@ -669,9 +669,9 @@ const ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER = "AnexoTecnicoIndividual";
 const CONTRATOS_TOKEN_EXPIRY_HOURS = Math.max(1, Number(process.env.CONTRATOS_TOKEN_EXPIRY_HOURS || 72));
 const CONTRATOS_BASE_URL = String(process.env.CONTRATOS_BASE_URL || "").trim().replace(/\/+$/, "");
 const CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO = String(process.env.CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO || "").trim();
-const CONTRATOS_FIRMA_COMPLETADA_DEFAULT_NOTIFY = "ana.garcia@silverconsulting.com.co";
-const ANEXO_INDIVIDUAL_NOTIFY_EMAIL = String(
-  process.env.ANEXO_INDIVIDUAL_NOTIFY_EMAIL || CONTRATOS_FIRMA_COMPLETADA_DEFAULT_NOTIFY
+const CONTRATOS_FIRMA_COMPLETADA_FALLBACK_NOTIFY = "ana.garcia@silverconsulting.com.co";
+const ANEXO_INDIVIDUAL_FALLBACK_NOTIFY_EMAIL = String(
+  process.env.ANEXO_INDIVIDUAL_NOTIFY_EMAIL || CONTRATOS_FIRMA_COMPLETADA_FALLBACK_NOTIFY
 ).trim();
 const CONTRATOS_FIRMA_COMPLETADA_SENDER = String(
   process.env.CONTRATOS_FIRMA_COMPLETADA_SENDER || "admin.apps@silverconsulting.com.co"
@@ -1749,6 +1749,11 @@ async function listAnexoTecnicoItems({ solicitudId = null, preregistroId = null,
   const clauses = [];
   const values = [];
   let idx = 1;
+
+  // Identificadores estructurados (IDs de proceso) tienen prioridad absoluta.
+  // Si alguno esta presente NO se agrega numero_documento ni correo_personal al
+  // WHERE para evitar devolver filas de otros contratos del mismo colaborador
+  // (recontrataciones) que comparten cedula o correo pero son procesos distintos.
   if (solicitudId) {
     clauses.push(`ati.solicitud_contratacion_id = $${idx++}`);
     values.push(solicitudId);
@@ -1757,14 +1762,20 @@ async function listAnexoTecnicoItems({ solicitudId = null, preregistroId = null,
     clauses.push(`ati.preregistro_id = $${idx++}`);
     values.push(preregistroId);
   }
-  if (numeroDocumento) {
-    clauses.push(`ati.numero_documento = $${idx++}`);
-    values.push(numeroDocumento);
+
+  // Solo usar identificadores personales cuando NO hay IDs de proceso:
+  // evita el OR contaminado que cruza recontrataciones.
+  if (!solicitudId && !preregistroId) {
+    if (numeroDocumento) {
+      clauses.push(`ati.numero_documento = $${idx++}`);
+      values.push(numeroDocumento);
+    } else if (correoPersonal) {
+      // correoPersonal es el ultimo recurso: no es identificador unico por contrato.
+      clauses.push(`LOWER(ati.correo_personal) = LOWER($${idx++})`);
+      values.push(correoPersonal);
+    }
   }
-  if (correoPersonal) {
-    clauses.push(`LOWER(ati.correo_personal) = LOWER($${idx++})`);
-    values.push(correoPersonal);
-  }
+
   if (!clauses.length) return [];
 
   const r = await pool.query(
@@ -2774,13 +2785,9 @@ function buildAnexoIndividualFirmaCompletadaEmail({ proceso }) {
 }
 
 async function notifyAnexoIndividualFirmaCompletada(tokenId) {
-  const recipients = Array.from(
-    new Set(
-      parseSimpleEmailList(ANEXO_INDIVIDUAL_NOTIFY_EMAIL)
-        .map((email) => String(email || "").trim().toLowerCase())
-        .filter(Boolean)
-    )
-  );
+  const recipients = await resolveTalentoHumanoNotificationRecipients({
+    fallback: ANEXO_INDIVIDUAL_FALLBACK_NOTIFY_EMAIL
+  });
   if (!tokenId || recipients.length === 0) {
     return { ok: false, skipped: "config_missing" };
   }
@@ -5612,7 +5619,7 @@ function sectionTitle(doc, title, y) {
   return y + 20;
 }
 
-// ?? Función principal ?????????????????????????????????????????
+// ?? Función principal ============================================================
 function buildCaseSummaryText(row = {}) {
   const parsed = parseTicketCaseFields(row?.nro_caso_int_ext);
   const casoCliente =
@@ -5653,9 +5660,9 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const nombreConsultor = cuenta.nombre_usuario || "Consultor";
   const cedulaConsultor = cuenta.cedula || "-";
 
-  // ??????????????????????????????????????????????
+  // ============================================================
   // 1. HEADER ? dos bloques separados sin solaparse
-  // ??????????????????????????????????????????????
+  // ============================================================
   const headerH = 80;
   fillRect(doc, 0, 0, PW_TOTAL, headerH, COLOR.azulMedio);
 
@@ -5687,9 +5694,9 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   let curY = headerH + 18;
 
-  // ??????????????????????????????????????????????
+  // ============================================================
   // 2. DEBE A ? tarjeta con 2 columnas
-  // ??????????????????????????????????????????????
+  // ============================================================
   curY = sectionTitle(doc, "DEBE A", curY);
 
   const cardPad = 12;
@@ -5721,9 +5728,9 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   curY += cardH + 14;
 
-  // ??????????????????????????????????????????????
+  // ============================================================
   // 3. VALOR A COBRAR
-  // ??????????????????????????????????????????????
+  // ============================================================
   curY = sectionTitle(doc, "VALOR A COBRAR", curY);
 
   const totalBoxH = 52;
@@ -5746,9 +5753,9 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   curY += totalBoxH + 14;
 
-  // ??????????????????????????????????????????????
+  // ============================================================
   // 4. CONCEPTO
-  // ??????????????????????????????????????????????
+  // ============================================================
   curY = sectionTitle(doc, "CONCEPTO", curY);
 
   const periodoInicio = fmtFecha(cuenta.fecha_periodo_inicio);
@@ -5773,9 +5780,9 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   curY = doc.y + 12;
 
-  // ??????????????????????????????????????????????
+  // ============================================================
   // 5. TABLA DE DETALLES
-  // ??????????????????????????????????????????????
+  // ============================================================
   curY = sectionTitle(doc, "DETALLE DE SERVICIOS", curY);
 
   const cols = [
@@ -5874,9 +5881,9 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   curY += totalRowH + 12;
 
-  // ??????????????????????????????????????????????
+  // ============================================================
   // 6. PIE + FIRMA
-  // ??????????????????????????????????????????????
+  // ============================================================
   if (curY > doc.page.height - 120) {
     doc.addPage();
     curY = MARGIN.top;
@@ -6294,7 +6301,10 @@ app.delete("/sub-consultores/:asociadoId", requireAccess({ roles: ["Administrado
 app.get("/modulos", requireAuthenticated, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, titulo
+      SELECT
+        id,
+        public_id,
+        titulo
       FROM modulo
       WHERE activo = true
       ORDER BY titulo ASC
@@ -6747,7 +6757,7 @@ app.get("/admin/usuarios-roles", requireAccess({ roles: ["Administrador"] }), as
   }
 });
 
-// ?? Gestión de licencias / acceso ??????????????????????????????????????????
+// ?? Gestión de licencias / acceso ============================================================?
 app.get("/admin/usuarios-licencias", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   try {
     const result = await pool.query(`
@@ -6883,7 +6893,7 @@ app.put("/admin/usuarios/:id/rol", requireAccess({ roles: ["Administrador"] }), 
   }
 });
 
-// ?? Firma de contratos: rutas admin ?????????????????????????????????????????
+// ?? Firma de contratos: rutas admin ============================================================
 const TALENTO_HUMANO_ROL = "Talento Humano";
 
 function buildContratoEmailHtml({ nombre, token, link }) {
@@ -6936,6 +6946,46 @@ function parseSimpleEmailList(value) {
     .split(/[;,]/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function uniqueEmailList(values) {
+  return Array.from(
+    new Set(
+      (Array.isArray(values) ? values : [values])
+        .flatMap((value) => parseSimpleEmailList(value))
+        .map((email) => String(email || "").trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+}
+
+async function getActiveUserEmailsByRole(roleTitle) {
+  const role = String(roleTitle || "").trim();
+  if (!role) return [];
+  try {
+    const result = await pool.query(
+      `
+      SELECT DISTINCT LOWER(BTRIM(u.email)) AS email
+      FROM usuarios u
+      JOIN roles r ON r.id = u.rol_usuario_id
+      WHERE u.activo = true
+        AND NULLIF(BTRIM(u.email), '') IS NOT NULL
+        AND LOWER(r.titulo) = LOWER($1)
+      ORDER BY LOWER(BTRIM(u.email)) ASC
+      `,
+      [role]
+    );
+    return uniqueEmailList(result.rows.map((row) => row.email));
+  } catch (err) {
+    console.error(`No se pudieron resolver destinatarios por rol "${role}":`, err?.message || err);
+    return [];
+  }
+}
+
+async function resolveTalentoHumanoNotificationRecipients({ fallback = "", extras = "" } = {}) {
+  const roleRecipients = await getActiveUserEmailsByRole(TALENTO_HUMANO_ROL);
+  const baseRecipients = roleRecipients.length ? roleRecipients : uniqueEmailList(fallback);
+  return uniqueEmailList([...baseRecipients, ...uniqueEmailList(extras)]);
 }
 
 function escapeHtmlText(value) {
@@ -7051,16 +7101,10 @@ function buildContratoFirmaCompletadaEmail({ proceso, docs = [] }) {
 }
 
 async function notifyContratoFirmaCompletada(tokenId) {
-  const recipients = Array.from(
-    new Set(
-      [
-        ...parseSimpleEmailList(CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO || CONTRATOS_FIRMA_COMPLETADA_DEFAULT_NOTIFY),
-        CONTRATOS_FIRMA_COMPLETADA_DEFAULT_NOTIFY
-      ]
-        .map((email) => String(email || "").trim().toLowerCase())
-        .filter(Boolean)
-    )
-  );
+  const recipients = await resolveTalentoHumanoNotificationRecipients({
+    fallback: CONTRATOS_FIRMA_COMPLETADA_FALLBACK_NOTIFY,
+    extras: CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO
+  });
   if (!tokenId || recipients.length === 0) {
     return { ok: false, skipped: "config_missing" };
   }
@@ -7391,22 +7435,15 @@ app.get("/admin/firma-contratos/anexo-items", requireAccess({ roles: ["Administr
       return res.status(400).json({ error: "Debes indicar solicitud_id, preregistro_id, numero_documento o correo_personal" });
     }
 
-    if ((solicitudId || preregistroId) && !numeroDocumento && !correoPersonal) {
-      const personaContext = await resolveContratoPersonaContext({
-        solicitud_id: solicitudId,
-        preregistro_id: preregistroId,
-        nombre_persona: "",
-        correo_personal: ""
-      });
-      numeroDocumento = toNullableTrimmedString(personaContext?.numeroDocumento);
-      correoPersonal = toNullableTrimmedString(personaContext?.correoPersonal);
-    }
-
+    // Cuando hay IDs de proceso (solicitud/preregistro), NO se resuelven ni agregan
+    // numero_documento ni correo_personal: hacerlo causaria que listAnexoTecnicoItems
+    // devuelva filas de otras recontrataciones del mismo colaborador via OR.
+    // Los identificadores personales solo se usan como fallback cuando no hay IDs.
     const rows = await listAnexoTecnicoItems({
       solicitudId,
       preregistroId,
-      numeroDocumento,
-      correoPersonal
+      numeroDocumento: (!solicitudId && !preregistroId) ? numeroDocumento : null,
+      correoPersonal: (!solicitudId && !preregistroId && !numeroDocumento) ? correoPersonal : null
     });
     res.json(rows.map(toAnexoApiRow));
   } catch (err) {
@@ -8947,7 +8984,8 @@ registerPreregistroRoutes({
   getGraphContext,
   sendEmailSafe,
   buildEmailLayout,
-  ensurePersistedAnexoFromProceso
+  ensurePersistedAnexoFromProceso,
+  resolveTalentoHumanoNotificationRecipients
 });
 
 registerContratacionesRoutes({
@@ -8959,7 +8997,8 @@ registerContratacionesRoutes({
   getGraphContext,
   sendEmailSafe,
   buildEmailLayout,
-  ensurePersistedAnexoFromProceso
+  ensurePersistedAnexoFromProceso,
+  resolveTalentoHumanoNotificationRecipients
 });
 /* ===============================
    AUTH
@@ -9312,9 +9351,9 @@ app.post("/auth/microsoft", async (req, res) => {
   }
 });
 
-// ????????????????????????????????????????????????????????????????????????????
+// ========================================================================================================================
 //  RUTAS PÚBLICAS ? MÓDULO FIRMA DE CONTRATOS (sin auth de Microsoft)
-// ????????????????????????????????????????????????????????????????????????????
+// ========================================================================================================================
 
 const CONTRATOS_STATIC_DIR = path.join(__dirname, "static", "contratos");
 
@@ -10152,30 +10191,74 @@ app.get("/tarifa-consultor", requireAccess({ roles: ["Administrador", "Coordinad
     if (!consultor_id || !cliente_id) {
       return res.status(400).json({ error: "Faltan parámetros requeridos" });
     }
+    const [
+      consultorInternalId,
+      clienteInternalId,
+      moduloInternalId,
+      tipoAsignacionInternalId
+    ] = await Promise.all([
+      resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.usuarios, consultor_id),
+      resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.clientes, cliente_id),
+      modulo_id
+        ? resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.modulo, modulo_id)
+        : Promise.resolve(null),
+      tipo_asignacion_id
+        ? resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.tipoAsignacion, tipo_asignacion_id)
+        : Promise.resolve(null)
+    ]);
+
+    if (!consultorInternalId) {
+      return res.status(404).json({ error: "Consultor no encontrado o inválido" });
+    }
+    if (!clienteInternalId) {
+      return res.status(404).json({ error: "Cliente no encontrado o inválido" });
+    }
+    if (modulo_id && !moduloInternalId) {
+      return res.status(404).json({ error: "Módulo no encontrado o inválido" });
+    }
+    if (tipo_asignacion_id && !tipoAsignacionInternalId) {
+      return res.status(404).json({ error: "Tipo de asignación no encontrado o inválido" });
+    }
+
     const result = await pool.query(
       `
-      WITH 
-        c_consultor AS (SELECT id FROM usuarios WHERE public_id = $1),
-        c_cliente AS (SELECT id FROM clientes WHERE public_id = $2),
-        c_modulo AS (SELECT id FROM modulo WHERE public_id = $3),
-        c_tipo_asignacion AS (SELECT id FROM tipo_asignacion WHERE public_id = $4)
-      SELECT obtener_tarifa_consultor(
-        (SELECT id FROM c_consultor), 
-        (SELECT id FROM c_cliente), 
-        (SELECT id FROM c_modulo), 
-        (SELECT id FROM c_tipo_asignacion)
+      SELECT COALESCE(
+        (
+          SELECT tc.valor_tarifa
+          FROM tarifa_consultor tc
+          WHERE tc.consultor_id = $1
+            AND tc.id_cliente = $2
+            AND ($3::int IS NULL OR tc.modulo_id = $3::int)
+            AND ($4::int IS NULL OR tc.id_tipo_asignacion = $4::int)
+            AND tc.activo = true
+            AND (tc.vigencia_hasta IS NULL OR tc.vigencia_hasta >= CURRENT_DATE)
+          ORDER BY tc.vigencia_desde DESC
+          LIMIT 1
+        ),
+        0
       ) AS valor_tarifa
       `,
-      [consultor_id, cliente_id, modulo_id || null, tipo_asignacion_id || null]
+      [
+        consultorInternalId,
+        clienteInternalId,
+        moduloInternalId,
+        tipoAsignacionInternalId
+      ]
     );
 
-    // Si todo es null porque UUIDs son malos la función va a arrojar null
     res.json(withPublicId(result.rows[0]));
   } catch (err) {
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {
       return res.status(404).json({ error: "No se encontraron referencias para calcular tarifa" });
     }
-    console.error(err);
+    console.error("Error en GET /tarifa-consultor", {
+      consultor_id,
+      cliente_id,
+      modulo_id,
+      tipo_asignacion_id,
+      message: err?.message,
+      code: err?.code
+    });
     res.status(500).json({ error: "Error al obtener tarifa" });
   }
 });
@@ -10225,29 +10308,51 @@ app.post("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador"] }),
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
 
-    // Resolución de IDs en un paso separado para evitar el problema de
-    // visibilidad de CTEs con INSERT en PostgreSQL.
-    const refsRes = await pool.query(
-      `SELECT
-         (SELECT id FROM clientes        WHERE public_id = $1) AS cliente_id,
-         (SELECT id FROM usuarios        WHERE public_id = $2) AS consultor_id,
-         (SELECT id FROM modulo          WHERE public_id = $3) AS modulo_id,
-         (SELECT id FROM tipo_asignacion WHERE public_id = $4) AS tipo_asignacion_id`,
-      [cliente_id, consultor_id, modulo_id || null, tipo_asignacion_id]
-    );
-    const refs = refsRes.rows[0];
-    if (!refs.cliente_id || !refs.consultor_id || !refs.tipo_asignacion_id) {
-      return res.status(400).json({ error: "Cliente, consultor o tipo de asignación no válido" });
+    const [
+      clienteInternalId,
+      consultorInternalId,
+      moduloInternalId,
+      tipoAsignacionInternalId
+    ] = await Promise.all([
+      resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.clientes, cliente_id),
+      resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.usuarios, consultor_id),
+      modulo_id
+        ? resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.modulo, modulo_id)
+        : Promise.resolve(null),
+      resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.tipoAsignacion, tipo_asignacion_id)
+    ]);
+
+    if (!clienteInternalId) {
+      return res.status(404).json({ error: "Cliente no encontrado o inválido" });
+    }
+    if (!consultorInternalId) {
+      return res.status(404).json({ error: "Consultor no encontrado o inválido" });
+    }
+    if (modulo_id && !moduloInternalId) {
+      return res.status(404).json({ error: "Módulo no encontrado o inválido" });
+    }
+    if (!tipoAsignacionInternalId) {
+      return res.status(404).json({ error: "Tipo de asignación no encontrado o inválido" });
     }
 
+    // Inserción atómica: solo inserta si no existe tarifa VIGENTE con la misma combinación.
+    // El WHERE NOT EXISTS + el índice único parcial en BD garantizan atomicidad real.
     const ins = await pool.query(
       `INSERT INTO tarifa_consultor (id_cliente, consultor_id, modulo_id, id_tipo_asignacion, valor_tarifa, activo)
-       VALUES ($1, $2, $3, $4, $5, true)
+       SELECT $1, $2, $3, $4, $5, true
+       WHERE NOT EXISTS (
+         SELECT 1 FROM tarifa_consultor
+         WHERE id_cliente = $1 AND consultor_id = $2
+           AND (modulo_id = $3 OR (modulo_id IS NULL AND $3::int IS NULL))
+           AND id_tipo_asignacion = $4
+           AND activo = true
+           AND (vigencia_hasta IS NULL OR vigencia_hasta >= CURRENT_DATE)
+       )
        RETURNING id`,
-      [refs.cliente_id, refs.consultor_id, refs.modulo_id || null, refs.tipo_asignacion_id, valor]
+      [clienteInternalId, consultorInternalId, moduloInternalId, tipoAsignacionInternalId, valor]
     );
-    if (!ins.rows[0]?.id) {
-      return res.status(500).json({ error: "Error al guardar tarifa" });
+    if (ins.rowCount === 0) {
+      return res.status(409).json({ error: "Ya existe una tarifa vigente para esta combinación de consultor, cliente, módulo y tipo de asignación." });
     }
 
     const result = await pool.query(
@@ -10279,6 +10384,9 @@ app.post("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador"] }),
 
     res.json(withPublicId(result.rows[0]));
   } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: "Ya existe una tarifa vigente para esta combinación de consultor, cliente, módulo y tipo de asignación." });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al guardar tarifa" });
   }
@@ -10290,72 +10398,100 @@ app.put("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador"] 
   const { cliente_id, consultor_id, modulo_id, tipo_asignacion_id, valor } = req.body;
 
   try {
-    const result = await pool.query(
-      `
-      WITH 
-        c_tarifa AS (SELECT id FROM tarifa_consultor WHERE public_id = $6),
-        c_cliente AS (SELECT id, titulo FROM clientes WHERE public_id = $1),
-        c_consultor AS (SELECT id, nombre_usuario, moneda_cobro FROM usuarios WHERE public_id = $2),
-        c_modulo AS (SELECT id, titulo FROM modulo WHERE public_id = $3),
-        c_tipo_asignacion AS (SELECT id, titulo FROM tipo_asignacion WHERE public_id = $4),
-        
-        upd AS (
-          UPDATE tarifa_consultor
-          SET id_cliente = (SELECT id FROM c_cliente),
-              consultor_id = (SELECT id FROM c_consultor),
-              modulo_id = (SELECT id FROM c_modulo),
-              id_tipo_asignacion = (SELECT id FROM c_tipo_asignacion),
-              valor_tarifa = $5
-          WHERE id = (SELECT id FROM c_tarifa)
-            AND EXISTS (SELECT 1 FROM c_cliente)
-            AND EXISTS (SELECT 1 FROM c_consultor)
-            AND EXISTS (SELECT 1 FROM c_tipo_asignacion)
-          RETURNING id, id_cliente, consultor_id, modulo_id, id_tipo_asignacion, valor_tarifa, activo, public_id
-        )
-      SELECT
-        upd.public_id AS id,
-        $1 AS cliente_id,
-        $2 AS consultor_id,
-        $3 AS modulo_id,
-        $4 AS tipo_asignacion_id,
-        upd.valor_tarifa AS valor,
-        upd.activo,
-        (SELECT titulo FROM c_cliente) AS nombre_cliente,
-        (SELECT nombre_usuario FROM c_consultor) AS nombre_consultor,
-        (SELECT titulo FROM c_modulo) AS nombre_modulo,
-        (SELECT titulo FROM c_tipo_asignacion) AS tipo_asignacion,
-        (SELECT moneda_cobro FROM c_consultor) AS moneda
-      FROM upd
-      `,
-      [
-        cliente_id,
-        consultor_id,
-        modulo_id || null,
-        tipo_asignacion_id, // NOT NULL EN DB AL PARECER SEGUN REQ
-        valor,
-        id
-      ]
+    if (!cliente_id || !consultor_id || !tipo_asignacion_id || !valor) {
+      return res.status(400).json({ error: "Faltan campos requeridos" });
+    }
+
+    const [
+      tarifaInternalId,
+      clienteInternalId,
+      consultorInternalId,
+      moduloInternalId,
+      tipoAsignacionInternalId
+    ] = await Promise.all([
+      resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.tarifaConsultor, id),
+      resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.clientes, cliente_id),
+      resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.usuarios, consultor_id),
+      modulo_id
+        ? resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.modulo, modulo_id)
+        : Promise.resolve(null),
+      resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.tipoAsignacion, tipo_asignacion_id)
+    ]);
+
+    if (!tarifaInternalId) {
+      return res.status(404).json({ error: "Tarifa no encontrada" });
+    }
+    if (!clienteInternalId) {
+      return res.status(404).json({ error: "Cliente no encontrado o inválido" });
+    }
+    if (!consultorInternalId) {
+      return res.status(404).json({ error: "Consultor no encontrado o inválido" });
+    }
+    if (modulo_id && !moduloInternalId) {
+      return res.status(404).json({ error: "Módulo no encontrado o inválido" });
+    }
+    if (!tipoAsignacionInternalId) {
+      return res.status(404).json({ error: "Tipo de asignación no encontrado o inválido" });
+    }
+
+    // Actualización atómica: solo actualiza si no existe OTRA tarifa vigente con la misma combinación.
+    const upd = await pool.query(
+      `UPDATE tarifa_consultor
+       SET id_cliente = $1,
+           consultor_id = $2,
+           modulo_id = $3,
+           id_tipo_asignacion = $4,
+           valor_tarifa = $5
+       WHERE id = $6
+         AND NOT EXISTS (
+           SELECT 1 FROM tarifa_consultor
+           WHERE id_cliente = $1 AND consultor_id = $2
+             AND (modulo_id = $3 OR (modulo_id IS NULL AND $3::int IS NULL))
+             AND id_tipo_asignacion = $4
+             AND activo = true
+             AND id <> $6
+             AND (vigencia_hasta IS NULL OR vigencia_hasta >= CURRENT_DATE)
+         )
+       RETURNING id`,
+      [clienteInternalId, consultorInternalId, moduloInternalId, tipoAsignacionInternalId, valor, tarifaInternalId]
     );
 
-    if (result.rowCount === 0) {
-      // Analizar fallo
-      const checkT = await pool.query("SELECT id FROM tarifa_consultor WHERE public_id = $1", [id]);
-      if (checkT.rowCount === 0) return res.status(404).json({ error: "Tarifa no encontrada" });
-      
-      const checkC = await pool.query("SELECT id FROM clientes WHERE public_id = $1", [cliente_id]);
-      if (checkC.rowCount === 0) return res.status(404).json({ error: "Cliente no encontrado" });
-
-      const checkU = await pool.query("SELECT id FROM usuarios WHERE public_id = $1", [consultor_id]);
-      if (checkU.rowCount === 0) return res.status(404).json({ error: "Consultor no encontrado" });
-      
-      const checkTA = await pool.query("SELECT id FROM tipo_asignacion WHERE public_id = $1", [tipo_asignacion_id]);
-      if (checkTA.rowCount === 0) return res.status(404).json({ error: "Tipo de asignación no encontrado" });
-      
-      return res.status(500).json({ error: "Error desconocido al actualizar tarifa" });
+    if (upd.rowCount === 0) {
+      const exists = await pool.query(`SELECT 1 FROM tarifa_consultor WHERE id = $1 LIMIT 1`, [tarifaInternalId]);
+      if (exists.rowCount === 0) {
+        return res.status(404).json({ error: "Tarifa no encontrada" });
+      }
+      return res.status(409).json({ error: "Ya existe una tarifa vigente para esta combinación de consultor, cliente, módulo y tipo de asignación." });
     }
-    
+
+    const result = await pool.query(
+      `SELECT
+         tc.public_id AS id,
+         c.public_id  AS cliente_id,
+         u.public_id  AS consultor_id,
+         m.public_id  AS modulo_id,
+         ta.public_id AS tipo_asignacion_id,
+         tc.valor_tarifa AS valor,
+         tc.activo,
+         c.titulo         AS nombre_cliente,
+         u.nombre_usuario AS nombre_consultor,
+         m.titulo         AS nombre_modulo,
+         ta.titulo        AS tipo_asignacion,
+         u.moneda_cobro   AS moneda
+       FROM tarifa_consultor tc
+       JOIN clientes c ON c.id = tc.id_cliente
+       JOIN usuarios u ON u.id = tc.consultor_id
+       LEFT JOIN modulo m ON m.id = tc.modulo_id
+       LEFT JOIN tipo_asignacion ta ON ta.id = tc.id_tipo_asignacion
+       WHERE tc.id = $1`,
+      [tarifaInternalId]
+    );
+
     res.json(result.rows[0]);
   } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: "Ya existe una tarifa vigente para esta combinación de consultor, cliente, módulo y tipo de asignación." });
+    }
     console.error(err);
     res.status(500).json({ error: "Error al actualizar tarifa" });
   }
@@ -10390,11 +10526,26 @@ app.delete("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador
 =============================== */
 
 // Obtener consultorías
+// Admin ve todas (o filtra por coordinador_id opcional).
+// Coordinador solo ve las suyas propias, sin importar qué venga en query params.
 app.get("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   try {
-    const { coordinador_id } = req.query;
+    const role = normalizeValue(req.user?.rol);
+    let filtroCoordId = null;
+
+    if (role === "coordinador") {
+      // Forzar siempre al ID del coordinador autenticado
+      filtroCoordId = req.user?.id || null;
+    } else {
+      // Admin puede filtrar opcionalmente por coordinador_id (public_id recibido en query)
+      const { coordinador_id } = req.query;
+      if (coordinador_id) {
+        const r = await pool.query(`SELECT id FROM usuarios WHERE public_id = $1`, [coordinador_id]);
+        filtroCoordId = r.rows[0]?.id || null;
+      }
+    }
+
     const result = await pool.query(`
-      WITH c_coordinador AS (SELECT id FROM usuarios WHERE public_id = $1)
       SELECT
         c.public_id AS id,
         cli.public_id AS cliente_id,
@@ -10410,9 +10561,9 @@ app.get("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"]
       LEFT JOIN usuarios u ON u.id = c.coordinador_responsable_id
       LEFT JOIN tipo_asignacion ta ON ta.id = c.id_tipo_asignacion
       WHERE c.activo = true
-        AND ($1::text IS NULL OR c.coordinador_responsable_id = (SELECT id FROM c_coordinador))
+        AND ($1::int IS NULL OR c.coordinador_responsable_id = $1::int)
       ORDER BY c.id DESC
-    `, [coordinador_id || null]);
+    `, [filtroCoordId]);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -10420,8 +10571,8 @@ app.get("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"]
   }
 });
 
-// Crear consultoría
-app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+// Crear consultoría (solo Administrador asigna clientes a coordinadores)
+app.post("/consultorias", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   const { cliente_id, coordinador_id, tipo_asignacion_id, descripcion_consultoria } = req.body;
 
   try {
@@ -10515,8 +10666,8 @@ app.post("/consultorias", requireAccess({ roles: ["Administrador", "Coordinador"
   }
 });
 
-// Actualizar consultoría
-app.put("/consultorias/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+// Actualizar consultoría (solo Administrador)
+app.put("/consultorias/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   const { id } = req.params;
   const { cliente_id, coordinador_id, tipo_asignacion_id, descripcion_consultoria } = req.body;
 
@@ -10581,8 +10732,8 @@ app.put("/consultorias/:id", requireAccess({ roles: ["Administrador", "Coordinad
   }
 });
 
-// Eliminar consultoría (soft delete)
-app.delete("/consultorias/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+// Eliminar consultoría (soft delete, solo Administrador)
+app.delete("/consultorias/:id", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -10751,14 +10902,26 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
         ra.es_costo_total,
         CASE
           WHEN ra.horas_asignadas IS NULL THEN NULL
+          WHEN (
+            LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempo y costo fijo%'
+            OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempoycostofijo%'
+          ) THEN GREATEST(ra.horas_asignadas - COALESCE(uso.horas_comprometidas, 0), 0)
           ELSE GREATEST(ra.horas_asignadas - COALESCE(uso.horas_aprobadas, 0), 0)
         END AS horas_disponibles,
         CASE
           WHEN ra.cantidad_dias IS NULL THEN NULL
+          WHEN (
+            LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempo y costo fijo%'
+            OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempoycostofijo%'
+          ) THEN GREATEST(ra.cantidad_dias - COALESCE(uso.dias_comprometidos, 0), 0)
           ELSE GREATEST(ra.cantidad_dias - COALESCE(uso.dias_aprobados, 0), 0)
         END AS dias_disponibles,
         CASE
           WHEN COALESCE(ra.es_costo_total, false) = false OR ra.total_pagar IS NULL THEN NULL
+          WHEN (
+            LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempo y costo fijo%'
+            OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempoycostofijo%'
+          ) THEN GREATEST(ra.total_pagar - COALESCE(uso.total_comprometido, 0), 0)
           ELSE GREATEST(ra.total_pagar - COALESCE(uso.total_aprobado, 0), 0)
         END AS total_disponible,
         ra.valor_hora,
@@ -10771,7 +10934,8 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
         ra.fecha_fin,
         ra.observacion,
         lr.estado_reporte,
-        lr.motivo_rechazo
+        lr.motivo_rechazo,
+        COALESCE(uso.reportes_pendientes, 0) AS reportes_pendientes
       FROM registro_asignaciones ra
         JOIN consultorias con ON ra.id_consultoria = con.id
         JOIN clientes c ON con.id_cliente = c.id
@@ -10789,7 +10953,11 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
           SELECT
             COALESCE(SUM(CASE WHEN rh.estado_reporte = 'Aprobado' THEN rh.horas_reportadas ELSE 0 END), 0) AS horas_aprobadas,
             COALESCE(SUM(CASE WHEN rh.estado_reporte = 'Aprobado' THEN rh.cantidad_dias_reportados ELSE 0 END), 0) AS dias_aprobados,
-            COALESCE(SUM(CASE WHEN rh.estado_reporte = 'Aprobado' THEN rh.total_cobrar ELSE 0 END), 0) AS total_aprobado
+            COALESCE(SUM(CASE WHEN rh.estado_reporte = 'Aprobado' THEN rh.total_cobrar ELSE 0 END), 0) AS total_aprobado,
+            COALESCE(SUM(CASE WHEN rh.estado_reporte <> 'Rechazado' THEN rh.horas_reportadas ELSE 0 END), 0) AS horas_comprometidas,
+            COALESCE(SUM(CASE WHEN rh.estado_reporte <> 'Rechazado' THEN rh.cantidad_dias_reportados ELSE 0 END), 0) AS dias_comprometidos,
+            COALESCE(SUM(CASE WHEN rh.estado_reporte <> 'Rechazado' THEN rh.total_cobrar ELSE 0 END), 0) AS total_comprometido,
+            COUNT(*) FILTER (WHERE rh.estado_reporte = 'Pendiente')::int AS reportes_pendientes
           FROM reporte_horas rh
           WHERE rh.id_registro_asignacion = ra.id
         ) uso ON true
@@ -10804,6 +10972,9 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
         )
       )
         AND (
+          LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempo y costo fijo%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempoycostofijo%'
+          OR
           lr.estado_reporte IS NULL
           OR lr.estado_reporte = 'Rechazado'
           OR (lr.estado_reporte = 'Aprobado' AND lr.id_cuenta_cobro IS NOT NULL)
@@ -10824,7 +10995,16 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
             COALESCE(ra.es_costo_total, false) = true
             AND (
               ra.total_pagar IS NOT NULL
-              AND ra.total_pagar > COALESCE(uso.total_aprobado, 0)
+              AND ra.total_pagar > COALESCE(
+                CASE
+                  WHEN (
+                    LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempo y costo fijo%'
+                    OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempoycostofijo%'
+                  ) THEN uso.total_comprometido
+                  ELSE uso.total_aprobado
+                END,
+                0
+              )
             )
           )
           OR (
@@ -10841,6 +11021,14 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
             AND (ra.cantidad_dias IS NULL OR ra.cantidad_dias > COALESCE(uso.dias_aprobados, 0))
           )
           OR (
+            (
+              LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempo y costo fijo%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempoycostofijo%'
+            )
+            AND COALESCE(ra.es_costo_total, false) = false
+            AND (ra.horas_asignadas IS NULL OR ra.horas_asignadas > COALESCE(uso.horas_comprometidas, 0))
+          )
+          OR (
             COALESCE(ra.es_costo_total, false) = false
             AND
             NOT (
@@ -10851,6 +11039,8 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempocompleto%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%medio tiempo%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mediotiempo%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempo y costo fijo%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%tiempoycostofijo%'
             )
             AND (ra.horas_asignadas IS NULL OR ra.horas_asignadas > COALESCE(uso.horas_aprobadas, 0))
           )
@@ -10902,14 +11092,20 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
         con.id_tipo_asignacion,
         con.coordinador_responsable_id,
         ta.titulo AS tipo_asignacion_titulo,
-        (SELECT estado_reporte 
-         FROM reporte_horas 
-         WHERE id_registro_asignacion = ra.id 
-           AND estado_reporte IN ('Pendiente', 'Rechazado') 
-         ORDER BY updated_at DESC NULLS LAST, id DESC LIMIT 1) AS _existente_estado
+        ur.ultimo_reporte_id,
+        ur.ultimo_reporte_estado
       FROM registro_asignaciones ra
         JOIN consultorias con ON ra.id_consultoria = con.id
         LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
+        LEFT JOIN LATERAL (
+          SELECT
+            rh.id AS ultimo_reporte_id,
+            rh.estado_reporte AS ultimo_reporte_estado
+          FROM reporte_horas rh
+          WHERE rh.id_registro_asignacion = ra.id
+          ORDER BY rh.updated_at DESC NULLS LAST, rh.id DESC
+          LIMIT 1
+        ) ur ON true
       WHERE ra.id = (SELECT id FROM c_asignacion)
       `,
       [id_registro_asignacion]
@@ -10920,22 +11116,6 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
     }
 
     const info = metaConsulta.rows[0];
-    const existenteRes = await pool.query(
-      `
-      SELECT id, estado_reporte
-      FROM reporte_horas
-      WHERE id_registro_asignacion = $1
-        AND estado_reporte IN ('Pendiente', 'Rechazado')
-      ORDER BY updated_at DESC NULLS LAST, id DESC
-      LIMIT 1
-      `,
-      [info.id]
-    );
-    const existenteRow = existenteRes.rows[0] || null;
-    if (existenteRow?.estado_reporte === "Pendiente") {
-      return res.status(400).json({ error: "Ya hay un reporte pendiente para esta asignación" });
-    }
-
     const registroAsignacionId = info.id;
     if (!info.consultor_responsable_id) {
       return res.status(400).json({ error: "La asignación no tiene consultor responsable." });
@@ -10975,8 +11155,14 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
     const esMensual =
       isTipoAsignacionMensual(tipoAsignacionTitulo);
     const esTiempoCostoFijo = isTipoAsignacionTiempoCostoFijo(tipoAsignacionTitulo);
+    const permitirParcialesAcumulados = esTiempoCostoFijo;
     const esCostoTotal = esTiempoCostoFijo && toBooleanInput(info.es_costo_total, false);
     const esHorasPorDemanda = isTipoAsignacionHorasPorDemanda(tipoAsignacionTitulo);
+    const ultimoReporteId = Number(info.ultimo_reporte_id || 0) || null;
+    const ultimoReporteEstado = String(info.ultimo_reporte_estado || "").trim() || null;
+    if (!permitirParcialesAcumulados && ultimoReporteEstado === "Pendiente") {
+      return res.status(400).json({ error: "Ya hay un reporte pendiente para esta asignación" });
+    }
     let cantidadSolicitada = 0;
     let horasReportadasFinal = 0;
     let diasReportadosFinal = 0;
@@ -11025,7 +11211,10 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
         SELECT
           COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN horas_reportadas ELSE 0 END), 0) AS horas_aprobadas,
           COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN cantidad_dias_reportados ELSE 0 END), 0) AS dias_aprobados,
-          COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN total_cobrar ELSE 0 END), 0) AS total_aprobado
+          COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN total_cobrar ELSE 0 END), 0) AS total_aprobado,
+          COALESCE(SUM(CASE WHEN estado_reporte <> 'Rechazado' THEN horas_reportadas ELSE 0 END), 0) AS horas_comprometidas,
+          COALESCE(SUM(CASE WHEN estado_reporte <> 'Rechazado' THEN cantidad_dias_reportados ELSE 0 END), 0) AS dias_comprometidos,
+          COALESCE(SUM(CASE WHEN estado_reporte <> 'Rechazado' THEN total_cobrar ELSE 0 END), 0) AS total_comprometido
         FROM reporte_horas
         WHERE id_registro_asignacion = $1
         `,
@@ -11033,9 +11222,11 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
       );
       if (esCostoTotal) {
         const totalAprobado = Number(uso.rows[0]?.total_aprobado || 0);
+        const totalComprometido = Number(uso.rows[0]?.total_comprometido || 0);
         const totalAsignado = toNullableNumber(info.total_pagar);
         if (totalAsignado !== null) {
-          const disponibles = Math.max(totalAsignado - totalAprobado, 0);
+          const totalUsado = permitirParcialesAcumulados ? totalComprometido : totalAprobado;
+          const disponibles = Math.max(totalAsignado - totalUsado, 0);
           if (cantidadSolicitada > disponibles) {
             return res.status(400).json({ error: `Excede presupuesto disponible de la asignación (${disponibles})` });
           }
@@ -11043,17 +11234,21 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
       } else {
         const horasAprobadas = Number(uso.rows[0]?.horas_aprobadas || 0);
         const diasAprobadas = Number(uso.rows[0]?.dias_aprobadas || 0);
+        const horasComprometidas = Number(uso.rows[0]?.horas_comprometidas || 0);
+        const diasComprometidas = Number(uso.rows[0]?.dias_comprometidos || 0);
         const horasAsignadas = toNullableNumber(info.horas_asignadas);
         const diasAsignados = toNullableNumber(info.cantidad_dias);
 
         if (esMensual && diasAsignados !== null) {
-          const disponibles = Math.max(diasAsignados - diasAprobadas, 0);
+          const diasUsados = permitirParcialesAcumulados ? diasComprometidas : diasAprobadas;
+          const disponibles = Math.max(diasAsignados - diasUsados, 0);
           if (cantidadSolicitada > disponibles) {
             return res.status(400).json({ error: `Excede días disponibles de la asignación (${disponibles})` });
           }
         }
         if (!esMensual && horasAsignadas !== null) {
-          const disponibles = Math.max(horasAsignadas - horasAprobadas, 0);
+          const horasUsadas = permitirParcialesAcumulados ? horasComprometidas : horasAprobadas;
+          const disponibles = Math.max(horasAsignadas - horasUsadas, 0);
           if (cantidadSolicitada > disponibles) {
             return res.status(400).json({ error: `Excede horas disponibles de la asignación (${disponibles})` });
           }
@@ -11074,7 +11269,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
       }
     }
     let result;
-    if (existenteRow?.estado_reporte === "Rechazado") {
+    if (ultimoReporteEstado === "Rechazado" && ultimoReporteId) {
       result = await pool.query(
         `UPDATE reporte_horas
            SET horas_reportadas = $1,
@@ -11105,7 +11300,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
           info.coordinador_responsable_id,
           consultorId,
           consultorPrincipalId,
-          existenteRow.id
+          ultimoReporteId
         ]
       );
     } else {
@@ -11166,7 +11361,7 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
       await sendEmailSafe({
         ...getGraphContext(req),
         to: correoRow.coordinador_email,
-        subject: `? Aprobación pendiente: reporte de ${correoRow.consultor_nombre || "consultor"}`,
+        subject: `⏳ Aprobación pendiente: reporte de ${correoRow.consultor_nombre || "consultor"}`,
         text:
           `Hola ${correoRow.coordinador_nombre || ""},\n` +
           `El consultor ${correoRow.consultor_nombre || ""} reportó horas.\n` +
@@ -11620,7 +11815,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
         await sendEmailSafe({
           ...getGraphContext(req),
           to: correoRow.coordinador_email,
-          subject: `? Ticket enviado a aprobación: ${correoRow.consultor_nombre || "consultor"}`,
+          subject: `⏳ Ticket enviado a aprobación: ${correoRow.consultor_nombre || "consultor"}`,
           text:
             `Hola ${correoRow.coordinador_nombre || ""},\n` +
             `El consultor ${correoRow.consultor_nombre || ""} envió un ticket de Mesa/Fábrica.\n` +
@@ -14133,7 +14328,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
       const esMesaOFabrica = isTipoAsignacionMesaOFabrica(tipoNorm);
       const portalUrl = buildPortalUrl(esMesaOFabrica ? "asignacion-fabrica-mesa-servicio" : "registro-horas-consultor");
       const titulo = esAprobado
-        ? "? Horas aprobadas"
+        ? "✅ Horas aprobadas"
         : estado === "Rechazado"
           ? "?? Acción requerida: corrección de reporte"
           : "Actualización de reporte";
@@ -14188,6 +14383,7 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
     fecha_inicio,
     fecha_fin,
     cantidad_dias,
+    horas_asignadas,
     valor_hora,
     valor_dia,
     nro_caso_interno,
@@ -14201,27 +14397,48 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
 
   try {
     const cantidadDiasNum = toNullableInteger(cantidad_dias);
+    const horasAsignadasNum = toNullableNumber(horas_asignadas);
     const valorHoraNum = toNullableNumber(valor_hora);
     const valorDiaNum = toNullableNumber(valor_dia);
     const totalPagarNum = toNullableNumber(total_pagar);
     const esCostoTotalInput = toBooleanInput(es_costo_total, false);
-    
+
     const estados = await getEstadoAsignacionValues();
     const estadoNormalizado = resolveEstadoAsignacionInput(estado, estados);
     if (estado && !estadoNormalizado) {
       return res.status(400).json({ error: "Estado de asignación inválido" });
     }
-    
+
     const tipoServicioNormalizado = normalizeTipoServicioInput(tipo_servicio);
     if (tipo_servicio && !tipoServicioNormalizado) {
       return res.status(400).json({ error: "Tipo de servicio inválido" });
+    }
+
+    const moduloInternalId = id_modulo
+      ? await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.modulo, id_modulo)
+      : null;
+    if (id_modulo && !moduloInternalId) {
+      return res.status(404).json({ error: "Modulo no encontrado" });
+    }
+
+    // Coordinadores solo pueden editar asignaciones de sus propias consultorías
+    if (normalizeValue(req.user?.rol) === "coordinador") {
+      const own = await pool.query(
+        `SELECT 1 FROM registro_asignaciones ra
+         JOIN consultorias con ON con.id = ra.id_consultoria
+         WHERE ra.public_id = $1 AND con.coordinador_responsable_id = $2`,
+        [id, req.user?.id]
+      );
+      if (own.rowCount === 0) {
+        return res.status(403).json({ error: "No tienes permisos para modificar esta asignación" });
+      }
     }
 
     const cteQuery = `
       WITH
         c_asignacion AS (SELECT id, id_consultoria FROM registro_asignaciones WHERE public_id = $1),
         c_consultor AS (SELECT id FROM usuarios WHERE public_id = $2),
-        c_modulo AS (SELECT id FROM modulo WHERE public_id = $3),
+        c_modulo AS (SELECT id FROM modulo WHERE id = $3::int),
         
         c_meta AS (
           SELECT
@@ -14261,19 +14478,21 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
         c_valores AS (
           SELECT
             c.es_t_c_fijo,
-            -- Aplicamos regla de costo total
+            -- Aplicamos regla de costo total; horas también se nullifican en modo costo total TCF
+            CASE WHEN c.es_t_c_fijo AND $13::boolean THEN null ELSE $16::numeric END AS out_horas,
             CASE WHEN c.es_t_c_fijo AND $13::boolean THEN null ELSE $4::int END AS out_dias,
             CASE WHEN c.es_t_c_fijo AND $13::boolean THEN null ELSE $5::numeric END AS out_v_hora,
             CASE WHEN c.es_t_c_fijo AND $13::boolean THEN null ELSE $6::numeric END AS out_v_dia
           FROM c_calc c
         ),
-        
+
         upd AS (
           UPDATE registro_asignaciones ra
           SET consultor_responsable_id = (CASE WHEN $2::text IS NOT NULL THEN (SELECT id FROM c_consultor) ELSE NULL END),
               id_modulo = (CASE WHEN $3::text IS NOT NULL THEN (SELECT id FROM c_modulo) ELSE NULL END),
               fecha_inicio = $7::date,
               fecha_fin = $8::date,
+              horas_asignadas = (SELECT out_horas FROM c_valores),
               cantidad_dias = (SELECT out_dias FROM c_valores),
               valor_hora = (SELECT out_v_hora FROM c_valores),
               valor_dia = (SELECT out_v_dia FROM c_valores),
@@ -14303,21 +14522,22 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
     `;
 
     const result = await pool.query(cteQuery, [
-      id,                          // $1
+      id,                               // $1
       consultor_responsable_id || null, // $2
-      id_modulo || null,           // $3
-      cantidadDiasNum,             // $4
-      valorHoraNum,                // $5
-      valorDiaNum,                 // $6
-      fecha_inicio || null,        // $7
-      fecha_fin || null,           // $8
-      nro_caso_interno || null,    // $9
-      nro_caso_cliente || null,    // $10
-      tipoServicioNormalizado || null, // $11
-      estadoNormalizado || null,   // $12
-      esCostoTotalInput,           // $13
-      observacion || null,         // $14
-      totalPagarNum                // $15
+      moduloInternalId || null,         // $3
+      cantidadDiasNum,                  // $4
+      valorHoraNum,                     // $5
+      valorDiaNum,                      // $6
+      fecha_inicio || null,             // $7
+      fecha_fin || null,                // $8
+      nro_caso_interno || null,         // $9
+      nro_caso_cliente || null,         // $10
+      tipoServicioNormalizado || null,  // $11
+      estadoNormalizado || null,        // $12
+      esCostoTotalInput,                // $13
+      observacion || null,              // $14
+      totalPagarNum,                    // $15
+      horasAsignadasNum                 // $16
     ]);
 
     const row = result.rows[0];
@@ -14437,6 +14657,22 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
       return res.status(400).json({ error: "Tipo de servicio inválido" });
     }
 
+    const moduloInternalId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.modulo, id_modulo);
+    if (!moduloInternalId) {
+      return res.status(404).json({ error: "Modulo no encontrado" });
+    }
+
+    // Coordinadores solo pueden asignar en sus propias consultorías
+    if (normalizeValue(req.user?.rol) === "coordinador") {
+      const own = await pool.query(
+        `SELECT 1 FROM consultorias WHERE public_id = $1 AND coordinador_responsable_id = $2 AND activo = true`,
+        [id_consultoria, req.user?.id]
+      );
+      if (own.rowCount === 0) {
+        return res.status(403).json({ error: "No tienes permisos para asignar en esta consultoría" });
+      }
+    }
+
     // CTE monumental que:
     // 1. Resuelve IDs (consultoria, consultor, modulo)
     // 2. Extrae meta (cliente, tipo_asignacion)
@@ -14457,7 +14693,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
           WHERE con.public_id = $1::uuid AND con.activo = true
         ),
         c_consultor AS (SELECT id, email, nombre_usuario FROM usuarios WHERE public_id = $2::uuid),
-        c_modulo AS (SELECT id, titulo FROM modulo WHERE public_id = $3::uuid),
+        c_modulo AS (SELECT id, titulo FROM modulo WHERE id = $3::int),
         c_estados AS (
           SELECT $4::tipo_estado_asignacion AS st_abierto, $5::tipo_estado_asignacion AS st_proceso
         ),
@@ -14547,7 +14783,21 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
               WHEN m.n_tipo LIKE '%horas por demanda%' OR m.n_tipo LIKE '%horaspordemanda%' OR m.n_tipo LIKE '%demanda%' THEN true
               ELSE false
             END AS es_h_demanda,
-            obtener_tarifa_consultor(m.id_consultor, m.id_cliente, m.id_modulo, m.id_tipo_asignacion) AS tarifa_calculada
+            COALESCE(
+              (
+                SELECT tc.valor_tarifa
+                FROM tarifa_consultor tc
+                WHERE tc.consultor_id = m.id_consultor
+                  AND tc.id_cliente = m.id_cliente
+                  AND (m.id_modulo IS NULL OR tc.modulo_id = m.id_modulo)
+                  AND (m.id_tipo_asignacion IS NULL OR tc.id_tipo_asignacion = m.id_tipo_asignacion)
+                  AND tc.activo = true
+                  AND (tc.vigencia_hasta IS NULL OR tc.vigencia_hasta >= CURRENT_DATE)
+                ORDER BY tc.vigencia_desde DESC
+                LIMIT 1
+              ),
+              0
+            ) AS tarifa_calculada
           FROM c_meta m
         ),
         
@@ -14663,7 +14913,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
     const result = await pool.query(cteQuery, [
       id_consultoria,          // $1
       consultor_responsable_id,// $2
-      id_modulo,               // $3
+      moduloInternalId,        // $3
       estados.abierto,         // $4
       estados.proceso,         // $5
       horasAsignadasNum,       // $6
@@ -14818,8 +15068,3 @@ process.on("SIGINT", () => {
 process.on("SIGTERM", () => {
   void gracefulShutdown("SIGTERM");
 });
-
-
-
-
-

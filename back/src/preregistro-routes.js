@@ -8,7 +8,8 @@ module.exports = function registerPreregistroRoutes(deps) {
     getGraphContext,
     sendEmailSafe,
     buildEmailLayout,
-    ensurePersistedAnexoFromProceso
+    ensurePersistedAnexoFromProceso,
+    resolveTalentoHumanoNotificationRecipients
   } = deps;
 
   const ESTADOS = Object.freeze({
@@ -437,6 +438,20 @@ module.exports = function registerPreregistroRoutes(deps) {
       return res.status(400).json({ error: "correo_personal no tiene formato valido" });
     }
 
+    // Validar que correo_personal no este registrado para otra persona (diferente documento)
+    const dupCheckRrhh = await pool.query(
+      `SELECT 1 FROM preregistro_personas
+       WHERE LOWER(correo_personal) = LOWER($1)
+         AND COALESCE(numero_documento,'') <> $2
+       LIMIT 1`,
+      [correo_personal, String(numero_documento || "").trim()]
+    );
+    if (dupCheckRrhh.rows.length) {
+      return res.status(422).json({
+        error: "El correo personal ya está registrado para otra persona en el sistema. Cada persona debe tener un correo personal único."
+      });
+    }
+
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -850,13 +865,9 @@ module.exports = function registerPreregistroRoutes(deps) {
 
       const updated = await getByInternalId(client, id);
       await syncSolicitudYAnexoDesdePreregistro(client, updated, req.user?.id);
-      const thUsers = await pool.query(
-        `SELECT u.email
-         FROM usuarios u
-         JOIN roles r ON r.id = u.rol_usuario_id
-         WHERE u.activo = true AND u.email IS NOT NULL AND LOWER(r.titulo) = LOWER('Talento Humano')`
-      );
-      const thDest = thUsers.rows.map((r) => r.email).filter(Boolean);
+      const thDest = typeof resolveTalentoHumanoNotificationRecipients === "function"
+        ? await resolveTalentoHumanoNotificationRecipients()
+        : [];
       const tiDest = String(process.env.EMAIL_TO_TI || "").split(",").map((s) => s.trim()).filter(Boolean);
 
       const tasks = [];

@@ -1,20 +1,83 @@
+// Mapa ruta -> script de vista. null = no necesita JS propio.
+const viewScripts = {
+    inicio:                           null,
+    cliente:                          "/js/cliente.js",
+    tarifas:                          "/js/tarifas.js",
+    "permisos-coordinador":           null,
+    "asignacion-coordinador":         "/js/asignacion-coordinador.js",
+    "asignacion-consultor":           "/js/asignacion-consultor.js",
+    "asociar-subconsultores":         "/js/asociar-subconsultores.js",
+    "mis-asignaciones-coordinador":   "/js/mis-asignaciones-coordinador.js",
+    "mis-asignaciones-consultor":     "/js/mis-asignaciones-consultor.js",
+    "registro-horas-consultor":       "/js/registro-horas-consultor.js",
+    "aprobar-rechazar-coordinador":   "/js/aprobar-rechazar-coordinador.js",
+    "mis-cuentas-cobros":             "/js/mis-cuentas-cobros.js",
+    "soportes-cuentas-cobro":         "/js/soportes-cuentas-cobro.js",
+    "generar-cuenta-cobro":           "/js/generar-cuenta-cobro.js",
+    "asignacion-fabrica-mesa-servicio": "/js/asignacion-fabrica-mesa-servicio.js",
+    "catalogos-admin":                "/js/catalogos-admin.js",
+    "gestion-licencias-admin":        "/js/gestion-licencias-admin.js",
+    "firma-contratos-admin":          "/js/firma-contratos-admin.js",
+    solicitudesCoord:                 "/js/solicitudes-coord.js",
+    preregistrosCoord:                "/js/preregistros-coord.js",
+    solicitudesRecl:                  "/js/solicitudes-recl.js",
+    onboardingTH:                     "/js/onboarding-th.js",
+    anexoTecnicoIndividual:           "/js/onboarding-th.js"
+};
+
+// Cache de promesas de scripts: clave = src, valor = Promise.
+// Guardar la promesa (no solo el resultado) evita inyectar el mismo
+// archivo dos veces si llegan dos navegaciones rápidas antes del onload.
+const _scriptPromises = new Map();
+
+function loadScript(src) {
+    if (_scriptPromises.has(src)) return _scriptPromises.get(src);
+    const promise = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = src;
+        script.onload = () => resolve();
+        script.onerror = () => {
+            _scriptPromises.delete(src); // permite reintento si falla
+            reject(new Error("Error cargando script: " + src));
+        };
+        document.head.appendChild(script);
+    });
+    _scriptPromises.set(src, promise);
+    return promise;
+}
+
 async function loadView(view) {
+    const container = document.getElementById("view-container");
+
+    // Feedback inmediato: evita pantalla en blanco mientras carga script + HTML.
+    container.innerHTML = `<div class="flex items-center justify-center py-16 text-gray-400">
+        <svg class="animate-spin h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+        </svg>
+    </div>`;
+
     try {
-        const res = await fetch(`/views/${view}.html`);
+        const scriptSrc = viewScripts[view] ?? null;
+
+        // Cargamos script y HTML en paralelo para no perder tiempo.
+        const [, res] = await Promise.all([
+            scriptSrc ? loadScript(scriptSrc) : Promise.resolve(),
+            fetch(`/views/${view}.html`)
+        ]);
+
         if (!res.ok) throw new Error("Error HTTP: " + res.status);
 
         const html = await res.text();
-        const container = document.getElementById("view-container");
-
         container.innerHTML = html;
 
-        // Re-inicializar Alpine para el contenido cargado dinámicamente
+        // Re-inicializar Alpine para el contenido cargado dinámicamente.
         if (window.Alpine) {
             Alpine.initTree(container);
         }
     } catch (error) {
         console.error("Error cargando vista:", error);
-        document.getElementById("view-container").innerHTML =
+        container.innerHTML =
             `<div class="text-red-600 p-4">Error cargando vista: ${view}</div>`;
     }
 }
@@ -100,4 +163,3 @@ function router() {
 
 window.addEventListener("hashchange", router);
 document.addEventListener("DOMContentLoaded", router);
-

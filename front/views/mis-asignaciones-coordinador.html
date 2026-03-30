@@ -158,7 +158,7 @@
     <div 
         x-show="mostrarModal"
         @click.self="cerrarModal"
-        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-start md:items-center justify-center z-50 p-3 md:p-4 overflow-y-auto"
+        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
         x-transition
         x-cloak
     >
@@ -241,8 +241,8 @@
                             required
                         >
                             <option value="">Seleccione...</option>
-                            <template x-for="modulo in modulos" :key="modulo.id">
-                                <option :value="modulo.id" x-text="modulo.titulo"></option>
+                            <template x-for="modulo in modulos" :key="modulo.public_id || modulo.id">
+                                <option :value="modulo.public_id || modulo.id" x-text="modulo.titulo"></option>
                             </template>
                         </select>
                         

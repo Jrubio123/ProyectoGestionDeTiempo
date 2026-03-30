@@ -8,7 +8,8 @@ module.exports = function registerContratacionesRoutes(deps) {
     getGraphContext,
     sendEmailSafe,
     buildEmailLayout,
-    ensurePersistedAnexoFromProceso
+    ensurePersistedAnexoFromProceso,
+    resolveTalentoHumanoNotificationRecipients
   } = deps;
 
   const ESTADOS = Object.freeze({
@@ -29,10 +30,9 @@ module.exports = function registerContratacionesRoutes(deps) {
     process.env.CONTRATACIONES_DESTINO_MESA ||
       "mesadeayuda@zettatech.com.co,jonathan.martinez@zettatech.com.co,richard.rendon@zettatech.com.co"
   );
-  const DESTINOS_TH = parseEmailList(
+  const DESTINOS_TH_FALLBACK =
     process.env.CONTRATACIONES_DESTINO_TH ||
-      "catalina.loaiza@silverconsulting.com.co,ana.garcia@silverconsulting.com.co"
-  );
+    "catalina.loaiza@silverconsulting.com.co,ana.garcia@silverconsulting.com.co";
 
   const BASE_SELECT = `
     SELECT
@@ -111,6 +111,13 @@ module.exports = function registerContratacionesRoutes(deps) {
       .split(/[;,]/)
       .map((item) => item.trim())
       .filter(Boolean);
+  }
+
+  async function getDestinosTalentoHumano() {
+    if (typeof resolveTalentoHumanoNotificationRecipients === "function") {
+      return resolveTalentoHumanoNotificationRecipients({ fallback: DESTINOS_TH_FALLBACK });
+    }
+    return parseEmailList(DESTINOS_TH_FALLBACK);
   }
 
   function normalizeKey(value) {
@@ -685,6 +692,7 @@ module.exports = function registerContratacionesRoutes(deps) {
 
     const solicitud = formatRow(rawSolicitud);
     const graphContext = getGraphContext(req);
+    const destinosTh = await getDestinosTalentoHumano();
     const coordinadorEmail = toNullableString(rawSolicitud.coordinador_email || req.user?.email);
     const requiereConfirmacionCliente = Boolean(rawSolicitud.requiere_confirmacion_cliente);
 
@@ -706,7 +714,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         );
         mailResults.coordinador = Boolean(coordResult.ok);
       } else {
-        const thResult = await sendMail(graphContext, DESTINOS_TH, buildMailThNuevo(solicitud));
+        const thResult = await sendMail(graphContext, destinosTh, buildMailThNuevo(solicitud));
         mailResults.th = Boolean(thResult.ok);
         const coordResult = await sendMail(
           graphContext,
@@ -718,14 +726,14 @@ module.exports = function registerContratacionesRoutes(deps) {
     }
 
     if (solicitud.tipo_solicitud === TIPO_EXTENSION) {
-      const thResult = await sendMail(graphContext, DESTINOS_TH, buildMailThExtension(solicitud));
+      const thResult = await sendMail(graphContext, destinosTh, buildMailThExtension(solicitud));
       mailResults.th = Boolean(thResult.ok);
     }
 
     if (solicitud.tipo_solicitud === TIPO_RETIRO) {
       const mesaResult = await sendMail(graphContext, DESTINOS_MESA, buildMailMesaRetiro(solicitud));
       mailResults.mesa = Boolean(mesaResult.ok);
-      const thResult = await sendMail(graphContext, DESTINOS_TH, buildMailThRetiro(solicitud));
+      const thResult = await sendMail(graphContext, destinosTh, buildMailThRetiro(solicitud));
       mailResults.th = Boolean(thResult.ok);
       const coordResult = await sendMail(graphContext, coordinadorEmail, buildMailCoordinadorRetiro(solicitud));
       mailResults.coordinador = Boolean(coordResult.ok);
@@ -982,6 +990,22 @@ module.exports = function registerContratacionesRoutes(deps) {
         const tipoDocumentoId = refs.tipo_documento_id || null;
         const clienteId = refs.cliente_id || null;
         const monedaFinal = moneda || await resolvePersonaMoneda(pool, personaUsuarioId);
+
+        // Validar que correo_personal no este registrado para otra persona (diferente documento)
+        if (tipoSolicitud === TIPO_NUEVO && correoPersonal && numeroDocumento) {
+          const dupCheck = await pool.query(
+            `SELECT 1 FROM preregistro_personas
+             WHERE LOWER(correo_personal) = LOWER($1)
+               AND COALESCE(numero_documento,'') <> $2
+             LIMIT 1`,
+            [correoPersonal, numeroDocumento]
+          );
+          if (dupCheck.rows.length) {
+            return res.status(422).json({
+              error: "El correo personal ya está registrado para otra persona en el sistema. Cada persona debe tener un correo personal único."
+            });
+          }
+        }
 
         let clienteNombre = null;
         let requiereConfirmacionCliente = false;
@@ -1634,7 +1658,8 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
 
         const solicitud = formatRow(row);
-        const thResult = await sendMail(getGraphContext(req), DESTINOS_TH, buildMailThNuevo(solicitud));
+        const destinosTh = await getDestinosTalentoHumano();
+        const thResult = await sendMail(getGraphContext(req), destinosTh, buildMailThNuevo(solicitud));
         const thOk = Boolean(thResult.ok);
 
         await pool.query(
@@ -1645,7 +1670,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             estado = $2
           WHERE id = $3
           `,
-          [thOk, thOk ? ESTADOS.completado : ESTADOS.pendienteConfirmacionCliente, internalId]
+          [thOk, thOk ? ESTADOS.pendienteRevisionTh : ESTADOS.pendienteConfirmacionCliente, internalId]
         );
 
         const updated = await getByInternalId(pool, internalId);

@@ -148,6 +148,27 @@ window.registroHorasApp = function () {
             return String(item.estado_reporte || "").toLowerCase() === "rechazado";
         },
 
+        tienePendientes(item) {
+            return Number(item?.reportes_pendientes || 0) > 0;
+        },
+
+        formatearCantidad(val) {
+            return new Intl.NumberFormat("es-CO", {
+                maximumFractionDigits: 2
+            }).format(Number(val || 0));
+        },
+
+        textoDisponible(item) {
+            if (this.esCostoTotal(item)) {
+                return this.formatearDinero(item?.total_disponible ?? item?.total_pagar ?? 0);
+            }
+            const esDias = this.esTipoMensual(item?.nombre_tipo_asignacion);
+            const disponible = esDias
+                ? Number(item?.dias_disponibles ?? item?.cantidad_dias ?? 0)
+                : Number(item?.horas_disponibles ?? item?.horas_asignadas ?? 0);
+            return `${this.formatearCantidad(disponible)} ${esDias ? "Dias" : "Hrs"}`;
+        },
+
         async enviarReporte(item) {
             const tipo = item.nombre_tipo_asignacion;
             const esCostoTotal = this.esCostoTotal(item);

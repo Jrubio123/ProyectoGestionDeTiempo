@@ -114,7 +114,8 @@ window.asignacionConsultorApp = function () {
             return this.cat.modulos.find((m) => {
                 const titulo = String(m?.titulo || "").trim().toLowerCase();
                 const id = String(m?.id || "").trim().toLowerCase();
-                return titulo === q || id === q;
+                const publicId = String(m?.public_id || "").trim().toLowerCase();
+                return titulo === q || id === q || publicId === q;
             }) || null;
         },
 
@@ -131,7 +132,7 @@ window.asignacionConsultorApp = function () {
 
         setModuloId() {
             const match = this.findModuloByInput(this.formDisplay.modulo);
-            this.form.modulo_id = match ? match.id : "";
+            this.form.modulo_id = match ? (match.public_id || match.id) : "";
             if (match) {
                 this.formDisplay.modulo = match.titulo || this.formDisplay.modulo;
             } else {

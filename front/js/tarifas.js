@@ -154,7 +154,7 @@ window.tarifasApp = function () {
             const match = this.cat.modulos.find(
                 (m) => String(m.titulo || "").toLowerCase() === q
             );
-            this.form.modulo_id = match ? match.id : "";
+            this.form.modulo_id = match ? (match.public_id || match.id) : "";
             this.validarDuplicado();
         },
 

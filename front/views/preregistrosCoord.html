@@ -85,8 +85,8 @@
         </div>
     </section>
 
-    <div x-show="modalOpen" class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm p-3 md:p-6 overflow-y-auto" style="display: none;">
-        <div class="max-w-5xl mx-auto bg-white rounded-3xl border border-slate-200 shadow-2xl p-5 md:p-7">
+    <div x-show="modalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" style="display: none;">
+        <div class="max-w-5xl w-full bg-white rounded-3xl border border-slate-200 shadow-2xl p-5 md:p-7 max-h-[90vh] overflow-y-auto">
             <div class="flex items-start justify-between gap-4 mb-5">
                 <div>
                     <h3 class="text-xl font-bold text-slate-900" x-text="modoEdicion ? `Completar Solicitud ${tipoModal}` : `Solicitud ${tipoModal}`"></h3>
@@ -128,75 +128,157 @@
             </div>
 
             <form @submit.prevent="guardarSolicitud" class="space-y-4">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <input x-model="form.nombre" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Nombres *">
-                    <input x-model="form.apellidos" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Apellidos *">
-                    <select x-model="form.tipo_documento_id" class="px-3 py-2 rounded-xl border border-slate-200">
-                        <option value="">Tipo documento</option>
-                        <template x-for="doc in documentos" :key="doc.id">
-                            <option :value="doc.id" x-text="doc.titulo"></option>
-                        </template>
-                    </select>
-                    <input x-model="form.numero_documento" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Numero documento">
-                    <input x-model="form.correo_personal" type="email" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Correo personal">
-                    <input x-model="form.correo_empresarial" type="email" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Correo empresarial">
-                    <input x-model="form.telefono" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Telefono">
-                    <input x-model="form.ubicacion" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Ubicacion">
-                    <input x-model="form.perfil" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Perfil">
-                    <select x-model="form.supervisor_id" class="px-3 py-2 rounded-xl border border-slate-200">
-                        <option value="">Supervisor / Coordinador</option>
-                        <template x-for="sup in supervisores" :key="sup.id">
-                            <option :value="sup.id" x-text="sup.nombre"></option>
-                        </template>
-                    </select>
-                    <select x-model="form.cliente_id" class="px-3 py-2 rounded-xl border border-slate-200">
-                        <option value="">Cliente</option>
-                        <template x-for="cliente in clientes" :key="cliente.id">
-                            <option :value="cliente.id" x-text="cliente.titulo"></option>
-                        </template>
-                    </select>
-                    <select x-model="form.modulo_id" class="px-3 py-2 rounded-xl border border-slate-200">
-                        <option value="">Modulo</option>
-                        <template x-for="modulo in modulos" :key="modulo.id">
-                            <option :value="modulo.id" x-text="modulo.titulo"></option>
-                        </template>
-                    </select>
-                    <input x-model="form.grupo_app_tiempos" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Grupo APP tiempos">
-                    <input x-model="form.grupo_distribucion" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Grupo distribucion">
-                    <select x-model="form.moneda" class="px-3 py-2 rounded-xl border border-slate-200">
-                        <option value="">Moneda</option>
-                        <option value="COP">COP</option>
-                        <option value="USD">USD</option>
-                    </select>
-                    <select x-model="form.modalidad_contrato" class="px-3 py-2 rounded-xl border border-slate-200">
-                        <option value="">Modalidad contrato</option>
-                        <option value="Full time">Full time</option>
-                        <option value="Medio tiempo">Medio tiempo</option>
-                        <option value="Por horas">Por horas</option>
-                    </select>
-                    <input x-model="form.tarifa_hora" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa hora">
-                    <input x-model="form.tarifa_mes" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa mes">
-                    <input x-model="form.tarifa_medio_tiempo" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa medio tiempo">
-                    <input x-model="form.tarifa_capacitacion" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa capacitacion">
+
+                <!-- ── NUEVO ──────────────────────────────────────────────── -->
+                <div x-show="tipoModal === 'Nuevo'" style="display:none" class="space-y-3">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input x-model="form.nombre" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Nombres *">
+                        <input x-model="form.apellidos" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Apellidos *">
+                        <select x-model="form.tipo_documento_id" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Tipo documento</option>
+                            <template x-for="doc in documentos" :key="doc.id">
+                                <option :value="doc.id" x-text="doc.titulo"></option>
+                            </template>
+                        </select>
+                        <input x-model="form.numero_documento" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Numero documento">
+                        <input x-model="form.correo_personal" type="email" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Correo personal">
+                        <input x-model="form.correo_empresarial" type="email" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Correo empresarial">
+                        <input x-model="form.telefono" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Telefono">
+                        <input x-model="form.ubicacion" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Ubicacion">
+                        <input x-model="form.perfil" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Perfil">
+                        <select x-model="form.supervisor_id" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Supervisor / Coordinador</option>
+                            <template x-for="sup in supervisores" :key="sup.id">
+                                <option :value="sup.id" x-text="sup.nombre"></option>
+                            </template>
+                        </select>
+                        <select x-model="form.cliente_id" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Cliente *</option>
+                            <template x-for="cliente in clientes" :key="cliente.id">
+                                <option :value="cliente.id" x-text="cliente.titulo"></option>
+                            </template>
+                        </select>
+                        <select x-model="form.modulo_id" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Modulo</option>
+                            <template x-for="modulo in modulos" :key="modulo.id">
+                                <option :value="modulo.id" x-text="modulo.titulo"></option>
+                            </template>
+                        </select>
+                        <input x-model="form.grupo_app_tiempos" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Grupo APP tiempos">
+                        <input x-model="form.grupo_distribucion" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Grupo distribucion">
+                        <select x-model="form.moneda" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Moneda</option>
+                            <option value="COP">COP</option>
+                            <option value="USD">USD</option>
+                        </select>
+                        <select x-model="form.modalidad_contrato" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Modalidad contrato</option>
+                            <option value="Full time">Full time</option>
+                            <option value="Medio tiempo">Medio tiempo</option>
+                            <option value="Por horas">Por horas</option>
+                        </select>
+                        <input x-model="form.tarifa_hora" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa hora">
+                        <input x-model="form.tarifa_mes" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa mes">
+                        <input x-model="form.tarifa_medio_tiempo" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa medio tiempo">
+                        <input x-model="form.tarifa_capacitacion" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa capacitacion">
+                        <input x-model="form.fecha_inicio" type="date" class="px-3 py-2 rounded-xl border border-slate-200">
+                        <input x-model="form.fecha_fin" type="date" class="px-3 py-2 rounded-xl border border-slate-200">
+                    </div>
+                    <textarea x-model="form.necesidad_ti" rows="3" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Que necesitas de TI? (obligatorio) *"></textarea>
+                    <textarea x-model="form.observaciones" rows="3" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Observaciones"></textarea>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3" x-show="tipoModal === 'Nuevo'">
-                    <input x-model="form.fecha_inicio" type="date" class="px-3 py-2 rounded-xl border border-slate-200">
-                    <input x-model="form.fecha_fin" type="date" class="px-3 py-2 rounded-xl border border-slate-200">
+                <!-- ── RETIRO ──────────────────────────────────────────────── -->
+                <div x-show="tipoModal === 'Retiro'" style="display:none" class="space-y-3">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input x-model="form.nombre" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Nombres *">
+                        <input x-model="form.apellidos" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Apellidos *">
+                        <input x-model="form.correo_personal" type="email" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Email del consultor *">
+                        <select x-model="form.grupo_app_tiempos" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Grupo de usuario *</option>
+                            <template x-for="rol in rolesDisponibles" :key="rol">
+                                <option :value="rol" x-text="rol"></option>
+                            </template>
+                        </select>
+                        <select x-model="form.supervisor_id" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Responsable / Coordinador *</option>
+                            <template x-for="sup in supervisores" :key="sup.id">
+                                <option :value="sup.id" x-text="sup.nombre"></option>
+                            </template>
+                        </select>
+                        <select x-model="form.cliente_id" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Cliente</option>
+                            <template x-for="cliente in clientes" :key="cliente.id">
+                                <option :value="cliente.id" x-text="cliente.titulo"></option>
+                            </template>
+                        </select>
+                        <input x-model="form.perfil" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Perfil">
+                        <select x-model="form.modalidad_contrato" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Modalidad de contrato</option>
+                            <option value="Full time">Full time</option>
+                            <option value="Medio tiempo">Medio tiempo</option>
+                            <option value="Por horas">Por horas</option>
+                        </select>
+                        <div class="md:col-span-2">
+                            <label class="block text-xs text-slate-500 mb-1">Fecha de retiro *</label>
+                            <input x-model="form.fecha_retiro" type="date" class="w-full px-3 py-2 rounded-xl border border-slate-200">
+                        </div>
+                    </div>
+                    <textarea x-model="form.necesidad_ti" rows="3" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Acciones requeridas a TI: bloquear acceso, retirar licencia, eliminar VPN... *"></textarea>
+                    <textarea x-model="form.observaciones" rows="3" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Observaciones"></textarea>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3" x-show="tipoModal === 'Extension'">
-                    <input x-model="form.fecha_extension_desde" type="date" class="px-3 py-2 rounded-xl border border-slate-200">
-                    <input x-model="form.fecha_extension_hasta" type="date" class="px-3 py-2 rounded-xl border border-slate-200">
+                <!-- ── EXTENSION / MODIFICACIÓN ──────────────────────────── -->
+                <div x-show="tipoModal === 'Extension'" style="display:none" class="space-y-3">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input x-model="form.nombre" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Nombres *">
+                        <input x-model="form.apellidos" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Apellidos *">
+                        <input x-model="form.numero_documento" type="text" inputmode="numeric" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Número de documento">
+                        <!-- Perfil via módulos; si es Otros habilita campo libre -->
+                        <div class="space-y-2">
+                            <select x-model="form.modulo_id" @change="onModuloChange" class="w-full px-3 py-2 rounded-xl border border-slate-200">
+                                <option value="">Perfil / Módulo</option>
+                                <template x-for="modulo in modulos" :key="modulo.id">
+                                    <option :value="modulo.id" x-text="modulo.titulo"></option>
+                                </template>
+                                <option value="otros">Otros</option>
+                            </select>
+                            <input x-show="perfilEsOtro" x-model="form.perfil" type="text" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Especifique el perfil *" style="display:none">
+                        </div>
+                        <select x-model="form.moneda" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Moneda</option>
+                            <option value="COP">COP</option>
+                            <option value="USD">US$</option>
+                        </select>
+                        <div>
+                            <label class="block text-xs text-slate-500 mb-1">Extensión desde (si aplica)</label>
+                            <input x-model="form.fecha_extension_desde" type="date" class="w-full px-3 py-2 rounded-xl border border-slate-200">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-500 mb-1">Extensión hasta (si aplica)</label>
+                            <input x-model="form.fecha_extension_hasta" type="date" class="w-full px-3 py-2 rounded-xl border border-slate-200">
+                        </div>
+                        <select x-model="form.supervisor_id" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Responsable / Coordinador (si aplica cambio)</option>
+                            <template x-for="sup in supervisores" :key="sup.id">
+                                <option :value="sup.id" x-text="sup.nombre"></option>
+                            </template>
+                        </select>
+                        <input x-model="form.tarifa_hora" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa hora">
+                        <input x-model="form.tarifa_mes" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa mes">
+                        <input x-model="form.tarifa_medio_tiempo" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa medio tiempo">
+                        <input x-model="form.tarifa_capacitacion" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa capacitación">
+                        <select x-model="form.cliente_id" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Cliente (si será reasignado)</option>
+                            <template x-for="cliente in clientes" :key="cliente.id">
+                                <option :value="cliente.id" x-text="cliente.titulo"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <textarea x-model="form.observaciones" rows="3" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Observaciones"></textarea>
                 </div>
 
-                <div class="grid grid-cols-1 gap-3" x-show="tipoModal === 'Retiro'">
-                    <input x-model="form.fecha_retiro" type="date" class="px-3 py-2 rounded-xl border border-slate-200">
-                </div>
-
-                <textarea x-model="form.necesidad_ti" rows="3" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Que necesitas de TI? (obligatorio) *"></textarea>
-                <textarea x-model="form.observaciones" rows="3" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Observaciones"></textarea>
-
+                <!-- ── Errores y acciones (comunes) ───────────────────────── -->
                 <div x-show="erroresFormulario.length" class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-700 text-sm">
                     <p class="font-semibold">Completa los campos requeridos:</p>
                     <ul class="list-disc pl-5 mt-1">
@@ -214,8 +296,8 @@
         </div>
     </div>
 
-    <div x-show="detalleOpen" class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm p-3 md:p-6 overflow-y-auto" style="display: none;">
-        <div class="max-w-3xl mx-auto bg-white rounded-3xl border border-slate-200 shadow-2xl p-5 md:p-7">
+    <div x-show="detalleOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" style="display: none;">
+        <div class="max-w-3xl w-full bg-white rounded-3xl border border-slate-200 shadow-2xl p-5 md:p-7 max-h-[90vh] overflow-y-auto">
             <div class="flex items-start justify-between gap-4 mb-4">
                 <div>
                     <h3 class="text-xl font-bold text-slate-900">Detalle Solicitud</h3>

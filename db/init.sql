@@ -476,6 +476,8 @@ CREATE TABLE tarifa_consultor
     modulo_id INTEGER REFERENCES modulo(id) ON DELETE SET NULL,
     id_tipo_asignacion INTEGER REFERENCES tipo_asignacion(id) ON DELETE SET NULL,
 
+    -- En migraciones historicas, las tarifas vencidas deben cargarse con activo=false
+    -- para no chocar con el indice unico parcial de filas activas.
     activo BOOLEAN DEFAULT true,
     vigencia_desde DATE,
     vigencia_hasta DATE,
@@ -491,6 +493,9 @@ CREATE INDEX idx_tarifa_cliente ON tarifa_consultor(id_cliente);
 CREATE INDEX idx_tarifa_consultor ON tarifa_consultor(consultor_id);
 CREATE INDEX idx_tarifa_modulo ON tarifa_consultor(modulo_id);
 CREATE INDEX idx_tarifa_activo ON tarifa_consultor(activo);
+CREATE UNIQUE INDEX idx_tarifa_unica_activa
+ON tarifa_consultor(id_cliente, consultor_id, modulo_id, id_tipo_asignacion)
+WHERE activo = true;
 
 COMMENT ON TABLE tarifa_consultor IS 'Tarifas por consultor, cliente y tipo de asignación';
 

@@ -145,8 +145,15 @@ Implementacion backend:
   - Agrega valores a `tipo_estado_mesa` si no existen.
 - `db/migrations/2026-03-17-usuario-licencias-backup.sql`:
   - Crea `usuario_licencias_backup` para guardar/restaurar snapshots de licencias de Entra ID.
+- `db/migrations/2026-03-30-tarifa-unique-index.sql`:
+  - Normaliza tarifas vencidas con `activo=true` y crea el indice unico parcial `idx_tarifa_unica_activa`.
+- `db/scripts/normalize-tarifas-vencidas-post-load.sql`:
+  - Paso post-carga para historicos: desactiva tarifas vencidas y lista duplicados activos que impedirian crear el indice.
+- `db/scripts/dedupe-tarifas-activas-post-load.sql`:
+  - Paso post-carga para duplicados vigentes: conserva una sola tarifa activa por combinacion y desactiva las demas.
 - Nota:
   - El cambio de `En_Firma` ya quedo integrado en `init.sql`; no se necesita migracion separada para instalaciones nuevas.
+  - Si se importan historicos en `tarifa_consultor`, las filas con `vigencia_hasta < CURRENT_DATE` deben entrar con `activo=false`, o se debe correr primero `db/scripts/normalize-tarifas-vencidas-post-load.sql`. Si aun quedan duplicados activos, correr `db/scripts/dedupe-tarifas-activas-post-load.sql` antes de aplicar `2026-03-30-tarifa-unique-index.sql`.
 
 ## Variables de entorno
 Plantillas versionadas:

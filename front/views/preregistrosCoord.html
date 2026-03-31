@@ -85,9 +85,9 @@
         </div>
     </section>
 
-    <div x-show="modalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" style="display: none;">
-        <div class="max-w-5xl w-full bg-white rounded-3xl border border-slate-200 shadow-2xl p-5 md:p-7 max-h-[90vh] overflow-y-auto">
-            <div class="flex items-start justify-between gap-4 mb-5">
+    <div x-show="modalOpen" class="view-overlay bg-white/30 backdrop-blur-md" style="display: none;">
+        <div class="w-11/12 max-w-5xl bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
+            <div class="flex items-start justify-between gap-4 mb-5 sticky top-0 bg-white z-10 pb-4 border-b border-gray-100">
                 <div>
                     <h3 class="text-xl font-bold text-slate-900" x-text="modoEdicion ? `Completar Solicitud ${tipoModal}` : `Solicitud ${tipoModal}`"></h3>
                     <p class="text-sm text-slate-600 mt-1" x-text="modoEdicion ? 'Completa los datos faltantes y envia el flujo.' : 'Busca un usuario existente para autocompletar o diligencia manualmente.'"></p>
@@ -296,9 +296,9 @@
         </div>
     </div>
 
-    <div x-show="detalleOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" style="display: none;">
-        <div class="max-w-3xl w-full bg-white rounded-3xl border border-slate-200 shadow-2xl p-5 md:p-7 max-h-[90vh] overflow-y-auto">
-            <div class="flex items-start justify-between gap-4 mb-4">
+    <div x-show="detalleOpen" class="view-overlay bg-white/30 backdrop-blur-md" style="display: none;">
+        <div class="w-11/12 max-w-5xl bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
+            <div class="flex items-start justify-between gap-4 mb-4 sticky top-0 bg-white z-10 pb-4 border-b border-gray-100">
                 <div>
                     <h3 class="text-xl font-bold text-slate-900">Detalle Solicitud</h3>
                     <p class="text-sm text-slate-600" x-text="detalle?.estado || '-' "></p>

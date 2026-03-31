@@ -1059,7 +1059,7 @@ function buildRrhhEstadoEmailContent({
 
   if (estado === "Cancelado") {
     return {
-      subject: `?? Notificación: Solicitud Cancelada - ${base.perfil}`,
+      subject: `🚫 Notificación: Solicitud Cancelada - ${base.perfil}`,
       text:
         `Hola ${base.toName},\n\n` +
         `Se ha registrado la cancelación de la solicitud para ${base.perfil}.\n` +
@@ -5619,7 +5619,7 @@ function sectionTitle(doc, title, y) {
   return y + 20;
 }
 
-// ?? Función principal ============================================================
+// ====Función principal ============================================================
 function buildCaseSummaryText(row = {}) {
   const parsed = parseTicketCaseFields(row?.nro_caso_int_ext);
   const casoCliente =
@@ -6757,7 +6757,7 @@ app.get("/admin/usuarios-roles", requireAccess({ roles: ["Administrador"] }), as
   }
 });
 
-// ?? Gestión de licencias / acceso ============================================================?
+// ====Gestión de licencias / acceso ============================================================?
 app.get("/admin/usuarios-licencias", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   try {
     const result = await pool.query(`
@@ -6893,7 +6893,7 @@ app.put("/admin/usuarios/:id/rol", requireAccess({ roles: ["Administrador"] }), 
   }
 });
 
-// ?? Firma de contratos: rutas admin ============================================================
+// ====Firma de contratos: rutas admin ============================================================
 const TALENTO_HUMANO_ROL = "Talento Humano";
 
 function buildContratoEmailHtml({ nombre, token, link }) {
@@ -14330,7 +14330,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
       const titulo = esAprobado
         ? "✅ Horas aprobadas"
         : estado === "Rechazado"
-          ? "?? Acción requerida: corrección de reporte"
+          ? "⚠️ Acción requerida: corrección de reporte"
           : "Actualización de reporte";
       await sendEmailSafe({
         ...getGraphContext(req),
@@ -14960,7 +14960,7 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
         await sendEmailSafe({
           ...getGraphContext(req),
           to: created.email_consultor,
-          subject: `?? Nueva asignación: ${created.nombre_modulo || "Proyecto"} - ${created.nombre_cliente}`,
+          subject: `🚀 Nueva asignación: ${created.nombre_modulo || "Proyecto"} - ${created.nombre_cliente}`,
           text:
             `Hola ${created.nombre_consultor || ""},\n` +
             `Tienes una nueva asignación.\n` +

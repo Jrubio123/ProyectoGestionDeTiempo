@@ -56,9 +56,9 @@
         </div>
     </div>
 
-    <div x-show="modalOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display: none;">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-4 md:p-6 max-h-[92vh] overflow-y-auto">
-            <div class="flex justify-between items-center mb-4">
+    <div x-show="modalOpen" x-transition.opacity class="view-overlay bg-white/30 backdrop-blur-md" style="display: none;">
+        <div class="w-11/12 max-w-3xl bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
+            <div class="flex justify-between items-center mb-4 sticky top-0 bg-white z-10 pb-4 border-b border-gray-100">
                 <h3 class="text-xl font-bold text-gray-800">Detalle de Asignación</h3>
                 <button @click="modalOpen = false" class="text-gray-400 hover:text-gray-600">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

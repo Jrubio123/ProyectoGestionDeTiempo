@@ -155,15 +155,15 @@
         </div>
 
     <!-- Modal de Edición -->
-    <div 
+    <div
         x-show="mostrarModal"
         @click.self="cerrarModal"
-        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        class="view-overlay bg-white/30 backdrop-blur-md"
         x-transition
         x-cloak
     >
-        <div 
-            class="bg-white rounded-3xl shadow-2xl w-full max-w-5xl max-h-[92vh] md:max-h-[90vh] overflow-y-auto"
+        <div
+            class="bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl w-full max-w-5xl max-h-[85vh] overflow-y-auto"
             x-transition:enter="transition ease-out duration-300"
             x-transition:enter-start="opacity-0 transform scale-95"
             x-transition:enter-end="opacity-100 transform scale-100"

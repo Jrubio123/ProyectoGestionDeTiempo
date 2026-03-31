@@ -375,8 +375,8 @@
         </div>
     </div>
 
-    <div x-show="modalDetalle" x-cloak class="prereg-modal-backdrop">
-        <div class="prereg-modal-panel">
+    <div x-show="modalDetalle" x-cloak class="view-overlay bg-white/30 backdrop-blur-md">
+        <div class="w-11/12 max-w-5xl bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh] relative">
             <div class="prereg-modal-head">
                 <div>
                     <h3 class="prereg-modal-title">Detalle de contratacion</h3>
@@ -444,8 +444,8 @@
                 <button type="button" x-show="itemActivo?.origen_flujo === 'preregistro' && itemActivo?.estado !== 'Completado' && itemActivo?.estado !== 'Anulado'" @click="abrirModalAnular" class="prereg-btn prereg-btn-danger">Anular contratacion</button>
             </div>
 
-            <div x-show="modalAnular" x-cloak class="prereg-mini-backdrop">
-                <div class="prereg-mini-modal">
+            <div x-show="modalAnular" x-cloak class="absolute inset-0 z-[300] flex items-center justify-center bg-white/30 backdrop-blur-md rounded-3xl">
+                <div class="w-11/12 max-w-md bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[80vh]">
                     <h4 class="prereg-mini-title">Confirmar anulacion</h4>
                     <p class="prereg-mini-subtitle">Esta accion no se puede deshacer.</p>
                     <textarea rows="4" class="prereg-input mt-3" x-model="motivoAnulacion" placeholder="Motivo (minimo 20 caracteres)"></textarea>
@@ -458,8 +458,8 @@
         </div>
     </div>
 
-    <div x-show="anexoModalItem.open" x-cloak class="prereg-modal-backdrop">
-        <div class="prereg-modal-panel max-w-4xl">
+    <div x-show="anexoModalItem.open" x-cloak class="view-overlay bg-white/30 backdrop-blur-md">
+        <div class="w-11/12 max-w-4xl bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
             <div class="prereg-modal-head">
                 <div>
                     <h3 class="prereg-modal-title" x-text="anexoModalItem.mode === 'edit' ? 'Editar item del anexo' : 'Agregar item al anexo'"></h3>
@@ -587,8 +587,8 @@
         </div>
     </div>
 
-    <div x-show="anexoModalFirma.open" x-cloak class="prereg-modal-backdrop">
-        <div class="prereg-modal-panel max-w-4xl">
+    <div x-show="anexoModalFirma.open" x-cloak class="view-overlay bg-white/30 backdrop-blur-md">
+        <div class="w-11/12 max-w-4xl bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
             <div class="prereg-modal-head">
                 <div>
                     <h3 class="prereg-modal-title">Confirmar envio a firma</h3>
@@ -662,8 +662,8 @@
         </div>
     </div>
 
-    <div x-show="anexoModalCancelar.open" x-cloak class="prereg-mini-backdrop">
-        <div class="prereg-mini-modal">
+    <div x-show="anexoModalCancelar.open" x-cloak class="view-overlay bg-white/30 backdrop-blur-md">
+        <div class="w-11/12 max-w-md bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
             <h4 class="prereg-mini-title">Cancelar envio pendiente</h4>
             <p class="prereg-mini-subtitle">Los items volveran a estado Pendiente de firma.</p>
 
@@ -683,8 +683,8 @@
         </div>
     </div>
 
-    <div x-show="anexoModalFinalizar.open" x-cloak class="prereg-mini-backdrop">
-        <div class="prereg-mini-modal">
+    <div x-show="anexoModalFinalizar.open" x-cloak class="view-overlay bg-white/30 backdrop-blur-md">
+        <div class="w-11/12 max-w-md bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
             <h4 class="prereg-mini-title">Finalizar item</h4>
             <p class="prereg-mini-subtitle">
                 Este item dejara de aparecer en el anexo activo y pasara al historial.

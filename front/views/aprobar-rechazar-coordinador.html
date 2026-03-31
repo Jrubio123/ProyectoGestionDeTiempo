@@ -149,12 +149,12 @@
 
     <div
         x-show="modalDetalle.open"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-3"
+        class="view-overlay bg-white/30 backdrop-blur-md"
         x-transition.opacity
         x-cloak
     >
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
-            <div class="flex items-start justify-between gap-4">
+        <div class="w-11/12 max-w-3xl bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
+            <div class="flex items-start justify-between gap-4 sticky top-0 bg-white z-10 pb-4 mb-4 border-b border-gray-100">
                 <div>
                     <h3 class="text-lg font-bold text-gray-900">Detalle del Ticket</h3>
                     <p class="text-sm text-gray-500" x-text="modalDetalle.reporte ? codigoTicket(modalDetalle.reporte) : ''"></p>
@@ -207,8 +207,8 @@
         </div>
     </div>
 
-    <div x-show="modalRechazo.open" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" x-transition.opacity>
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 animate-scale-in">
+    <div x-show="modalRechazo.open" class="view-overlay bg-white/30 backdrop-blur-md" x-transition.opacity>
+        <div class="w-11/12 max-w-md bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
             <div class="text-center mb-4">
                 <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3 text-red-600">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>

@@ -554,8 +554,11 @@
 
 .prereg-modal-backdrop {
     position: fixed;
-    inset: 0;
-    z-index: 60;
+    top: var(--navbar-height);
+    right: 0;
+    bottom: 0;
+    left: var(--sidebar-width);
+    z-index: 2000;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -564,9 +567,13 @@
     backdrop-filter: blur(4px);
 }
 
+body.sidebar-collapsed .prereg-modal-backdrop {
+    left: var(--sidebar-collapsed-width);
+}
+
 .prereg-modal-panel {
     width: min(1120px, 100%);
-    max-height: calc(100vh - 2rem);
+    max-height: calc(100vh - var(--navbar-height) - 2rem);
     overflow-y: auto;
     background: #ffffff;
     border: 1px solid #dbe4ee;
@@ -766,6 +773,12 @@
     .prereg-form-grid,
     .prereg-meta {
         grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 1024px) {
+    .prereg-modal-backdrop {
+        left: 0;
     }
 }
 

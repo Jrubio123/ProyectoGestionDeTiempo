@@ -17,7 +17,7 @@ Sistema web para gestionar consultorias, asignaciones, reporte de horas, cuentas
 - `tunnel`:
   - Front y back por URLs publicas de Dev Tunnels.
 - `test`:
-  - Front: `https://zealous-mud-057b4ca0f.1.azurestaticapps.net/`
+  - Front: `https://https://lively-sky-00d667a0f.4.azurestaticapps.net/`
   - Back: `https://proyectogestiondetiempo.onrender.com`
   - DB: Supabase
 - `prod`:
@@ -185,7 +185,7 @@ Variables clave:
 La resolucion se hace en `front/env.js`:
 - `local` usa localhost.
 - `tunnel` usa URL publica de tunel.
-- `test` detecta host `zealous-mud-057b4ca0f.1.azurestaticapps.net` y usa Render.
+- `test` detecta host `https://lively-sky-00d667a0f.4.azurestaticapps.net` y usa Render.
 - `prod` usa URL de backend productiva configurada.
 
 Comportamiento especial en `test`:

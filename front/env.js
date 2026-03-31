@@ -7,7 +7,7 @@
         api_test: "https://proyectogestiondetiempo.onrender.com",
         api_prod: "https://backapp-eghxaxfafuecc2dr.westus-01.azurewebsites.net",
         test_front_hosts: [
-            "zealous-mud-057b4ca0f.1.azurestaticapps.net"
+            "https://lively-sky-00d667a0f.4.azurestaticapps.net"
         ],
         azure_tenant_id: "9c6fde39-4030-44e7-aeb7-c6c97aa49ba4",
         azure_client_id: "8544473b-8df2-49c7-8916-264a0b4cbc6b",

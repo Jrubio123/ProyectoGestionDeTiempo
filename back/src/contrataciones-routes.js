@@ -73,6 +73,9 @@ module.exports = function registerContratacionesRoutes(deps) {
       sc.ubicacion,
       sc.grupo_app_tiempos,
       sc.grupo_distribucion,
+      sc.vpn_corona,
+      sc.necesita_s_user,
+      sc.grupo_usuario_otro,
       sc.moneda,
       sc.tarifa_hora,
       sc.tarifa_mes,
@@ -302,6 +305,36 @@ module.exports = function registerContratacionesRoutes(deps) {
       values.push(correoSilver);
     }
 
+    if (solicitudRow.vpn_corona !== undefined) {
+      sets.push(`vpn_corona = $${idx++}`);
+      values.push(Boolean(solicitudRow.vpn_corona));
+    }
+    if (solicitudRow.necesita_s_user !== undefined) {
+      sets.push(`necesita_s_user = $${idx++}`);
+      values.push(Boolean(solicitudRow.necesita_s_user));
+    }
+    if (solicitudRow.grupo_usuario_otro !== undefined && solicitudRow.grupo_usuario_otro !== null) {
+      sets.push(`grupo_usuario_otro = $${idx++}`);
+      values.push(solicitudRow.grupo_usuario_otro);
+    }
+
+    const VALID_GRUPO_USUARIO = ["ADMIN", "COORDINADOR", "CONSULTOR", "CONTABILIDAD", "COMERCIAL", "Otro"];
+    if (solicitudRow.grupo_app_tiempos && VALID_GRUPO_USUARIO.includes(solicitudRow.grupo_app_tiempos)) {
+      sets.push(`grupo_usuario = $${idx++}`);
+      values.push(solicitudRow.grupo_app_tiempos);
+    }
+
+    const VALID_GRUPO_DISTRIBUCION = ["Todos Silver", "Vinculados", "Responsable"];
+    if (solicitudRow.grupo_distribucion && VALID_GRUPO_DISTRIBUCION.includes(solicitudRow.grupo_distribucion)) {
+      sets.push(`grupo_distribucion = $${idx++}`);
+      values.push(solicitudRow.grupo_distribucion);
+    }
+
+    if (solicitudRow.ubicacion) {
+      sets.push(`pais_ubicacion = COALESCE($${idx++}, pais_ubicacion)`);
+      values.push(solicitudRow.ubicacion);
+    }
+
     if (markCoordinadorCompletion && actorUserId) {
       sets.push(`completado_coordinador_por = COALESCE(completado_coordinador_por, $${idx++})`);
       values.push(actorUserId);
@@ -372,6 +405,482 @@ module.exports = function registerContratacionesRoutes(deps) {
     });
   }
 
+  function normalizeAnexoTipo(value) {
+    const key = normalizeKey(value);
+    if (!key) return null;
+    if (["fulltime", "tiempocompleto", "completo"].includes(key)) return "full_time";
+    if (["mediotiempo", "parttime", "part", "medio"].includes(key)) return "medio_tiempo";
+    if (["horas", "porhoras", "hourly"].includes(key)) return "horas";
+    if (["capacitacion", "training"].includes(key)) return "capacitacion";
+    if (["proyecto", "project"].includes(key)) return "proyecto";
+    return null;
+  }
+
+  function anexoTipoLabel(value) {
+    const tipo = normalizeAnexoTipo(value);
+    return (
+      {
+        full_time: "Full time",
+        medio_tiempo: "Medio tiempo",
+        horas: "Horas",
+        capacitacion: "Capacitacion",
+        proyecto: "Proyecto"
+      }[tipo] || null
+    );
+  }
+
+  function extensionTipoRequiereFechas(value) {
+    const tipo = normalizeAnexoTipo(value);
+    return tipo === "full_time" || tipo === "medio_tiempo" || tipo === "proyecto";
+  }
+
+  function anexoTipoToModalidad(value) {
+    const tipo = normalizeAnexoTipo(value);
+    if (tipo === "medio_tiempo") return "Medio tiempo";
+    if (tipo === "horas" || tipo === "capacitacion") return "Por horas";
+    if (tipo === "full_time") return "Full time";
+    return null;
+  }
+
+  function mapTarifaFieldsByTipo(tipo, valor) {
+    const amount = toNullableNumber(valor);
+    const normalized = normalizeAnexoTipo(tipo);
+    return {
+      tarifa_hora: normalized === "horas" && amount !== null ? amount : null,
+      tarifa_mes: (normalized === "full_time" || normalized === "proyecto") && amount !== null ? amount : null,
+      tarifa_medio_tiempo: normalized === "medio_tiempo" && amount !== null ? amount : null,
+      tarifa_capacitacion: normalized === "capacitacion" && amount !== null ? amount : null
+    };
+  }
+
+  function formatMoneyInline(value, moneda = "COP") {
+    const amount = toNullableNumber(value);
+    const currency = normalizeMoneda(moneda) || "COP";
+    if (amount === null) return null;
+    try {
+      return new Intl.NumberFormat("es-CO", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 2
+      }).format(amount);
+    } catch (_) {
+      return `${currency} ${amount}`;
+    }
+  }
+
+  function pickFirst(...values) {
+    for (const value of values) {
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
+    return null;
+  }
+
+  async function resolveUsuarioMeta(internalId) {
+    if (!internalId) return null;
+    const result = await pool.query(
+      `
+      SELECT id, public_id, nombre_usuario, email
+      FROM usuarios
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [internalId]
+    );
+    return result.rows[0] || null;
+  }
+
+  async function findPersonaBaseUser({ userInternalId = null, numeroDocumento = null, correoEmpresarial = null } = {}) {
+    if (!userInternalId && !numeroDocumento && !correoEmpresarial) return null;
+    const result = await pool.query(
+      `
+      SELECT
+        u.id,
+        u.public_id,
+        u.nombre_usuario,
+        u.email,
+        u.cedula,
+        u.telefono,
+        u.moneda_cobro,
+        di.public_id AS tipo_documento_public_id,
+        di.titulo AS tipo_documento_titulo,
+        di.codigo AS tipo_documento_codigo
+      FROM usuarios u
+      LEFT JOIN documento_identidad di ON di.id = u.tipo_documento_id
+      WHERE u.activo = true
+        AND (
+          ($1::int IS NOT NULL AND u.id = $1)
+          OR ($2::text IS NOT NULL AND u.cedula = $2)
+          OR ($3::text IS NOT NULL AND LOWER(COALESCE(u.email, '')) = LOWER($3))
+        )
+      ORDER BY
+        CASE WHEN u.id = $1 THEN 0 ELSE 1 END,
+        u.nombre_usuario ASC
+      LIMIT 1
+      `,
+      [userInternalId || null, numeroDocumento || null, correoEmpresarial || null]
+    );
+    return result.rows[0] || null;
+  }
+
+  async function findActiveAnexoForPersona({
+    userInternalId = null,
+    numeroDocumento = null,
+    correoPersonal = null,
+    correoEmpresarial = null
+  } = {}) {
+    if (!userInternalId && !numeroDocumento && !correoPersonal && !correoEmpresarial) return null;
+    const result = await pool.query(
+      `
+      SELECT
+        ati.id,
+        ati.public_id,
+        ati.usuario_id,
+        ati.tipo_asignacion,
+        ati.correo_personal,
+        ati.cliente_id,
+        c.public_id AS cliente_public_id,
+        COALESCE(c.titulo, ati.cliente_nombre) AS cliente_nombre,
+        ati.modulo_id,
+        m.public_id AS modulo_public_id,
+        m.titulo AS modulo_titulo,
+        ati.moneda,
+        ati.valor_tarifa,
+        ati.fecha_inicio,
+        ati.fecha_fin,
+        ati.fecha_fin_calculada,
+        ati.estado_firma
+      FROM anexo_tecnico_items ati
+      LEFT JOIN clientes c ON c.id = ati.cliente_id
+      LEFT JOIN modulo m ON m.id = ati.modulo_id
+      WHERE ati.estado = 'activo'
+        AND (
+          ($1::int IS NOT NULL AND ati.usuario_id = $1)
+          OR ($2::text IS NOT NULL AND ati.numero_documento = $2)
+          OR ($3::text IS NOT NULL AND LOWER(COALESCE(ati.correo_personal, '')) = LOWER($3))
+          OR ($4::text IS NOT NULL AND LOWER(COALESCE(ati.correo_personal, '')) = LOWER($4))
+        )
+      ORDER BY
+        CASE WHEN ati.usuario_id = $1 THEN 0 ELSE 1 END,
+        ati.fecha_inicio DESC NULLS LAST,
+        ati.updated_at DESC NULLS LAST,
+        ati.created_at DESC
+      LIMIT 1
+      `,
+      [userInternalId || null, numeroDocumento || null, correoPersonal || null, correoEmpresarial || null]
+    );
+    return result.rows[0] || null;
+  }
+
+  async function findLatestSolicitudForPersona({ userInternalId = null, numeroDocumento = null, correoEmpresarial = null } = {}) {
+    if (!userInternalId && !numeroDocumento && !correoEmpresarial) return null;
+    const result = await pool.query(
+      `
+      SELECT
+        sc.id,
+        sc.public_id,
+        sc.tipo_solicitud,
+        sc.perfil,
+        sc.correo_personal,
+        sc.correo_empresarial,
+        sc.moneda,
+        sc.tarifa_hora,
+        sc.tarifa_mes,
+        sc.tarifa_medio_tiempo,
+        sc.tarifa_capacitacion,
+        sc.modalidad_contrato,
+        sc.fecha_inicio,
+        sc.fecha_fin,
+        sc.fecha_extension_desde,
+        sc.fecha_extension_hasta,
+        sc.datos_extra,
+        sc.supervisor_id,
+        sup.public_id AS supervisor_public_id,
+        sup.nombre_usuario AS supervisor_nombre,
+        sup.email AS supervisor_email,
+        sc.cliente_id,
+        c.public_id AS cliente_public_id,
+        c.titulo AS cliente_nombre
+      FROM solicitudes_contratacion sc
+      LEFT JOIN usuarios sup ON sup.id = sc.supervisor_id
+      LEFT JOIN clientes c ON c.id = sc.cliente_id
+      WHERE sc.tipo_solicitud <> $4
+        AND (
+          ($1::int IS NOT NULL AND sc.persona_usuario_id = $1)
+          OR ($2::text IS NOT NULL AND sc.numero_documento = $2)
+          OR ($3::text IS NOT NULL AND LOWER(COALESCE(sc.correo_empresarial, '')) = LOWER($3))
+        )
+      ORDER BY sc.updated_at DESC NULLS LAST, sc.created_at DESC
+      LIMIT 1
+      `,
+      [userInternalId || null, numeroDocumento || null, correoEmpresarial || null, TIPO_RETIRO]
+    );
+    return result.rows[0] || null;
+  }
+
+  async function findLatestPreregistroForPersona({ userInternalId = null, numeroDocumento = null, correoPersonal = null } = {}) {
+    if (!userInternalId && !numeroDocumento && !correoPersonal) return null;
+    const result = await pool.query(
+      `
+      SELECT
+        pp.id,
+        pp.public_id,
+        pp.correo_personal,
+        pp.moneda,
+        pp.tarifa_hora,
+        pp.tarifa_mes,
+        pp.tarifa_medio_tiempo,
+        pp.tarifa_capacitacion,
+        pp.fecha_fin,
+        sr.modulo_id,
+        m.public_id AS modulo_public_id,
+        m.titulo AS modulo_titulo,
+        sr.cliente_id,
+        c.public_id AS cliente_public_id,
+        c.titulo AS cliente_nombre
+      FROM preregistro_personas pp
+      LEFT JOIN solicitudes_rrhh sr ON sr.id = pp.id_solicitud_rrhh
+      LEFT JOIN modulo m ON m.id = sr.modulo_id
+      LEFT JOIN clientes c ON c.id = sr.cliente_id
+      WHERE (
+          ($1::int IS NOT NULL AND pp.id_usuario_creado = $1)
+          OR ($2::text IS NOT NULL AND pp.numero_documento = $2)
+          OR ($3::text IS NOT NULL AND LOWER(COALESCE(pp.correo_personal, '')) = LOWER($3))
+        )
+      ORDER BY pp.updated_at DESC NULLS LAST, pp.created_at DESC
+      LIMIT 1
+      `,
+      [userInternalId || null, numeroDocumento || null, correoPersonal || null]
+    );
+    return result.rows[0] || null;
+  }
+
+  async function buildPersonaExtensionContext({
+    userInternalId = null,
+    numeroDocumento = null,
+    correoPersonal = null,
+    correoEmpresarial = null,
+    baseUserRow = null
+  } = {}) {
+    const baseUser =
+      baseUserRow ||
+      (await findPersonaBaseUser({
+        userInternalId,
+        numeroDocumento,
+        correoEmpresarial
+      }));
+    const resolvedUserId = baseUser?.id || userInternalId || null;
+    const resolvedDocumento = numeroDocumento || baseUser?.cedula || null;
+
+    const [anexoActivo, solicitudActual, preregistroActual] = await Promise.all([
+      findActiveAnexoForPersona({
+        userInternalId: resolvedUserId,
+        numeroDocumento: resolvedDocumento,
+        correoPersonal,
+        correoEmpresarial: correoEmpresarial || baseUser?.email || null
+      }),
+      findLatestSolicitudForPersona({
+        userInternalId: resolvedUserId,
+        numeroDocumento: resolvedDocumento,
+        correoEmpresarial: correoEmpresarial || baseUser?.email || null
+      }),
+      findLatestPreregistroForPersona({
+        userInternalId: resolvedUserId,
+        numeroDocumento: resolvedDocumento,
+        correoPersonal
+      })
+    ]);
+
+    const tipoAsignacion =
+      normalizeAnexoTipo(anexoActivo?.tipo_asignacion) ||
+      normalizeAnexoTipo(toObjectOrEmpty(solicitudActual?.datos_extra)?.tipo_asignacion) ||
+      normalizeAnexoTipo(solicitudActual?.modalidad_contrato);
+    const tarifasAnexo = mapTarifaFieldsByTipo(tipoAsignacion, anexoActivo?.valor_tarifa);
+
+    return {
+      user: baseUser
+        ? {
+            id: baseUser.public_id,
+            internal_id: baseUser.id,
+            nombre: baseUser.nombre_usuario,
+            email: baseUser.email || null,
+            numero_documento: baseUser.cedula || resolvedDocumento || null,
+            telefono: baseUser.telefono || null,
+            moneda: baseUser.moneda_cobro || null,
+            tipo_documento_id: baseUser.tipo_documento_public_id || null,
+            tipo_documento_titulo: baseUser.tipo_documento_titulo || null,
+            tipo_documento_codigo: baseUser.tipo_documento_codigo || null
+          }
+        : null,
+      correo_personal: pickFirst(anexoActivo?.correo_personal, solicitudActual?.correo_personal, preregistroActual?.correo_personal, correoPersonal),
+      correo_empresarial: pickFirst(baseUser?.email, solicitudActual?.correo_empresarial, correoEmpresarial),
+      cliente_id: pickFirst(anexoActivo?.cliente_public_id, solicitudActual?.cliente_public_id, preregistroActual?.cliente_public_id),
+      cliente_nombre: pickFirst(anexoActivo?.cliente_nombre, solicitudActual?.cliente_nombre, preregistroActual?.cliente_nombre),
+      supervisor_id: solicitudActual?.supervisor_public_id || null,
+      supervisor_nombre: solicitudActual?.supervisor_nombre || null,
+      supervisor_email: solicitudActual?.supervisor_email || null,
+      perfil: pickFirst(anexoActivo?.modulo_titulo, solicitudActual?.perfil, preregistroActual?.modulo_titulo),
+      modulo_id: pickFirst(anexoActivo?.modulo_public_id, preregistroActual?.modulo_public_id),
+      modulo_nombre: pickFirst(anexoActivo?.modulo_titulo, preregistroActual?.modulo_titulo, solicitudActual?.perfil),
+      moneda: pickFirst(anexoActivo?.moneda, solicitudActual?.moneda, preregistroActual?.moneda, baseUser?.moneda_cobro),
+      modalidad_contrato: pickFirst(solicitudActual?.modalidad_contrato, anexoTipoToModalidad(tipoAsignacion)),
+      tipo_asignacion: tipoAsignacion,
+      tipo_asignacion_label: anexoTipoLabel(tipoAsignacion),
+      extension_requiere_fechas: extensionTipoRequiereFechas(tipoAsignacion),
+      fecha_inicio_actual: pickFirst(anexoActivo?.fecha_inicio, solicitudActual?.fecha_inicio),
+      fecha_fin_actual: pickFirst(anexoActivo?.fecha_fin, solicitudActual?.fecha_fin, preregistroActual?.fecha_fin),
+      tarifa_hora: pickFirst(tarifasAnexo.tarifa_hora, toNullableNumber(solicitudActual?.tarifa_hora), toNullableNumber(preregistroActual?.tarifa_hora)),
+      tarifa_mes: pickFirst(tarifasAnexo.tarifa_mes, toNullableNumber(solicitudActual?.tarifa_mes), toNullableNumber(preregistroActual?.tarifa_mes)),
+      tarifa_medio_tiempo: pickFirst(
+        tarifasAnexo.tarifa_medio_tiempo,
+        toNullableNumber(solicitudActual?.tarifa_medio_tiempo),
+        toNullableNumber(preregistroActual?.tarifa_medio_tiempo)
+      ),
+      tarifa_capacitacion: pickFirst(
+        tarifasAnexo.tarifa_capacitacion,
+        toNullableNumber(solicitudActual?.tarifa_capacitacion),
+        toNullableNumber(preregistroActual?.tarifa_capacitacion)
+      ),
+      anexo_activo: anexoActivo
+        ? {
+            id: anexoActivo.public_id,
+            tipo_asignacion: anexoActivo.tipo_asignacion,
+            tipo_asignacion_label: anexoTipoLabel(anexoActivo.tipo_asignacion),
+            cliente_id: anexoActivo.cliente_public_id || null,
+            cliente_nombre: anexoActivo.cliente_nombre || null,
+            modulo_id: anexoActivo.modulo_public_id || null,
+            modulo_nombre: anexoActivo.modulo_titulo || null,
+            moneda: anexoActivo.moneda || null,
+            valor_tarifa: anexoActivo.valor_tarifa === null ? null : Number(anexoActivo.valor_tarifa),
+            fecha_inicio: anexoActivo.fecha_inicio || null,
+            fecha_fin: anexoActivo.fecha_fin || null,
+            fecha_fin_calculada: Boolean(anexoActivo.fecha_fin_calculada),
+            estado_firma: anexoActivo.estado_firma || "pendiente"
+          }
+        : null
+    };
+  }
+
+  function buildExtensionExtraContext(currentContext, requestedValues) {
+    const base = currentContext
+      ? {
+          tipo_asignacion: currentContext.tipo_asignacion || null,
+          tipo_asignacion_label: currentContext.tipo_asignacion_label || null,
+          cliente_id: currentContext.cliente_id || null,
+          cliente_nombre: currentContext.cliente_nombre || null,
+          supervisor_id: currentContext.supervisor_id || null,
+          supervisor_nombre: currentContext.supervisor_nombre || null,
+          perfil: currentContext.perfil || null,
+          modulo_id: currentContext.modulo_id || null,
+          modulo_nombre: currentContext.modulo_nombre || null,
+          moneda: currentContext.moneda || null,
+          fecha_inicio: currentContext.fecha_inicio_actual || null,
+          fecha_fin: currentContext.fecha_fin_actual || null,
+          tarifa_hora: currentContext.tarifa_hora ?? null,
+          tarifa_mes: currentContext.tarifa_mes ?? null,
+          tarifa_medio_tiempo: currentContext.tarifa_medio_tiempo ?? null,
+          tarifa_capacitacion: currentContext.tarifa_capacitacion ?? null
+        }
+      : null;
+
+    const changes = [];
+    const requestedFrom = requestedValues?.fecha_extension_desde || null;
+    const requestedTo = requestedValues?.fecha_extension_hasta || null;
+    const baseFrom = currentContext?.fecha_inicio_actual || null;
+    const baseTo = currentContext?.fecha_fin_actual || null;
+    if ((requestedFrom || requestedTo) && (requestedFrom !== baseFrom || requestedTo !== baseTo)) {
+      changes.push(
+        `Extension: ${formatDateForEmail(requestedFrom) || "N/A"} -> ${formatDateForEmail(requestedTo) || "N/A"}`
+      );
+    }
+    if (
+      requestedValues?.cliente_id &&
+      requestedValues.cliente_id !== currentContext?.cliente_id &&
+      requestedValues?.cliente_nombre
+    ) {
+      changes.push(`Cliente: ${currentContext?.cliente_nombre || "Sin cliente"} -> ${requestedValues.cliente_nombre}`);
+    }
+    if (
+      requestedValues?.supervisor_id &&
+      requestedValues.supervisor_id !== currentContext?.supervisor_id &&
+      requestedValues?.supervisor_nombre
+    ) {
+      changes.push(
+        `Responsable: ${currentContext?.supervisor_nombre || "Sin responsable"} -> ${requestedValues.supervisor_nombre}`
+      );
+    }
+    if (requestedValues?.perfil && requestedValues.perfil !== currentContext?.perfil) {
+      changes.push(`Perfil: ${currentContext?.perfil || "Sin perfil"} -> ${requestedValues.perfil}`);
+    }
+    if (requestedValues?.moneda && requestedValues.moneda !== currentContext?.moneda) {
+      changes.push(`Moneda: ${currentContext?.moneda || "N/A"} -> ${requestedValues.moneda}`);
+    }
+
+    const tarifas = [
+      ["Tarifa hora", currentContext?.tarifa_hora, requestedValues?.tarifa_hora, requestedValues?.moneda || currentContext?.moneda],
+      ["Tarifa mes", currentContext?.tarifa_mes, requestedValues?.tarifa_mes, requestedValues?.moneda || currentContext?.moneda],
+      [
+        "Tarifa medio tiempo",
+        currentContext?.tarifa_medio_tiempo,
+        requestedValues?.tarifa_medio_tiempo,
+        requestedValues?.moneda || currentContext?.moneda
+      ],
+      [
+        "Tarifa capacitacion",
+        currentContext?.tarifa_capacitacion,
+        requestedValues?.tarifa_capacitacion,
+        requestedValues?.moneda || currentContext?.moneda
+      ]
+    ];
+    tarifas.forEach(([label, oldValue, newValue, moneda]) => {
+      const next = toNullableNumber(newValue);
+      if (next === null) return;
+      const prev = toNullableNumber(oldValue);
+      if (prev === next) return;
+      changes.push(`${label}: ${formatMoneyInline(prev, moneda) || "N/A"} -> ${formatMoneyInline(next, moneda)}`);
+    });
+
+    return {
+      tipo_asignacion: currentContext?.tipo_asignacion || null,
+      extension_base: base,
+      extension_cambios: changes
+    };
+  }
+
+  function summarizeExtensionBase(base) {
+    if (!base || typeof base !== "object") return null;
+    const parts = [
+      base.tipo_asignacion_label || null,
+      base.cliente_nombre || null,
+      base.perfil || base.modulo_nombre || null,
+      base.moneda || null,
+      formatDateForEmail(base.fecha_inicio),
+      formatDateForEmail(base.fecha_fin)
+    ].filter(Boolean);
+    return parts.join(" | ") || null;
+  }
+
+  function buildExtensionSummaryBlocks(solicitud) {
+    const extra = toObjectOrEmpty(solicitud?.datos_extra);
+    const blocks = [];
+    const emailObjetivo = [solicitud?.correo_personal, solicitud?.correo_empresarial].filter(Boolean).join(" / ");
+    if (emailObjetivo) {
+      blocks.push({ label: "Email persona a modificar", value: emailObjetivo });
+    }
+    if (extra.extension_base) {
+      blocks.push({
+        label: "Contrato actual detectado",
+        value: summarizeExtensionBase(extra.extension_base) || "Sin contexto previo"
+      });
+    }
+    if (Array.isArray(extra.extension_cambios) && extra.extension_cambios.length) {
+      blocks.push({
+        label: "Cambios solicitados",
+        value: extra.extension_cambios.filter(Boolean).join(" | ")
+      });
+    }
+    return blocks;
+  }
+
   function formatRow(row) {
     if (!row) return null;
     return {
@@ -425,6 +934,9 @@ module.exports = function registerContratacionesRoutes(deps) {
       ubicacion: row.ubicacion || null,
       grupo_app_tiempos: row.grupo_app_tiempos || null,
       grupo_distribucion: row.grupo_distribucion || null,
+      vpn_corona: Boolean(row.vpn_corona),
+      necesita_s_user: Boolean(row.necesita_s_user),
+      grupo_usuario_otro: row.grupo_usuario_otro || null,
       moneda: row.moneda || null,
       tarifa_hora: row.tarifa_hora === null ? null : Number(row.tarifa_hora),
       tarifa_mes: row.tarifa_mes === null ? null : Number(row.tarifa_mes),
@@ -593,7 +1105,7 @@ module.exports = function registerContratacionesRoutes(deps) {
   }
 
   function buildMailThExtension(solicitud) {
-    const blocks = baseBlocks(solicitud);
+    const blocks = [...baseBlocks(solicitud), ...buildExtensionSummaryBlocks(solicitud)];
     return {
       subject: "Administrativos: Modificar contrato",
       text:
@@ -775,6 +1287,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         const result = await pool.query(
           `
           SELECT
+            u.id AS internal_id,
             u.public_id AS id,
             u.nombre_usuario,
             u.email AS correo_empresarial,
@@ -798,7 +1311,60 @@ module.exports = function registerContratacionesRoutes(deps) {
           `,
           [`%${search}%`, limit]
         );
-        return res.json(result.rows || []);
+        const enriched = await Promise.all(
+          (result.rows || []).map(async (row) => {
+            const context = await buildPersonaExtensionContext({
+              userInternalId: row.internal_id,
+              numeroDocumento: row.numero_documento || null,
+              correoEmpresarial: row.correo_empresarial || null,
+              baseUserRow: {
+                id: row.internal_id,
+                public_id: row.id,
+                nombre_usuario: row.nombre_usuario,
+                email: row.correo_empresarial,
+                cedula: row.numero_documento,
+                telefono: row.telefono,
+                moneda_cobro: row.moneda,
+                tipo_documento_public_id: row.tipo_documento_id,
+                tipo_documento_titulo: row.tipo_documento,
+                tipo_documento_codigo: row.tipo_documento_codigo
+              }
+            });
+
+            return {
+              id: row.id,
+              nombre_usuario: row.nombre_usuario,
+              correo_empresarial: context?.correo_empresarial || row.correo_empresarial || null,
+              correo_personal: context?.correo_personal || null,
+              numero_documento: row.numero_documento || null,
+              telefono: row.telefono || null,
+              moneda: context?.moneda || row.moneda || null,
+              tipo_documento_id: row.tipo_documento_id || null,
+              tipo_documento: row.tipo_documento || null,
+              tipo_documento_codigo: row.tipo_documento_codigo || null,
+              cliente_id: context?.cliente_id || null,
+              cliente_nombre: context?.cliente_nombre || null,
+              supervisor_id: context?.supervisor_id || null,
+              supervisor_nombre: context?.supervisor_nombre || null,
+              supervisor_email: context?.supervisor_email || null,
+              perfil: context?.perfil || null,
+              modulo_id: context?.modulo_id || null,
+              modulo_nombre: context?.modulo_nombre || null,
+              modalidad_contrato: context?.modalidad_contrato || null,
+              tipo_asignacion: context?.tipo_asignacion || null,
+              tipo_asignacion_label: context?.tipo_asignacion_label || null,
+              extension_requiere_fechas: Boolean(context?.extension_requiere_fechas),
+              fecha_inicio_actual: context?.fecha_inicio_actual || null,
+              fecha_fin_actual: context?.fecha_fin_actual || null,
+              tarifa_hora: context?.tarifa_hora ?? null,
+              tarifa_mes: context?.tarifa_mes ?? null,
+              tarifa_medio_tiempo: context?.tarifa_medio_tiempo ?? null,
+              tarifa_capacitacion: context?.tarifa_capacitacion ?? null,
+              anexo_activo: context?.anexo_activo || null
+            };
+          })
+        );
+        return res.json(enriched);
       } catch (err) {
         console.error(err);
         return res.status(500).json({ error: "Error buscando personas" });
@@ -915,6 +1481,9 @@ module.exports = function registerContratacionesRoutes(deps) {
       const ubicacion = toNullableString(payload.ubicacion);
       const grupoAppTiempos = toNullableString(payload.grupo_app_tiempos);
       const grupoDistribucion = toNullableString(payload.grupo_distribucion);
+      const vpnCorona = payload.vpn_corona === true || payload.vpn_corona === "true" || payload.vpn_corona === 1;
+      const necesitaSUser = payload.necesita_s_user === true || payload.necesita_s_user === "true" || payload.necesita_s_user === 1;
+      const grupoUsuarioOtro = toNullableString(payload.grupo_usuario_otro);
       const necesidadTi = toNullableString(payload.necesidad_ti);
       const observaciones = toNullableString(payload.observaciones);
       const enviarCorreos = payload.enviar_correos !== false;
@@ -922,8 +1491,8 @@ module.exports = function registerContratacionesRoutes(deps) {
       if (!nombre || !apellidos) {
         return res.status(400).json({ error: "nombre y apellidos son obligatorios" });
       }
-      if (enviarCorreos && !necesidadTi) {
-        return res.status(400).json({ error: "necesidad_ti es obligatoria" });
+      if (enviarCorreos && tipoSolicitud === TIPO_RETIRO && !necesidadTi) {
+        return res.status(400).json({ error: "necesidad_ti es obligatoria para retiros" });
       }
       if (enviarCorreos && tipoSolicitud === TIPO_RETIRO && !payload.fecha_retiro) {
         return res.status(400).json({ error: "fecha_retiro es obligatoria para solicitudes de retiro" });
@@ -993,6 +1562,17 @@ module.exports = function registerContratacionesRoutes(deps) {
         const clienteId = refs.cliente_id || null;
         const monedaFinal = moneda || await resolvePersonaMoneda(pool, personaUsuarioId);
 
+        if (tipoSolicitud === TIPO_EXTENSION && !numeroDocumento && !personaUsuarioId) {
+          return res.status(400).json({
+            error: "Para Extension debes seleccionar una persona existente o indicar numero_documento"
+          });
+        }
+        if (tipoSolicitud === TIPO_EXTENSION && !correoPersonal && !correoEmpresarial) {
+          return res.status(400).json({
+            error: "Para Extension se requiere al menos un correo de referencia de la persona a modificar"
+          });
+        }
+
         // Validar que correo_personal no este registrado para otra persona (diferente documento)
         if (tipoSolicitud === TIPO_NUEVO && correoPersonal && numeroDocumento) {
           const dupCheck = await pool.query(
@@ -1040,9 +1620,45 @@ module.exports = function registerContratacionesRoutes(deps) {
             ? payload.datos_extra
             : {};
 
-        if (payload.modulo_id && !datosExtra.modulo_id) datosExtra.modulo_id = payload.modulo_id;
+        if (payload.modulo_id && isUuid(payload.modulo_id) && !datosExtra.modulo_id) datosExtra.modulo_id = payload.modulo_id;
         if (payload.modulo && !datosExtra.modulo) datosExtra.modulo = payload.modulo;
+        if (perfil && !datosExtra.modulo) datosExtra.modulo = perfil;
         if (clienteNombre && !datosExtra.cliente_nombre) datosExtra.cliente_nombre = clienteNombre;
+
+        if (tipoSolicitud === TIPO_EXTENSION) {
+          const [extensionContext, supervisorMeta] = await Promise.all([
+            buildPersonaExtensionContext({
+              userInternalId: personaUsuarioId,
+              numeroDocumento,
+              correoPersonal,
+              correoEmpresarial
+            }),
+            resolveUsuarioMeta(supervisorId)
+          ]);
+          const extensionExtra = buildExtensionExtraContext(extensionContext, {
+            cliente_id: payload.cliente_id || null,
+            cliente_nombre: clienteNombre || extensionContext?.cliente_nombre || null,
+            supervisor_id: supervisorMeta?.public_id || payload.supervisor_id || null,
+            supervisor_nombre: supervisorMeta?.nombre_usuario || extensionContext?.supervisor_nombre || null,
+            perfil,
+            moneda: monedaFinal,
+            fecha_extension_desde: fechaExtensionDesde,
+            fecha_extension_hasta: fechaExtensionHasta,
+            tarifa_hora: payload.tarifa_hora,
+            tarifa_mes: payload.tarifa_mes,
+            tarifa_medio_tiempo: payload.tarifa_medio_tiempo,
+            tarifa_capacitacion: payload.tarifa_capacitacion
+          });
+          if (extensionExtra?.tipo_asignacion && !datosExtra.tipo_asignacion) {
+            datosExtra.tipo_asignacion = extensionExtra.tipo_asignacion;
+          }
+          if (extensionExtra?.extension_base) {
+            datosExtra.extension_base = extensionExtra.extension_base;
+          }
+          if (Array.isArray(extensionExtra?.extension_cambios) && extensionExtra.extension_cambios.length) {
+            datosExtra.extension_cambios = extensionExtra.extension_cambios;
+          }
+        }
 
         const inserted = await pool.query(
           `
@@ -1066,6 +1682,9 @@ module.exports = function registerContratacionesRoutes(deps) {
             ubicacion,
             grupo_app_tiempos,
             grupo_distribucion,
+            vpn_corona,
+            necesita_s_user,
+            grupo_usuario_otro,
             moneda,
             tarifa_hora,
             tarifa_mes,
@@ -1089,7 +1708,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             $1,  $2,  $3,  $4,  $5,  $6,  $7,  $8,  $9,  $10,
             $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
             $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-            $31, $32, $33, $34, false, false, false
+            $31, $32, $33, $34, $35, $36, $37, false, false, false
           )
           RETURNING id
           `,
@@ -1113,6 +1732,9 @@ module.exports = function registerContratacionesRoutes(deps) {
             ubicacion,
             grupoAppTiempos,
             grupoDistribucion,
+            vpnCorona,
+            necesitaSUser,
+            grupoUsuarioOtro,
             monedaFinal,
             toNullableNumber(payload.tarifa_hora),
             toNullableNumber(payload.tarifa_mes),
@@ -1192,6 +1814,16 @@ module.exports = function registerContratacionesRoutes(deps) {
           payload.grupo_app_tiempos !== undefined ? toNullableString(payload.grupo_app_tiempos) : current.grupo_app_tiempos;
         const grupoDistribucion =
           payload.grupo_distribucion !== undefined ? toNullableString(payload.grupo_distribucion) : current.grupo_distribucion;
+        const vpnCorona =
+          payload.vpn_corona !== undefined
+            ? (payload.vpn_corona === true || payload.vpn_corona === "true" || payload.vpn_corona === 1)
+            : Boolean(current.vpn_corona);
+        const necesitaSUser =
+          payload.necesita_s_user !== undefined
+            ? (payload.necesita_s_user === true || payload.necesita_s_user === "true" || payload.necesita_s_user === 1)
+            : Boolean(current.necesita_s_user);
+        const grupoUsuarioOtro =
+          payload.grupo_usuario_otro !== undefined ? toNullableString(payload.grupo_usuario_otro) : current.grupo_usuario_otro;
         const necesidadTi =
           payload.necesidad_ti !== undefined ? toNullableString(payload.necesidad_ti) : current.necesidad_ti;
         const observaciones = payload.observaciones !== undefined ? toNullableString(payload.observaciones) : current.observaciones;
@@ -1199,8 +1831,8 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (!nombre || !apellidos) {
           return res.status(400).json({ error: "nombre y apellidos son obligatorios" });
         }
-        if (!necesidadTi) {
-          return res.status(400).json({ error: "necesidad_ti es obligatoria" });
+        if (tipoSolicitud === TIPO_RETIRO && !necesidadTi) {
+          return res.status(400).json({ error: "necesidad_ti es obligatoria para retiros" });
         }
 
         const monedaInput = payload.moneda !== undefined ? payload.moneda : current.moneda;
@@ -1283,6 +1915,17 @@ module.exports = function registerContratacionesRoutes(deps) {
           moneda = await resolvePersonaMoneda(pool, personaUsuarioId);
         }
 
+        if (tipoSolicitud === TIPO_EXTENSION && !numeroDocumento && !personaUsuarioId) {
+          return res.status(400).json({
+            error: "Para Extension debes seleccionar una persona existente o indicar numero_documento"
+          });
+        }
+        if (tipoSolicitud === TIPO_EXTENSION && !correoPersonal && !correoEmpresarial) {
+          return res.status(400).json({
+            error: "Para Extension se requiere al menos un correo de referencia de la persona a modificar"
+          });
+        }
+
         if (tipoSolicitud === TIPO_NUEVO && !clienteId) {
           return res.status(400).json({ error: "Cliente obligatorio para solicitudes Nuevo" });
         }
@@ -1319,9 +1962,47 @@ module.exports = function registerContratacionesRoutes(deps) {
             ? payload.datos_extra
             : {};
         const datosExtra = { ...existingDatosExtra, ...incomingDatosExtra };
-        if (payload.modulo_id && !datosExtra.modulo_id) datosExtra.modulo_id = payload.modulo_id;
+        if (payload.modulo_id && isUuid(payload.modulo_id) && !datosExtra.modulo_id) datosExtra.modulo_id = payload.modulo_id;
         if (payload.modulo && !datosExtra.modulo) datosExtra.modulo = payload.modulo;
+        if (perfil && !datosExtra.modulo) datosExtra.modulo = perfil;
         if (clienteNombre && !datosExtra.cliente_nombre) datosExtra.cliente_nombre = clienteNombre;
+
+        if (tipoSolicitud === TIPO_EXTENSION) {
+          const [extensionContext, supervisorMeta] = await Promise.all([
+            buildPersonaExtensionContext({
+              userInternalId: personaUsuarioId,
+              numeroDocumento,
+              correoPersonal,
+              correoEmpresarial
+            }),
+            resolveUsuarioMeta(supervisorId)
+          ]);
+          const extensionExtra = buildExtensionExtraContext(extensionContext, {
+            cliente_id: clientePublicId || null,
+            cliente_nombre: clienteNombre || extensionContext?.cliente_nombre || null,
+            supervisor_id: supervisorMeta?.public_id || supervisorPublicId || null,
+            supervisor_nombre: supervisorMeta?.nombre_usuario || extensionContext?.supervisor_nombre || null,
+            perfil,
+            moneda,
+            fecha_extension_desde: fechaExtensionDesde,
+            fecha_extension_hasta: fechaExtensionHasta,
+            tarifa_hora: payload.tarifa_hora !== undefined ? payload.tarifa_hora : current.tarifa_hora,
+            tarifa_mes: payload.tarifa_mes !== undefined ? payload.tarifa_mes : current.tarifa_mes,
+            tarifa_medio_tiempo:
+              payload.tarifa_medio_tiempo !== undefined ? payload.tarifa_medio_tiempo : current.tarifa_medio_tiempo,
+            tarifa_capacitacion:
+              payload.tarifa_capacitacion !== undefined ? payload.tarifa_capacitacion : current.tarifa_capacitacion
+          });
+          if (extensionExtra?.tipo_asignacion && !datosExtra.tipo_asignacion) {
+            datosExtra.tipo_asignacion = extensionExtra.tipo_asignacion;
+          }
+          if (extensionExtra?.extension_base) {
+            datosExtra.extension_base = extensionExtra.extension_base;
+          }
+          if (Array.isArray(extensionExtra?.extension_cambios) && extensionExtra.extension_cambios.length) {
+            datosExtra.extension_cambios = extensionExtra.extension_cambios;
+          }
+        }
 
         await pool.query(
           `
@@ -1342,25 +2023,28 @@ module.exports = function registerContratacionesRoutes(deps) {
             ubicacion = $13,
             grupo_app_tiempos = $14,
             grupo_distribucion = $15,
-            moneda = $16,
-            tarifa_hora = $17,
-            tarifa_mes = $18,
-            tarifa_medio_tiempo = $19,
-            tarifa_capacitacion = $20,
-            modalidad_contrato = $21,
-            fecha_inicio = $22,
-            fecha_fin = $23,
-            fecha_extension_desde = $24,
-            fecha_extension_hasta = $25,
-            fecha_retiro = $26,
-            necesidad_ti = $27,
-            observaciones = $28,
-            datos_extra = $29::jsonb,
-            requiere_confirmacion_cliente = $30,
+            vpn_corona = $16,
+            necesita_s_user = $17,
+            grupo_usuario_otro = $18,
+            moneda = $19,
+            tarifa_hora = $20,
+            tarifa_mes = $21,
+            tarifa_medio_tiempo = $22,
+            tarifa_capacitacion = $23,
+            modalidad_contrato = $24,
+            fecha_inicio = $25,
+            fecha_fin = $26,
+            fecha_extension_desde = $27,
+            fecha_extension_hasta = $28,
+            fecha_retiro = $29,
+            necesidad_ti = $30,
+            observaciones = $31,
+            datos_extra = $32::jsonb,
+            requiere_confirmacion_cliente = $33,
             correo_enviado_mesa = false,
             correo_enviado_th = false,
             correo_confirmacion_coordinador = false
-          WHERE id = $31
+          WHERE id = $34
           `,
           [
             ESTADOS.enProceso,
@@ -1378,6 +2062,9 @@ module.exports = function registerContratacionesRoutes(deps) {
             ubicacion,
             grupoAppTiempos,
             grupoDistribucion,
+            vpnCorona,
+            necesitaSUser,
+            grupoUsuarioOtro,
             moneda,
             toNullableNumber(payload.tarifa_hora !== undefined ? payload.tarifa_hora : current.tarifa_hora),
             toNullableNumber(payload.tarifa_mes !== undefined ? payload.tarifa_mes : current.tarifa_mes),

@@ -1725,6 +1725,237 @@ async function resolveContratoPersonaContext(proceso) {
   };
 }
 
+function addDaysToDateYmd(value, deltaDays) {
+  const ymd = normalizeDateOnlyInput(value);
+  if (!ymd || !Number.isFinite(Number(deltaDays))) return null;
+  const date = new Date(`${ymd}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() + Number(deltaDays));
+  return date.toISOString().slice(0, 10);
+}
+
+async function listActiveAnexoItemsForPersonaContext(personaContext, { lockRows = false } = {}) {
+  const userId = toNullableInteger(personaContext?.usuario_id);
+  const numeroDocumento = toNullableTrimmedString(personaContext?.numeroDocumento);
+  const correoPersonal = toNullableTrimmedString(personaContext?.correoPersonal);
+
+  if (!userId && !numeroDocumento && !correoPersonal) return [];
+
+  const client = lockRows ? await pool.connect() : pool;
+  try {
+    const result = await client.query(
+      `
+      SELECT
+        ati.id,
+        ati.public_id,
+        ati.solicitud_contratacion_id,
+        ati.preregistro_id,
+        ati.usuario_id,
+        ati.nombre_persona,
+        ati.numero_documento,
+        ati.correo_personal,
+        ati.tipo_asignacion,
+        ati.cliente_id,
+        COALESCE(c.titulo, ati.cliente_nombre) AS cliente_nombre,
+        ati.modulo_id,
+        m.titulo AS modulo_titulo,
+        ati.moneda,
+        ati.valor_tarifa,
+        ati.fecha_inicio,
+        ati.fecha_fin,
+        ati.fecha_fin_calculada,
+        ati.origen,
+        ati.estado,
+        ati.estado_firma,
+        ati.created_at,
+        ati.updated_at
+      FROM anexo_tecnico_items ati
+      LEFT JOIN clientes c ON c.id = ati.cliente_id
+      LEFT JOIN modulo m ON m.id = ati.modulo_id
+      WHERE ati.estado = 'activo'
+        AND (
+          ($1::int IS NOT NULL AND ati.usuario_id = $1)
+          OR ($2::text IS NOT NULL AND ati.numero_documento = $2)
+          OR (
+            $3::text IS NOT NULL
+            AND COALESCE(BTRIM(ati.numero_documento), '') = ''
+            AND LOWER(COALESCE(ati.correo_personal, '')) = LOWER($3)
+          )
+        )
+      ORDER BY
+        CASE WHEN ati.usuario_id = $1 THEN 0 ELSE 1 END,
+        ati.fecha_inicio DESC NULLS LAST,
+        ati.updated_at DESC NULLS LAST,
+        ati.created_at DESC
+      ${lockRows ? "FOR UPDATE OF ati" : ""}
+      `,
+      [userId, numeroDocumento, correoPersonal]
+    );
+    return result.rows || [];
+  } finally {
+    if (lockRows) client.release();
+  }
+}
+
+async function syncExtensionAnexoFromContext({ proceso, personaContext, createdBy = null, strict = false }) {
+  if (!proceso || !personaContext) return null;
+
+  const existingItems = await listActiveAnexoItemsForPersonaContext(personaContext);
+  const currentItem = existingItems[0] || null;
+  const tipoBase =
+    normalizeAnexoTipoInput(personaContext?.datos_extra?.tipo_asignacion) ||
+    normalizeAnexoTipoInput(currentItem?.tipo_asignacion) ||
+    inferAnexoTipoFromContext(personaContext);
+  const valorTarifa = inferAnexoTarifaFromContext(personaContext, tipoBase);
+  const fechaInicioTarget =
+    normalizeDateOnlyInput(personaContext?.fecha_extension_desde) ||
+    normalizeDateOnlyInput(personaContext?.fecha_inicio) ||
+    normalizeDateOnlyInput(currentItem?.fecha_inicio) ||
+    normalizeDateOnlyInput(personaContext?.created_at) ||
+    new Date().toISOString().slice(0, 10);
+
+  let fechaFinTarget = null;
+  let fechaFinCalculadaTarget = false;
+  if (tipoBase === "horas" || tipoBase === "capacitacion") {
+    fechaFinTarget = computeYearEndDate(fechaInicioTarget);
+    fechaFinCalculadaTarget = true;
+  } else {
+    fechaFinTarget =
+      normalizeDateOnlyInput(personaContext?.fecha_extension_hasta) ||
+      normalizeDateOnlyInput(personaContext?.fecha_fin) ||
+      normalizeDateOnlyInput(currentItem?.fecha_fin) ||
+      computeYearEndDate(fechaInicioTarget) ||
+      fechaInicioTarget;
+    fechaFinCalculadaTarget = !normalizeDateOnlyInput(personaContext?.fecha_extension_hasta);
+  }
+
+  if (valorTarifa === null || !fechaInicioTarget || !fechaFinTarget) {
+    if (strict) {
+      throw buildAnexoPersistenciaError(
+        personaContext,
+        "La extension no tiene suficientes datos para sincronizar el anexo tecnico."
+      );
+    }
+    return currentItem;
+  }
+
+  const payload = buildAnexoInsertPayload({
+    input: {
+      tipo_asignacion: tipoBase,
+      valor_tarifa: valorTarifa,
+      fecha_inicio: fechaInicioTarget,
+      fecha_fin: fechaFinTarget,
+      fecha_fin_calculada: fechaFinCalculadaTarget,
+      moneda: personaContext?.moneda,
+      modulo_id: personaContext?.modulo_id || currentItem?.modulo_id || null,
+      nombre_persona: personaContext?.nombreCompleto,
+      numero_documento: personaContext?.numeroDocumento,
+      correo_personal: personaContext?.correoPersonal
+    },
+    personaContext,
+    solicitudId: proceso.solicitud_id || null,
+    preregistroId: proceso.preregistro_id || null,
+    clienteId: personaContext?.clienteId || currentItem?.cliente_id || null,
+    clienteNombre: personaContext?.clienteNombre || currentItem?.cliente_nombre || "",
+    creadoPor: createdBy || null,
+    origen: "automatico"
+  });
+
+  if (!currentItem) {
+    const created = await insertAnexoTecnicoItem(payload);
+    return created.row;
+  }
+
+  const sameSource =
+    (proceso?.solicitud_id && Number(currentItem.solicitud_contratacion_id) === Number(proceso.solicitud_id)) ||
+    (proceso?.preregistro_id && Number(currentItem.preregistro_id) === Number(proceso.preregistro_id));
+  const shouldSplitHistory =
+    !sameSource &&
+    payload.fecha_inicio &&
+    currentItem.fecha_inicio &&
+    payload.fecha_inicio > currentItem.fecha_inicio;
+
+  if (shouldSplitHistory) {
+    const cierreAnterior = addDaysToDateYmd(payload.fecha_inicio, -1);
+    const fechaFinAnterior =
+      cierreAnterior && cierreAnterior >= currentItem.fecha_inicio
+        ? cierreAnterior
+        : currentItem.fecha_fin;
+
+    await pool.query(
+      `
+      UPDATE anexo_tecnico_items
+      SET
+        estado = 'finalizado',
+        fecha_fin = COALESCE($2, fecha_fin),
+        fecha_fin_calculada = false,
+        updated_by = $3,
+        updated_at = NOW()
+      WHERE id = $1
+      `,
+      [currentItem.id, fechaFinAnterior, createdBy || null]
+    );
+
+    const inserted = await insertAnexoTecnicoItem({
+      ...payload,
+      estado_firma: currentItem.estado_firma === "firmado" ? "pendiente" : (currentItem.estado_firma || "pendiente"),
+      updated_by: createdBy || null
+    });
+    return inserted.row;
+  }
+
+  const updated = await pool.query(
+    `
+    UPDATE anexo_tecnico_items
+    SET
+      solicitud_contratacion_id = COALESCE($1, solicitud_contratacion_id),
+      preregistro_id = COALESCE($2, preregistro_id),
+      usuario_id = COALESCE($3, usuario_id),
+      nombre_persona = $4,
+      numero_documento = $5,
+      correo_personal = $6,
+      tipo_asignacion = $7,
+      cliente_id = $8,
+      cliente_nombre = $9,
+      modulo_id = $10,
+      moneda = $11,
+      valor_tarifa = $12,
+      fecha_inicio = $13,
+      fecha_fin = $14,
+      fecha_fin_calculada = $15,
+      origen = $16,
+      estado = 'activo',
+      estado_firma = $17,
+      updated_by = $18,
+      updated_at = NOW()
+    WHERE id = $19
+    RETURNING *
+    `,
+    [
+      payload.solicitud_contratacion_id,
+      payload.preregistro_id,
+      payload.usuario_id,
+      payload.nombre_persona,
+      payload.numero_documento,
+      payload.correo_personal,
+      payload.tipo_asignacion,
+      payload.cliente_id,
+      payload.cliente_nombre,
+      payload.modulo_id,
+      payload.moneda,
+      payload.valor_tarifa,
+      payload.fecha_inicio,
+      payload.fecha_fin,
+      payload.fecha_fin_calculada,
+      payload.origen,
+      currentItem.estado_firma === "firmado" ? "pendiente" : (currentItem.estado_firma || "pendiente"),
+      createdBy || null,
+      currentItem.id
+    ]
+  );
+  return updated.rows[0] || currentItem;
+}
+
 function buildAnexoItemForTemplateRow(item) {
   const tipo = normalizeAnexoTipoInput(item?.tipo_asignacion) || "full_time";
   const moneda = normalizeMonedaContrato(item?.moneda) || "COP";
@@ -2168,6 +2399,9 @@ function buildAnexoPersistenciaError(personaContext, detalle = "") {
 
 async function ensureAutomaticAnexoFromContext({ proceso, personaContext, createdBy = null, strict = false }) {
   if (!proceso || !personaContext) return null;
+  if (String(personaContext?.tipo_solicitud || "").trim() === "Extension") {
+    return syncExtensionAnexoFromContext({ proceso, personaContext, createdBy, strict });
+  }
   const tipo = inferAnexoTipoFromContext(personaContext);
   const valorTarifa = inferAnexoTarifaFromContext(personaContext, tipo);
   const fechas = inferAnexoDatesFromContext(personaContext, tipo);
@@ -6313,6 +6547,21 @@ app.get("/modulos", requireAuthenticated, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al obtener módulos" });
+  }
+});
+
+// Monedas disponibles
+app.get("/monedas", requireAuthenticated, async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT unnest(enum_range(NULL::tipo_moneda))::text AS id
+      `
+    );
+    res.json((result.rows || []).map((row) => ({ id: row.id, titulo: row.id })));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener monedas" });
   }
 });
 

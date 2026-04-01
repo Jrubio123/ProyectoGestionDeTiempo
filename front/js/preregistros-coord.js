@@ -2,6 +2,8 @@
 window.preregistrosCoordApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
     const DRAFT_SOURCE_RRHH = "rrhh";
+    const DEFAULT_MONEDAS = ["COP", "USD", "EUR"];
+    const EXTENSION_TIPOS_CON_FECHA = ["full_time", "medio_tiempo", "proyecto"];
 
     const emptyForm = () => ({
         persona_usuario_id: "",
@@ -16,7 +18,17 @@ window.preregistrosCoordApp = function () {
         correo_personal: "",
         correo_empresarial: "",
         telefono: "",
+        // Para Nuevo: pais_ubicacion (campo libre); para otros: ubicacion legacy
+        pais_ubicacion: "",
         ubicacion: "",
+        // Campos técnicos nuevos (Nuevo)
+        vpn_corona: false,
+        necesita_s_user: false,
+        grupo_usuario: "",          // enum: ADMIN/COORDINADOR/CONSULTOR/CONTABILIDAD/COMERCIAL/Otro
+        grupo_usuario_otro: "",     // libre cuando grupo_usuario === "Otro"
+        grupo_distribucion_todos_silver: false,
+        grupo_distribucion_vinculados: false,
+        // Legacy (Extension/Retiro)
         grupo_app_tiempos: "",
         grupo_distribucion: "",
         moneda: "COP",
@@ -40,6 +52,7 @@ window.preregistrosCoordApp = function () {
         modulos: [],
         documentos: [],
         supervisores: [],
+        monedas: [],
 
         filtroEstado: "",
         busqueda: "",
@@ -82,24 +95,40 @@ window.preregistrosCoordApp = function () {
             await Promise.all([this.cargarCatalogos(), this.cargarSolicitudes()]);
         },
 
+        fallbackMonedas() {
+            return DEFAULT_MONEDAS.map((id) => ({ id, titulo: id }));
+        },
+
+        ensureMonedasDisponibles(monedaActual = "") {
+            const current = String(monedaActual || "").trim().toUpperCase();
+            const source = Array.isArray(this.monedas) && this.monedas.length ? [...this.monedas] : this.fallbackMonedas();
+            if (current && !source.some((item) => String(item?.id || "").trim().toUpperCase() === current)) {
+                source.unshift({ id: current, titulo: current });
+            }
+            return source;
+        },
+
         async cargarCatalogos() {
             try {
-                const [clientes, modulos, documentos, supervisores] = await Promise.all([
+                const [clientes, modulos, documentos, supervisores, monedas] = await Promise.all([
                     axios.get(`${API}/clientes`, this.getAuthConfig()),
                     axios.get(`${API}/modulos`, this.getAuthConfig()),
                     axios.get(`${API}/documentos-identidad`, this.getAuthConfig()),
-                    axios.get(`${API}/supervisores`, this.getAuthConfig())
+                    axios.get(`${API}/supervisores`, this.getAuthConfig()),
+                    axios.get(`${API}/monedas`, this.getAuthConfig())
                 ]);
                 this.clientes = Array.isArray(clientes.data) ? clientes.data : [];
                 this.modulos = Array.isArray(modulos.data) ? modulos.data : [];
                 this.documentos = Array.isArray(documentos.data) ? documentos.data : [];
                 this.supervisores = Array.isArray(supervisores.data) ? supervisores.data : [];
+                this.monedas = Array.isArray(monedas.data) && monedas.data.length ? monedas.data : this.fallbackMonedas();
                 this.incluirSolicitanteEnSupervisores();
             } catch (e) {
                 this.clientes = [];
                 this.modulos = [];
                 this.documentos = [];
                 this.supervisores = [];
+                this.monedas = this.fallbackMonedas();
                 this.incluirSolicitanteEnSupervisores();
             }
         },
@@ -139,21 +168,316 @@ window.preregistrosCoordApp = function () {
             this.form.supervisor_id = currentUserId;
         },
 
+        pickFirst(...values) {
+            for (const value of values) {
+                if (value !== undefined && value !== null && value !== "") return value;
+            }
+            return null;
+        },
+
+        normalizarTexto(value) {
+            return String(value || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .trim();
+        },
+
+        normalizarNumero(value) {
+            if (value === undefined || value === null || value === "") return null;
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : null;
+        },
+
+        sonNumerosIguales(a, b) {
+            return this.normalizarNumero(a) === this.normalizarNumero(b);
+        },
+
+        buscarModuloPorId(id) {
+            return (this.modulos || []).find((modulo) => String(modulo?.id || "") === String(id || "")) || null;
+        },
+
+        resolverDatosPerfil({ moduloId = "", perfil = "" } = {}) {
+            const modulo = this.buscarModuloPorId(moduloId);
+            if (modulo) {
+                return {
+                    modulo_id: String(modulo.id),
+                    perfil: String(modulo.titulo || "").trim()
+                };
+            }
+
+            const freeText = String(perfil || "").trim();
+            if (!freeText) {
+                return { modulo_id: "", perfil: "" };
+            }
+
+            const moduloByTitle = (this.modulos || []).find(
+                (item) => this.normalizarTexto(item?.titulo) === this.normalizarTexto(freeText)
+            );
+            if (moduloByTitle) {
+                return {
+                    modulo_id: String(moduloByTitle.id),
+                    perfil: String(moduloByTitle.titulo || "").trim()
+                };
+            }
+
+            return {
+                modulo_id: "otros",
+                perfil: freeText
+            };
+        },
+
+        parseNombreCompleto(value) {
+            const parts = String(value || "")
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean);
+
+            if (!parts.length) return { nombre: "", apellidos: "" };
+            if (parts.length === 1) return { nombre: parts[0], apellidos: "" };
+            if (parts.length === 2) return { nombre: parts[0], apellidos: parts[1] };
+
+            return {
+                nombre: parts.slice(0, 2).join(" "),
+                apellidos: parts.slice(2).join(" ")
+            };
+        },
+
+        formatFecha(value) {
+            if (!value) return "-";
+            const d = new Date(value);
+            if (Number.isNaN(d.getTime())) return String(value);
+            return d.toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" });
+        },
+
+        formatMonto(value, moneda = "COP") {
+            const amount = this.normalizarNumero(value);
+            const currency = String(moneda || "COP").trim().toUpperCase() || "COP";
+            if (amount === null) return "-";
+            try {
+                return new Intl.NumberFormat("es-CO", {
+                    style: "currency",
+                    currency,
+                    maximumFractionDigits: 2
+                }).format(amount);
+            } catch (_) {
+                return `${currency} ${amount}`;
+            }
+        },
+
+        construirBaseExtensionDesdeDatos(source) {
+            if (!source || typeof source !== "object" || Array.isArray(source)) return null;
+            const perfilData = this.resolverDatosPerfil({
+                moduloId: source.modulo_id || "",
+                perfil: source.perfil || source.modulo_nombre || ""
+            });
+            const base = {
+                tipo_asignacion: source.tipo_asignacion || null,
+                tipo_asignacion_label: source.tipo_asignacion_label || null,
+                cliente_id: source.cliente_id || null,
+                cliente_nombre: source.cliente_nombre || null,
+                supervisor_id: source.supervisor_id || null,
+                supervisor_nombre: source.supervisor_nombre || null,
+                perfil: perfilData.perfil || null,
+                modulo_id: perfilData.modulo_id && perfilData.modulo_id !== "otros" ? perfilData.modulo_id : null,
+                modulo_nombre: source.modulo_nombre || perfilData.perfil || null,
+                moneda: source.moneda || null,
+                fecha_inicio: source.fecha_inicio || null,
+                fecha_fin: source.fecha_fin || null,
+                tarifa_hora: source.tarifa_hora ?? null,
+                tarifa_mes: source.tarifa_mes ?? null,
+                tarifa_medio_tiempo: source.tarifa_medio_tiempo ?? null,
+                tarifa_capacitacion: source.tarifa_capacitacion ?? null
+            };
+            const hasData = Object.values(base).some((value) => value !== null && value !== "");
+            return hasData ? base : null;
+        },
+
+        combinarBasesExtension(primary, secondary) {
+            const first = primary || null;
+            const fallback = secondary || null;
+            if (!first && !fallback) return null;
+            return {
+                tipo_asignacion: this.pickFirst(first?.tipo_asignacion, fallback?.tipo_asignacion),
+                tipo_asignacion_label: this.pickFirst(first?.tipo_asignacion_label, fallback?.tipo_asignacion_label),
+                cliente_id: this.pickFirst(first?.cliente_id, fallback?.cliente_id),
+                cliente_nombre: this.pickFirst(first?.cliente_nombre, fallback?.cliente_nombre),
+                supervisor_id: this.pickFirst(first?.supervisor_id, fallback?.supervisor_id),
+                supervisor_nombre: this.pickFirst(first?.supervisor_nombre, fallback?.supervisor_nombre),
+                perfil: this.pickFirst(first?.perfil, fallback?.perfil),
+                modulo_id: this.pickFirst(first?.modulo_id, fallback?.modulo_id),
+                modulo_nombre: this.pickFirst(first?.modulo_nombre, fallback?.modulo_nombre),
+                moneda: this.pickFirst(first?.moneda, fallback?.moneda),
+                fecha_inicio: this.pickFirst(first?.fecha_inicio, fallback?.fecha_inicio),
+                fecha_fin: this.pickFirst(first?.fecha_fin, fallback?.fecha_fin),
+                tarifa_hora: this.pickFirst(first?.tarifa_hora, fallback?.tarifa_hora),
+                tarifa_mes: this.pickFirst(first?.tarifa_mes, fallback?.tarifa_mes),
+                tarifa_medio_tiempo: this.pickFirst(first?.tarifa_medio_tiempo, fallback?.tarifa_medio_tiempo),
+                tarifa_capacitacion: this.pickFirst(first?.tarifa_capacitacion, fallback?.tarifa_capacitacion)
+            };
+        },
+
+        construirBaseExtensionDesdePersona(persona) {
+            if (!persona) return null;
+            const anexo = persona?.anexo_activo || null;
+            const current = this.construirBaseExtensionDesdeDatos({
+                tipo_asignacion: persona?.tipo_asignacion || anexo?.tipo_asignacion || null,
+                tipo_asignacion_label: persona?.tipo_asignacion_label || anexo?.tipo_asignacion_label || null,
+                cliente_id: persona?.cliente_id || anexo?.cliente_id || null,
+                cliente_nombre: persona?.cliente_nombre || anexo?.cliente_nombre || null,
+                supervisor_id: persona?.supervisor_id || null,
+                supervisor_nombre: persona?.supervisor_nombre || null,
+                perfil: persona?.perfil || persona?.modulo_nombre || anexo?.modulo_nombre || null,
+                modulo_id: persona?.modulo_id || anexo?.modulo_id || null,
+                modulo_nombre: persona?.modulo_nombre || anexo?.modulo_nombre || null,
+                moneda: persona?.moneda || anexo?.moneda || null,
+                fecha_inicio: persona?.fecha_inicio_actual || anexo?.fecha_inicio || null,
+                fecha_fin: persona?.fecha_fin_actual || anexo?.fecha_fin || null,
+                tarifa_hora: persona?.tarifa_hora ?? null,
+                tarifa_mes: persona?.tarifa_mes ?? null,
+                tarifa_medio_tiempo: persona?.tarifa_medio_tiempo ?? null,
+                tarifa_capacitacion: persona?.tarifa_capacitacion ?? null
+            });
+            const anexoBase = this.construirBaseExtensionDesdeDatos({
+                tipo_asignacion: anexo?.tipo_asignacion || null,
+                tipo_asignacion_label: anexo?.tipo_asignacion_label || null,
+                cliente_id: anexo?.cliente_id || null,
+                cliente_nombre: anexo?.cliente_nombre || null,
+                perfil: anexo?.modulo_nombre || null,
+                modulo_id: anexo?.modulo_id || null,
+                modulo_nombre: anexo?.modulo_nombre || null,
+                moneda: anexo?.moneda || null,
+                fecha_inicio: anexo?.fecha_inicio || null,
+                fecha_fin: anexo?.fecha_fin || null
+            });
+            return this.combinarBasesExtension(current, anexoBase);
+        },
+
+        construirPersonaDesdeSolicitud(item) {
+            if (!item) return null;
+            const base = this.construirBaseExtensionDesdeDatos(item?.datos_extra?.extension_base);
+            const perfilData = this.resolverDatosPerfil({
+                moduloId: item?.datos_extra?.modulo_id || base?.modulo_id || "",
+                perfil: item?.perfil || base?.perfil || base?.modulo_nombre || ""
+            });
+            const nombreUsuario =
+                String(item?.persona?.nombre || "").trim() ||
+                `${item?.nombre || ""} ${item?.apellidos || ""}`.trim();
+            const tipoAsignacion = item?.datos_extra?.tipo_asignacion || base?.tipo_asignacion || null;
+            const anexoBase = base
+                ? {
+                    id: null,
+                    tipo_asignacion: base.tipo_asignacion || null,
+                    tipo_asignacion_label: base.tipo_asignacion_label || null,
+                    cliente_id: base.cliente_id || null,
+                    cliente_nombre: base.cliente_nombre || null,
+                    modulo_id: base.modulo_id || null,
+                    modulo_nombre: base.modulo_nombre || base.perfil || null,
+                    moneda: base.moneda || null,
+                    valor_tarifa:
+                        this.pickFirst(
+                            base.tarifa_mes,
+                            base.tarifa_medio_tiempo,
+                            base.tarifa_hora,
+                            base.tarifa_capacitacion
+                        ) ?? null,
+                    fecha_inicio: base.fecha_inicio || null,
+                    fecha_fin: base.fecha_fin || null,
+                    fecha_fin_calculada: false,
+                    estado_firma: "pendiente"
+                }
+                : null;
+
+            return {
+                id: item?.persona?.id || "",
+                nombre_usuario: nombreUsuario || null,
+                correo_empresarial: item?.correo_empresarial || item?.persona?.email || null,
+                correo_personal: item?.correo_personal || null,
+                numero_documento: item?.numero_documento || null,
+                telefono: item?.telefono || null,
+                moneda: item?.moneda || base?.moneda || "COP",
+                tipo_documento_id: item?.tipo_documento?.id || "",
+                tipo_documento: item?.tipo_documento?.titulo || null,
+                tipo_documento_codigo: item?.tipo_documento?.codigo || null,
+                cliente_id: item?.cliente?.id || base?.cliente_id || null,
+                cliente_nombre: item?.cliente?.nombre || base?.cliente_nombre || null,
+                supervisor_id: item?.supervisor?.id || base?.supervisor_id || null,
+                supervisor_nombre: item?.supervisor?.nombre || base?.supervisor_nombre || null,
+                supervisor_email: item?.supervisor?.email || null,
+                perfil: perfilData.perfil || item?.perfil || base?.perfil || null,
+                modulo_id: perfilData.modulo_id || "",
+                modulo_nombre: base?.modulo_nombre || perfilData.perfil || item?.perfil || null,
+                modalidad_contrato: item?.modalidad_contrato || null,
+                tipo_asignacion: tipoAsignacion,
+                tipo_asignacion_label: base?.tipo_asignacion_label || null,
+                extension_requiere_fechas: EXTENSION_TIPOS_CON_FECHA.includes(String(tipoAsignacion || "").trim()),
+                fecha_inicio_actual: base?.fecha_inicio || item?.fecha_inicio || null,
+                fecha_fin_actual: base?.fecha_fin || item?.fecha_fin || null,
+                tarifa_hora: base?.tarifa_hora ?? item?.tarifa_hora ?? null,
+                tarifa_mes: base?.tarifa_mes ?? item?.tarifa_mes ?? null,
+                tarifa_medio_tiempo: base?.tarifa_medio_tiempo ?? item?.tarifa_medio_tiempo ?? null,
+                tarifa_capacitacion: base?.tarifa_capacitacion ?? item?.tarifa_capacitacion ?? null,
+                anexo_activo: anexoBase
+            };
+        },
+
+        poblarFormularioDesdePersona(persona) {
+            if (!persona) return;
+            const perfilData = this.resolverDatosPerfil({
+                moduloId: persona.modulo_id || "",
+                perfil: persona.perfil || persona.modulo_nombre || ""
+            });
+            const nombreCompleto = String(persona.nombre_usuario || persona.nombre || "").trim();
+            const nombrePartes = this.parseNombreCompleto(nombreCompleto);
+
+            this.form.persona_usuario_id = persona.id || "";
+            this.form.tipo_documento_id = persona.tipo_documento_id || "";
+            this.form.numero_documento = persona.numero_documento || "";
+            this.form.correo_empresarial = persona.correo_empresarial || "";
+            if (persona.correo_personal) this.form.correo_personal = persona.correo_personal;
+            if (persona.telefono) this.form.telefono = persona.telefono;
+            if (persona.moneda) this.form.moneda = persona.moneda;
+            if (persona.cliente_id) this.form.cliente_id = String(persona.cliente_id);
+            if (persona.supervisor_id) this.form.supervisor_id = String(persona.supervisor_id);
+            if (perfilData.modulo_id) this.form.modulo_id = perfilData.modulo_id;
+            if (perfilData.perfil) this.form.perfil = perfilData.perfil;
+            if (persona.modalidad_contrato) this.form.modalidad_contrato = persona.modalidad_contrato;
+            if (persona.tarifa_hora != null) this.form.tarifa_hora = persona.tarifa_hora;
+            if (persona.tarifa_mes != null) this.form.tarifa_mes = persona.tarifa_mes;
+            if (persona.tarifa_medio_tiempo != null) this.form.tarifa_medio_tiempo = persona.tarifa_medio_tiempo;
+            if (persona.tarifa_capacitacion != null) this.form.tarifa_capacitacion = persona.tarifa_capacitacion;
+
+            if (nombrePartes.nombre) this.form.nombre = nombrePartes.nombre;
+            if (nombrePartes.apellidos) this.form.apellidos = nombrePartes.apellidos;
+        },
+
         mapSolicitudToForm(item) {
+            const perfilData = this.resolverDatosPerfil({
+                moduloId: item?.datos_extra?.modulo_id || "",
+                perfil: item?.perfil || item?.datos_extra?.modulo || ""
+            });
+            const gd = String(item?.grupo_distribucion || "");
             return {
                 persona_usuario_id: item?.persona?.id || "",
                 tipo_documento_id: item?.tipo_documento?.id || "",
                 cliente_id: item?.cliente?.id || "",
                 supervisor_id: item?.supervisor?.id || "",
-                modulo_id: item?.datos_extra?.modulo_id || "",
+                modulo_id: perfilData.modulo_id || "",
                 nombre: item?.nombre || "",
                 apellidos: item?.apellidos || "",
                 numero_documento: item?.numero_documento || "",
-                perfil: item?.perfil || "",
+                perfil: perfilData.perfil || item?.perfil || "",
                 correo_personal: item?.correo_personal || "",
                 correo_empresarial: item?.correo_empresarial || "",
                 telefono: item?.telefono || "",
+                pais_ubicacion: item?.ubicacion || "",
                 ubicacion: item?.ubicacion || "",
+                vpn_corona: Boolean(item?.vpn_corona),
+                necesita_s_user: Boolean(item?.necesita_s_user),
+                grupo_usuario: item?.grupo_app_tiempos || "",
+                grupo_usuario_otro: item?.grupo_usuario_otro || "",
+                grupo_distribucion_todos_silver: gd.includes("Todos Silver"),
+                grupo_distribucion_vinculados: gd.includes("Vinculados"),
                 grupo_app_tiempos: item?.grupo_app_tiempos || "",
                 grupo_distribucion: item?.grupo_distribucion || "",
                 moneda: item?.moneda || "COP",
@@ -188,12 +512,8 @@ window.preregistrosCoordApp = function () {
                     item?.datos_extra && typeof item.datos_extra === "object" && !Array.isArray(item.datos_extra)
                         ? { ...item.datos_extra }
                         : {};
-                if (item?.persona?.id) {
-                    this.personaSeleccionada = { ...item.persona };
-                    this.busquedaPersona = item?.persona?.nombre || "";
-                } else {
-                    this.busquedaPersona = "";
-                }
+                this.personaSeleccionada = this.construirPersonaDesdeSolicitud(item);
+                this.busquedaPersona = this.personaSeleccionada?.nombre_usuario || item?.persona?.nombre || "";
                 return;
             }
 
@@ -202,7 +522,9 @@ window.preregistrosCoordApp = function () {
             this.datosExtraBase = {};
             this.form = emptyForm();
             this.busquedaPersona = "";
-            this.aplicarSupervisorPorDefecto();
+            if (tipo !== "Extension") {
+                this.aplicarSupervisorPorDefecto();
+            }
         },
 
         abrirModalDesdeSolicitud(item) {
@@ -295,46 +617,9 @@ window.preregistrosCoordApp = function () {
 
         seleccionarPersona(persona) {
             if (!persona) return;
-            this.form.persona_usuario_id = persona.id || "";
-            this.form.tipo_documento_id = persona.tipo_documento_id || "";
-            this.form.numero_documento = persona.numero_documento || "";
-            this.form.correo_empresarial = persona.correo_empresarial || "";
-            this.form.correo_personal = persona.correo_personal || this.form.correo_personal;
-            this.form.telefono = persona.telefono || "";
             this.personaSeleccionada = { ...persona };
-
-            // Auto-fill campos de contrato si vienen del preregistro / historial
-            if (persona.cliente_id && !this.form.cliente_id)
-                this.form.cliente_id = String(persona.cliente_id);
-            if (persona.supervisor_id && !this.form.supervisor_id)
-                this.form.supervisor_id = String(persona.supervisor_id);
-            if (persona.perfil && !this.form.perfil)
-                this.form.perfil = persona.perfil;
-            if (persona.moneda)
-                this.form.moneda = persona.moneda;
-            if (persona.tarifa_hora != null)
-                this.form.tarifa_hora = persona.tarifa_hora;
-            if (persona.tarifa_mes != null)
-                this.form.tarifa_mes = persona.tarifa_mes;
-            if (persona.tarifa_medio_tiempo != null)
-                this.form.tarifa_medio_tiempo = persona.tarifa_medio_tiempo;
-            if (persona.tarifa_capacitacion != null)
-                this.form.tarifa_capacitacion = persona.tarifa_capacitacion;
-            if (persona.grupo_app_tiempos && !this.form.grupo_app_tiempos)
-                this.form.grupo_app_tiempos = persona.grupo_app_tiempos;
-            if (persona.modalidad_contrato && !this.form.modalidad_contrato)
-                this.form.modalidad_contrato = persona.modalidad_contrato;
-
-            const nombreCompleto = String(persona.nombre_usuario || "").trim();
-            const partes = nombreCompleto ? nombreCompleto.split(/\s+/) : [];
-            if (!String(this.form.nombre || "").trim() && partes.length) {
-                this.form.nombre = partes.slice(0, 2).join(" ");
-            }
-            if (!String(this.form.apellidos || "").trim() && partes.length > 2) {
-                this.form.apellidos = partes.slice(2).join(" ");
-            }
-
-            this.busquedaPersona = nombreCompleto || this.busquedaPersona;
+            this.poblarFormularioDesdePersona(persona);
+            this.busquedaPersona = String(persona.nombre_usuario || persona.nombre || "").trim() || this.busquedaPersona;
             this.personasEncontradas = [];
             this.mostrarSugerenciasPersona = false;
         },
@@ -347,14 +632,78 @@ window.preregistrosCoordApp = function () {
             this.mostrarSugerenciasPersona = false;
         },
 
+        perfilFormularioActual() {
+            if (this.form.modulo_id && this.form.modulo_id !== "otros") {
+                return this.buscarModuloPorId(this.form.modulo_id)?.titulo || this.form.perfil || "";
+            }
+            return String(this.form.perfil || "").trim();
+        },
+
+        tieneCambioExtensionSolicitado() {
+            if (this.tipoModal !== "Extension") return true;
+
+            const base = this.extensionBaseActual;
+            const perfilActual = this.perfilFormularioActual();
+            const clienteId = String(this.form.cliente_id || "").trim() || null;
+            const supervisorId = String(this.form.supervisor_id || "").trim() || null;
+            const moneda = String(this.form.moneda || "").trim().toUpperCase() || null;
+            const fechaDesde = String(this.form.fecha_extension_desde || "").trim() || null;
+            const fechaHasta = String(this.form.fecha_extension_hasta || "").trim() || null;
+
+            if (!base) {
+                return Boolean(
+                    fechaDesde ||
+                    fechaHasta ||
+                    clienteId ||
+                    supervisorId ||
+                    perfilActual ||
+                    moneda ||
+                    this.normalizarNumero(this.form.tarifa_hora) !== null ||
+                    this.normalizarNumero(this.form.tarifa_mes) !== null ||
+                    this.normalizarNumero(this.form.tarifa_medio_tiempo) !== null ||
+                    this.normalizarNumero(this.form.tarifa_capacitacion) !== null
+                );
+            }
+
+            if ((fechaDesde || fechaHasta) && (fechaDesde !== (base.fecha_inicio || null) || fechaHasta !== (base.fecha_fin || null))) {
+                return true;
+            }
+            if (clienteId && clienteId !== String(base.cliente_id || "")) return true;
+            if (supervisorId && supervisorId !== String(base.supervisor_id || "")) return true;
+            if (perfilActual && this.normalizarTexto(perfilActual) !== this.normalizarTexto(base.perfil || base.modulo_nombre || "")) {
+                return true;
+            }
+            if (moneda && moneda !== String(base.moneda || "").trim().toUpperCase()) return true;
+            if (!this.sonNumerosIguales(this.form.tarifa_hora, base.tarifa_hora)) return true;
+            if (!this.sonNumerosIguales(this.form.tarifa_mes, base.tarifa_mes)) return true;
+            if (!this.sonNumerosIguales(this.form.tarifa_medio_tiempo, base.tarifa_medio_tiempo)) return true;
+            if (!this.sonNumerosIguales(this.form.tarifa_capacitacion, base.tarifa_capacitacion)) return true;
+
+            return false;
+        },
+
         validarFormulario() {
             const errors = [];
             if (!String(this.form.nombre || "").trim()) errors.push("Nombres");
             if (!String(this.form.apellidos || "").trim()) errors.push("Apellidos");
 
             if (this.tipoModal === "Nuevo") {
-                if (!String(this.form.necesidad_ti || "").trim()) errors.push("Que necesitas de TI");
                 if (!String(this.form.cliente_id || "").trim()) errors.push("Cliente");
+                if (!String(this.form.moneda || "").trim()) errors.push("Moneda");
+                if (!String(this.form.fecha_inicio || "").trim()) errors.push("Fecha inicio");
+                const alguna = [
+                    this.form.tarifa_hora,
+                    this.form.tarifa_mes,
+                    this.form.tarifa_medio_tiempo,
+                    this.form.tarifa_capacitacion
+                ].some((t) => t !== "" && t !== null && t !== undefined && Number.isFinite(Number(t)) && Number(t) > 0);
+                if (!alguna) errors.push("Se requiere al menos una tarifa");
+                if (this.form.modulo_id === "otros" && !String(this.form.perfil || "").trim()) {
+                    errors.push("Especifique el perfil");
+                }
+                if (this.form.grupo_usuario === "Otro" && !String(this.form.grupo_usuario_otro || "").trim()) {
+                    errors.push("Especifique el grupo de usuario");
+                }
             }
 
             if (this.tipoModal === "Retiro") {
@@ -366,8 +715,21 @@ window.preregistrosCoordApp = function () {
             }
 
             if (this.tipoModal === "Extension") {
+                if (!String(this.form.numero_documento || "").trim() && !String(this.form.persona_usuario_id || "").trim()) {
+                    errors.push("Busca una persona existente o digita el numero de documento");
+                }
+                if (!String(this.form.correo_personal || "").trim() && !String(this.form.correo_empresarial || "").trim()) {
+                    errors.push("Correo personal o correo empresarial");
+                }
+                if (!String(this.form.moneda || "").trim()) errors.push("Moneda");
+                if (!String(this.form.modulo_id || "").trim() && !String(this.form.perfil || "").trim()) {
+                    errors.push("Perfil / Modulo");
+                }
                 if (this.form.modulo_id === "otros" && !String(this.form.perfil || "").trim()) {
                     errors.push("Especifique el perfil");
+                }
+                if (!this.tieneCambioExtensionSolicitado()) {
+                    errors.push("Indica al menos un cambio en tarifas, fechas, cliente, responsable o perfil");
                 }
             }
 
@@ -376,32 +738,99 @@ window.preregistrosCoordApp = function () {
 
         onModuloChange() {
             const id = this.form.modulo_id;
-            if (!id || id === "otros") {
-                if (id === "otros") this.form.perfil = "";
+            if (!id) return;
+            if (id === "otros") {
+                this.form.perfil = "";
                 return;
             }
-            const modulo = (this.modulos || []).find((m) => String(m.id) === String(id));
+            const modulo = this.buscarModuloPorId(id);
             if (modulo) this.form.perfil = modulo.titulo;
         },
 
         get perfilEsOtro() {
-            return this.tipoModal === "Extension" && this.form.modulo_id === "otros";
+            return (this.tipoModal === "Nuevo" || this.tipoModal === "Extension") && this.form.modulo_id === "otros";
+        },
+
+        get grupoUsuarioEsOtro() {
+            return this.tipoModal === "Nuevo" && this.form.grupo_usuario === "Otro";
+        },
+
+        get monedasDisponibles() {
+            return this.ensureMonedasDisponibles(this.form.moneda);
+        },
+
+        get extensionBaseActual() {
+            return this.combinarBasesExtension(
+                this.construirBaseExtensionDesdePersona(this.personaSeleccionada),
+                this.construirBaseExtensionDesdeDatos(this.datosExtraBase?.extension_base)
+            );
+        },
+
+        get extensionCambiosPrevios() {
+            return Array.isArray(this.datosExtraBase?.extension_cambios)
+                ? this.datosExtraBase.extension_cambios.filter(Boolean)
+                : [];
+        },
+
+        get extensionCorreosObjetivo() {
+            return [this.form.correo_personal, this.form.correo_empresarial]
+                .map((item) => String(item || "").trim())
+                .filter(Boolean);
+        },
+
+        get extensionRequiereFechas() {
+            const tipo = String(
+                this.personaSeleccionada?.tipo_asignacion ||
+                this.extensionBaseActual?.tipo_asignacion ||
+                ""
+            ).trim();
+            return EXTENSION_TIPOS_CON_FECHA.includes(tipo);
+        },
+
+        get extensionHelperFechas() {
+            const tipo = this.personaSeleccionada?.tipo_asignacion_label || this.extensionBaseActual?.tipo_asignacion_label || "este contrato";
+            if (this.extensionRequiereFechas) {
+                return `Para ${tipo}, estas fechas ayudan a sincronizar el anexo tecnico.`;
+            }
+            return "Si solo cambias tarifas, cliente o responsable, puedes dejar estas fechas vacias.";
         },
 
         construirPayload() {
-            const datosExtra = {
-                ...(this.datosExtraBase || {})
-            };
-            if (this.form.modulo_id) {
-                datosExtra.modulo_id = this.form.modulo_id;
-            }
+            const moduloId = this.form.modulo_id && this.form.modulo_id !== "otros" ? this.form.modulo_id : "";
+            const perfil = this.perfilFormularioActual();
+            const moneda = String(this.form.moneda || "").trim().toUpperCase();
+            const datosExtra = { ...(this.datosExtraBase || {}) };
 
-            return {
+            if (moduloId) datosExtra.modulo_id = moduloId;
+            else delete datosExtra.modulo_id;
+
+            const base = {
                 ...this.form,
+                modulo_id: moduloId,
+                perfil,
+                moneda,
                 tipo_solicitud: this.tipoModal,
                 enviar_correos: true,
                 datos_extra: datosExtra
             };
+
+            if (this.tipoModal === "Nuevo") {
+                // Campos técnicos del nuevo modal
+                base.vpn_corona       = Boolean(this.form.vpn_corona);
+                base.necesita_s_user  = Boolean(this.form.necesita_s_user);
+                base.ubicacion        = String(this.form.pais_ubicacion || "").trim() || null;
+                base.grupo_app_tiempos = this.form.grupo_usuario || null;
+                base.grupo_usuario_otro = this.form.grupo_usuario === "Otro"
+                    ? (String(this.form.grupo_usuario_otro || "").trim() || null)
+                    : null;
+                // Grupo distribución: combinar checkboxes en string
+                const gdArr = [];
+                if (this.form.grupo_distribucion_todos_silver) gdArr.push("Todos Silver");
+                if (this.form.grupo_distribucion_vinculados)   gdArr.push("Vinculados");
+                base.grupo_distribucion = gdArr.join(", ") || null;
+            }
+
+            return base;
         },
 
         async guardarSolicitud() {
@@ -444,14 +873,6 @@ window.preregistrosCoordApp = function () {
             }
         },
 
-        normalizarTexto(value) {
-            return String(value || "")
-                .normalize("NFD")
-                .replace(/[\u0300-\u036f]/g, "")
-                .toLowerCase()
-                .trim();
-        },
-
         esPendienteConfirmacionCliente(estado) {
             return this.normalizarTexto(estado) === "pendiente confirmacion cliente";
         },
@@ -488,13 +909,6 @@ window.preregistrosCoordApp = function () {
             if (estado === "Pendiente Comercial") return "bg-orange-100 text-orange-700";
             if (estado === "Pendiente") return "bg-slate-100 text-slate-700";
             return "bg-slate-100 text-slate-600";
-        },
-
-        formatFecha(value) {
-            if (!value) return "-";
-            const d = new Date(value);
-            if (Number.isNaN(d.getTime())) return String(value);
-            return d.toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" });
         },
 
         incluyeBusqueda(item) {

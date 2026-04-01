@@ -114,23 +114,61 @@
                             <button type="button" @click="seleccionarPersona(persona)" class="w-full text-left px-3 py-2 hover:bg-slate-50">
                                 <p class="text-sm font-semibold text-slate-800" x-text="persona.nombre_usuario"></p>
                                 <p class="text-xs text-slate-500" x-text="`${persona.numero_documento || 'Sin doc'} - ${persona.correo_empresarial || 'Sin correo'}`"></p>
+                                <p class="text-[11px] text-slate-400" x-text="[persona.cliente_nombre, persona.perfil || persona.modulo_nombre, persona.tipo_asignacion_label].filter(Boolean).join(' | ') || 'Sin contexto contractual previo'"></p>
                             </button>
                         </template>
                     </div>
                 </div>
-                <div x-show="personaSeleccionada" class="mt-2 flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs" style="display: none;">
-                    <p class="text-emerald-800">
-                        Seleccionado:
-                        <span class="font-semibold" x-text="personaSeleccionada?.nombre_usuario || personaSeleccionada?.nombre || '-'"></span>
-                    </p>
-                    <button type="button" @click="limpiarPersonaSeleccionada" class="text-emerald-700 hover:text-emerald-900">Limpiar</button>
+                <div x-show="personaSeleccionada" class="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-3 text-xs space-y-3" style="display: none;">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="space-y-1">
+                            <p class="text-emerald-900 font-semibold" x-text="personaSeleccionada?.nombre_usuario || personaSeleccionada?.nombre || '-'"></p>
+                            <p class="text-emerald-800" x-text="`Documento: ${personaSeleccionada?.numero_documento || form.numero_documento || 'Sin documento'}`"></p>
+                            <p class="text-emerald-700" x-text="extensionCorreosObjetivo.length ? `Correos de referencia: ${extensionCorreosObjetivo.join(' / ')}` : 'Sin correos detectados aún'"></p>
+                        </div>
+                        <button type="button" @click="limpiarPersonaSeleccionada" class="text-emerald-700 hover:text-emerald-900">Limpiar</button>
+                    </div>
+
+                    <div x-show="tipoModal === 'Extension' && extensionBaseActual" class="grid grid-cols-1 md:grid-cols-3 gap-3" style="display: none;">
+                        <div class="rounded-xl border border-emerald-200 bg-white/70 p-3">
+                            <p class="text-[11px] uppercase tracking-wide text-emerald-700 font-bold">Contrato actual detectado</p>
+                            <p class="text-sm font-semibold text-slate-800 mt-1" x-text="extensionBaseActual?.tipo_asignacion_label || 'Sin tipo detectado'"></p>
+                            <p class="text-xs text-slate-600 mt-1" x-text="`${formatFecha(extensionBaseActual?.fecha_inicio)} -> ${formatFecha(extensionBaseActual?.fecha_fin)}`"></p>
+                        </div>
+                        <div class="rounded-xl border border-emerald-200 bg-white/70 p-3">
+                            <p class="text-[11px] uppercase tracking-wide text-emerald-700 font-bold">Contexto actual</p>
+                            <p class="text-xs text-slate-700 mt-1" x-text="`Cliente: ${extensionBaseActual?.cliente_nombre || 'Sin cliente'}`"></p>
+                            <p class="text-xs text-slate-700 mt-1" x-text="`Responsable: ${extensionBaseActual?.supervisor_nombre || 'Sin responsable'}`"></p>
+                            <p class="text-xs text-slate-700 mt-1" x-text="`Perfil: ${extensionBaseActual?.perfil || extensionBaseActual?.modulo_nombre || 'Sin perfil'}`"></p>
+                            <p class="text-xs text-slate-700 mt-1" x-text="`Moneda: ${extensionBaseActual?.moneda || 'N/A'}`"></p>
+                        </div>
+                        <div class="rounded-xl border border-emerald-200 bg-white/70 p-3">
+                            <p class="text-[11px] uppercase tracking-wide text-emerald-700 font-bold">Tarifas actuales</p>
+                            <p class="text-xs text-slate-700 mt-1" x-text="`Hora: ${formatMonto(extensionBaseActual?.tarifa_hora, extensionBaseActual?.moneda)}`"></p>
+                            <p class="text-xs text-slate-700 mt-1" x-text="`Mes: ${formatMonto(extensionBaseActual?.tarifa_mes, extensionBaseActual?.moneda)}`"></p>
+                            <p class="text-xs text-slate-700 mt-1" x-text="`Medio tiempo: ${formatMonto(extensionBaseActual?.tarifa_medio_tiempo, extensionBaseActual?.moneda)}`"></p>
+                            <p class="text-xs text-slate-700 mt-1" x-text="`Capacitación: ${formatMonto(extensionBaseActual?.tarifa_capacitacion, extensionBaseActual?.moneda)}`"></p>
+                        </div>
+                    </div>
+
+                    <div x-show="tipoModal === 'Extension' && extensionCambiosPrevios.length" class="rounded-xl border border-emerald-200 bg-white/70 p-3" style="display: none;">
+                        <p class="text-[11px] uppercase tracking-wide text-emerald-700 font-bold">Cambios ya cargados</p>
+                        <ul class="list-disc pl-5 mt-2 space-y-1 text-slate-700">
+                            <template x-for="cambio in extensionCambiosPrevios" :key="cambio">
+                                <li x-text="cambio"></li>
+                            </template>
+                        </ul>
+                    </div>
                 </div>
             </div>
 
             <form @submit.prevent="guardarSolicitud" class="space-y-4">
 
                 <!-- ── NUEVO ──────────────────────────────────────────────── -->
-                <div x-show="tipoModal === 'Nuevo'" style="display:none" class="space-y-3">
+                <div x-show="tipoModal === 'Nuevo'" style="display:none" class="space-y-4">
+
+                    <!-- Datos personales -->
+                    <p class="text-xs uppercase tracking-wide text-slate-500 font-bold">Datos personales</p>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <input x-model="form.nombre" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Nombres *">
                         <input x-model="form.apellidos" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Apellidos *">
@@ -140,51 +178,120 @@
                                 <option :value="doc.id" x-text="doc.titulo"></option>
                             </template>
                         </select>
-                        <input x-model="form.numero_documento" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Numero documento">
-                        <input x-model="form.correo_personal" type="email" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Correo personal">
-                        <input x-model="form.correo_empresarial" type="email" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Correo empresarial">
-                        <input x-model="form.telefono" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Telefono">
-                        <input x-model="form.ubicacion" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Ubicacion">
-                        <input x-model="form.perfil" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Perfil">
-                        <select x-model="form.supervisor_id" class="px-3 py-2 rounded-xl border border-slate-200">
-                            <option value="">Supervisor / Coordinador</option>
-                            <template x-for="sup in supervisores" :key="sup.id">
-                                <option :value="sup.id" x-text="sup.nombre"></option>
-                            </template>
-                        </select>
+                        <input x-model="form.numero_documento" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Número documento">
+                        <input x-model="form.telefono" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Teléfono">
+                        <input x-model="form.correo_personal" type="email" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Correo personal *">
+                    </div>
+
+                    <!-- Contrato -->
+                    <p class="text-xs uppercase tracking-wide text-slate-500 font-bold pt-1">Contrato</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <select x-model="form.cliente_id" class="px-3 py-2 rounded-xl border border-slate-200">
                             <option value="">Cliente *</option>
                             <template x-for="cliente in clientes" :key="cliente.id">
                                 <option :value="cliente.id" x-text="cliente.titulo"></option>
                             </template>
                         </select>
-                        <select x-model="form.modulo_id" class="px-3 py-2 rounded-xl border border-slate-200">
-                            <option value="">Modulo</option>
-                            <template x-for="modulo in modulos" :key="modulo.id">
-                                <option :value="modulo.id" x-text="modulo.titulo"></option>
+                        <select x-model="form.supervisor_id" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Responsable / Supervisor</option>
+                            <template x-for="sup in supervisores" :key="sup.id">
+                                <option :value="sup.id" x-text="sup.nombre"></option>
                             </template>
                         </select>
-                        <input x-model="form.grupo_app_tiempos" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Grupo APP tiempos">
-                        <input x-model="form.grupo_distribucion" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Grupo distribucion">
-                        <select x-model="form.moneda" class="px-3 py-2 rounded-xl border border-slate-200">
-                            <option value="">Moneda</option>
-                            <option value="COP">COP</option>
-                            <option value="USD">USD</option>
-                        </select>
-                        <select x-model="form.modalidad_contrato" class="px-3 py-2 rounded-xl border border-slate-200">
-                            <option value="">Modalidad contrato</option>
-                            <option value="Full time">Full time</option>
-                            <option value="Medio tiempo">Medio tiempo</option>
-                            <option value="Por horas">Por horas</option>
-                        </select>
-                        <input x-model="form.tarifa_hora" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa hora">
-                        <input x-model="form.tarifa_mes" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa mes">
-                        <input x-model="form.tarifa_medio_tiempo" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa medio tiempo">
-                        <input x-model="form.tarifa_capacitacion" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa capacitacion">
-                        <input x-model="form.fecha_inicio" type="date" class="px-3 py-2 rounded-xl border border-slate-200">
-                        <input x-model="form.fecha_fin" type="date" class="px-3 py-2 rounded-xl border border-slate-200">
+                        <div>
+                            <label class="block text-xs text-slate-500 mb-1">Fecha inicio *</label>
+                            <input x-model="form.fecha_inicio" type="date" class="w-full px-3 py-2 rounded-xl border border-slate-200">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-500 mb-1">Fecha fin</label>
+                            <input x-model="form.fecha_fin" type="date" class="w-full px-3 py-2 rounded-xl border border-slate-200">
+                        </div>
+                        <!-- Perfil vía módulos -->
+                        <div class="space-y-2">
+                            <select x-model="form.modulo_id" @change="onModuloChange" class="w-full px-3 py-2 rounded-xl border border-slate-200">
+                                <option value="">Perfil / Módulo *</option>
+                                <template x-for="modulo in modulos" :key="modulo.id">
+                                    <option :value="modulo.id" x-text="modulo.titulo"></option>
+                                </template>
+                                <option value="otros">Otros</option>
+                            </select>
+                            <input x-show="perfilEsOtro" x-model="form.perfil" type="text" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Especifica el perfil *" style="display:none">
+                        </div>
+                        <input x-model="form.pais_ubicacion" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="País de ubicación (donde vive)">
                     </div>
-                    <textarea x-model="form.necesidad_ti" rows="3" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Que necesitas de TI? (obligatorio) *"></textarea>
+
+                    <!-- Accesos técnicos -->
+                    <p class="text-xs uppercase tracking-wide text-slate-500 font-bold pt-1">Accesos técnicos</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <!-- VPN Corona -->
+                        <div class="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2">
+                            <span class="text-sm text-slate-700">VPN Corona</span>
+                            <div class="flex gap-2">
+                                <button type="button" @click="form.vpn_corona = true"
+                                    :class="form.vpn_corona ? 'bg-emerald-600 text-white' : 'border border-slate-200 text-slate-600'"
+                                    class="px-3 py-1 rounded-lg text-xs font-semibold transition">Sí</button>
+                                <button type="button" @click="form.vpn_corona = false"
+                                    :class="!form.vpn_corona ? 'bg-slate-600 text-white' : 'border border-slate-200 text-slate-600'"
+                                    class="px-3 py-1 rounded-lg text-xs font-semibold transition">No</button>
+                            </div>
+                        </div>
+                        <!-- Necesita S-User -->
+                        <div class="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2">
+                            <span class="text-sm text-slate-700">Necesita S-User</span>
+                            <div class="flex gap-2">
+                                <button type="button" @click="form.necesita_s_user = true"
+                                    :class="form.necesita_s_user ? 'bg-emerald-600 text-white' : 'border border-slate-200 text-slate-600'"
+                                    class="px-3 py-1 rounded-lg text-xs font-semibold transition">Sí</button>
+                                <button type="button" @click="form.necesita_s_user = false"
+                                    :class="!form.necesita_s_user ? 'bg-slate-600 text-white' : 'border border-slate-200 text-slate-600'"
+                                    class="px-3 py-1 rounded-lg text-xs font-semibold transition">No</button>
+                            </div>
+                        </div>
+                        <!-- Grupo usuario -->
+                        <div class="space-y-2">
+                            <select x-model="form.grupo_usuario" class="w-full px-3 py-2 rounded-xl border border-slate-200">
+                                <option value="">Grupo de usuario</option>
+                                <option value="ADMIN">ADMIN</option>
+                                <option value="COORDINADOR">COORDINADOR</option>
+                                <option value="CONSULTOR">CONSULTOR</option>
+                                <option value="CONTABILIDAD">CONTABILIDAD</option>
+                                <option value="COMERCIAL">COMERCIAL</option>
+                                <option value="Otro">Otro</option>
+                            </select>
+                            <input x-show="grupoUsuarioEsOtro" x-model="form.grupo_usuario_otro" type="text"
+                                class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Especifica el grupo *" style="display:none">
+                        </div>
+                        <!-- Grupo distribución -->
+                        <div class="rounded-xl border border-slate-200 px-3 py-2 space-y-1">
+                            <p class="text-xs text-slate-500 mb-1">Grupo de distribución</p>
+                            <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                                <input type="checkbox" x-model="form.grupo_distribucion_todos_silver" class="rounded">
+                                Todos Silver
+                            </label>
+                            <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                                <input type="checkbox" x-model="form.grupo_distribucion_vinculados" class="rounded">
+                                Vinculados
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Económicos -->
+                    <p class="text-xs uppercase tracking-wide text-slate-500 font-bold pt-1">Económicos</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <select x-model="form.moneda" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Moneda *</option>
+                            <template x-for="moneda in monedasDisponibles" :key="moneda.id">
+                                <option :value="moneda.id" x-text="moneda.titulo"></option>
+                            </template>
+                        </select>
+                        <div></div>
+                        <input x-model="form.tarifa_hora" type="number" step="0.01" min="0" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa hora">
+                        <input x-model="form.tarifa_mes" type="number" step="0.01" min="0" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa mes">
+                        <input x-model="form.tarifa_medio_tiempo" type="number" step="0.01" min="0" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa medio tiempo">
+                        <input x-model="form.tarifa_capacitacion" type="number" step="0.01" min="0" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa capacitación">
+                    </div>
+                    <p class="text-xs text-slate-400 -mt-1">* Se requiere al menos una tarifa</p>
+
                     <textarea x-model="form.observaciones" rows="3" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Observaciones"></textarea>
                 </div>
 
@@ -230,11 +337,15 @@
 
                 <!-- ── EXTENSION / MODIFICACIÓN ──────────────────────────── -->
                 <div x-show="tipoModal === 'Extension'" style="display:none" class="space-y-3">
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div class="rounded-2xl border border-amber-200 bg-amber-50/50 p-4">
+                        <p class="text-xs uppercase tracking-wide text-amber-700 font-bold mb-3">Persona a modificar</p>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <input x-model="form.nombre" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Nombres *">
                         <input x-model="form.apellidos" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Apellidos *">
-                        <input x-model="form.numero_documento" type="text" inputmode="numeric" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Número de documento">
+                        <input x-model="form.numero_documento" type="text" inputmode="numeric" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Número de documento *">
                         <!-- Perfil via módulos; si es Otros habilita campo libre -->
+                        <input x-model="form.correo_personal" type="email" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Correo personal de referencia">
+                        <input x-model="form.correo_empresarial" type="email" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Correo empresarial de referencia">
                         <div class="space-y-2">
                             <select x-model="form.modulo_id" @change="onModuloChange" class="w-full px-3 py-2 rounded-xl border border-slate-200">
                                 <option value="">Perfil / Módulo</option>
@@ -246,20 +357,21 @@
                             <input x-show="perfilEsOtro" x-model="form.perfil" type="text" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Especifique el perfil *" style="display:none">
                         </div>
                         <select x-model="form.moneda" class="px-3 py-2 rounded-xl border border-slate-200">
-                            <option value="">Moneda</option>
-                            <option value="COP">COP</option>
-                            <option value="USD">US$</option>
+                            <option value="">Moneda *</option>
+                            <template x-for="moneda in monedasDisponibles" :key="moneda.id">
+                                <option :value="moneda.id" x-text="moneda.titulo"></option>
+                            </template>
                         </select>
                         <div>
-                            <label class="block text-xs text-slate-500 mb-1">Extensión desde (si aplica)</label>
+                            <label class="block text-xs text-slate-500 mb-1">Fecha de extensión desde</label>
                             <input x-model="form.fecha_extension_desde" type="date" class="w-full px-3 py-2 rounded-xl border border-slate-200">
                         </div>
                         <div>
-                            <label class="block text-xs text-slate-500 mb-1">Extensión hasta (si aplica)</label>
+                            <label class="block text-xs text-slate-500 mb-1">Fecha de extensión hasta</label>
                             <input x-model="form.fecha_extension_hasta" type="date" class="w-full px-3 py-2 rounded-xl border border-slate-200">
                         </div>
                         <select x-model="form.supervisor_id" class="px-3 py-2 rounded-xl border border-slate-200">
-                            <option value="">Responsable / Coordinador (si aplica cambio)</option>
+                            <option value="">Responsable / Supervisor / Coordinador</option>
                             <template x-for="sup in supervisores" :key="sup.id">
                                 <option :value="sup.id" x-text="sup.nombre"></option>
                             </template>
@@ -274,6 +386,8 @@
                                 <option :value="cliente.id" x-text="cliente.titulo"></option>
                             </template>
                         </select>
+                        <p class="text-xs text-slate-500 md:col-span-2" x-text="extensionHelperFechas"></p>
+                    </div>
                     </div>
                     <textarea x-model="form.observaciones" rows="3" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Observaciones"></textarea>
                 </div>
@@ -311,9 +425,32 @@
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Cliente</p><p class="font-semibold" x-text="detalle?.cliente?.nombre || '-' "></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Nombre</p><p class="font-semibold" x-text="`${detalle?.nombre || ''} ${detalle?.apellidos || ''}`.trim() || '-' "></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Documento</p><p class="font-semibold" x-text="detalle?.numero_documento || '-' "></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Correo personal</p><p class="font-semibold" x-text="detalle?.correo_personal || '-' "></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Correo empresarial</p><p class="font-semibold" x-text="detalle?.correo_empresarial || '-' "></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Perfil</p><p class="font-semibold" x-text="detalle?.perfil || '-' "></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Supervisor</p><p class="font-semibold" x-text="detalle?.supervisor?.nombre || '-' "></p></div>
-                <div class="rounded-xl border border-slate-200 p-3 md:col-span-2"><p class="text-xs text-slate-500">Necesidad TI</p><p class="font-semibold" x-text="detalle?.necesidad_ti || '-' "></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Moneda</p><p class="font-semibold" x-text="detalle?.moneda || '-' "></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Modalidad</p><p class="font-semibold" x-text="detalle?.modalidad_contrato || '-' "></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Tarifa hora</p><p class="font-semibold" x-text="formatMonto(detalle?.tarifa_hora, detalle?.moneda)"></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Tarifa mes</p><p class="font-semibold" x-text="formatMonto(detalle?.tarifa_mes, detalle?.moneda)"></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Tarifa medio tiempo</p><p class="font-semibold" x-text="formatMonto(detalle?.tarifa_medio_tiempo, detalle?.moneda)"></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Tarifa capacitación</p><p class="font-semibold" x-text="formatMonto(detalle?.tarifa_capacitacion, detalle?.moneda)"></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Extensión desde</p><p class="font-semibold" x-text="formatFecha(detalle?.fecha_extension_desde)"></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Extensión hasta</p><p class="font-semibold" x-text="formatFecha(detalle?.fecha_extension_hasta)"></p></div>
+                <div x-show="detalle?.tipo_solicitud === 'Nuevo' || detalle?.tipo_solicitud === 'Retiro'" class="rounded-xl border border-slate-200 p-3 md:col-span-2" style="display: none;"><p class="text-xs text-slate-500">Necesidad TI</p><p class="font-semibold" x-text="detalle?.necesidad_ti || '-' "></p></div>
+                <div x-show="detalle?.tipo_solicitud === 'Extension' && detalle?.datos_extra?.extension_base" class="rounded-xl border border-slate-200 p-3 md:col-span-2" style="display: none;">
+                    <p class="text-xs text-slate-500">Contrato actual detectado</p>
+                    <p class="font-semibold text-slate-800" x-text="[detalle?.datos_extra?.extension_base?.tipo_asignacion_label, detalle?.datos_extra?.extension_base?.cliente_nombre, detalle?.datos_extra?.extension_base?.perfil || detalle?.datos_extra?.extension_base?.modulo_nombre].filter(Boolean).join(' | ') || '-' "></p>
+                    <p class="text-xs text-slate-500 mt-1" x-text="`${formatFecha(detalle?.datos_extra?.extension_base?.fecha_inicio)} -> ${formatFecha(detalle?.datos_extra?.extension_base?.fecha_fin)}`"></p>
+                </div>
+                <div x-show="detalle?.tipo_solicitud === 'Extension' && detalle?.datos_extra?.extension_cambios?.length" class="rounded-xl border border-slate-200 p-3 md:col-span-2" style="display: none;">
+                    <p class="text-xs text-slate-500">Cambios solicitados</p>
+                    <ul class="list-disc pl-5 mt-2 space-y-1 text-slate-700">
+                        <template x-for="cambio in (detalle?.datos_extra?.extension_cambios || [])" :key="cambio">
+                            <li x-text="cambio"></li>
+                        </template>
+                    </ul>
+                </div>
                 <div class="rounded-xl border border-slate-200 p-3 md:col-span-2"><p class="text-xs text-slate-500">Observaciones</p><p class="font-semibold" x-text="detalle?.observaciones || '-' "></p></div>
             </div>
 

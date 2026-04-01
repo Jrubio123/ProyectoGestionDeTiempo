@@ -792,7 +792,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     }
   });
 
-  app.patch("/api/preregistros/:public_id/seccion-2", requireAccess({ roles: ["Coordinador"] }), async (req, res) => {
+  app.patch("/api/preregistros/:public_id/seccion-2", requireAccess({ roles: ["Coordinador", "Comercial"] }), async (req, res) => {
     const {
       fecha_fin, moneda, pais_pago,
       tarifa_hora, tarifa_mes, tarifa_medio_tiempo, tarifa_capacitacion,
@@ -827,8 +827,9 @@ module.exports = function registerPreregistroRoutes(deps) {
       const current = await getByPublicId(client, req.params.public_id);
       if (!current) return res.status(404).json({ error: "Preregistro no encontrado" });
       const id = current.id;
-      if (current.estado !== ESTADOS.pendienteCoordinador) {
-        return res.status(422).json({ error: "La seccion 2 solo puede completarse en Pendiente Coordinador" });
+      const estadosPermitidosSeccion2 = [ESTADOS.pendienteCoordinador, ESTADOS.pendienteComercial];
+      if (!estadosPermitidosSeccion2.includes(current.estado)) {
+        return res.status(422).json({ error: "La seccion 2 solo puede completarse en Pendiente Coordinador o Pendiente Comercial" });
       }
       if (String(current.solicitud_coordinador_id) !== String(req.user?.id || "")) {
         return res.status(403).json({ error: "No eres el coordinador dueno de esta solicitud" });

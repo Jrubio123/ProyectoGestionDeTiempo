@@ -84,6 +84,7 @@ window.auth = (function () {
         if (rol === "coordinador") return "coordinador";
         if (rol === "reclutador") return "reclutador";
         if (rol === "contabilidad") return "contabilidad";
+        if (rol === "comercial") return "comercial";
         if (rol === "talento humano" || rol === "talento_humano") return "talento_humano";
         if (rol === "consultor") {
             // Si es consultor, podemos diferenciar por tipo_consultor si existe

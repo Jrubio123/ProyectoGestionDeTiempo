@@ -15,6 +15,7 @@ module.exports = function registerContratacionesRoutes(deps) {
   const ESTADOS = Object.freeze({
     pendiente: "Pendiente",
     pendienteCoordinador: "Pendiente Coordinador",
+    pendienteComercial: "Pendiente Comercial",
     enProceso: "En Proceso",
     pendienteConfirmacionCliente: "Pendiente Confirmación Cliente",
     pendienteRevisionTh: "Pendiente Revision TH",
@@ -243,6 +244,7 @@ module.exports = function registerContratacionesRoutes(deps) {
     const raw = String(estado || "").trim();
     if (!raw) return null;
     if (raw === ESTADOS.pendiente || raw === ESTADOS.pendienteCoordinador) return ESTADOS.pendienteCoordinador;
+    if (raw === ESTADOS.pendienteComercial) return ESTADOS.pendienteComercial;
     if (raw === ESTADOS.pendienteRevisionTh) return ESTADOS.pendienteRevisionTh;
     if (raw === ESTADOS.pendienteCorreoSilver) return ESTADOS.pendienteCorreoSilver;
     if (raw === ESTADOS.completado) return ESTADOS.completado;
@@ -763,7 +765,7 @@ module.exports = function registerContratacionesRoutes(deps) {
 
   app.get(
     "/contrataciones/personas",
-    requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }),
+    requireAccess({ roles: ["Administrador", "Coordinador", "Comercial", "Talento Humano"] }),
     async (req, res) => {
       try {
         const search = String(req.query?.search || "").trim();
@@ -806,7 +808,7 @@ module.exports = function registerContratacionesRoutes(deps) {
 
   app.get(
     "/contrataciones/solicitudes",
-    requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }),
+    requireAccess({ roles: ["Administrador", "Coordinador", "Comercial", "Talento Humano"] }),
     async (req, res) => {
       try {
         const role = normalizeValue(req.user?.rol);
@@ -874,7 +876,7 @@ module.exports = function registerContratacionesRoutes(deps) {
 
   app.get(
     "/contrataciones/solicitudes/:id",
-    requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }),
+    requireAccess({ roles: ["Administrador", "Coordinador", "Comercial", "Talento Humano"] }),
     async (req, res) => {
       try {
         const row = await getByPublicId(pool, req.params.id);
@@ -895,7 +897,7 @@ module.exports = function registerContratacionesRoutes(deps) {
 
   app.post(
     "/contrataciones/solicitudes",
-    requireAccess({ roles: ["Administrador", "Coordinador"] }),
+    requireAccess({ roles: ["Administrador", "Coordinador", "Comercial"] }),
     async (req, res) => {
       const payload = req.body || {};
       const tipoSolicitud = normalizeTipoSolicitud(payload.tipo_solicitud);
@@ -1154,7 +1156,7 @@ module.exports = function registerContratacionesRoutes(deps) {
 
   app.post(
     "/contrataciones/solicitudes/:id/completar",
-    requireAccess({ roles: ["Administrador", "Coordinador"] }),
+    requireAccess({ roles: ["Administrador", "Coordinador", "Comercial"] }),
     async (req, res) => {
       const payload = req.body || {};
       try {
@@ -1638,7 +1640,7 @@ module.exports = function registerContratacionesRoutes(deps) {
 
   app.post(
     "/contrataciones/solicitudes/:id/enviar-th",
-    requireAccess({ roles: ["Administrador", "Coordinador"] }),
+    requireAccess({ roles: ["Administrador", "Coordinador", "Comercial"] }),
     async (req, res) => {
       try {
         const row = await getByPublicId(pool, req.params.id);

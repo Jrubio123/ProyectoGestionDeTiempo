@@ -105,6 +105,7 @@ function initSidebar() {
             "asignacion-fabrica-mesa-servicio"
         ],
         reclutador: ["inicio", "solicitudesRecl"],
+        comercial: ["inicio", "solicitudesCoord", "preregistrosCoord"],
         talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin"]
     };
 

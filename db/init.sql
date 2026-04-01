@@ -719,7 +719,7 @@ CREATE TABLE solicitudes_rrhh (
         CHECK (prioridad IN ('Alta', 'Media', 'Baja')),
         
     estado VARCHAR(50) DEFAULT 'Pendiente' NOT NULL
-        CHECK (estado IN ('Pendiente', 'Reclutamiento', 'Entrevistas', 'Contratado', 'Cancelado')),
+        CHECK (estado IN ('Pendiente', 'Reclutamiento', 'Entrevistas', 'Contratado', 'Suspendido', 'Cerrado')),
     
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()

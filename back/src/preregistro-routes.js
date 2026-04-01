@@ -14,6 +14,7 @@ module.exports = function registerPreregistroRoutes(deps) {
 
   const ESTADOS = Object.freeze({
     pendienteCoordinador: "Pendiente Coordinador",
+    pendienteComercial: "Pendiente Comercial",
     pendienteRevisionTh: "Pendiente Revision TH",
     pendienteCorreoSilver: "Pendiente Correo Silver",
     completado: "Completado",
@@ -24,6 +25,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     const raw = String(estado || "").trim();
     if (!raw) return null;
     if (raw === ESTADOS.pendienteCoordinador) return ESTADOS.pendienteCoordinador;
+    if (raw === ESTADOS.pendienteComercial) return ESTADOS.pendienteComercial;
     if (raw === ESTADOS.pendienteRevisionTh) return ESTADOS.pendienteRevisionTh;
     if (raw === ESTADOS.pendienteCorreoSilver) return ESTADOS.pendienteCorreoSilver;
     if (raw === ESTADOS.completado) return ESTADOS.completado;
@@ -473,7 +475,7 @@ module.exports = function registerPreregistroRoutes(deps) {
         return res.status(404).json({ error: "Solicitud no encontrada" });
       }
       const solicitudId = solicitud.id;
-      if (!["Entrevistas", "Reclutamiento"].includes(String(solicitud.estado || ""))) {
+      if (!["Entrevistas", "Entrevista", "Reclutamiento"].includes(String(solicitud.estado || ""))) {
         await client.query("ROLLBACK");
         return res.status(422).json({ error: "La solicitud debe estar en Entrevistas o Reclutamiento para contratar" });
       }
@@ -509,7 +511,7 @@ module.exports = function registerPreregistroRoutes(deps) {
           monedaNorm,
           tarifaMesParsed.value,
           tarifaHoraParsed.value,
-          ESTADOS.pendienteCoordinador,
+          ESTADOS.pendienteComercial,
           req.user?.id
         ]
       );
@@ -590,7 +592,7 @@ module.exports = function registerPreregistroRoutes(deps) {
               )
               VALUES (
                 'Nuevo',
-                'Pendiente Coordinador',
+                'Pendiente Comercial',
                 $1,
                 $2,
                 $3,
@@ -1221,7 +1223,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     }
   });
 
-  app.get("/api/preregistros", requireAccess({ roles: ["Reclutador", "Coordinador", "Talento Humano", "Administrador"] }), async (req, res) => {
+  app.get("/api/preregistros", requireAccess({ roles: ["Reclutador", "Coordinador", "Comercial", "Talento Humano", "Administrador"] }), async (req, res) => {
     const page = Math.max(Number(req.query?.page || 1), 1);
     const limit = Math.min(Math.max(Number(req.query?.limit || 20), 1), 100);
     try {
@@ -1290,7 +1292,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     }
   });
 
-  app.get("/api/preregistros/:public_id", requireAccess({ roles: ["Reclutador", "Coordinador", "Talento Humano", "Administrador"] }), async (req, res) => {
+  app.get("/api/preregistros/:public_id", requireAccess({ roles: ["Reclutador", "Coordinador", "Comercial", "Talento Humano", "Administrador"] }), async (req, res) => {
     try {
       const row = await getByPublicId(pool, req.params.public_id);
       if (!row) return res.status(404).json({ error: "Preregistro no encontrado" });

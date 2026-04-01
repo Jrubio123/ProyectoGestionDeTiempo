@@ -146,6 +146,7 @@ function router() {
             "asignacion-fabrica-mesa-servicio"
         ],
         reclutador: ["inicio", "solicitudesRecl"],
+        comercial: ["inicio", "solicitudesCoord", "preregistrosCoord"],
         talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin"]
     };
     const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);

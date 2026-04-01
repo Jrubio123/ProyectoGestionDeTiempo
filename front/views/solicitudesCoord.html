@@ -49,8 +49,8 @@
                                 <span class="px-3 py-1 rounded-full text-xs font-semibold"
                                     :class="{
                                         'bg-orange-100 text-orange-600': s.estado === 'Pendiente',
-                                        'bg-green-100 text-green-600': ['Reclutamiento','Entrevistas','Contratado'].includes(s.estado),
-                                        'bg-slate-100 text-slate-500': s.estado === 'Cancelado'
+                                        'bg-green-100 text-green-600': ['Reclutamiento','Entrevista','Entrevistas','Contratado'].includes(s.estado),
+                                        'bg-slate-100 text-slate-500': ['Suspendido','Cerrado','Cancelado'].includes(s.estado)
                                     }"
                                     x-text="s.estado">
                                 </span>

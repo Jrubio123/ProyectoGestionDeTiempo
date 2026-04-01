@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -v \"const\\\\|function\\\\|//\")",
+      "Read(//c/Users/JuanPabloRubioMejía/Downloads/ProyectoGestionDeTiempo/**)"
+    ]
+  }
+}

@@ -103,9 +103,19 @@ window.solicitudesReclApp = function () {
             });
         },
 
+        normalizarEstadoRrhh(estado) {
+            const raw = String(estado || "").trim();
+            if (raw === "Entrevista") return "Entrevistas";
+            if (raw === "Cancelado") return "Cerrado";
+            return raw;
+        },
+
         get solicitudesFiltradas() {
             if (this.filtro === "Todos") return this.solicitudes;
-            return this.solicitudes.filter((s) => s.estado === this.filtro || s.preregistro_estado === this.filtro);
+            const filtroNorm = this.normalizarEstadoRrhh(this.filtro);
+            return this.solicitudes.filter((s) =>
+                this.normalizarEstadoRrhh(s.estado) === filtroNorm || s.preregistro_estado === filtroNorm
+            );
         },
 
         esSolicitudBloqueada(s) {

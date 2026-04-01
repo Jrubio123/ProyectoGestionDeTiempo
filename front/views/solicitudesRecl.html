@@ -20,8 +20,8 @@
                 <div class="rrhh-glass-card p-4 relative cursor-pointer border-l-4" @click="abrirDetalle(s)"
                     :class="{
                         'border-[#ff6000]': s.estado === 'Pendiente',
-                        'border-[#189fa9]': s.estado === 'Reclutamiento' || s.estado === 'Entrevistas' || s.estado === 'Contratado',
-                        'border-[#5a189a]': s.estado === 'Cancelado'
+                        'border-[#189fa9]': s.estado === 'Reclutamiento' || s.estado === 'Entrevista' || s.estado === 'Entrevistas' || s.estado === 'Contratado',
+                        'border-[#5a189a]': s.estado === 'Suspendido' || s.estado === 'Cerrado' || s.estado === 'Cancelado'
                     }">
                     <div class="flex justify-between items-start mb-2 gap-2">
                         <h3 class="font-bold text-[#20272f]" x-text="s.perfil"></h3>
@@ -39,9 +39,9 @@
                     <span class="rrhh-badge mb-3"
                         :class="{
                             'rrhh-badge-attention': s.estado === 'Pendiente',
-                            'rrhh-badge-progress': s.estado === 'Reclutamiento' || s.estado === 'Entrevistas' || s.estado === 'Contratado',
-                            'rrhh-badge-neutral': s.estado === 'Cancelado',
-                            'rrhh-badge-structure': !['Pendiente','Reclutamiento','Entrevistas','Contratado','Cancelado'].includes(s.estado)
+                            'rrhh-badge-progress': s.estado === 'Reclutamiento' || s.estado === 'Entrevista' || s.estado === 'Entrevistas' || s.estado === 'Contratado',
+                            'rrhh-badge-neutral': s.estado === 'Suspendido' || s.estado === 'Cerrado' || s.estado === 'Cancelado',
+                            'rrhh-badge-structure': !['Pendiente','Reclutamiento','Entrevista','Entrevistas','Contratado','Suspendido','Cerrado','Cancelado'].includes(s.estado)
                         }"
                         x-text="s.estado"></span>
 
@@ -56,7 +56,8 @@
                             <option value="Reclutamiento" :selected="s.estado == 'Reclutamiento'">Reclutamiento</option>
                             <option value="Entrevistas" :selected="s.estado == 'Entrevistas'">Entrevistas</option>
                             <option value="Contratado" :selected="s.estado == 'Contratado'">Contratado</option>
-                            <option value="Cancelado" :selected="s.estado == 'Cancelado'">Cancelado</option>
+                            <option value="Suspendido" :selected="s.estado == 'Suspendido'">Suspendido</option>
+                            <option value="Cerrado" :selected="s.estado == 'Cerrado'">Cerrado</option>
                         </select>
                     </div>
 

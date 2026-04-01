@@ -968,7 +968,7 @@ async function notifyCuentaCobroFirmadaToProveedores({
 }
 
 function isRrhhEstadoNotificable(estado) {
-  return ["Reclutamiento", "Entrevistas", "Contratado", "Cancelado"].includes(String(estado || "").trim());
+  return ["Reclutamiento", "Entrevista", "Entrevistas", "Contratado", "Cerrado", "Cancelado"].includes(String(estado || "").trim());
 }
 
 function buildRrhhEstadoEmailContent({
@@ -1012,7 +1012,7 @@ function buildRrhhEstadoEmailContent({
     };
   }
 
-  if (estado === "Entrevistas") {
+  if (estado === "Entrevista" || estado === "Entrevistas") {
     return {
       subject: `🤝 Actualización: Iniciamos fase de entrevistas para ${base.perfil}`,
       text:
@@ -1057,22 +1057,22 @@ function buildRrhhEstadoEmailContent({
     };
   }
 
-  if (estado === "Cancelado") {
+  if (estado === "Cerrado" || estado === "Cancelado") {
     return {
-      subject: `🚫 Notificación: Solicitud Cancelada - ${base.perfil}`,
+      subject: `🚫 Notificación: Solicitud Cerrada - ${base.perfil}`,
       text:
         `Hola ${base.toName},\n\n` +
-        `Se ha registrado la cancelación de la solicitud para ${base.perfil}.\n` +
+        `Se ha registrado el cierre de la solicitud para ${base.perfil}.\n` +
         `Motivo/Nota: ${base.nota}\n\n` +
         `Por favor, revisa los detalles y comienza el proceso correspondiente.\n\n` +
         `Ver solicitud en el sistema: ${base.url}\n`,
       html: buildEmailLayout({
-        title: "Solicitud cancelada",
-        intro: `Hola <strong>${base.toName}</strong>, se registró la cancelación de la solicitud.`,
+        title: "Solicitud cerrada",
+        intro: `Hola <strong>${base.toName}</strong>, se registró el cierre de la solicitud.`,
         blocks: [
           { label: "Perfil", value: base.perfil },
           { label: "Cliente", value: base.cliente },
-          { label: "Estado", value: "Cancelado" },
+          { label: "Estado", value: "Cerrado" },
           { label: "Motivo/Nota", value: base.nota }
         ],
         ctaLabel: "Ver solicitud en el sistema",
@@ -5984,7 +5984,7 @@ const requireAuthenticated = (req, res, next) => {
 =============================== */
 
 // 1. OBTENER TODOS
-app.get("/clientes", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
+app.get("/clientes", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial", "Talento Humano"] }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -8554,7 +8554,7 @@ app.get("/documentos-identidad", requireAuthenticated, async (req, res) => {
 });
 
 // Supervisores/Coordinadores disponibles para flujos de contratación
-app.get("/supervisores", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
+app.get("/supervisores", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial", "Talento Humano"] }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -8583,7 +8583,7 @@ app.get("/supervisores", requireAccess({ roles: ["Administrador", "Coordinador",
 =============================== */
 
 // Listar solicitudes (coordinador ve las suyas, reclutador ve todas)
-app.get("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Reclutador", "Administrador"] }), async (req, res) => {
+app.get("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Reclutador", "Comercial", "Administrador"] }), async (req, res) => {
   try {
     const role = normalizeValue(req.user?.rol);
     const params = [];

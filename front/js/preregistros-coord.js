@@ -468,10 +468,14 @@ window.preregistrosCoordApp = function () {
 
         puedeContinuar(item) {
             const estado = this.normalizarTexto(item?.estado);
+            const roleKey = window.auth?.getRoleKey?.() || "other";
+            const estadosContinuable = roleKey === "comercial"
+                ? ["pendiente", "pendiente comercial"]
+                : ["pendiente", "pendiente coordinador"];
             return (
                 !!item &&
                 item.tipo_solicitud === "Nuevo" &&
-                (estado === "pendiente" || estado === "pendiente coordinador") &&
+                estadosContinuable.includes(estado) &&
                 String(item?.datos_extra?.origen || "").toLowerCase() === DRAFT_SOURCE_RRHH
             );
         },
@@ -481,6 +485,7 @@ window.preregistrosCoordApp = function () {
             if (this.esPendienteConfirmacionCliente(estado)) return "bg-amber-100 text-amber-700";
             if (estado === "En Proceso") return "bg-blue-100 text-blue-700";
             if (estado === "Pendiente Coordinador") return "bg-slate-100 text-slate-700";
+            if (estado === "Pendiente Comercial") return "bg-orange-100 text-orange-700";
             if (estado === "Pendiente") return "bg-slate-100 text-slate-700";
             return "bg-slate-100 text-slate-600";
         },

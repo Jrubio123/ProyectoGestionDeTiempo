@@ -14481,6 +14481,7 @@ app.get("/aprobaciones/pendientes", requireAccess({ roles: ["Coordinador"] }), a
         rh.created_at AS fecha_reporte,
         rh.nro_caso_int_ext,
         rh.tipo_servicio,
+        rh.observacion_mesa_fabrica AS observacion_ticket,
         rh.requerimiento,
         rh.perfil_fabrica,
         rh.wricef,

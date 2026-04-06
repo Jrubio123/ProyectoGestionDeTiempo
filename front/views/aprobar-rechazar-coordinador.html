@@ -196,12 +196,11 @@
                     <p class="font-semibold text-gray-800 break-words" x-text="referenciaTicket(modalDetalle.reporte) || '-'"></p>
                 </div>
                 <div class="rounded-xl border border-gray-200 p-3 bg-gray-50 md:col-span-2">
-                    <p class="text-xs uppercase text-gray-400 font-bold">Asignacion</p>
-                    <p class="font-semibold text-gray-800" x-text="modalDetalle.reporte?.tipo_servicio || '-'"></p>
-                    <p class="text-xs text-gray-500 mt-1">
-                        <span x-text="`Periodo: ${periodoAsignacion(modalDetalle.reporte)}`"></span>
-                    </p>
-                    <p class="text-xs text-gray-500 mt-1 break-words" x-text="modalDetalle.reporte?.asignacion_observacion || '-'"></p>
+                    <p class="text-xs uppercase text-gray-400 font-bold">Observaciones</p>
+                    <p
+                        class="font-semibold text-gray-800 break-words whitespace-pre-wrap"
+                        x-text="modalDetalle.reporte?.observacion_ticket || modalDetalle.reporte?.asignacion_observacion || '-'"
+                    ></p>
                 </div>
             </div>
         </div>

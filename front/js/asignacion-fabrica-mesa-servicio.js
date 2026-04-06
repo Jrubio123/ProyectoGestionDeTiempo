@@ -1,4 +1,6 @@
 // js/asignacion-fabrica-mesa-servicio.js
+const MAX_TICKETS_POR_ASIGNACION = 200;
+
 window.mesaFabricaApp = function () {
     return {
         API: window.API_BASE || "http://localhost:4000",
@@ -287,7 +289,7 @@ window.mesaFabricaApp = function () {
         },
 
         canCreateSolicitud(item) {
-            return this.isAsignacionOperable(item) && this.countTicketsByAsignacion(item) < 10;
+            return this.isAsignacionOperable(item) && this.countTicketsByAsignacion(item) < MAX_TICKETS_POR_ASIGNACION;
         },
 
         countTicketsByAsignacion(item) {

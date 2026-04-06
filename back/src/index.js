@@ -1,4 +1,4 @@
-const path = require("path");
+﻿const path = require("path");
 const crypto = require("crypto");
 const fs = require("fs");
 const envFile =
@@ -1428,7 +1428,7 @@ async function ensureTokenDocsFirmaPlan(tokenRow) {
 }
 
 
-const MAX_TICKETS_POR_ASIGNACION = 10;
+const MAX_TICKETS_POR_ASIGNACION = 200;
 
 function toNullableNumber(value) {
   if (value === undefined || value === null || value === "") return null;
@@ -6128,7 +6128,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
     .text(
-      "Documento generado electrónicamente ? Silver Consulting S.A.S.  ?  NIT 901.149.190-0  ?  Medellín, Colombia",
+      "Documento generado electrónicamente - Silver Consulting S.A.S.  -  NIT 901.149.190-0  -  Medellín, Colombia",
       ML, curY, { width: PW, align: "center", lineBreak: false }
     );
 
@@ -13980,13 +13980,35 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
       const resolvedPdf = artifacts?.signedPdf || null;
 
       if (!resolvedPdf || !isPdfBuffer(resolvedPdf.buffer)) {
-        console.warn("Webhook contrato: no se pudo resolver PDF firmado", { requestId, contractId });
+        console.warn("Webhook contrato: PDF no disponible aún, reintentando en 30s", { requestId, contractId });
+        setTimeout(async () => {
+          try {
+            const r = await pool.query(
+              `SELECT id, nombre_persona, correo_personal, docs_firma FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
+              [proceso.id]
+            );
+            if (r.rows[0]) await reconcileContratoDocsForProcess(r.rows[0], { docIndex, reason: "webhook_retry" });
+          } catch (retryErr) {
+            console.error("Error en reconcile diferido de contrato:", retryErr?.message || retryErr);
+          }
+        }, 30000);
         return;
       }
       try {
         oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName);
       } catch (upErr) {
         console.error("Error subiendo contrato firmado a OneDrive:", upErr.message);
+        setTimeout(async () => {
+          try {
+            const r = await pool.query(
+              `SELECT id, nombre_persona, correo_personal, docs_firma FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
+              [proceso.id]
+            );
+            if (r.rows[0]) await reconcileContratoDocsForProcess(r.rows[0], { docIndex, reason: "webhook_retry" });
+          } catch (retryErr) {
+            console.error("Error en reconcile diferido de contrato:", retryErr?.message || retryErr);
+          }
+        }, 30000);
       }
     }
 
@@ -14061,6 +14083,67 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
     console.log(`Contrato doc${docIndex || "?"} estado ${status} para proceso ${proceso.id}. Completado: ${todosFirmados}`);
   } catch (err) {
     console.error("Error procesando webhook de contrato:", err.message);
+  }
+}
+
+async function reintentarCuentaCobroFirma(cuentaId) {
+  try {
+    const cuentaResult = await pool.query(
+      `SELECT cc.id, cc.public_id, cc.created_by, cc.fecha_correspondiente, cc.created_at, cc.datos_adjuntos,
+              u.nombre_usuario, u.email
+       FROM cuenta_cobro cc LEFT JOIN usuarios u ON u.id = cc.created_by
+       WHERE cc.id = $1 LIMIT 1`,
+      [cuentaId]
+    );
+    const cuenta = cuentaResult.rows[0];
+    if (!cuenta) return;
+
+    const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object" ? cuenta.datos_adjuntos : {};
+    const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object" ? prevAdjuntos.firma : {};
+
+    if (prevFirma.documento_firmado?.url) return; // ya está resuelto
+    if (prevFirma.estado !== "signed") return;    // no está firmado aún
+
+    const requestId = String(prevFirma.request_id || "").trim();
+    const contractId = String(prevFirma.contract_id || `CC-${cuenta.public_id || cuenta.id}`).trim();
+    const signatureId = String(prevFirma.signature_id || "").trim();
+
+    const artifacts = await resolveClickSignArtifacts({ event: {}, requestId, contractId, publicId: String(cuenta.public_id || ""), signatureId });
+    const resolvedPdf = artifacts?.signedPdf || null;
+    if (!resolvedPdf || !isPdfBuffer(resolvedPdf.buffer)) {
+      console.warn("Reintento cuenta cobro: PDF aún no disponible", { cuentaId, requestId, contractId });
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const uploadResult = await uploadSignedPdfToOneDrive(cuenta, resolvedPdf.buffer, resolvedPdf.fileName);
+    const documentoFirmado = { ...uploadResult.archivo, carpeta: uploadResult.carpeta, origen: resolvedPdf.source || "clicksign", actualizado_en: nowIso };
+
+    const firma = { ...prevFirma, documento_firmado: documentoFirmado, documento_firmado_error: null, actualizado_en: nowIso };
+    const prevSoportes = prevAdjuntos.soportes && typeof prevAdjuntos.soportes === "object" ? prevAdjuntos.soportes : {};
+    const adjuntos = {
+      ...prevAdjuntos,
+      firma,
+      soportes: {
+        ...prevSoportes,
+        carpeta: documentoFirmado.carpeta || prevSoportes.carpeta || "",
+        actualizado_en: nowIso,
+        cuenta_cobro_firmada: {
+          id: documentoFirmado.id || prevSoportes?.cuenta_cobro_firmada?.id || null,
+          nombre: documentoFirmado.nombre || prevSoportes?.cuenta_cobro_firmada?.nombre || "CuentaCobroFirmada.pdf",
+          url: documentoFirmado.url || ""
+        }
+      }
+    };
+
+    const estadoAprobado = await getCuentaCobroEstadoAprobado();
+    await pool.query(
+      `UPDATE cuenta_cobro SET datos_adjuntos = $1::jsonb, estado = $2::tipo_estado_reporte, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
+      [JSON.stringify(adjuntos), estadoAprobado, cuenta.id]
+    );
+    console.log(`Reintento exitoso: cuenta cobro ${cuenta.id} subida a OneDrive desde webhook diferido.`);
+  } catch (err) {
+    console.error("Error en reintento diferido de cuenta cobro firmada:", err?.message || err);
   }
 }
 
@@ -14372,6 +14455,10 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
             `,
             [JSON.stringify(adjuntos), cuenta.id]
           );
+        }
+
+        if (status === "signed" && !documentoFirmado?.url) {
+          setTimeout(() => reintentarCuentaCobroFirma(cuenta.id), 30000);
         }
       } catch (innerErr) {
         console.error("Error procesando webhook Click&Sign:", innerErr);

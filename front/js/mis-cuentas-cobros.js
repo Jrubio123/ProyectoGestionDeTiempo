@@ -53,8 +53,11 @@ window.misCuentasApp = function () {
         },
 
         firmaPendiente(cuenta) {
-            const firmaEstado = String(cuenta?.datos_adjuntos?.firma?.estado || "").toLowerCase().trim();
-            if (["signed", "firmado", "completed", "aprobado"].includes(firmaEstado)) return false;
+            const firma = cuenta?.datos_adjuntos?.firma || {};
+            const firmaEstado = String(firma.estado || "").toLowerCase().trim();
+            if (["signed", "firmado", "completed", "aprobado"].includes(firmaEstado)) {
+                return !firma.documento_firmado?.url;
+            }
             if (["pending", "in_progress", "en_firma", "started", "sent", "open", "created"].includes(firmaEstado)) return true;
             const estadoCuenta = String(cuenta?.estado || "").toLowerCase().trim();
             return ["en firma", "pendiente"].includes(estadoCuenta);
@@ -66,7 +69,6 @@ window.misCuentasApp = function () {
             if (firma.request_id) payload.request_id = firma.request_id;
             if (firma.contract_id) payload.contract_id = firma.contract_id;
             if (firma.signature_id) payload.signature_id = firma.signature_id;
-            if (firma.estado) payload.status = firma.estado;
             return payload;
         },
 

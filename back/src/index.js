@@ -909,37 +909,58 @@ async function notifyCuentaCobroFirmadaToProveedores({
   const prev = prevNotification && typeof prevNotification === "object" ? prevNotification : {};
   if (!CLICKSIGN_SIGNED_NOTIFY_ENABLED || !CLICKSIGN_SIGNED_NOTIFY_TO) return prev;
   if (!documentoFirmado?.url) return prev;
+  // Soft check rápido (no es race-safe, pero evita el roundtrip a DB si ya sabemos que se envió)
   if (prev.enviada) return prev;
+
+  // Candado atómico en DB: solo el primer proceso que ejecute este UPDATE procede a enviar.
+  // Si otro proceso ya marcó enviada=true (o está en proceso), rowCount=0 y abortamos.
+  const cuentaPublicId = cuenta?.public_id;
+  if (cuentaPublicId) {
+    const claim = await pool.query(
+      `UPDATE cuenta_cobro
+       SET datos_adjuntos = jsonb_set(
+         datos_adjuntos,
+         '{firma,notificacion_proveedores,enviada}',
+         'true'::jsonb,
+         true
+       )
+       WHERE public_id = $1
+         AND COALESCE((datos_adjuntos->'firma'->'notificacion_proveedores'->>'enviada')::boolean, false) = false
+       RETURNING id`,
+      [cuentaPublicId]
+    );
+    if (claim.rowCount === 0) {
+      // Otro proceso ya reclamó el envío
+      return { ...prev, enviada: true };
+    }
+  }
 
   const cuentaRef = resolveCuentaCobroReference(cuenta);
   const cuentaNumero = String(cuenta.id || "");
   const consultorNombre = resolveCuentaCobroConsultorNombre(cuenta);
   const subject = `Cuenta de cobro firmada | ${consultorNombre} | N° ${cuentaNumero}`;
   const senderEmail = String(cuenta?.email || graphContext?.graphUserEmail || "").trim();
-  const notificationLockKey = String(cuenta?.id || cuenta?.public_id || cuentaRef || "").trim();
-  if (notificationLockKey && providerNotificationInFlight.has(notificationLockKey)) {
-    return null;
-  }
-  const textoPlano =
-    `Se completó la firma digital de una cuenta de cobro.\n` +
-    `Consultor: ${consultorNombre}\n` +
-    `Cuenta de cobro: N° ${cuentaNumero}\n` +
-    `Documento firmado: ${documentoFirmado.url}\n`;
-  const html = buildEmailLayout({
-    title: "Cuenta de cobro firmada",
-    intro: `Se completó la firma digital de la cuenta de cobro <strong>N° ${cuentaNumero}</strong>.`,
-    blocks: [
-      { label: "Consultor", value: consultorNombre },
-      { label: "Cuenta de cobro", value: `N° ${cuentaNumero}` },
-      { label: "Documento firmado", value: documentoFirmado.url }
-    ],
-    ctaLabel: "Abrir documento firmado",
-    ctaUrl: documentoFirmado.url,
-    closing: "Notificación automática del sistema de cuentas de cobro."
-  });
-
+  const notificationLockKey = String(cuenta?.public_id || cuenta?.id || cuentaRef || "").trim();
   if (notificationLockKey) providerNotificationInFlight.add(notificationLockKey);
   try {
+    const textoPlano =
+      `Se completó la firma digital de una cuenta de cobro.\n` +
+      `Consultor: ${consultorNombre}\n` +
+      `Cuenta de cobro: N° ${cuentaNumero}\n` +
+      `Documento firmado: ${documentoFirmado.url}\n`;
+    const html = buildEmailLayout({
+      title: "Cuenta de cobro firmada",
+      intro: `Se completó la firma digital de la cuenta de cobro <strong>N° ${cuentaNumero}</strong>.`,
+      blocks: [
+        { label: "Consultor", value: consultorNombre },
+        { label: "Cuenta de cobro", value: `N° ${cuentaNumero}` },
+        { label: "Documento firmado", value: documentoFirmado.url }
+      ],
+      ctaLabel: "Abrir documento firmado",
+      ctaUrl: documentoFirmado.url,
+      closing: "Notificación automática del sistema de cuentas de cobro."
+    });
+
     let sendResult = await sendEmailSafe({
       graphUserEmail: senderEmail || null,
       to: CLICKSIGN_SIGNED_NOTIFY_TO,

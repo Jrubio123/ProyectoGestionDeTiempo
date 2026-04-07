@@ -912,9 +912,9 @@ async function notifyCuentaCobroFirmadaToProveedores({
   if (prev.enviada) return prev;
 
   const cuentaRef = resolveCuentaCobroReference(cuenta);
-  const cuentaRefCorta = String(cuenta.public_id || cuenta.id || "").split("-")[0];
+  const cuentaNumero = String(cuenta.id || "");
   const consultorNombre = resolveCuentaCobroConsultorNombre(cuenta);
-  const subject = `Cuenta de cobro firmada | ${consultorNombre} | ${cuentaRefCorta}`;
+  const subject = `Cuenta de cobro firmada | ${consultorNombre} | N° ${cuentaNumero}`;
   const senderEmail = String(cuenta?.email || graphContext?.graphUserEmail || "").trim();
   const notificationLockKey = String(cuenta?.id || cuenta?.public_id || cuentaRef || "").trim();
   if (notificationLockKey && providerNotificationInFlight.has(notificationLockKey)) {
@@ -923,14 +923,14 @@ async function notifyCuentaCobroFirmadaToProveedores({
   const textoPlano =
     `Se completó la firma digital de una cuenta de cobro.\n` +
     `Consultor: ${consultorNombre}\n` +
-    `Cuenta de cobro: ${cuentaRefCorta}\n` +
+    `Cuenta de cobro: N° ${cuentaNumero}\n` +
     `Documento firmado: ${documentoFirmado.url}\n`;
   const html = buildEmailLayout({
     title: "Cuenta de cobro firmada",
-    intro: `Se completó la firma digital de la cuenta de cobro <strong>${cuentaRefCorta}</strong>.`,
+    intro: `Se completó la firma digital de la cuenta de cobro <strong>N° ${cuentaNumero}</strong>.`,
     blocks: [
       { label: "Consultor", value: consultorNombre },
-      { label: "Cuenta de cobro", value: cuentaRefCorta },
+      { label: "Cuenta de cobro", value: `N° ${cuentaNumero}` },
       { label: "Documento firmado", value: documentoFirmado.url }
     ],
     ctaLabel: "Abrir documento firmado",

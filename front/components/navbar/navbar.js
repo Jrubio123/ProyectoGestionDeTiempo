@@ -1,6 +1,6 @@
 function getRoleRoutes() {
     return {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin", "gestion-personas"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -11,7 +11,8 @@ function getRoleRoutes() {
             "tarifas",
             "solicitudesCoord",
             "preregistrosCoord",
-            "soportes-cuentas-cobro"
+            "soportes-cuentas-cobro",
+            "gestion-personas"
         ],
         consultor_principal: [
             "inicio",
@@ -51,6 +52,7 @@ function getAllSearchViews() {
         { label: "Generar Cuenta Cobro", hash: "#generar-cuenta-cobro" },
         { label: "Catálogos Admin", hash: "#catalogos-admin" },
         { label: "Licencias de Acceso", hash: "#gestion-licencias-admin" },
+        { label: "Gestion de Personas", hash: "#gestion-personas" },
         { label: "Solicitudes RRHH", hash: "#solicitudesCoord" },
         { label: "Contrataciones", hash: "#preregistrosCoord" },
         { label: "Pool de Solicitudes", hash: "#solicitudesRecl" },

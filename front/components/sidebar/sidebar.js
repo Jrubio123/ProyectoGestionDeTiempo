@@ -77,7 +77,7 @@ function initSidebar() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin", "gestion-personas"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -88,7 +88,8 @@ function initSidebar() {
             "tarifas",
             "solicitudesCoord",
             "preregistrosCoord",
-            "soportes-cuentas-cobro"
+            "soportes-cuentas-cobro",
+            "gestion-personas"
         ],
         consultor_principal: [
             "inicio",

@@ -8779,6 +8779,58 @@ app.get("/admin/usuarios/:id/licencias-historial", requireAccess({ roles: ["Admi
 
 // ====Gestión de Personas ============================================================
 
+function isAdminRole(req) {
+  return normalizeValue(req?.user?.rol) === "administrador";
+}
+
+function isValidEmailFormat(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function normalizeTipoPersonaForUsuariosInput(value) {
+  const raw = normalizeValue(value);
+  if (!raw) return null;
+  if (raw === "natural") return "Natural";
+  if (raw === "juridica") return "Jurídica";
+  return null;
+}
+
+function normalizeTipoConsultorInput(value) {
+  const raw = normalizeValue(value);
+  if (!raw) return null;
+  if (raw === "principal") return "Principal";
+  if (raw === "asociado") return "Asociado";
+  return null;
+}
+
+async function resolvePersonaReferenceOrThrow(db, tableName, value, label) {
+  if (value === undefined) return { provided: false, id: null };
+  if (value === null || String(value).trim() === "") {
+    return { provided: true, id: null };
+  }
+
+  const resolvedId = await resolveInternalIdFromPublicIdOrId(db, tableName, value);
+  if (!resolvedId) {
+    const err = new Error(`${label} no válido`);
+    err.status = 400;
+    throw err;
+  }
+  return { provided: true, id: resolvedId };
+}
+
+function sanitizePersonaForRead(row, req) {
+  if (!row) return row;
+  if (isAdminRole(req)) return row;
+
+  const sanitized = { ...row, azure_oid: null };
+  delete sanitized.rol_id;
+  delete sanitized.banco_id;
+  delete sanitized.tipo_cuenta_id;
+  delete sanitized.tipo_documento_id;
+  delete sanitized.consultor_principal_id;
+  return sanitized;
+}
+
 // GET /admin/personas — listado de todos los usuarios (admin + coordinador)
 app.get("/admin/personas", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
   try {
@@ -8799,7 +8851,7 @@ app.get("/admin/personas", requireAccess({ roles: ["Administrador", "Coordinador
       LEFT JOIN roles r ON r.id = u.rol_usuario_id
       ORDER BY u.nombre_usuario ASC
     `);
-    res.json(result.rows);
+    res.json((result.rows || []).map((row) => sanitizePersonaForRead(row, req)));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al listar personas" });
@@ -8848,7 +8900,7 @@ app.get("/admin/personas/:id", requireAccess({ roles: ["Administrador", "Coordin
     `, [id]);
 
     if (result.rowCount === 0) return res.status(404).json({ error: "Persona no encontrada" });
-    res.json(result.rows[0]);
+    res.json(sanitizePersonaForRead(result.rows[0], req));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al obtener ficha de persona" });
@@ -8860,31 +8912,44 @@ app.put("/admin/personas/:id/identidad", requireAccess({ roles: ["Administrador"
   const { id } = req.params;
   const { nombre_usuario, email, rol_id, activo, azure_oid } = req.body || {};
   try {
+    const nombreUsuario = toNullableTrimmedString(nombre_usuario);
+    const emailNormalizado = toNullableTrimmedString(email)?.toLowerCase() || null;
+    const azureOid = toNullableTrimmedString(azure_oid);
+    const rolRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.roles, rol_id, "Rol");
+
+    if (!nombreUsuario) {
+      return res.status(400).json({ error: "El nombre es obligatorio" });
+    }
+    if (!emailNormalizado || !isValidEmailFormat(emailNormalizado)) {
+      return res.status(400).json({ error: "El email no tiene un formato válido" });
+    }
+    if (typeof activo !== "boolean") {
+      return res.status(400).json({ error: "El estado activo es obligatorio" });
+    }
+
     const result = await pool.query(`
-      WITH c_rol AS (
-        SELECT id FROM roles WHERE public_id = $1
-      )
       UPDATE usuarios SET
-        nombre_usuario = COALESCE($2, nombre_usuario),
-        email          = COALESCE($3, email),
-        rol_usuario_id = CASE WHEN $1::text IS NOT NULL THEN (SELECT id FROM c_rol) ELSE rol_usuario_id END,
-        activo         = COALESCE($4, activo),
+        nombre_usuario = $1,
+        email          = $2,
+        rol_usuario_id = $3,
+        activo         = $4,
         azure_oid      = $5,
         updated_at     = CURRENT_TIMESTAMP
       WHERE public_id = $6
       RETURNING public_id AS id, nombre_usuario, email, activo, azure_oid
     `, [
-      rol_id   ?? null,
-      nombre_usuario ? nombre_usuario.trim() : null,
-      email    ? email.trim().toLowerCase() : null,
-      typeof activo === "boolean" ? activo : null,
-      azure_oid ? azure_oid.trim() : null,
+      nombreUsuario,
+      emailNormalizado,
+      rolRef.id,
+      activo,
+      azureOid,
       id
     ]);
     if (result.rowCount === 0) return res.status(404).json({ error: "Persona no encontrada" });
     res.json(result.rows[0]);
   } catch (err) {
     if (err.code === "23505") return res.status(409).json({ error: "El email ya está en uso por otro usuario" });
+    if (err?.status === 400) return res.status(400).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: "Error al actualizar identidad" });
   }
@@ -8895,32 +8960,39 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador"]
   const { id } = req.params;
   const { tipo_documento_id, cedula, telefono, direccion, ciudad, tipo_persona } = req.body || {};
   try {
+    const tipoDocumentoRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.documentoIdentidad, tipo_documento_id, "Tipo de documento");
+    const tipoPersonaNormalizada = tipo_persona === undefined
+      ? undefined
+      : normalizeTipoPersonaForUsuariosInput(tipo_persona);
+
+    if (tipo_persona !== undefined && tipo_persona !== null && !tipoPersonaNormalizada) {
+      return res.status(400).json({ error: "Tipo de persona inválido" });
+    }
+
     const result = await pool.query(`
-      WITH c_doc AS (
-        SELECT id FROM documento_identidad WHERE public_id = $1
-      )
       UPDATE usuarios SET
-        tipo_documento_id = CASE WHEN $1::text IS NOT NULL THEN (SELECT id FROM c_doc) ELSE tipo_documento_id END,
-        cedula            = COALESCE($2, cedula),
-        telefono          = COALESCE($3, telefono),
-        direccion         = COALESCE($4, direccion),
-        ciudad            = COALESCE($5, ciudad),
-        tipo_persona      = COALESCE($6::tipo_persona, tipo_persona),
+        tipo_documento_id = $1,
+        cedula            = $2,
+        telefono          = $3,
+        direccion         = $4,
+        ciudad            = $5,
+        tipo_persona      = $6::tipo_persona,
         updated_at        = CURRENT_TIMESTAMP
       WHERE public_id = $7
       RETURNING public_id AS id, cedula, telefono, direccion, ciudad, tipo_persona
     `, [
-      tipo_documento_id ?? null,
-      cedula    ? cedula.trim()    : null,
-      telefono  ? telefono.trim()  : null,
-      direccion ? direccion.trim() : null,
-      ciudad    ? ciudad.trim()    : null,
-      tipo_persona ?? null,
+      tipoDocumentoRef.id,
+      toNullableTrimmedString(cedula),
+      toNullableTrimmedString(telefono),
+      toNullableTrimmedString(direccion),
+      toNullableTrimmedString(ciudad),
+      tipoPersonaNormalizada ?? null,
       id
     ]);
     if (result.rowCount === 0) return res.status(404).json({ error: "Persona no encontrada" });
     res.json(result.rows[0]);
   } catch (err) {
+    if (err?.status === 400) return res.status(400).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: "Error al actualizar datos personales" });
   }
@@ -8931,28 +9003,34 @@ app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador"] })
   const { id } = req.params;
   const { moneda_cobro, banco_id, tipo_cuenta_id, nro_cuenta_bancaria } = req.body || {};
   try {
+    const bancoRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.bancos, banco_id, "Banco");
+    const tipoCuentaRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.tipoCuentaBancaria, tipo_cuenta_id, "Tipo de cuenta");
+    const monedaNormalizada = moneda_cobro === undefined ? undefined : normalizeValue(moneda_cobro).toUpperCase();
+
+    if (!["COP", "USD", "EUR"].includes(monedaNormalizada || "")) {
+      return res.status(400).json({ error: "Moneda no válida" });
+    }
+
     const result = await pool.query(`
-      WITH
-        c_banco AS (SELECT id FROM bancos              WHERE public_id = $1),
-        c_tipo  AS (SELECT id FROM tipo_cuenta_bancaria WHERE public_id = $2)
       UPDATE usuarios SET
-        moneda_cobro      = COALESCE($3::tipo_moneda, moneda_cobro),
-        banco_id          = CASE WHEN $1::text IS NOT NULL THEN (SELECT id FROM c_banco) ELSE banco_id END,
-        tipo_cuenta_id    = CASE WHEN $2::text IS NOT NULL THEN (SELECT id FROM c_tipo)  ELSE tipo_cuenta_id END,
-        nro_cuenta_bancaria = COALESCE($4, nro_cuenta_bancaria),
+        moneda_cobro        = $1::tipo_moneda,
+        banco_id            = $2,
+        tipo_cuenta_id      = $3,
+        nro_cuenta_bancaria = $4,
         updated_at        = CURRENT_TIMESTAMP
       WHERE public_id = $5
       RETURNING public_id AS id, moneda_cobro, nro_cuenta_bancaria
     `, [
-      banco_id       ?? null,
-      tipo_cuenta_id ?? null,
-      moneda_cobro   ?? null,
-      nro_cuenta_bancaria ? nro_cuenta_bancaria.trim() : null,
+      monedaNormalizada,
+      bancoRef.id,
+      tipoCuentaRef.id,
+      toNullableTrimmedString(nro_cuenta_bancaria),
       id
     ]);
     if (result.rowCount === 0) return res.status(404).json({ error: "Persona no encontrada" });
     res.json(result.rows[0]);
   } catch (err) {
+    if (err?.status === 400) return res.status(400).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: "Error al actualizar datos de cobro" });
   }
@@ -8962,27 +9040,101 @@ app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador"] })
 app.put("/admin/personas/:id/operativa", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   const { id } = req.params;
   const { tipo_consultor, consultor_principal_id } = req.body || {};
+  const client = await pool.connect();
   try {
-    const result = await pool.query(`
-      WITH c_principal AS (
-        SELECT id FROM usuarios WHERE public_id = $1
-      )
+    const personaId = await resolveInternalIdFromPublicIdOrId(client, ID_TABLES.usuarios, id);
+    if (!personaId) return res.status(404).json({ error: "Persona no encontrada" });
+
+    const personaActualRes = await client.query(
+      `
+      SELECT id, tipo_consultor, id_consultor_principal
+      FROM usuarios
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [personaId]
+    );
+    const personaActual = personaActualRes.rows[0];
+    const principalRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.usuarios, consultor_principal_id, "Consultor principal");
+    const tipoConsultorNormalizado = tipo_consultor === undefined
+      ? undefined
+      : normalizeTipoConsultorInput(tipo_consultor);
+
+    if (tipo_consultor !== undefined && tipo_consultor !== null && !tipoConsultorNormalizado) {
+      return res.status(400).json({ error: "Tipo de consultor inválido" });
+    }
+
+    let nextPrincipalId = principalRef.provided ? principalRef.id : personaActual.id_consultor_principal;
+    let nextTipoConsultor = tipoConsultorNormalizado !== undefined ? tipoConsultorNormalizado : personaActual.tipo_consultor;
+
+    if (nextPrincipalId && Number(nextPrincipalId) === Number(personaId)) {
+      return res.status(400).json({ error: "Una persona no puede ser su propio consultor principal" });
+    }
+
+    const dependientesRes = await client.query(
+      `
+      SELECT COUNT(*)::int AS total
+      FROM usuarios
+      WHERE id_consultor_principal = $1
+      `,
+      [personaId]
+    );
+    const totalDependientes = Number(dependientesRes.rows[0]?.total || 0);
+
+    if (nextPrincipalId) {
+      const principalMeta = await client.query(
+        `
+        SELECT id, tipo_consultor
+        FROM usuarios
+        WHERE id = $1
+          AND activo = true
+        LIMIT 1
+        `,
+        [nextPrincipalId]
+      );
+      const principalRow = principalMeta.rows[0];
+      if (!principalRow) {
+        return res.status(400).json({ error: "Consultor principal no válido" });
+      }
+      if (normalizeValue(principalRow.tipo_consultor) === "asociado") {
+        return res.status(400).json({ error: "Un consultor asociado no puede ser consultor principal" });
+      }
+      if (totalDependientes > 0) {
+        return res.status(400).json({ error: "No puedes asociar a una persona que ya tiene subconsultores asignados" });
+      }
+      if (!nextTipoConsultor) nextTipoConsultor = "Asociado";
+      if (nextTipoConsultor !== "Asociado") {
+        return res.status(400).json({ error: "Solo un consultor asociado puede tener consultor principal asignado" });
+      }
+    }
+
+    if (!nextPrincipalId && nextTipoConsultor === "Asociado") {
+      return res.status(400).json({ error: "Un consultor asociado debe tener consultor principal asignado" });
+    }
+
+    if (nextTipoConsultor === "Asociado" && totalDependientes > 0) {
+      return res.status(400).json({ error: "No puedes marcar como asociado a una persona que ya tiene subconsultores asignados" });
+    }
+
+    const result = await client.query(
+      `
       UPDATE usuarios SET
-        tipo_consultor         = COALESCE($2::tipo_consultor_enum, tipo_consultor),
-        id_consultor_principal = CASE WHEN $1::text IS NOT NULL THEN (SELECT id FROM c_principal) ELSE id_consultor_principal END,
+        tipo_consultor         = $1::tipo_consultor_enum,
+        id_consultor_principal = $2,
         updated_at             = CURRENT_TIMESTAMP
-      WHERE public_id = $3
+      WHERE id = $3
       RETURNING public_id AS id, tipo_consultor
-    `, [
-      consultor_principal_id ?? null,
-      tipo_consultor         ?? null,
-      id
-    ]);
+      `,
+      [nextTipoConsultor || null, nextPrincipalId || null, personaId]
+    );
     if (result.rowCount === 0) return res.status(404).json({ error: "Persona no encontrada" });
     res.json(result.rows[0]);
   } catch (err) {
+    if (err?.status === 400) return res.status(400).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: "Error al actualizar relación operativa" });
+  } finally {
+    client.release();
   }
 });
 

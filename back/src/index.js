@@ -5914,14 +5914,14 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   doc.fontSize(9).font("Helvetica-Bold").fillColor(COLOR.blanco)
     .text("CUENTA DE COBRO", rightX, 16, { width: rightW, align: "right", lineBreak: false });
 
-  const numCuenta = String(cuenta.public_id || cuenta.id || "").substring(0, 18);
+  const numCuenta = String(cuenta.id || "");
   doc.fontSize(8).font("Helvetica").fillColor(COLOR.blanco)
     .text(`N° ${numCuenta}`, rightX, 30, { width: rightW, align: "right", lineBreak: false });
 
   const fechaDoc = fmtFecha(cuenta.created_at);
   const ciudadDoc = cuenta.ciudad_cobro || "";
   doc.fontSize(8).fillColor(COLOR.blanco)
-    .text(`${fechaDoc}  ?  ${ciudadDoc}`, rightX, 44, { width: rightW, align: "right", lineBreak: false });
+    .text(`${fechaDoc}  -  ${ciudadDoc}`, rightX, 44, { width: rightW, align: "right", lineBreak: false });
 
   // Banda turquesa inferior del header
   fillRect(doc, 0, headerH, PW_TOTAL, 4, COLOR.naranjaSilver);

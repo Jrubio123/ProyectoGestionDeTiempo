@@ -8777,6 +8777,231 @@ app.get("/admin/usuarios/:id/licencias-historial", requireAccess({ roles: ["Admi
   }
 });
 
+// ====Gestión de Personas ============================================================
+
+// GET /admin/personas — listado de todos los usuarios (admin + coordinador)
+app.get("/admin/personas", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        u.public_id            AS id,
+        u.nombre_usuario,
+        u.email,
+        u.activo,
+        u.tipo_consultor,
+        u.ciudad,
+        u.ultimo_inicio_sesion,
+        u.azure_oid,
+        (u.nro_cuenta_bancaria IS NOT NULL AND u.nro_cuenta_bancaria <> '') AS tiene_datos_bancarios,
+        (u.cedula IS NOT NULL AND u.cedula <> '')                           AS tiene_documento,
+        r.titulo               AS rol
+      FROM usuarios u
+      LEFT JOIN roles r ON r.id = u.rol_usuario_id
+      ORDER BY u.nombre_usuario ASC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al listar personas" });
+  }
+});
+
+// GET /admin/personas/:id — ficha completa (admin + coordinador)
+app.get("/admin/personas/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT
+        u.public_id                AS id,
+        u.nombre_usuario,
+        u.email,
+        u.activo,
+        u.azure_oid,
+        u.ultimo_inicio_sesion,
+        u.tipo_persona,
+        u.moneda_cobro,
+        u.tipo_consultor,
+        u.cedula,
+        u.telefono,
+        u.direccion,
+        u.ciudad,
+        u.nro_cuenta_bancaria,
+        u.observaciones,
+        r.public_id                AS rol_id,
+        r.titulo                   AS rol,
+        b.public_id                AS banco_id,
+        b.titulo                   AS banco,
+        tc.public_id               AS tipo_cuenta_id,
+        tc.titulo                  AS tipo_cuenta,
+        di.public_id               AS tipo_documento_id,
+        di.titulo                  AS tipo_documento,
+        di.codigo                  AS tipo_documento_codigo,
+        cp.public_id               AS consultor_principal_id,
+        cp.nombre_usuario          AS consultor_principal_nombre
+      FROM usuarios u
+      LEFT JOIN roles r   ON r.id  = u.rol_usuario_id
+      LEFT JOIN bancos b  ON b.id  = u.banco_id
+      LEFT JOIN tipo_cuenta_bancaria tc ON tc.id = u.tipo_cuenta_id
+      LEFT JOIN documento_identidad  di ON di.id = u.tipo_documento_id
+      LEFT JOIN usuarios cp ON cp.id = u.id_consultor_principal
+      WHERE u.public_id = $1
+    `, [id]);
+
+    if (result.rowCount === 0) return res.status(404).json({ error: "Persona no encontrada" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener ficha de persona" });
+  }
+});
+
+// PUT /admin/personas/:id/identidad — nombre, email, rol, activo, azure_oid (admin)
+app.put("/admin/personas/:id/identidad", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const { id } = req.params;
+  const { nombre_usuario, email, rol_id, activo, azure_oid } = req.body || {};
+  try {
+    const result = await pool.query(`
+      WITH c_rol AS (
+        SELECT id FROM roles WHERE public_id = $1
+      )
+      UPDATE usuarios SET
+        nombre_usuario = COALESCE($2, nombre_usuario),
+        email          = COALESCE($3, email),
+        rol_usuario_id = CASE WHEN $1::text IS NOT NULL THEN (SELECT id FROM c_rol) ELSE rol_usuario_id END,
+        activo         = COALESCE($4, activo),
+        azure_oid      = $5,
+        updated_at     = CURRENT_TIMESTAMP
+      WHERE public_id = $6
+      RETURNING public_id AS id, nombre_usuario, email, activo, azure_oid
+    `, [
+      rol_id   ?? null,
+      nombre_usuario ? nombre_usuario.trim() : null,
+      email    ? email.trim().toLowerCase() : null,
+      typeof activo === "boolean" ? activo : null,
+      azure_oid ? azure_oid.trim() : null,
+      id
+    ]);
+    if (result.rowCount === 0) return res.status(404).json({ error: "Persona no encontrada" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === "23505") return res.status(409).json({ error: "El email ya está en uso por otro usuario" });
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar identidad" });
+  }
+});
+
+// PUT /admin/personas/:id/personal — tipo_documento, cédula, teléfono, dirección, ciudad, tipo_persona (admin)
+app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const { id } = req.params;
+  const { tipo_documento_id, cedula, telefono, direccion, ciudad, tipo_persona } = req.body || {};
+  try {
+    const result = await pool.query(`
+      WITH c_doc AS (
+        SELECT id FROM documento_identidad WHERE public_id = $1
+      )
+      UPDATE usuarios SET
+        tipo_documento_id = CASE WHEN $1::text IS NOT NULL THEN (SELECT id FROM c_doc) ELSE tipo_documento_id END,
+        cedula            = COALESCE($2, cedula),
+        telefono          = COALESCE($3, telefono),
+        direccion         = COALESCE($4, direccion),
+        ciudad            = COALESCE($5, ciudad),
+        tipo_persona      = COALESCE($6::tipo_persona, tipo_persona),
+        updated_at        = CURRENT_TIMESTAMP
+      WHERE public_id = $7
+      RETURNING public_id AS id, cedula, telefono, direccion, ciudad, tipo_persona
+    `, [
+      tipo_documento_id ?? null,
+      cedula    ? cedula.trim()    : null,
+      telefono  ? telefono.trim()  : null,
+      direccion ? direccion.trim() : null,
+      ciudad    ? ciudad.trim()    : null,
+      tipo_persona ?? null,
+      id
+    ]);
+    if (result.rowCount === 0) return res.status(404).json({ error: "Persona no encontrada" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar datos personales" });
+  }
+});
+
+// PUT /admin/personas/:id/cobro — moneda, banco, tipo_cuenta, nro_cuenta (admin)
+app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const { id } = req.params;
+  const { moneda_cobro, banco_id, tipo_cuenta_id, nro_cuenta_bancaria } = req.body || {};
+  try {
+    const result = await pool.query(`
+      WITH
+        c_banco AS (SELECT id FROM bancos              WHERE public_id = $1),
+        c_tipo  AS (SELECT id FROM tipo_cuenta_bancaria WHERE public_id = $2)
+      UPDATE usuarios SET
+        moneda_cobro      = COALESCE($3::tipo_moneda, moneda_cobro),
+        banco_id          = CASE WHEN $1::text IS NOT NULL THEN (SELECT id FROM c_banco) ELSE banco_id END,
+        tipo_cuenta_id    = CASE WHEN $2::text IS NOT NULL THEN (SELECT id FROM c_tipo)  ELSE tipo_cuenta_id END,
+        nro_cuenta_bancaria = COALESCE($4, nro_cuenta_bancaria),
+        updated_at        = CURRENT_TIMESTAMP
+      WHERE public_id = $5
+      RETURNING public_id AS id, moneda_cobro, nro_cuenta_bancaria
+    `, [
+      banco_id       ?? null,
+      tipo_cuenta_id ?? null,
+      moneda_cobro   ?? null,
+      nro_cuenta_bancaria ? nro_cuenta_bancaria.trim() : null,
+      id
+    ]);
+    if (result.rowCount === 0) return res.status(404).json({ error: "Persona no encontrada" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar datos de cobro" });
+  }
+});
+
+// PUT /admin/personas/:id/operativa — tipo_consultor, consultor_principal (admin)
+app.put("/admin/personas/:id/operativa", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  const { id } = req.params;
+  const { tipo_consultor, consultor_principal_id } = req.body || {};
+  try {
+    const result = await pool.query(`
+      WITH c_principal AS (
+        SELECT id FROM usuarios WHERE public_id = $1
+      )
+      UPDATE usuarios SET
+        tipo_consultor         = COALESCE($2::tipo_consultor_enum, tipo_consultor),
+        id_consultor_principal = CASE WHEN $1::text IS NOT NULL THEN (SELECT id FROM c_principal) ELSE id_consultor_principal END,
+        updated_at             = CURRENT_TIMESTAMP
+      WHERE public_id = $3
+      RETURNING public_id AS id, tipo_consultor
+    `, [
+      consultor_principal_id ?? null,
+      tipo_consultor         ?? null,
+      id
+    ]);
+    if (result.rowCount === 0) return res.status(404).json({ error: "Persona no encontrada" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar relación operativa" });
+  }
+});
+
+// GET /admin/tipos-cuenta-bancaria — catálogo para formulario (admin)
+app.get("/admin/tipos-cuenta-bancaria", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT public_id AS id, titulo
+      FROM tipo_cuenta_bancaria
+      WHERE activo = true
+      ORDER BY titulo ASC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener tipos de cuenta" });
+  }
+});
+
 // Tipos de asignación activos
 app.get("/tipos-asignacion", requireAuthenticated, async (req, res) => {
   try {

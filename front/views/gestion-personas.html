@@ -1,0 +1,491 @@
+<div x-data="gestionPersonasApp()" x-init="init()" class="max-w-7xl mx-auto space-y-6 animate-fade-in-up">
+
+    <!-- Encabezado -->
+    <div class="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-indigo-50 flex justify-between items-center">
+        <div>
+            <h1 class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">
+                Gestión de Personas
+            </h1>
+            <p class="text-gray-500 text-sm mt-1">
+                <span x-show="esAdmin">Edita los datos maestros de cada usuario por secciones.</span>
+                <span x-show="!esAdmin">Consulta la ficha de cada usuario en modo lectura.</span>
+            </p>
+        </div>
+        <button @click="cargarPersonas()"
+                class="p-2 bg-white border border-gray-200 rounded-full hover:rotate-180 transition-transform duration-500 text-slate-600 shadow-sm"
+                title="Recargar">
+            <svg class="w-6 h-6" :class="{'animate-spin': cargando}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+        </button>
+    </div>
+
+    <!-- Grid principal -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- ── Listado (izquierda) ──────────────────────────────────────── -->
+        <div class="lg:col-span-4">
+            <div class="bg-white rounded-2xl shadow-xl border border-gray-100 sticky top-6 flex flex-col" style="max-height: calc(100vh - 7rem);">
+
+                <!-- Filtros -->
+                <div class="p-4 border-b border-gray-100 space-y-3">
+                    <input type="text" x-model="filtroTexto" placeholder="Buscar por nombre, email, ciudad..."
+                           class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                    <div class="flex gap-2">
+                        <select x-model="filtroEstado" class="flex-1 px-2 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-indigo-400 bg-gray-50">
+                            <option value="todos">Todos</option>
+                            <option value="activos">Activos</option>
+                            <option value="inactivos">Inactivos</option>
+                        </select>
+                        <select x-model="filtroRol" class="flex-1 px-2 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-indigo-400 bg-gray-50">
+                            <option value="todos">Todos los roles</option>
+                            <template x-for="r in rolesUnicos" :key="r">
+                                <option :value="r" x-text="r"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <p class="text-xs text-gray-400 text-right" x-text="personasFiltradas.length + ' personas'"></p>
+                </div>
+
+                <!-- Lista -->
+                <div class="overflow-y-auto flex-1 divide-y divide-gray-50">
+
+                    <div x-show="cargando" class="flex items-center justify-center py-10 text-gray-400 gap-2">
+                        <svg class="w-5 h-5 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        <span class="text-sm">Cargando...</span>
+                    </div>
+
+                    <template x-for="p in personasFiltradas" :key="p.id">
+                        <button @click="seleccionar(p)"
+                                class="w-full text-left px-4 py-3 hover:bg-indigo-50/40 transition-colors"
+                                :class="ficha?.id === p.id ? 'bg-indigo-50 border-l-4 border-indigo-500' : ''">
+                            <div class="flex items-center gap-3">
+                                <div class="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+                                     :class="colorAvatar(p.rol)">
+                                    <span x-text="inicialAvatar(p.nombre_usuario)"></span>
+                                </div>
+                                <div class="min-w-0 flex-1">
+                                    <p class="font-semibold text-sm text-gray-800 truncate" x-text="p.nombre_usuario"></p>
+                                    <p class="text-xs text-gray-400 truncate" x-text="p.email"></p>
+                                    <div class="flex items-center gap-1.5 mt-1 flex-wrap">
+                                        <span x-show="p.rol" class="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-xs font-medium" x-text="p.rol"></span>
+                                        <span x-show="p.tipo_consultor" class="px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded text-xs" x-text="p.tipo_consultor"></span>
+                                        <span :class="p.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'"
+                                              class="px-1.5 py-0.5 rounded text-xs font-semibold"
+                                              x-text="p.activo ? 'Activo' : 'Inactivo'"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </button>
+                    </template>
+
+                    <div x-show="!cargando && personasFiltradas.length === 0" class="text-center py-10 text-gray-400 text-sm">
+                        No hay personas que coincidan con los filtros.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Ficha detalle (derecha) ────────────────────────────────── -->
+        <div class="lg:col-span-8">
+
+            <!-- Estado vacío -->
+            <div x-show="!ficha && !cargandoFicha"
+                 class="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center py-24 text-gray-400 gap-3">
+                <svg class="w-12 h-12 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                </svg>
+                <p class="text-sm font-medium">Selecciona una persona del listado</p>
+            </div>
+
+            <!-- Loader ficha -->
+            <div x-show="cargandoFicha"
+                 class="bg-white rounded-2xl shadow-sm border border-gray-100 flex items-center justify-center py-24 gap-3 text-gray-400">
+                <svg class="w-6 h-6 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                <span class="text-sm">Cargando ficha...</span>
+            </div>
+
+            <!-- Ficha -->
+            <div x-show="ficha && !cargandoFicha" class="space-y-4">
+
+                <!-- Header persona -->
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                    <div class="flex items-center gap-4">
+                        <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold text-white flex-shrink-0"
+                             :class="colorAvatar(ficha?.rol)">
+                            <span x-text="inicialAvatar(ficha?.nombre_usuario)"></span>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <h2 class="text-xl font-bold text-gray-900 truncate" x-text="ficha?.nombre_usuario"></h2>
+                            <p class="text-sm text-gray-500 truncate" x-text="ficha?.email"></p>
+                            <div class="flex items-center gap-2 mt-2 flex-wrap">
+                                <span x-show="ficha?.rol" class="px-2.5 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-bold" x-text="ficha?.rol"></span>
+                                <span x-show="ficha?.tipo_consultor" class="px-2.5 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold" x-text="ficha?.tipo_consultor"></span>
+                                <span :class="ficha?.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'"
+                                      class="px-2.5 py-1 rounded-full text-xs font-bold"
+                                      x-text="ficha?.activo ? 'Activo' : 'Inactivo'"></span>
+                                <span x-show="ficha?.azure_oid" class="px-2.5 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold">Entra ID</span>
+                            </div>
+                        </div>
+                        <div class="text-right text-xs text-gray-400 flex-shrink-0">
+                            <p class="font-medium text-gray-500">Último acceso</p>
+                            <p x-text="formatFechaHora(ficha?.ultimo_inicio_sesion)"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Sección: Identidad y Acceso ── -->
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-50">
+                        <h3 class="font-bold text-gray-700 flex items-center gap-2">
+                            <span class="w-1.5 h-5 bg-indigo-500 rounded-full"></span>
+                            Identidad y Acceso
+                        </h3>
+                        <button x-show="esAdmin && !editando.identidad"
+                                @click="abrirEdicion('identidad')"
+                                class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors px-3 py-1 rounded-lg hover:bg-indigo-50">
+                            Editar
+                        </button>
+                    </div>
+
+                    <!-- Vista lectura -->
+                    <div x-show="!editando.identidad" class="px-6 py-4 grid grid-cols-2 gap-4">
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Nombre</p>
+                            <p class="text-sm text-gray-800" x-text="ficha?.nombre_usuario || '—'"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Email Silver</p>
+                            <p class="text-sm text-gray-800 truncate" x-text="ficha?.email || '—'"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Rol</p>
+                            <p class="text-sm text-gray-800" x-text="ficha?.rol || '—'"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Estado</p>
+                            <span :class="ficha?.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'"
+                                  class="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold"
+                                  x-text="ficha?.activo ? 'Activo' : 'Inactivo'"></span>
+                        </div>
+                        <div class="col-span-2">
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Azure OID</p>
+                            <p class="text-sm text-gray-500 font-mono truncate" x-text="ficha?.azure_oid || '—'"></p>
+                        </div>
+                    </div>
+
+                    <!-- Formulario edición -->
+                    <div x-show="editando.identidad" class="px-6 py-4 space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Nombre</label>
+                                <input type="text" x-model="draft.identidad.nombre_usuario"
+                                       class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Email</label>
+                                <input type="email" x-model="draft.identidad.email"
+                                       class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Rol</label>
+                                <select x-model="draft.identidad.rol_id"
+                                        class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                                    <option value="">Sin cambio</option>
+                                    <template x-for="r in cat.roles" :key="r.id">
+                                        <option :value="r.id" x-text="r.titulo"></option>
+                                    </template>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Estado</label>
+                                <select x-model="draft.identidad.activo"
+                                        class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                                    <option :value="true">Activo</option>
+                                    <option :value="false">Inactivo</option>
+                                </select>
+                            </div>
+                            <div class="col-span-2">
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Azure OID</label>
+                                <input type="text" x-model="draft.identidad.azure_oid"
+                                       placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                                       class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm font-mono focus:outline-none focus:border-indigo-400 bg-gray-50">
+                            </div>
+                        </div>
+                        <div x-show="errores.identidad" class="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2" x-text="errores.identidad"></div>
+                        <div class="flex gap-2 justify-end">
+                            <button @click="cancelarEdicion('identidad')"
+                                    class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+                                Cancelar
+                            </button>
+                            <button @click="guardar('identidad')" :disabled="guardando.identidad"
+                                    class="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-60 transition-colors">
+                                <span x-show="!guardando.identidad">Guardar</span>
+                                <span x-show="guardando.identidad">Guardando...</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Sección: Datos Personales ── -->
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-50">
+                        <h3 class="font-bold text-gray-700 flex items-center gap-2">
+                            <span class="w-1.5 h-5 bg-purple-500 rounded-full"></span>
+                            Datos Personales
+                        </h3>
+                        <button x-show="esAdmin && !editando.personal"
+                                @click="abrirEdicion('personal')"
+                                class="text-xs font-semibold text-purple-600 hover:text-purple-800 transition-colors px-3 py-1 rounded-lg hover:bg-purple-50">
+                            Editar
+                        </button>
+                    </div>
+
+                    <!-- Vista lectura -->
+                    <div x-show="!editando.personal" class="px-6 py-4 grid grid-cols-2 gap-4">
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Tipo Documento</p>
+                            <p class="text-sm text-gray-800" x-text="ficha?.tipo_documento || '—'"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Documento</p>
+                            <p class="text-sm text-gray-800" x-text="ficha?.cedula || '—'"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Teléfono</p>
+                            <p class="text-sm text-gray-800" x-text="ficha?.telefono || '—'"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Ciudad</p>
+                            <p class="text-sm text-gray-800" x-text="ficha?.ciudad || '—'"></p>
+                        </div>
+                        <div class="col-span-2">
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Dirección</p>
+                            <p class="text-sm text-gray-800" x-text="ficha?.direccion || '—'"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Tipo Persona</p>
+                            <p class="text-sm text-gray-800" x-text="ficha?.tipo_persona || '—'"></p>
+                        </div>
+                    </div>
+
+                    <!-- Formulario edición -->
+                    <div x-show="editando.personal" class="px-6 py-4 space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Tipo Documento</label>
+                                <select x-model="draft.personal.tipo_documento_id"
+                                        class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                                    <option value="">Sin cambio</option>
+                                    <template x-for="d in cat.tiposDocumento" :key="d.id">
+                                        <option :value="d.id" x-text="d.titulo"></option>
+                                    </template>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Número de documento</label>
+                                <input type="text" x-model="draft.personal.cedula"
+                                       class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Teléfono</label>
+                                <input type="text" x-model="draft.personal.telefono"
+                                       class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Ciudad</label>
+                                <input type="text" x-model="draft.personal.ciudad"
+                                       class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                            </div>
+                            <div class="col-span-2">
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Dirección</label>
+                                <input type="text" x-model="draft.personal.direccion"
+                                       class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Tipo Persona</label>
+                                <select x-model="draft.personal.tipo_persona"
+                                        class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                                    <option value="">Sin cambio</option>
+                                    <option value="Natural">Natural</option>
+                                    <option value="Jurídica">Jurídica</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div x-show="errores.personal" class="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2" x-text="errores.personal"></div>
+                        <div class="flex gap-2 justify-end">
+                            <button @click="cancelarEdicion('personal')"
+                                    class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+                                Cancelar
+                            </button>
+                            <button @click="guardar('personal')" :disabled="guardando.personal"
+                                    class="px-4 py-2 text-sm font-semibold text-white bg-purple-600 rounded-xl hover:bg-purple-700 disabled:opacity-60 transition-colors">
+                                <span x-show="!guardando.personal">Guardar</span>
+                                <span x-show="guardando.personal">Guardando...</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Sección: Datos de Cobro ── -->
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-50">
+                        <h3 class="font-bold text-gray-700 flex items-center gap-2">
+                            <span class="w-1.5 h-5 bg-emerald-500 rounded-full"></span>
+                            Datos de Cobro
+                        </h3>
+                        <button x-show="esAdmin && !editando.cobro"
+                                @click="abrirEdicion('cobro')"
+                                class="text-xs font-semibold text-emerald-600 hover:text-emerald-800 transition-colors px-3 py-1 rounded-lg hover:bg-emerald-50">
+                            Editar
+                        </button>
+                    </div>
+
+                    <!-- Vista lectura -->
+                    <div x-show="!editando.cobro" class="px-6 py-4 grid grid-cols-2 gap-4">
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Moneda</p>
+                            <p class="text-sm text-gray-800" x-text="ficha?.moneda_cobro || '—'"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Banco</p>
+                            <p class="text-sm text-gray-800" x-text="ficha?.banco || '—'"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Tipo de Cuenta</p>
+                            <p class="text-sm text-gray-800" x-text="ficha?.tipo_cuenta || '—'"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Número de Cuenta</p>
+                            <p class="text-sm text-gray-800 font-mono" x-text="ficha?.nro_cuenta_bancaria || '—'"></p>
+                        </div>
+                    </div>
+
+                    <!-- Formulario edición -->
+                    <div x-show="editando.cobro" class="px-6 py-4 space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Moneda</label>
+                                <select x-model="draft.cobro.moneda_cobro"
+                                        class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                                    <option value="COP">COP</option>
+                                    <option value="USD">USD</option>
+                                    <option value="EUR">EUR</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Banco</label>
+                                <select x-model="draft.cobro.banco_id"
+                                        class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                                    <option value="">Sin cambio</option>
+                                    <template x-for="b in cat.bancos" :key="b.id">
+                                        <option :value="b.id" x-text="b.titulo"></option>
+                                    </template>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Tipo de Cuenta</label>
+                                <select x-model="draft.cobro.tipo_cuenta_id"
+                                        class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                                    <option value="">Sin cambio</option>
+                                    <template x-for="tc in cat.tiposCuenta" :key="tc.id">
+                                        <option :value="tc.id" x-text="tc.titulo"></option>
+                                    </template>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Número de Cuenta</label>
+                                <input type="text" x-model="draft.cobro.nro_cuenta_bancaria"
+                                       class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm font-mono focus:outline-none focus:border-indigo-400 bg-gray-50">
+                            </div>
+                        </div>
+                        <div x-show="errores.cobro" class="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2" x-text="errores.cobro"></div>
+                        <div class="flex gap-2 justify-end">
+                            <button @click="cancelarEdicion('cobro')"
+                                    class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+                                Cancelar
+                            </button>
+                            <button @click="guardar('cobro')" :disabled="guardando.cobro"
+                                    class="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 disabled:opacity-60 transition-colors">
+                                <span x-show="!guardando.cobro">Guardar</span>
+                                <span x-show="guardando.cobro">Guardando...</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Sección: Relación Operativa ── -->
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-50">
+                        <h3 class="font-bold text-gray-700 flex items-center gap-2">
+                            <span class="w-1.5 h-5 bg-amber-500 rounded-full"></span>
+                            Relación Operativa
+                        </h3>
+                        <button x-show="esAdmin && !editando.operativa"
+                                @click="abrirEdicion('operativa')"
+                                class="text-xs font-semibold text-amber-600 hover:text-amber-800 transition-colors px-3 py-1 rounded-lg hover:bg-amber-50">
+                            Editar
+                        </button>
+                    </div>
+
+                    <!-- Vista lectura -->
+                    <div x-show="!editando.operativa" class="px-6 py-4 grid grid-cols-2 gap-4">
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Tipo Consultor</p>
+                            <p class="text-sm text-gray-800" x-text="ficha?.tipo_consultor || '—'"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase mb-1">Consultor Principal</p>
+                            <p class="text-sm text-gray-800" x-text="ficha?.consultor_principal_nombre || '—'"></p>
+                        </div>
+                    </div>
+
+                    <!-- Formulario edición -->
+                    <div x-show="editando.operativa" class="px-6 py-4 space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Tipo Consultor</label>
+                                <select x-model="draft.operativa.tipo_consultor"
+                                        class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                                    <option value="">Sin cambio</option>
+                                    <option value="Principal">Principal</option>
+                                    <option value="Asociado">Asociado</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Consultor Principal</label>
+                                <select x-model="draft.operativa.consultor_principal_id"
+                                        class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 bg-gray-50">
+                                    <option value="">Sin principal</option>
+                                    <template x-for="cp in cat.principales" :key="cp.id">
+                                        <option :value="cp.id" x-text="cp.nombre"></option>
+                                    </template>
+                                </select>
+                            </div>
+                        </div>
+                        <div x-show="errores.operativa" class="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2" x-text="errores.operativa"></div>
+                        <div class="flex gap-2 justify-end">
+                            <button @click="cancelarEdicion('operativa')"
+                                    class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+                                Cancelar
+                            </button>
+                            <button @click="guardar('operativa')" :disabled="guardando.operativa"
+                                    class="px-4 py-2 text-sm font-semibold text-white bg-amber-500 rounded-xl hover:bg-amber-600 disabled:opacity-60 transition-colors">
+                                <span x-show="!guardando.operativa">Guardar</span>
+                                <span x-show="guardando.operativa">Guardando...</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+            </div><!-- /ficha -->
+        </div><!-- /col derecha -->
+
+    </div><!-- /grid -->
+</div>

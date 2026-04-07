@@ -12716,8 +12716,7 @@ app.get("/cuentas-cobro/historial/:userId", requireAccess({ roles: ["Consultor",
       `
       WITH c_consultor AS (SELECT id FROM usuarios WHERE public_id = $1)
       SELECT
-        cc.id,
-        cc.public_id,
+        cc.public_id AS id,
         COALESCE(NULLIF(cc.descripcion, ''), 'Cuenta de cobro') AS descripcion,
         cc.fecha_correspondiente,
         cc.fecha_periodo_inicio AS fecha_inicio_periodo,

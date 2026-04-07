@@ -48,7 +48,7 @@
                     <template x-for="c in cuentas" :key="c.id">
                         <tr class="hover:bg-cyan-50/20 transition-colors">
                             <td class="px-6 py-4">
-                                <span class="font-bold text-gray-800">#<span x-text="c.id"></span></span>
+                                <span class="font-bold text-gray-800">#<span x-text="c.id.split('-')[0]"></span></span>
                                 <p class="text-xs text-gray-400" x-text="formatDate(c.created_at)"></p>
                             </td>
                             <td class="px-6 py-4">

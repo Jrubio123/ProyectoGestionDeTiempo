@@ -94,7 +94,7 @@ window.misCuentasApp = function () {
                 for (const cuenta of pendientes) {
                     try {
                         const payload = this.getFirmaReconcilePayload(cuenta);
-                        const res = await axios.post(`${API}/cuentas-cobro/${cuenta.public_id}/firma/reconciliar`, payload);
+                        const res = await axios.post(`${API}/cuentas-cobro/${cuenta.id}/firma/reconciliar`, payload);
                         const estadoFirma = String(res?.data?.estado_firma || "").toLowerCase().trim();
                         if (["signed", "firmado", "completed", "aprobado"].includes(estadoFirma) || res?.data?.documento_firmado_url) {
                             huboCambios = true;
@@ -117,7 +117,7 @@ window.misCuentasApp = function () {
             this.modal.open = true;
             this.modal.detalles = [];
             try {
-                const res = await axios.get(`${API}/cuentas-cobro/detalle/${cuenta.public_id}`);
+                const res = await axios.get(`${API}/cuentas-cobro/detalle/${cuenta.id}`);
                 this.modal.detalles = res.data || [];
             } catch (e) {
                 this.modal.detalles = [];
@@ -126,14 +126,14 @@ window.misCuentasApp = function () {
 
         async descargarPDF(cuenta) {
             try {
-                const res = await axios.get(`${API}/cuentas-cobro/${cuenta.public_id}/pdf`, {
+                const res = await axios.get(`${API}/cuentas-cobro/${cuenta.id}/pdf`, {
                     responseType: "blob"
                 });
                 const blob = new Blob([res.data], { type: "application/pdf" });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.href = url;
-                a.download = `CuentaCobro_${cuenta.id}.pdf`;
+                a.download = `CuentaCobro_${cuenta.id.split("-")[0]}.pdf`;
                 document.body.appendChild(a);
                 a.click();
                 a.remove();
@@ -145,11 +145,11 @@ window.misCuentasApp = function () {
 
         async iniciarFirma(cuenta) {
             if (!cuenta?.id) return;
-            const confirmar = confirm(`Se iniciara la firma digital de la cuenta #${cuenta.id}. Deseas continuar?`);
+            const confirmar = confirm(`Se iniciara la firma digital de la cuenta #${cuenta.id.split("-")[0]}. Deseas continuar?`);
             if (!confirmar) return;
 
             try {
-                const res = await axios.post(`${API}/cuentas-cobro/${cuenta.public_id}/firma/iniciar`);
+                const res = await axios.post(`${API}/cuentas-cobro/${cuenta.id}/firma/iniciar`);
                 const urlFirma = res?.data?.url_firma || "";
                 if (urlFirma) {
                     window.open(urlFirma, "_blank", "noopener");

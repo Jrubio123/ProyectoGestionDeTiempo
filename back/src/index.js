@@ -5837,12 +5837,12 @@ function fmtFecha(value) {
   return `${day} de ${meses[month - 1]} de ${year}`;
 }
 
-function infoRow(doc, x, y, label, value, labelWidth = 90) {
-  const w = pageWidth(doc) / 2 - labelWidth - 10;
+function infoRow(doc, x, y, label, value, labelWidth = 90, maxWidth = null) {
+  const w = maxWidth !== null ? maxWidth : (pageWidth(doc) / 2 - labelWidth - 16);
   doc.fontSize(8.5).font("Helvetica-Bold").fillColor(COLOR.textoPrin)
     .text(label, x, y, { width: labelWidth, lineBreak: false });
   doc.font("Helvetica").fillColor(COLOR.textoSec)
-    .text(String(value || "-"), x + labelWidth, y, { width: w, lineBreak: false });
+    .text(String(value || "-"), x + labelWidth, y, { width: w, lineBreak: false, ellipsis: true });
 }
 
 function sectionTitle(doc, title, y) {
@@ -5934,7 +5934,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   curY = sectionTitle(doc, "DEBE A", curY);
 
   const cardPad = 12;
-  const cardH = 72;
+  const cardH = 88;
   doc.save()
     .roundedRect(ML, curY, PW, cardH, 5)
     .strokeColor(COLOR.grisLinea).lineWidth(0.8).stroke()
@@ -5943,6 +5943,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const c1x = ML + cardPad;
   const c2x = ML + PW / 2 + cardPad;
   const rh = 15;
+  const colW = PW / 2 - cardPad - 8;
   let ry = curY + 10;
 
   infoRow(doc, c1x, ry, "Nombre:", cuenta.nombre_usuario || "-");
@@ -5951,14 +5952,15 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   infoRow(doc, c1x, ry, "Documento:",
     `${cuenta.tipo_documento || "CC"}: ${cuenta.cedula || "-"}`);
-  infoRow(doc, c2x, ry, "Dirección:", cuenta.direccion || "-");
+  infoRow(doc, c2x, ry, "Banco:", cuenta.banco || "-");
   ry += rh;
 
-  infoRow(doc, c1x, ry, "Banco:", cuenta.banco || "-");
-  infoRow(doc, c2x, ry, "No. Cuenta:", cuenta.nro_cuenta_bancaria || "-");
+  infoRow(doc, c1x, ry, "No. Cuenta:", cuenta.nro_cuenta_bancaria || "-");
+  infoRow(doc, c2x, ry, "Tipo cuenta:", cuenta.tipo_cuenta || "-");
   ry += rh;
 
-  infoRow(doc, c1x, ry, "Tipo cuenta:", cuenta.tipo_cuenta || "-");
+  // Dirección en fila propia para evitar solapamiento con textos largos
+  infoRow(doc, c1x, ry, "Dirección:", cuenta.direccion || "-", 90, PW - cardPad - 90);
 
   curY += cardH + 14;
 

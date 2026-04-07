@@ -94,7 +94,7 @@ window.misCuentasApp = function () {
                 for (const cuenta of pendientes) {
                     try {
                         const payload = this.getFirmaReconcilePayload(cuenta);
-                        const res = await axios.post(`${API}/cuentas-cobro/${cuenta.id}/firma/reconciliar`, payload);
+                        const res = await axios.post(`${API}/cuentas-cobro/${cuenta.public_id}/firma/reconciliar`, payload);
                         const estadoFirma = String(res?.data?.estado_firma || "").toLowerCase().trim();
                         if (["signed", "firmado", "completed", "aprobado"].includes(estadoFirma) || res?.data?.documento_firmado_url) {
                             huboCambios = true;
@@ -117,7 +117,7 @@ window.misCuentasApp = function () {
             this.modal.open = true;
             this.modal.detalles = [];
             try {
-                const res = await axios.get(`${API}/cuentas-cobro/detalle/${cuenta.id}`);
+                const res = await axios.get(`${API}/cuentas-cobro/detalle/${cuenta.public_id}`);
                 this.modal.detalles = res.data || [];
             } catch (e) {
                 this.modal.detalles = [];
@@ -126,7 +126,7 @@ window.misCuentasApp = function () {
 
         async descargarPDF(cuenta) {
             try {
-                const res = await axios.get(`${API}/cuentas-cobro/${cuenta.id}/pdf`, {
+                const res = await axios.get(`${API}/cuentas-cobro/${cuenta.public_id}/pdf`, {
                     responseType: "blob"
                 });
                 const blob = new Blob([res.data], { type: "application/pdf" });
@@ -149,7 +149,7 @@ window.misCuentasApp = function () {
             if (!confirmar) return;
 
             try {
-                const res = await axios.post(`${API}/cuentas-cobro/${cuenta.id}/firma/iniciar`);
+                const res = await axios.post(`${API}/cuentas-cobro/${cuenta.public_id}/firma/iniciar`);
                 const urlFirma = res?.data?.url_firma || "";
                 if (urlFirma) {
                     window.open(urlFirma, "_blank", "noopener");

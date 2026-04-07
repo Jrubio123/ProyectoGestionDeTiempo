@@ -11267,7 +11267,6 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mediotiempo%'
             )
             AND COALESCE(ra.es_costo_total, false) = false
-            AND (ra.cantidad_dias IS NULL OR ra.cantidad_dias > COALESCE(uso.dias_aprobados, 0))
           )
           OR (
             (
@@ -11488,13 +11487,6 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
         const horasAsignadas = toNullableNumber(info.horas_asignadas);
         const diasAsignados = toNullableNumber(info.cantidad_dias);
 
-        if (esMensual && diasAsignados !== null) {
-          const diasUsados = permitirParcialesAcumulados ? diasComprometidas : diasAprobadas;
-          const disponibles = Math.max(diasAsignados - diasUsados, 0);
-          if (cantidadSolicitada > disponibles) {
-            return res.status(400).json({ error: `Excede días disponibles de la asignación (${disponibles})` });
-          }
-        }
         if (!esMensual && horasAsignadas !== null) {
           const horasUsadas = permitirParcialesAcumulados ? horasComprometidas : horasAprobadas;
           const disponibles = Math.max(horasAsignadas - horasUsadas, 0);
@@ -14606,7 +14598,7 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
               const diasAprobadas = Number(uso.rows[0]?.dias_aprobadas || 0);
               const totalAprobado = Number(uso.rows[0]?.total_aprobado || 0);
               const agotadoPorHoras = !esMensual && horasAsignadas !== null && horasAprobadas >= horasAsignadas;
-              const agotadoPorDias = esMensual && diasAsignados !== null && diasAprobadas >= diasAsignados;
+              const agotadoPorDias = false; // mensual no tiene tope de días
               const agotadoPorTotal = esCostoTotal && totalAsignado !== null && totalAprobado >= totalAsignado;
               if (agotadoPorHoras || agotadoPorDias || agotadoPorTotal) {
                 estadoAprobadoDestino = estados.cerrado || estados.proceso;

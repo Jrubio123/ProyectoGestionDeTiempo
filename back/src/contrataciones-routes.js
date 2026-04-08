@@ -1075,7 +1075,7 @@ module.exports = function registerContratacionesRoutes(deps) {
     return {
       subject: "Solicitud HOLCIM - Envio parcial completado",
       text:
-        "Se completo parcialmente la gestion de la solicitud.\n" +
+        "Se completo parcialmente la gestión de la solicitud.\n" +
         "TI fue notificado para creacion de usuario.\n" +
         "El contrato queda pendiente de confirmacion con el cliente.\n\n" +
         blocks.map((item) => `${item.label}: ${item.value}`).join("\n"),

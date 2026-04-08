@@ -11122,6 +11122,30 @@ app.put("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador"] 
       return res.status(409).json({ error: "Ya existe una tarifa vigente para esta combinación de consultor, cliente, módulo y tipo de asignación." });
     }
 
+    // Recalcular asignaciones activas de tipo Full time / Part Time que usen esta tarifa
+    await pool.query(
+      `UPDATE registro_asignaciones ra
+       SET valor_hora  = $1,
+           valor_dia   = $1 / 20.0,
+           total_pagar = CASE
+             WHEN ra.cantidad_dias IS NOT NULL AND ra.cantidad_dias > 0
+               THEN ($1 / 20.0) * ra.cantidad_dias
+             ELSE ra.total_pagar
+           END,
+           updated_at  = NOW()
+       FROM consultorias con
+       JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
+       WHERE ra.id_consultoria         = con.id
+         AND con.id_cliente              = $2
+         AND ra.consultor_responsable_id = $3
+         AND (($4::int IS NULL AND ra.id_modulo IS NULL) OR ra.id_modulo = $4)
+         AND con.id_tipo_asignacion      = $5
+         AND ra.estado IN ('Abierto', 'Proceso')
+         AND ra.es_costo_total           = false
+         AND LOWER(ta.titulo) IN ('full time', 'part time')`,
+      [valor, clienteInternalId, consultorInternalId, moduloInternalId, tipoAsignacionInternalId]
+    );
+
     const result = await pool.query(
       `SELECT
          tc.public_id AS id,

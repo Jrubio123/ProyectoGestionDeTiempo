@@ -130,7 +130,9 @@ window.registroHorasApp = function () {
             }
             const esDias = this.esTipoMensual(item?.nombre_tipo_asignacion);
             if (esDias) {
-                return false;
+                const disponible = item?.dias_disponibles;
+                if (disponible === null || disponible === undefined || Number.isNaN(Number(disponible))) return false;
+                return reportado > Number(disponible);
             }
             const disponible = item?.horas_disponibles;
             if (disponible === null || disponible === undefined || Number.isNaN(Number(disponible))) return false;
@@ -162,7 +164,8 @@ window.registroHorasApp = function () {
             }
             const esDias = this.esTipoMensual(item?.nombre_tipo_asignacion);
             if (esDias) {
-                return this.formatearDinero((item?.valor_dia || 0) * 20);
+                const disponible = Number(item?.dias_disponibles ?? item?.cantidad_dias ?? 0);
+                return `${this.formatearCantidad(disponible)} Dias`;
             }
             const disponible = Number(item?.horas_disponibles ?? item?.horas_asignadas ?? 0);
             return `${this.formatearCantidad(disponible)} Hrs`;

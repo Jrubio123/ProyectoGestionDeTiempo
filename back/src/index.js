@@ -11624,7 +11624,7 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
           OR
           lr.estado_reporte IS NULL
           OR lr.estado_reporte = 'Rechazado'
-          OR (lr.estado_reporte = 'Aprobado' AND lr.id_cuenta_cobro IS NOT NULL)
+          OR lr.estado_reporte = 'Aprobado'
         )
         AND ra.estado IN ($3::tipo_estado_asignacion, $4::tipo_estado_asignacion)
         AND NOT (
@@ -11665,6 +11665,7 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mediotiempo%'
             )
             AND COALESCE(ra.es_costo_total, false) = false
+            AND (ra.cantidad_dias IS NULL OR ra.cantidad_dias > COALESCE(uso.dias_aprobados, 0))
           )
           OR (
             (
@@ -11885,7 +11886,13 @@ app.post("/reportar-horas", requireAccess({ roles: ["Consultor", "Consultor Prin
         const horasAsignadas = toNullableNumber(info.horas_asignadas);
         const diasAsignados = toNullableNumber(info.cantidad_dias);
 
-        if (!esMensual && horasAsignadas !== null) {
+        if (esMensual && diasAsignados !== null) {
+          const diasUsados = permitirParcialesAcumulados ? diasComprometidas : diasAprobadas;
+          const disponibles = Math.max(diasAsignados - diasUsados, 0);
+          if (cantidadSolicitada > disponibles) {
+            return res.status(400).json({ error: `Excede dias disponibles de la asignacion (${disponibles})` });
+          }
+        } else if (!esMensual && horasAsignadas !== null) {
           const horasUsadas = permitirParcialesAcumulados ? horasComprometidas : horasAprobadas;
           const disponibles = Math.max(horasAsignadas - horasUsadas, 0);
           if (cantidadSolicitada > disponibles) {

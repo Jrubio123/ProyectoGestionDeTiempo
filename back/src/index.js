@@ -5717,6 +5717,15 @@ function formatCuentaCobroDate(value) {
   return `${date.getDate()} de ${months[date.getMonth()]} de ${date.getFullYear()}`;
 }
 
+function normalizeCuentaCobroIdentityValue(value) {
+  const raw = toNullableTrimmedString(value);
+  if (!raw) return null;
+  if (/^\d+\.0+$/.test(raw)) {
+    return raw.replace(/\.0+$/, "");
+  }
+  return raw;
+}
+
 /*function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const totalNumeros = Number(cuenta.total_cuenta_cobro || 0);
   const totalLetras = cuenta.total_letras || buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
@@ -5913,7 +5922,9 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const totalLetras = buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
   const monedaSimbolo = String(cuenta.moneda_cobro || "COP").toUpperCase() === "USD" ? "USD" : "COP";
   const nombreConsultor = cuenta.nombre_usuario || "Consultor";
-  const cedulaConsultor = cuenta.cedula || "-";
+  const cedulaConsultor = normalizeCuentaCobroIdentityValue(cuenta.cedula) || "-";
+  const telefonoConsultor = normalizeCuentaCobroIdentityValue(cuenta.telefono) || "-";
+  const cuentaBancariaConsultor = cuenta.nro_cuenta_bancaria || "-";
 
   // ============================================================
   // 1. HEADER ? dos bloques separados sin solaparse
@@ -5968,15 +5979,15 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   let ry = curY + 10;
 
   infoRow(doc, c1x, ry, "Nombre:", cuenta.nombre_usuario || "-");
-  infoRow(doc, c2x, ry, "Teléfono:", cuenta.telefono || "-");
+  infoRow(doc, c2x, ry, "Teléfono:", telefonoConsultor);
   ry += rh;
 
   infoRow(doc, c1x, ry, "Documento:",
-    `${cuenta.tipo_documento || "CC"}: ${cuenta.cedula || "-"}`);
+    `${cuenta.tipo_documento || "CC"}: ${cedulaConsultor}`);
   infoRow(doc, c2x, ry, "Banco:", cuenta.banco || "-");
   ry += rh;
 
-  infoRow(doc, c1x, ry, "No. Cuenta:", cuenta.nro_cuenta_bancaria || "-");
+  infoRow(doc, c1x, ry, "No. Cuenta:", cuentaBancariaConsultor);
   infoRow(doc, c2x, ry, "Tipo cuenta:", cuenta.tipo_cuenta || "-");
   ry += rh;
 

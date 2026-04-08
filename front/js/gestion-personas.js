@@ -3,7 +3,7 @@ window.gestionPersonasApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
 
     return {
-        esAdmin: false,
+        puedeEditar: false,
         cargando: false,
         cargandoFicha: false,
 
@@ -55,11 +55,11 @@ window.gestionPersonasApp = function () {
             }
 
             const roleKey = window.auth?.getRoleKey?.() || "other";
-            this.esAdmin = roleKey === "admin";
+            this.puedeEditar = roleKey === "admin" || roleKey === "talento_humano";
 
             await Promise.all([
                 this.cargarPersonas(),
-                this.esAdmin ? this.cargarCatalogos() : Promise.resolve()
+                this.puedeEditar ? this.cargarCatalogos() : Promise.resolve()
             ]);
         },
 
@@ -227,10 +227,7 @@ window.gestionPersonasApp = function () {
                         email: this.ficha.email,
                         activo: this.ficha.activo,
                         rol: this.ficha.rol,
-                        tipo_consultor: this.ficha.tipo_consultor,
                         ciudad: this.ficha.ciudad,
-                        tiene_datos_bancarios: !!this.ficha.nro_cuenta_bancaria,
-                        tiene_documento: !!this.ficha.cedula
                     };
                 }
 

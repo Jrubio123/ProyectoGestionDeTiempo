@@ -6380,7 +6380,7 @@ app.get("/consultores", requireAccess({ roles: ["Administrador", "Coordinador"] 
 });
 
 // Consultores principales disponibles (no asociados)
-app.get("/consultores/principales", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+app.get("/consultores/principales", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -6717,7 +6717,7 @@ app.delete("/admin/modulos/:id", requireAccess({ roles: ["Administrador"] }), as
 });
 
 // Roles (admin)
-app.get("/admin/roles", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+app.get("/admin/roles", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
   try {
     const result = await pool.query(
       `
@@ -6859,7 +6859,7 @@ app.delete("/admin/roles/:id", requireAccess({ roles: ["Administrador"] }), asyn
 });
 
 // Bancos (admin)
-app.get("/admin/bancos", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+app.get("/admin/bancos", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
   try {
     const result = await pool.query(
       `
@@ -8779,8 +8779,9 @@ app.get("/admin/usuarios/:id/licencias-historial", requireAccess({ roles: ["Admi
 
 // ====Gestión de Personas ============================================================
 
-function isAdminRole(req) {
-  return normalizeValue(req?.user?.rol) === "administrador";
+function canEditGestionPersonas(req) {
+  const role = normalizeValue(req?.user?.rol);
+  return role === "administrador" || role === "talento humano";
 }
 
 function isValidEmailFormat(value) {
@@ -8820,7 +8821,7 @@ async function resolvePersonaReferenceOrThrow(db, tableName, value, label) {
 
 function sanitizePersonaForRead(row, req) {
   if (!row) return row;
-  if (isAdminRole(req)) return row;
+  if (canEditGestionPersonas(req)) return row;
 
   const sanitized = { ...row, azure_oid: null };
   delete sanitized.rol_id;
@@ -8831,8 +8832,8 @@ function sanitizePersonaForRead(row, req) {
   return sanitized;
 }
 
-// GET /admin/personas — listado de todos los usuarios (admin + coordinador)
-app.get("/admin/personas", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+// GET /admin/personas — listado de todos los usuarios (admin + coordinador + TH)
+app.get("/admin/personas", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -8840,12 +8841,9 @@ app.get("/admin/personas", requireAccess({ roles: ["Administrador", "Coordinador
         u.nombre_usuario,
         u.email,
         u.activo,
-        u.tipo_consultor,
         u.ciudad,
         u.ultimo_inicio_sesion,
         u.azure_oid,
-        (u.nro_cuenta_bancaria IS NOT NULL AND u.nro_cuenta_bancaria <> '') AS tiene_datos_bancarios,
-        (u.cedula IS NOT NULL AND u.cedula <> '')                           AS tiene_documento,
         r.titulo               AS rol
       FROM usuarios u
       LEFT JOIN roles r ON r.id = u.rol_usuario_id
@@ -8858,8 +8856,8 @@ app.get("/admin/personas", requireAccess({ roles: ["Administrador", "Coordinador
   }
 });
 
-// GET /admin/personas/:id — ficha completa (admin + coordinador)
-app.get("/admin/personas/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+// GET /admin/personas/:id — ficha completa (admin + coordinador + TH)
+app.get("/admin/personas/:id", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(`
@@ -8907,8 +8905,8 @@ app.get("/admin/personas/:id", requireAccess({ roles: ["Administrador", "Coordin
   }
 });
 
-// PUT /admin/personas/:id/identidad — nombre, email, rol, activo, azure_oid (admin)
-app.put("/admin/personas/:id/identidad", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+// PUT /admin/personas/:id/identidad — nombre, email, rol, activo, azure_oid (admin + TH)
+app.put("/admin/personas/:id/identidad", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
   const { id } = req.params;
   const { nombre_usuario, email, rol_id, activo, azure_oid } = req.body || {};
   try {
@@ -8955,8 +8953,8 @@ app.put("/admin/personas/:id/identidad", requireAccess({ roles: ["Administrador"
   }
 });
 
-// PUT /admin/personas/:id/personal — tipo_documento, cédula, teléfono, dirección, ciudad, tipo_persona (admin)
-app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+// PUT /admin/personas/:id/personal — tipo_documento, cédula, teléfono, dirección, ciudad, tipo_persona (admin + TH)
+app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
   const { id } = req.params;
   const { tipo_documento_id, cedula, telefono, direccion, ciudad, tipo_persona } = req.body || {};
   try {
@@ -8998,8 +8996,8 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador"]
   }
 });
 
-// PUT /admin/personas/:id/cobro — moneda, banco, tipo_cuenta, nro_cuenta (admin)
-app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+// PUT /admin/personas/:id/cobro — moneda, banco, tipo_cuenta, nro_cuenta (admin + TH)
+app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
   const { id } = req.params;
   const { moneda_cobro, banco_id, tipo_cuenta_id, nro_cuenta_bancaria } = req.body || {};
   try {
@@ -9036,8 +9034,8 @@ app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador"] })
   }
 });
 
-// PUT /admin/personas/:id/operativa — tipo_consultor, consultor_principal (admin)
-app.put("/admin/personas/:id/operativa", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+// PUT /admin/personas/:id/operativa — tipo_consultor, consultor_principal (admin + TH)
+app.put("/admin/personas/:id/operativa", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
   const { id } = req.params;
   const { tipo_consultor, consultor_principal_id } = req.body || {};
   const client = await pool.connect();
@@ -9138,8 +9136,8 @@ app.put("/admin/personas/:id/operativa", requireAccess({ roles: ["Administrador"
   }
 });
 
-// GET /admin/tipos-cuenta-bancaria — catálogo para formulario (admin)
-app.get("/admin/tipos-cuenta-bancaria", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
+// GET /admin/tipos-cuenta-bancaria — catálogo para formulario (admin + TH)
+app.get("/admin/tipos-cuenta-bancaria", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT public_id AS id, titulo

@@ -107,7 +107,7 @@ function initSidebar() {
         ],
         reclutador: ["inicio", "solicitudesRecl"],
         comercial: ["inicio", "solicitudesCoord", "preregistrosCoord"],
-        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin"]
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin", "gestion-personas"]
     };
 
     const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);

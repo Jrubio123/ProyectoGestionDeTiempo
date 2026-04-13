@@ -1164,6 +1164,28 @@ module.exports = function registerContratacionesRoutes(deps) {
     };
   }
 
+  function buildMailCoordinadorDevolucionTh(solicitud, observaciones) {
+    const blocks = [
+      { label: "Tipo", value: solicitud?.tipo_solicitud || "Nuevo" },
+      { label: "Nombre", value: `${solicitud?.nombre || ""} ${solicitud?.apellidos || ""}`.trim() || "N/A" },
+      { label: "Cliente", value: solicitud?.cliente?.nombre || "N/A" },
+      { label: "Perfil", value: solicitud?.perfil || "N/A" },
+      { label: "Observaciones TH", value: observaciones || "Sin detalle" }
+    ];
+
+    return {
+      subject: "Contratacion devuelta por Talento Humano",
+      text:
+        "Talento Humano devolvio la solicitud para ajustes.\n\n" +
+        blocks.map((item) => `${item.label}: ${item.value}`).join("\n"),
+      html: buildEmailLayout({
+        title: "Contratacion devuelta por TH",
+        intro: "La solicitud requiere ajustes por parte del coordinador antes de continuar con la revision.",
+        blocks
+      })
+    };
+  }
+
   async function sendMail(graphContext, recipients, content) {
     const to = Array.isArray(recipients) ? recipients.join(",") : String(recipients || "").trim();
     if (!to) return { ok: false, skipped: true };
@@ -1270,6 +1292,31 @@ module.exports = function registerContratacionesRoutes(deps) {
       WHERE id = $5
       `,
       [estadoFinal, mailResults.mesa, mailResults.th, mailResults.coordinador, internalId]
+    );
+
+    return getByInternalId(pool, internalId);
+  }
+
+  async function redispatchReturnedSolicitudToTh({ internalId, req }) {
+    const rawSolicitud = await getByInternalId(pool, internalId);
+    if (!rawSolicitud) {
+      throw new Error("No se pudo recuperar la solicitud devuelta para reenviar a TH");
+    }
+
+    const solicitud = formatRow(rawSolicitud);
+    const destinosTh = await getDestinosTalentoHumano();
+    const thResult = await sendMail(getGraphContext(req), destinosTh, buildMailThNuevo(solicitud));
+    const thOk = Boolean(thResult.ok);
+
+    await pool.query(
+      `
+      UPDATE solicitudes_contratacion
+      SET
+        estado = $1,
+        correo_enviado_th = $2
+      WHERE id = $3
+      `,
+      [thOk ? ESTADOS.pendienteRevisionTh : ESTADOS.enProceso, thOk, internalId]
     );
 
     return getByInternalId(pool, internalId);
@@ -2043,7 +2090,10 @@ module.exports = function registerContratacionesRoutes(deps) {
             requiere_confirmacion_cliente = $33,
             correo_enviado_mesa = false,
             correo_enviado_th = false,
-            correo_confirmacion_coordinador = false
+            correo_confirmacion_coordinador = false,
+            revisado_th_por = NULL,
+            fecha_revision_th = NULL,
+            observaciones_th = NULL
           WHERE id = $34
           `,
           [
@@ -2088,7 +2138,25 @@ module.exports = function registerContratacionesRoutes(deps) {
           ]
         );
 
-        await dispatchAndFinalizeSolicitud({ internalId, req });
+        const shouldRedispatchOnlyTh =
+          tipoSolicitud === TIPO_NUEVO &&
+          current.estado === ESTADOS.pendienteCoordinador &&
+          (Boolean(current.correo_enviado_mesa) || Boolean(current.correo_enviado_th) || Boolean(current.fecha_revision_th));
+
+        if (shouldRedispatchOnlyTh) {
+          await pool.query(
+            `
+            UPDATE solicitudes_contratacion
+            SET correo_enviado_mesa = $1
+            WHERE id = $2
+            `,
+            [Boolean(current.correo_enviado_mesa), internalId]
+          );
+          await redispatchReturnedSolicitudToTh({ internalId, req });
+        } else {
+          await dispatchAndFinalizeSolicitud({ internalId, req });
+        }
+
         const afterDispatch = await getByInternalId(pool, internalId);
         await syncLinkedPreregistroFromSolicitud(pool, afterDispatch, {
           actorUserId: req.user?.id || null,
@@ -2103,6 +2171,71 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
         console.error(err);
         return res.status(500).json({ error: "Error completando solicitud de contratacion" });
+      }
+    }
+  );
+
+  app.patch(
+    "/contrataciones/solicitudes/:id/devolver-coordinador",
+    requireAccess({ roles: ["Administrador", "Talento Humano"] }),
+    async (req, res) => {
+      try {
+        const row = await getByPublicId(pool, req.params.id);
+        if (!row) return res.status(404).json({ error: "Solicitud no encontrada" });
+        const internalId = row.id;
+
+        if (row.tipo_solicitud !== TIPO_NUEVO) {
+          return res.status(422).json({ error: "Solo aplica para solicitudes tipo Nuevo" });
+        }
+        if (![ESTADOS.pendienteRevisionTh, ESTADOS.pendienteCorreoSilver].includes(row.estado)) {
+          return res.status(422).json({
+            error: `La solicitud debe estar en '${ESTADOS.pendienteRevisionTh}' o '${ESTADOS.pendienteCorreoSilver}' para devolverse a coordinador`
+          });
+        }
+
+        const observaciones = toNullableString(req.body?.observaciones_th);
+        if (!observaciones || observaciones.length < 10) {
+          return res.status(400).json({ error: "Las observaciones de devolucion deben tener al menos 10 caracteres" });
+        }
+
+        await pool.query(
+          `
+          UPDATE solicitudes_contratacion
+          SET
+            estado = $1,
+            revisado_th_por = $2,
+            fecha_revision_th = NOW(),
+            observaciones_th = $3,
+            correo_enviado_th = false,
+            updated_at = NOW()
+          WHERE id = $4
+          `,
+          [ESTADOS.pendienteCoordinador, req.user?.id || null, observaciones, internalId]
+        );
+
+        const updatedSolicitud = await getByInternalId(pool, internalId);
+        await syncLinkedPreregistroFromSolicitud(pool, updatedSolicitud, {
+          actorUserId: req.user?.id || null
+        });
+
+        if (row.coordinador_email) {
+          sendMail(
+            getGraphContext(req),
+            row.coordinador_email,
+            buildMailCoordinadorDevolucionTh(formatRow(updatedSolicitud), observaciones)
+          ).catch((mailErr) => {
+            console.error("Error notificando devolucion a coordinador:", mailErr?.message || mailErr);
+          });
+        }
+
+        const updated = await syncAnexoDesdeSolicitud(internalId, req.user?.id);
+        return res.json(formatRow(updated));
+      } catch (err) {
+        if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+          return res.status(404).json({ error: "Solicitud no encontrada" });
+        }
+        console.error(err);
+        return res.status(500).json({ error: "Error devolviendo solicitud a coordinador" });
       }
     }
   );
@@ -2215,6 +2348,12 @@ module.exports = function registerContratacionesRoutes(deps) {
         const tipoCuenta = toNullableString(datosExtra.tipo_cuenta);
         const numeroCuenta = toNullableString(datosExtra.numero_cuenta);
         const tipoPersona = normalizeTipoPersonaForUsuarios(datosExtra.tipo_persona);
+        const facturaEnColombia =
+          datosExtra.factura_en_colombia === true || datosExtra.factura_en_colombia === "true"
+            ? true
+            : datosExtra.factura_en_colombia === false || datosExtra.factura_en_colombia === "false"
+              ? false
+              : null;
 
         if (!direccion || !bancoId || !tipoCuenta || !numeroCuenta || !tipoPersona) {
           await client.query("ROLLBACK");
@@ -2248,9 +2387,9 @@ module.exports = function registerContratacionesRoutes(deps) {
           const moneda = normalizeMoneda(row.moneda) || "COP";
           const usuarioRes = await client.query(
             `INSERT INTO usuarios
-              (nombre_usuario, email, rol_usuario_id, activo, nro_cuenta_bancaria, banco_id, tipo_cuenta_id, tipo_documento_id, cedula, direccion, telefono, ciudad, tipo_persona, moneda_cobro, created_by, azure_oid)
+              (nombre_usuario, email, rol_usuario_id, activo, nro_cuenta_bancaria, banco_id, tipo_cuenta_id, tipo_documento_id, cedula, direccion, telefono, ciudad, tipo_persona, moneda_cobro, factura_en_colombia, created_by, azure_oid)
              VALUES
-              ($1, $2, $3, true, $4, $5, $6, $7, $8, $9, $10, $11, $12::tipo_persona, $13::tipo_moneda, 'contratacion_th', NULL)
+              ($1, $2, $3, true, $4, $5, $6, $7, $8, $9, $10, $11, $12::tipo_persona, $13::tipo_moneda, $14, 'contratacion_th', NULL)
              RETURNING id, public_id, nombre_usuario, email`,
             [
               nombreCompleto || correoSilver,
@@ -2265,7 +2404,8 @@ module.exports = function registerContratacionesRoutes(deps) {
               row.telefono || null,
               row.ubicacion || null,
               tipoPersona,
-              moneda
+              moneda,
+              facturaEnColombia
             ]
           );
 

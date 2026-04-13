@@ -365,6 +365,7 @@ CREATE TABLE usuarios
 
     -- Clasificación (antes eran Choice en SharePoint)
     tipo_persona tipo_persona,
+    factura_en_colombia BOOLEAN,
     moneda_cobro tipo_moneda DEFAULT 'COP',
     tipo_consultor tipo_consultor_enum,
 
@@ -836,6 +837,7 @@ CREATE TABLE preregistro_personas (
     fecha_fin DATE,
     moneda tipo_moneda,
     pais_pago VARCHAR(100),
+    factura_en_colombia BOOLEAN,
     tarifa_hora NUMERIC(15,2),
     tarifa_mes NUMERIC(15,2),
     tarifa_medio_tiempo NUMERIC(15,2),

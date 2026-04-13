@@ -182,7 +182,10 @@ window.gestionPersonasApp = function () {
                     moneda_cobro: this.ficha?.moneda_cobro || "COP",
                     banco_id: this.ficha?.banco_id || "",
                     tipo_cuenta_id: this.ficha?.tipo_cuenta_id || "",
-                    nro_cuenta_bancaria: this.ficha?.nro_cuenta_bancaria || ""
+                    nro_cuenta_bancaria: this.ficha?.nro_cuenta_bancaria || "",
+                    factura_en_colombia:
+                        this.ficha?.factura_en_colombia === true ? "true" :
+                        this.ficha?.factura_en_colombia === false ? "false" : ""
                 };
                 return;
             }

@@ -163,6 +163,12 @@ module.exports = function registerPreregistroRoutes(deps) {
     return null;
   }
 
+  function normalizeFacturaEnColombia(value) {
+    if (value === true || value === "true" || value === 1 || value === "1") return true;
+    if (value === false || value === "false" || value === 0 || value === "0") return false;
+    return null;
+  }
+
   function normalizeTipoPersonaForUsuarios(value) {
     const raw = normalizeValue(value);
     if (raw === "natural") return "Natural";
@@ -185,7 +191,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       s.estado AS solicitud_estado,
       p.nombre, p.apellidos, p.tipo_documento_id, di.titulo AS tipo_documento, p.numero_documento, p.telefono,
       p.correo_personal, p.pais_ubicacion, p.ciudad,
-      p.fecha_fin, p.moneda, p.pais_pago,
+      p.fecha_fin, p.moneda, p.pais_pago, p.factura_en_colombia,
       p.tarifa_hora, p.tarifa_mes, p.tarifa_medio_tiempo, p.tarifa_capacitacion,
       p.vpn_corona, p.necesita_s_user, p.grupo_usuario, p.grupo_distribucion,
       p.observaciones, p.direccion, p.tipo_persona, p.banco_id,
@@ -247,6 +253,10 @@ module.exports = function registerPreregistroRoutes(deps) {
       fecha_fin: row.fecha_fin,
       moneda: row.moneda,
       pais_pago: row.pais_pago,
+      factura_en_colombia:
+        row.factura_en_colombia === null || row.factura_en_colombia === undefined
+          ? null
+          : Boolean(row.factura_en_colombia),
       tarifa_hora: row.tarifa_hora,
       tarifa_mes: row.tarifa_mes,
       tarifa_medio_tiempo: row.tarifa_medio_tiempo,
@@ -337,7 +347,11 @@ module.exports = function registerPreregistroRoutes(deps) {
         : Boolean(preregistroRow.necesita_s_user),
       grupo_usuario: preregistroRow.grupo_usuario || existingDatosExtra.grupo_usuario || null,
       grupo_distribucion: preregistroRow.grupo_distribucion || existingDatosExtra.grupo_distribucion || null,
-      pais_pago: preregistroRow.pais_pago || existingDatosExtra.pais_pago || null
+      pais_pago: preregistroRow.pais_pago || existingDatosExtra.pais_pago || null,
+      factura_en_colombia:
+        preregistroRow.factura_en_colombia === null || preregistroRow.factura_en_colombia === undefined
+          ? (existingDatosExtra.factura_en_colombia ?? null)
+          : Boolean(preregistroRow.factura_en_colombia)
     };
     const nextEstado = estado || mapPreregistroEstadoToSolicitudEstado(preregistroRow.estado);
 
@@ -418,9 +432,13 @@ module.exports = function registerPreregistroRoutes(deps) {
             moneda, tarifa_mes, tarifa_hora } = req.body || {};
     const docType = String(tipo_documento || "").trim();
     const monedaNorm = String(moneda || "").trim().toUpperCase();
+    const facturaEnColombia = normalizeFacturaEnColombia(req.body?.factura_en_colombia);
 
     if (!nombre || !apellidos || !docType || !numero_documento || !correo_personal) {
       return res.status(400).json({ error: "Faltan campos obligatorios de la seccion 1" });
+    }
+    if (facturaEnColombia === null) {
+      return res.status(400).json({ error: "factura_en_colombia es obligatorio" });
     }
     if (!monedaNorm || !MONEDAS.has(monedaNorm)) {
       return res.status(400).json({ error: "moneda es obligatoria y debe ser COP, USD o EUR" });
@@ -495,8 +513,8 @@ module.exports = function registerPreregistroRoutes(deps) {
       await client.query(`UPDATE solicitudes_rrhh SET estado = 'Contratado' WHERE id = $1`, [solicitudId]);
       const created = await client.query(
         `INSERT INTO preregistro_personas
-          (id_solicitud_rrhh, nombre, apellidos, tipo_documento_id, numero_documento, telefono, correo_personal, pais_ubicacion, ciudad, moneda, tarifa_mes, tarifa_hora, estado, creado_por)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          (id_solicitud_rrhh, nombre, apellidos, tipo_documento_id, numero_documento, telefono, correo_personal, pais_ubicacion, ciudad, moneda, factura_en_colombia, tarifa_mes, tarifa_hora, estado, creado_por)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
          RETURNING id, public_id, estado`,
         [
           solicitudId,
@@ -509,6 +527,7 @@ module.exports = function registerPreregistroRoutes(deps) {
           pais_ubicacion || null,
           ciudad || null,
           monedaNorm,
+          facturaEnColombia,
           tarifaMesParsed.value,
           tarifaHoraParsed.value,
           ESTADOS.pendienteComercial,
@@ -700,6 +719,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       "pais_ubicacion",
       "ciudad",
       "moneda",
+      "factura_en_colombia",
       "tarifa_mes",
       "tarifa_hora"
     ];
@@ -736,6 +756,14 @@ module.exports = function registerPreregistroRoutes(deps) {
         nextTarifaHora = parsed.value;
       }
 
+      let nextFacturaEnColombia = current.factura_en_colombia;
+      if (req.body?.factura_en_colombia !== undefined) {
+        nextFacturaEnColombia = normalizeFacturaEnColombia(req.body.factura_en_colombia);
+        if (nextFacturaEnColombia === null) {
+          return res.status(400).json({ error: "factura_en_colombia debe ser booleano" });
+        }
+      }
+
       if (req.body?.tarifa_mes !== undefined || req.body?.tarifa_hora !== undefined) {
         if (nextTarifaMes === null && nextTarifaHora === null) {
           return res.status(400).json({ error: "Se requiere tarifa mensual o tarifa por hora" });
@@ -762,6 +790,11 @@ module.exports = function registerPreregistroRoutes(deps) {
         if (field === "moneda") {
           sets.push(`moneda = $${idx++}`);
           vals.push(nextMoneda);
+          continue;
+        }
+        if (field === "factura_en_colombia") {
+          sets.push(`factura_en_colombia = $${idx++}`);
+          vals.push(nextFacturaEnColombia);
           continue;
         }
         if (field === "tarifa_mes") {
@@ -1114,9 +1147,9 @@ module.exports = function registerPreregistroRoutes(deps) {
       const nombreCompleto = `${current.nombre || ""} ${current.apellidos || ""}`.trim();
       const usuarioRes = await client.query(
         `INSERT INTO usuarios
-          (nombre_usuario, email, rol_usuario_id, activo, nro_cuenta_bancaria, banco_id, tipo_cuenta_id, tipo_documento_id, cedula, direccion, telefono, ciudad, tipo_persona, moneda_cobro, created_by, azure_oid)
+          (nombre_usuario, email, rol_usuario_id, activo, nro_cuenta_bancaria, banco_id, tipo_cuenta_id, tipo_documento_id, cedula, direccion, telefono, ciudad, tipo_persona, moneda_cobro, factura_en_colombia, created_by, azure_oid)
          VALUES
-          ($1, $2, $3, true, $4, $5, $6, $7, $8, $9, $10, $11, $12::tipo_persona, $13::tipo_moneda, 'preregistro_th', NULL)
+          ($1, $2, $3, true, $4, $5, $6, $7, $8, $9, $10, $11, $12::tipo_persona, $13::tipo_moneda, $14, 'preregistro_th', NULL)
          RETURNING id, public_id, nombre_usuario, email`,
         [
           nombreCompleto || correoSilver,
@@ -1131,7 +1164,10 @@ module.exports = function registerPreregistroRoutes(deps) {
           current.telefono || null,
           current.ciudad || null,
           normalizeTipoPersonaForUsuarios(current.tipo_persona) || null,
-          current.moneda || "COP"
+          current.moneda || "COP",
+          current.factura_en_colombia === null || current.factura_en_colombia === undefined
+            ? null
+            : Boolean(current.factura_en_colombia)
         ]
       );
 

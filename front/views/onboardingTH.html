@@ -403,6 +403,7 @@
                     <div class="prereg-info-card"><p class="prereg-info-label">Tipo contrato</p><p class="prereg-info-value" x-text="modalidadContratoDetalle()"></p></div>
                     <div class="prereg-info-card"><p class="prereg-info-label">Valor a pagar</p><p class="prereg-info-value" x-text="tarifaPrincipalDetalle()"></p></div>
                     <div class="prereg-info-card"><p class="prereg-info-label">Moneda</p><p class="prereg-info-value" x-text="itemActivo?.moneda || '-'"></p></div>
+                    <div class="prereg-info-card"><p class="prereg-info-label">Factura en Colombia</p><p class="prereg-info-value" x-text="itemActivo?.factura_en_colombia === true ? 'Si' : itemActivo?.factura_en_colombia === false ? 'No' : '-'"></p></div>
                     <div class="prereg-info-card"><p class="prereg-info-label">Coordinador</p><p class="prereg-info-value" x-text="itemActivo?.solicitud?.coordinador?.nombre || '-'"></p></div>
                 </div>
             </section>
@@ -430,10 +431,23 @@
                 </div>
             </section>
 
+            <section class="prereg-section" x-show="itemActivo?.origen_flujo === 'contratacion'">
+                <p class="prereg-section-title">Observaciones TH</p>
+                <textarea
+                    class="prereg-input min-h-[120px]"
+                    x-model="observacionesRevisionTh"
+                    :disabled="!seccion3Editable"
+                    placeholder="Describe aqui los ajustes requeridos si vas a devolver la contratacion al coordinador."
+                ></textarea>
+            </section>
+
             <div class="prereg-modal-footer">
                 <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarDetalle">Cancelar</button>
                 <button type="button" x-show="seccion3Editable" @click="guardarS3" :disabled="guardandoS3" class="prereg-btn prereg-btn-ghost">
                     <span x-text="guardandoS3 ? 'Guardando...' : 'Guardar'"></span>
+                </button>
+                <button type="button" x-show="seccion3Editable && itemActivo?.origen_flujo === 'contratacion'" @click="devolverContratacion" :disabled="!puedeDevolverContratacion || aprobando" class="prereg-btn prereg-btn-danger">
+                    <span x-text="aprobando ? 'Devolviendo...' : 'Devolver a coordinador'"></span>
                 </button>
                 <button type="button" x-show="seccion3Editable && itemActivo?.origen_flujo === 'preregistro'" @click="aprobarPreregistro" :disabled="!puedeAprobar || aprobando" class="prereg-btn prereg-btn-teal">
                     <span x-text="aprobando ? 'Aprobando...' : 'Aprobar'"></span>

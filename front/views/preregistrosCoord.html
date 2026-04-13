@@ -96,6 +96,11 @@
             </div>
 
             <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 md:p-4 mb-4">
+                <div x-show="modoEdicion && observacionesThActivas" class="mb-4 rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-900" style="display: none;">
+                    <p class="text-xs uppercase tracking-wide font-bold text-amber-700">Observaciones de Talento Humano</p>
+                    <p class="mt-2 whitespace-pre-line" x-text="observacionesThActivas"></p>
+                </div>
+
                 <p class="text-xs uppercase tracking-wide text-slate-500 font-bold mb-2">Buscar Persona Existente</p>
                 <div class="relative" @click.outside="ocultarSugerenciasPersona">
                     <input
@@ -450,6 +455,10 @@
                             <li x-text="cambio"></li>
                         </template>
                     </ul>
+                </div>
+                <div x-show="detalle?.observaciones_th" class="rounded-xl border border-amber-200 bg-amber-50/70 p-3 md:col-span-2" style="display: none;">
+                    <p class="text-xs text-amber-700">Observaciones TH</p>
+                    <p class="font-semibold text-amber-900 whitespace-pre-line" x-text="detalle?.observaciones_th"></p>
                 </div>
                 <div class="rounded-xl border border-slate-200 p-3 md:col-span-2"><p class="text-xs text-slate-500">Observaciones</p><p class="font-semibold" x-text="detalle?.observaciones || '-' "></p></div>
             </div>

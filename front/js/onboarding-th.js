@@ -68,6 +68,7 @@ window.onboardingThApp = function () {
         guardandoS3: false,
         aprobando: false,
         anulando: false,
+        observacionesRevisionTh: "",
         itemActivo: null,
         formS3: emptyS3(),
         motivoAnulacion: "",
@@ -278,6 +279,7 @@ window.onboardingThApp = function () {
             const preregistro = linkedPreregistro || null;
             const preregistroSolicitud = preregistro?.solicitud || {};
             const preregistroBanco = preregistro?.banco || null;
+            const facturaEnColombiaRaw = preregistro?.factura_en_colombia ?? item?.datos_extra?.factura_en_colombia;
             return {
                 id: item?.id,
                 origen_flujo: "contratacion",
@@ -307,6 +309,12 @@ window.onboardingThApp = function () {
                 fecha_fin: item?.fecha_fin || preregistro?.fecha_fin || null,
                 moneda: item?.moneda || preregistro?.moneda || null,
                 pais_pago: preregistro?.pais_pago || item?.datos_extra?.pais_pago || null,
+                factura_en_colombia:
+                    facturaEnColombiaRaw === true || facturaEnColombiaRaw === "true"
+                        ? true
+                        : facturaEnColombiaRaw === false || facturaEnColombiaRaw === "false"
+                            ? false
+                            : null,
                 tarifa_hora: item?.tarifa_hora ?? preregistro?.tarifa_hora ?? null,
                 tarifa_mes: item?.tarifa_mes ?? preregistro?.tarifa_mes ?? null,
                 tarifa_medio_tiempo: item?.tarifa_medio_tiempo ?? preregistro?.tarifa_medio_tiempo ?? null,
@@ -493,6 +501,7 @@ window.onboardingThApp = function () {
                 numero_cuenta: item?.numero_cuenta || "",
                 correo_silver: item?.correo_silver || ""
             };
+            this.observacionesRevisionTh = item?.observaciones_th || "";
             this.modalDetalle = true;
             if (focoCorreo) {
                 setTimeout(() => document.getElementById("thCorreoSilver")?.focus(), 90);
@@ -505,6 +514,7 @@ window.onboardingThApp = function () {
             this.itemActivo = null;
             this.formS3 = emptyS3();
             this.motivoAnulacion = "";
+            this.observacionesRevisionTh = "";
             this.guardandoS3 = false;
             this.aprobando = false;
             this.anulando = false;
@@ -583,6 +593,12 @@ window.onboardingThApp = function () {
             return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(this.formS3.correo_silver || "").trim());
         },
 
+        get puedeDevolverContratacion() {
+            if (this.itemActivo?.origen_flujo !== "contratacion") return false;
+            if (!this.seccion3Editable) return false;
+            return String(this.observacionesRevisionTh || "").trim().length >= 10;
+        },
+
         async guardarS3() {
             if (!this.itemActivo?.id || !this.seccion3Editable) return;
             if (!this.s3BaseValida) {
@@ -636,13 +652,32 @@ window.onboardingThApp = function () {
                 );
                 await axios.patch(
                     `${API}/contrataciones/solicitudes/${this.itemActivo.id}/revision-th`,
-                    { observaciones_th: null },
+                    { observaciones_th: String(this.observacionesRevisionTh || "").trim() || null },
                     this.getAuthConfig()
                 );
                 await this.cargarRegistros();
                 this.cerrarDetalle();
             } catch (e) {
                 alert(e?.response?.data?.error || "Error completando revision TH");
+            } finally {
+                this.aprobando = false;
+            }
+        },
+
+        async devolverContratacion() {
+            if (!this.puedeDevolverContratacion) return;
+            if (!confirm("Esta contratacion volvera al coordinador para ajustes. Deseas continuar?")) return;
+            this.aprobando = true;
+            try {
+                await axios.patch(
+                    `${API}/contrataciones/solicitudes/${this.itemActivo.id}/devolver-coordinador`,
+                    { observaciones_th: String(this.observacionesRevisionTh || "").trim() },
+                    this.getAuthConfig()
+                );
+                await this.cargarRegistros();
+                this.cerrarDetalle();
+            } catch (e) {
+                alert(e?.response?.data?.error || "Error devolviendo contratacion a coordinador");
             } finally {
                 this.aprobando = false;
             }

@@ -8881,6 +8881,7 @@ app.get("/admin/personas/:id", requireAccess({ roles: ["Administrador", "Coordin
         u.ultimo_inicio_sesion,
         u.tipo_persona,
         u.moneda_cobro,
+        u.factura_en_colombia,
         u.tipo_consultor,
         u.cedula,
         u.telefono,
@@ -9010,14 +9011,27 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
 // PUT /admin/personas/:id/cobro — moneda, banco, tipo_cuenta, nro_cuenta (admin + TH)
 app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
   const { id } = req.params;
-  const { moneda_cobro, banco_id, tipo_cuenta_id, nro_cuenta_bancaria } = req.body || {};
+  const { moneda_cobro, banco_id, tipo_cuenta_id, nro_cuenta_bancaria, factura_en_colombia } = req.body || {};
   try {
     const bancoRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.bancos, banco_id, "Banco");
     const tipoCuentaRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.tipoCuentaBancaria, tipo_cuenta_id, "Tipo de cuenta");
     const monedaNormalizada = moneda_cobro === undefined ? undefined : normalizeValue(moneda_cobro).toUpperCase();
+    const facturaEnColombiaNormalizada =
+      factura_en_colombia === undefined
+        ? undefined
+        : factura_en_colombia === null || factura_en_colombia === ""
+          ? null
+          : factura_en_colombia === true || factura_en_colombia === "true" || factura_en_colombia === 1 || factura_en_colombia === "1"
+            ? true
+            : factura_en_colombia === false || factura_en_colombia === "false" || factura_en_colombia === 0 || factura_en_colombia === "0"
+              ? false
+              : "__invalid__";
 
     if (!["COP", "USD", "EUR"].includes(monedaNormalizada || "")) {
       return res.status(400).json({ error: "Moneda no válida" });
+    }
+    if (facturaEnColombiaNormalizada === "__invalid__") {
+      return res.status(400).json({ error: "Factura en Colombia no válida" });
     }
 
     const result = await pool.query(`
@@ -9026,14 +9040,16 @@ app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador", "T
         banco_id            = $2,
         tipo_cuenta_id      = $3,
         nro_cuenta_bancaria = $4,
+        factura_en_colombia = $5,
         updated_at        = CURRENT_TIMESTAMP
-      WHERE public_id = $5
-      RETURNING public_id AS id, moneda_cobro, nro_cuenta_bancaria
+      WHERE public_id = $6
+      RETURNING public_id AS id, moneda_cobro, nro_cuenta_bancaria, factura_en_colombia
     `, [
       monedaNormalizada,
       bancoRef.id,
       tipoCuentaRef.id,
       toNullableTrimmedString(nro_cuenta_bancaria),
+      facturaEnColombiaNormalizada,
       id
     ]);
     if (result.rowCount === 0) return res.status(404).json({ error: "Persona no encontrada" });

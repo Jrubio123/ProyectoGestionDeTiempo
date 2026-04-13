@@ -208,10 +208,17 @@
                         <option value="USD">USD &mdash; D&oacute;lar</option>
                         <option value="EUR">EUR &mdash; Euro</option>
                     </select>
+                    <select class="rrhh-input text-sm" x-model="formS1.factura_en_colombia">
+                        <option value="">Factura en Colombia *</option>
+                        <option value="true">Si</option>
+                        <option value="false">No</option>
+                    </select>
                     <div class="relative">
                         <span class="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-[#6f7b8e] pointer-events-none">$/mes</span>
                         <input type="number" min="0" class="rrhh-input rrhh-input-prefix text-sm" x-model="formS1.tarifa_mes" placeholder="Tarifa mensual">
                     </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
                     <div class="relative">
                         <span class="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-[#6f7b8e] pointer-events-none">$/hr</span>
                         <input type="number" min="0" class="rrhh-input rrhh-input-prefix text-sm" x-model="formS1.tarifa_hora" placeholder="Tarifa por hora">

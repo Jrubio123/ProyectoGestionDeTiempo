@@ -1,7 +1,6 @@
 // js/preregistros-coord.js
 window.preregistrosCoordApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
-    const DRAFT_SOURCE_RRHH = "rrhh";
     const DEFAULT_MONEDAS = ["COP", "USD", "EUR"];
     const EXTENSION_TIPOS_CON_FECHA = ["full_time", "medio_tiempo", "proyecto"];
 
@@ -65,6 +64,7 @@ window.preregistrosCoordApp = function () {
         modoEdicion: false,
         solicitudEditId: null,
         datosExtraBase: {},
+        observacionesThActivas: "",
 
         form: emptyForm(),
         busquedaPersona: "",
@@ -512,6 +512,7 @@ window.preregistrosCoordApp = function () {
                     item?.datos_extra && typeof item.datos_extra === "object" && !Array.isArray(item.datos_extra)
                         ? { ...item.datos_extra }
                         : {};
+                this.observacionesThActivas = item?.observaciones_th || "";
                 this.personaSeleccionada = this.construirPersonaDesdeSolicitud(item);
                 this.busquedaPersona = this.personaSeleccionada?.nombre_usuario || item?.persona?.nombre || "";
                 return;
@@ -520,6 +521,7 @@ window.preregistrosCoordApp = function () {
             this.modoEdicion = false;
             this.solicitudEditId = null;
             this.datosExtraBase = {};
+            this.observacionesThActivas = "";
             this.form = emptyForm();
             this.busquedaPersona = "";
             if (tipo !== "Extension") {
@@ -539,6 +541,7 @@ window.preregistrosCoordApp = function () {
             this.modoEdicion = false;
             this.solicitudEditId = null;
             this.datosExtraBase = {};
+            this.observacionesThActivas = "";
             this.form = emptyForm();
             this.personasEncontradas = [];
             this.busquedaPersona = "";
@@ -896,8 +899,7 @@ window.preregistrosCoordApp = function () {
             return (
                 !!item &&
                 item.tipo_solicitud === "Nuevo" &&
-                estadosContinuable.includes(estado) &&
-                String(item?.datos_extra?.origen || "").toLowerCase() === DRAFT_SOURCE_RRHH
+                estadosContinuable.includes(estado)
             );
         },
 

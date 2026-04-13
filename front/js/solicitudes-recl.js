@@ -12,6 +12,7 @@ window.solicitudesReclApp = function () {
         pais_ubicacion: "",
         ciudad: "",
         moneda: "",
+        factura_en_colombia: "",
         tarifa_mes: "",
         tarifa_hora: ""
     });
@@ -177,6 +178,9 @@ window.solicitudesReclApp = function () {
                 pais_ubicacion: p.pais_ubicacion || "",
                 ciudad: p.ciudad || "",
                 moneda: p.moneda || "",
+                factura_en_colombia:
+                    p.factura_en_colombia === true ? "true" :
+                    p.factura_en_colombia === false ? "false" : "",
                 tarifa_mes: p.tarifa_mes || "",
                 tarifa_hora: p.tarifa_hora || ""
             };
@@ -197,6 +201,7 @@ window.solicitudesReclApp = function () {
                 if (!String(this.formS1?.[k] || "").trim()) return false;
             }
             if (!String(this.formS1.moneda || "").trim()) return false;
+            if (!["true", "false"].includes(String(this.formS1.factura_en_colombia || "").trim())) return false;
             const tarifaMes = this.formS1.tarifa_mes !== "" && this.formS1.tarifa_mes !== null ? Number(this.formS1.tarifa_mes) : null;
             const tarifaHora = this.formS1.tarifa_hora !== "" && this.formS1.tarifa_hora !== null ? Number(this.formS1.tarifa_hora) : null;
             if (tarifaMes !== null && (!Number.isFinite(tarifaMes) || tarifaMes < 0)) return false;
@@ -223,6 +228,7 @@ window.solicitudesReclApp = function () {
                 pais_ubicacion: String(this.formS1.pais_ubicacion || "").trim() || null,
                 ciudad: String(this.formS1.ciudad || "").trim() || null,
                 moneda: String(this.formS1.moneda || "").trim() || null,
+                factura_en_colombia: String(this.formS1.factura_en_colombia || "").trim() === "true",
                 tarifa_mes: this.formS1.tarifa_mes !== "" && this.formS1.tarifa_mes !== null ? Number(this.formS1.tarifa_mes) : null,
                 tarifa_hora: this.formS1.tarifa_hora !== "" && this.formS1.tarifa_hora !== null ? Number(this.formS1.tarifa_hora) : null
             };

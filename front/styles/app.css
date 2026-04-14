@@ -373,7 +373,7 @@ body.sidebar-collapsed .app-main {
 }
 
 /* Posicionamiento de overlays: fixed anclado al área de contenido (excluye navbar y sidebar) */
-/*.view-overlay {
+.view-overlay {
     position: fixed;
     top: var(--navbar-height);
     right: 0;
@@ -383,22 +383,8 @@ body.sidebar-collapsed .app-main {
     display: flex;
     align-items: center;
     justify-content: center;
-}*/
-
-.view-overlay {
-    position: fixed;
-    top: var(--navbar-height);
-    right: 0;
-    bottom: 0;
-    left: var(--sidebar-width);
-    z-index: 300;
-
-    /* Cambio clave: scroll en el overlay, no en el modal */
-    display: flex;
-    align-items: flex-start;        /* ← ya no centra, parte desde arriba */
-    justify-content: center;
-    overflow-y: auto;               /* ← el scroll va aquí */
-    padding: 2rem 1rem;             /* ← respiro visual arriba y abajo */
+    margin: 0 !important;
+     /* Fondo semitransparente para destacar el overlay */
 }
 
 body.sidebar-collapsed .view-overlay {

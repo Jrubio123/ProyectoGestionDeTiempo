@@ -392,9 +392,13 @@ body.sidebar-collapsed .app-main {
     bottom: 0;
     left: var(--sidebar-width);
     z-index: 300;
-    display: grid;
-    place-items: center;
-    overflow-y: auto;
+
+    /* Cambio clave: scroll en el overlay, no en el modal */
+    display: flex;
+    align-items: flex-start;        /* ← ya no centra, parte desde arriba */
+    justify-content: center;
+    overflow-y: auto;               /* ← el scroll va aquí */
+    padding: 2rem 1rem;             /* ← respiro visual arriba y abajo */
 }
 
 body.sidebar-collapsed .view-overlay {

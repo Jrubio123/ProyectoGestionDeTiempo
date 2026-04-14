@@ -1120,6 +1120,7 @@ const ID_TABLES = Object.freeze({
   tipoAsignacion: "tipo_asignacion",
   modulo: "modulo",
   usuarios: "usuarios",
+  personas: "personas",
   consultorias: "consultorias",
   tarifaConsultor: "tarifa_consultor",
   registroAsignaciones: "registro_asignaciones",
@@ -2568,16 +2569,18 @@ async function getUsuarioAnexoIndividualById(userInput) {
       u.public_id,
       u.nombre_usuario,
       u.email,
-      u.cedula,
-      u.telefono,
-      u.direccion,
-      u.ciudad,
+      COALESCE(p.numero_documento, u.cedula)       AS cedula,
+      COALESCE(p.numero_contacto, u.telefono)      AS telefono,
+      COALESCE(p.direccion_residencia, u.direccion) AS direccion,
+      COALESCE(p.ciudad_residencia, u.ciudad)       AS ciudad,
       u.moneda_cobro,
       u.tipo_consultor,
-      di.titulo AS tipo_documento_titulo,
-      di.codigo AS tipo_documento_codigo
+      COALESCE(di_p.titulo, di_u.titulo) AS tipo_documento_titulo,
+      COALESCE(di_p.codigo, di_u.codigo) AS tipo_documento_codigo
     FROM usuarios u
-    LEFT JOIN documento_identidad di ON di.id = u.tipo_documento_id
+    LEFT JOIN personas p               ON u.persona_id        = p.id
+    LEFT JOIN documento_identidad di_p ON di_p.id = p.tipo_documento_id
+    LEFT JOIN documento_identidad di_u ON di_u.id = u.tipo_documento_id
     WHERE u.id = $1
       AND u.activo = true
     LIMIT 1
@@ -5624,20 +5627,24 @@ async function getCuentaCobroPdfContext(cuentaInternalId) {
       cc.*,
       u.nombre_usuario,
       u.email,
-      u.cedula,
-      u.direccion,
-      u.telefono,
-      u.ciudad,
-      u.nro_cuenta_bancaria,
       u.moneda_cobro,
-      b.titulo AS banco,
-      tcb.titulo AS tipo_cuenta,
-      di.titulo AS tipo_documento
+      COALESCE(p.numero_documento, u.cedula)            AS cedula,
+      COALESCE(p.direccion_residencia, u.direccion)     AS direccion,
+      COALESCE(p.numero_contacto, u.telefono)           AS telefono,
+      COALESCE(p.ciudad_residencia, u.ciudad)           AS ciudad,
+      COALESCE(p.numero_cuenta, u.nro_cuenta_bancaria)  AS nro_cuenta_bancaria,
+      COALESCE(b_p.titulo, b_u.titulo)                  AS banco,
+      COALESCE(tcb_p.titulo, tcb_u.titulo)              AS tipo_cuenta,
+      COALESCE(di_p.titulo, di_u.titulo)                AS tipo_documento
     FROM cuenta_cobro cc
-      JOIN usuarios u ON cc.created_by = u.id
-      LEFT JOIN bancos b ON u.banco_id = b.id
-      LEFT JOIN tipo_cuenta_bancaria tcb ON u.tipo_cuenta_id = tcb.id
-      LEFT JOIN documento_identidad di ON u.tipo_documento_id = di.id
+      JOIN usuarios u              ON cc.created_by       = u.id
+      LEFT JOIN personas p         ON u.persona_id        = p.id
+      LEFT JOIN bancos b_p         ON p.banco_id          = b_p.id
+      LEFT JOIN bancos b_u         ON u.banco_id          = b_u.id
+      LEFT JOIN tipo_cuenta_bancaria tcb_p ON p.tipo_cuenta_id = tcb_p.id
+      LEFT JOIN tipo_cuenta_bancaria tcb_u ON u.tipo_cuenta_id = tcb_u.id
+      LEFT JOIN documento_identidad di_p   ON p.tipo_documento_id = di_p.id
+      LEFT JOIN documento_identidad di_u   ON u.tipo_documento_id = di_u.id
     WHERE cc.id = $1
     `,
     [cuentaInternalId]
@@ -7827,7 +7834,7 @@ app.get("/th/anexo-individual/search", requireAccess({ roles: ["Administrador", 
         u.public_id AS id,
         u.nombre_usuario AS nombre,
         u.email,
-        u.cedula,
+        COALESCE(p.numero_documento, u.cedula) AS cedula,
         u.tipo_consultor,
         EXISTS (
           SELECT 1
@@ -7835,7 +7842,11 @@ app.get("/th/anexo-individual/search", requireAccess({ roles: ["Administrador", 
           WHERE ati.estado = 'activo'
             AND (
               ati.usuario_id = u.id
-              OR (u.cedula IS NOT NULL AND ati.usuario_id IS NULL AND ati.numero_documento = u.cedula)
+              OR (
+                COALESCE(p.numero_documento, u.cedula) IS NOT NULL
+                AND ati.usuario_id IS NULL
+                AND ati.numero_documento = COALESCE(p.numero_documento, u.cedula)
+              )
             )
         ) AS tiene_items_activos,
         EXISTS (
@@ -7845,13 +7856,14 @@ app.get("/th/anexo-individual/search", requireAccess({ roles: ["Administrador", 
             AND t.estado = 'enviado'
         ) AS envio_pendiente
       FROM usuarios u
+      LEFT JOIN personas p ON u.persona_id = p.id
       WHERE u.activo = true
         AND LOWER(COALESCE(u.email, '')) LIKE '%@silverconsulting.com.co'
         AND (
           $1 = ''
           OR u.nombre_usuario ILIKE $2
           OR u.email ILIKE $2
-          OR COALESCE(u.cedula, '') ILIKE $2
+          OR COALESCE(p.numero_documento, u.cedula, '') ILIKE $2
         )
       ORDER BY
         CASE WHEN u.nombre_usuario ILIKE $2 THEN 0 ELSE 1 END,
@@ -8843,21 +8855,411 @@ function sanitizePersonaForRead(row, req) {
   return sanitized;
 }
 
-// GET /admin/personas — listado de todos los usuarios (admin + coordinador + TH)
+// GET /admin/personas-standalone — personas creadas sin usuario del sistema (admin + TH)
+app.get("/admin/personas-standalone", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        p.public_id,
+        p.estado,
+        p.nombre,
+        p.apellidos,
+        p.numero_documento    AS cedula,
+        p.tipo_persona,
+        p.correo_electronico  AS email,
+        p.ciudad_residencia   AS ciudad,
+        p.numero_contacto     AS telefono,
+        p.tipo_contrato,
+        p.created_at
+      FROM personas p
+      WHERE NOT EXISTS (
+        SELECT 1 FROM usuarios u WHERE u.persona_id = p.id
+      )
+      ORDER BY p.nombre ASC NULLS LAST, p.created_at DESC
+    `);
+    res.json(result.rows || []);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al listar personas standalone" });
+  }
+});
+
+// GET /admin/personas/p/:personaId — ficha de persona standalone por personas.public_id (admin + TH)
+// Solo aplica a personas sin usuario vinculado; si tiene usuario, usar GET /admin/personas/:id.
+app.get("/admin/personas/p/:personaId", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+  const { personaId } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT
+        p.public_id,
+        p.estado,
+        p.nombre,
+        p.apellidos,
+        p.numero_documento        AS cedula,
+        p.tipo_persona,
+        p.factura_en_colombia,
+        p.numero_contacto         AS telefono,
+        p.correo_electronico,
+        p.direccion_residencia    AS direccion,
+        p.ciudad_residencia       AS ciudad,
+        p.departamento_pais,
+        p.titulo_profesional,
+        p.sexo,
+        p.fecha_nacimiento,
+        p.nombre_contacto_emergencia,
+        p.telefono_contacto_emergencia,
+        p.parentesco,
+        p.eps, p.afp, p.arl,
+        p.composicion_familiar, p.hijos, p.personas_a_cargo,
+        p.tipo_contrato, p.modalidad,
+        p.numero_cuenta           AS nro_cuenta_bancaria,
+        p.modulo_otro, p.cliente_otro,
+        di.public_id  AS tipo_documento_id,
+        di.titulo     AS tipo_documento,
+        di.codigo     AS tipo_documento_codigo,
+        b.public_id   AS banco_id,
+        b.titulo      AS banco,
+        tc.public_id  AS tipo_cuenta_id,
+        tc.titulo     AS tipo_cuenta,
+        m.public_id   AS persona_modulo_id,
+        m.titulo      AS persona_modulo,
+        cl.public_id  AS persona_cliente_id,
+        cl.titulo     AS persona_cliente
+      FROM personas p
+      LEFT JOIN documento_identidad di  ON di.id = p.tipo_documento_id
+      LEFT JOIN bancos b                ON b.id  = p.banco_id
+      LEFT JOIN tipo_cuenta_bancaria tc ON tc.id = p.tipo_cuenta_id
+      LEFT JOIN modulo m                ON m.id  = p.modulo_id
+      LEFT JOIN clientes cl             ON cl.id = p.cliente_id
+      WHERE p.public_id = $1
+        AND NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.persona_id = p.id)
+    `, [personaId]);
+
+    if (result.rowCount === 0) return res.status(404).json({ error: "Persona standalone no encontrada" });
+    res.json(sanitizePersonaForRead(result.rows[0], req));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener ficha de persona" });
+  }
+});
+
+// PUT /admin/personas/p/:personaId/personal — editar datos personales de persona standalone (admin + TH)
+app.put("/admin/personas/p/:personaId/personal", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+  const { personaId } = req.params;
+  const {
+    tipo_documento_id, cedula, nombre, apellidos,
+    telefono, direccion, ciudad, tipo_persona,
+    fecha_nacimiento, sexo, departamento_pais, titulo_profesional,
+    correo_electronico
+  } = req.body || {};
+  try {
+    const tipoDocumentoRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.documentoIdentidad, tipo_documento_id, "Tipo de documento");
+    const tipoPersonaNormalizada = tipo_persona ? normalizeTipoPersonaForUsuariosInput(tipo_persona) : null;
+    if (tipo_persona && !tipoPersonaNormalizada) {
+      return res.status(400).json({ error: "Tipo de persona inválido" });
+    }
+    const sexoNormalizado = toNullableTrimmedString(sexo);
+    if (sexoNormalizado && !["Hombre", "Mujer", "Otro"].includes(sexoNormalizado)) {
+      return res.status(400).json({ error: "Sexo inválido. Debe ser Hombre, Mujer u Otro" });
+    }
+
+    const result = await pool.query(`
+      UPDATE personas SET
+        tipo_documento_id    = $1,
+        numero_documento     = $2,
+        nombre               = $3,
+        apellidos            = $4,
+        numero_contacto      = $5,
+        direccion_residencia = $6,
+        ciudad_residencia    = $7,
+        tipo_persona         = $8::tipo_persona,
+        fecha_nacimiento     = $9,
+        sexo                 = $10::tipo_sexo,
+        departamento_pais    = $11,
+        titulo_profesional   = $12,
+        correo_electronico   = $13,
+        updated_at           = CURRENT_TIMESTAMP
+      WHERE public_id = $14
+        AND NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.persona_id = personas.id)
+      RETURNING public_id, nombre, apellidos, numero_documento AS cedula, tipo_persona, sexo, estado
+    `, [
+      tipoDocumentoRef.id,
+      toNullableTrimmedString(cedula),
+      toNullableTrimmedString(nombre),
+      toNullableTrimmedString(apellidos),
+      toNullableTrimmedString(telefono),
+      toNullableTrimmedString(direccion),
+      toNullableTrimmedString(ciudad),
+      tipoPersonaNormalizada ?? null,
+      fecha_nacimiento || null,
+      sexoNormalizado,
+      toNullableTrimmedString(departamento_pais),
+      toNullableTrimmedString(titulo_profesional),
+      toNullableTrimmedString(correo_electronico)?.toLowerCase() || null,
+      personaId
+    ]);
+    if (result.rowCount === 0) return res.status(404).json({ error: "Persona standalone no encontrada. Si tiene usuario vinculado, usa PUT /admin/personas/:id/personal" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === "23505") return res.status(409).json({ error: "El número de documento ya está en uso" });
+    if (err?.status === 400) return res.status(400).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar datos personales" });
+  }
+});
+
+// PUT /admin/personas/p/:personaId/cobro — editar datos bancarios de persona standalone (admin + TH)
+app.put("/admin/personas/p/:personaId/cobro", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+  const { personaId } = req.params;
+  const { banco_id, tipo_cuenta_id, nro_cuenta_bancaria, factura_en_colombia } = req.body || {};
+  try {
+    const bancoRef      = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.bancos, banco_id, "Banco");
+    const tipoCuentaRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.tipoCuentaBancaria, tipo_cuenta_id, "Tipo de cuenta");
+    const facturaVal =
+      factura_en_colombia === true  || factura_en_colombia === "true"  || factura_en_colombia === 1 ? true
+      : factura_en_colombia === false || factura_en_colombia === "false" || factura_en_colombia === 0 ? false
+      : null;
+
+    const result = await pool.query(`
+      UPDATE personas SET
+        banco_id            = $1,
+        tipo_cuenta_id      = $2,
+        numero_cuenta       = $3,
+        factura_en_colombia = $4,
+        updated_at          = CURRENT_TIMESTAMP
+      WHERE public_id = $5
+        AND NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.persona_id = personas.id)
+      RETURNING public_id, numero_cuenta AS nro_cuenta_bancaria, factura_en_colombia
+    `, [bancoRef.id, tipoCuentaRef.id, toNullableTrimmedString(nro_cuenta_bancaria), facturaVal, personaId]);
+    if (result.rowCount === 0) return res.status(404).json({ error: "Persona standalone no encontrada. Si tiene usuario vinculado, usa PUT /admin/personas/:id/cobro" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err?.status === 400) return res.status(400).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar datos de cobro" });
+  }
+});
+
+// PUT /admin/personas/p/:personaId/contratacion — editar contrato/módulo/cliente/familiar de persona standalone (admin + TH)
+app.put("/admin/personas/p/:personaId/contratacion", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+  const { personaId } = req.params;
+  const {
+    tipo_contrato, modalidad,
+    modulo_id, modulo_otro, cliente_id, cliente_otro,
+    eps, afp, arl,
+    composicion_familiar, hijos, personas_a_cargo,
+    nombre_contacto_emergencia, telefono_contacto_emergencia, parentesco
+  } = req.body || {};
+  try {
+    const moduloRef  = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.modulo, modulo_id, "Módulo");
+    const clienteRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.clientes, cliente_id, "Cliente");
+
+    const tipoContratoNormalizado = toNullableTrimmedString(tipo_contrato);
+    if (tipoContratoNormalizado && !["Full time", "Indefinido", "Por horas", "Aprendizaje"].includes(tipoContratoNormalizado)) {
+      return res.status(400).json({ error: "Tipo de contrato inválido" });
+    }
+
+    const result = await pool.query(`
+      UPDATE personas SET
+        tipo_contrato                = $1::tipo_contrato,
+        modalidad                    = $2,
+        modulo_id                    = $3,
+        modulo_otro                  = $4,
+        cliente_id                   = $5,
+        cliente_otro                 = $6,
+        eps                          = $7,
+        afp                          = $8,
+        arl                          = $9,
+        composicion_familiar         = $10,
+        hijos                        = $11,
+        personas_a_cargo             = $12,
+        nombre_contacto_emergencia   = $13,
+        telefono_contacto_emergencia = $14,
+        parentesco                   = $15,
+        updated_at                   = CURRENT_TIMESTAMP
+      WHERE public_id = $16
+        AND NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.persona_id = personas.id)
+      RETURNING public_id, tipo_contrato, modalidad
+    `, [
+      tipoContratoNormalizado,
+      toNullableTrimmedString(modalidad),
+      moduloRef.id,
+      toNullableTrimmedString(modulo_otro),
+      clienteRef.id,
+      toNullableTrimmedString(cliente_otro),
+      toNullableTrimmedString(eps),
+      toNullableTrimmedString(afp),
+      toNullableTrimmedString(arl),
+      toNullableTrimmedString(composicion_familiar),
+      Number.isFinite(Number(hijos)) ? Math.max(0, Math.floor(Number(hijos))) : 0,
+      Number.isFinite(Number(personas_a_cargo)) ? Math.max(0, Math.floor(Number(personas_a_cargo))) : 0,
+      toNullableTrimmedString(nombre_contacto_emergencia),
+      toNullableTrimmedString(telefono_contacto_emergencia),
+      toNullableTrimmedString(parentesco),
+      personaId
+    ]);
+    if (result.rowCount === 0) return res.status(404).json({ error: "Persona standalone no encontrada. Si tiene usuario vinculado, usa PUT /admin/personas/:id/contratacion" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err?.status === 400) return res.status(400).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar datos de contratación" });
+  }
+});
+
+// PATCH /admin/personas/p/:personaId/estado — activar o inactivar persona standalone (admin + TH)
+app.patch("/admin/personas/p/:personaId/estado", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+  const { personaId } = req.params;
+  const { estado } = req.body || {};
+  if (!["activo", "inactivo"].includes(estado)) {
+    return res.status(400).json({ error: "Estado inválido. Debe ser 'activo' o 'inactivo'" });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE personas SET estado = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE public_id = $2
+         AND NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.persona_id = personas.id)
+       RETURNING public_id, estado`,
+      [estado, personaId]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: "Persona standalone no encontrada. Si tiene usuario vinculado, gestiona su estado en /admin/usuarios" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar estado" });
+  }
+});
+
+// POST /admin/personas — crear persona independiente (sin usuario del sistema) (admin + TH)
+app.post("/admin/personas", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+  const {
+    numero_documento, tipo_documento_id, nombre, apellidos,
+    fecha_nacimiento, sexo, numero_contacto, correo_electronico,
+    direccion_residencia, ciudad_residencia, departamento_pais,
+    titulo_profesional, tipo_persona, factura_en_colombia,
+    nombre_contacto_emergencia, telefono_contacto_emergencia, parentesco,
+    banco_id, tipo_cuenta_id, numero_cuenta,
+    composicion_familiar, hijos, personas_a_cargo,
+    eps, afp, arl, tipo_contrato, modalidad,
+    modulo_id, modulo_otro, cliente_id, cliente_otro
+  } = req.body || {};
+
+  try {
+    const tipoDocumentoRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.documentoIdentidad, tipo_documento_id, "Tipo de documento");
+    const bancoRef       = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.bancos, banco_id, "Banco");
+    const tipoCuentaRef  = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.tipoCuentaBancaria, tipo_cuenta_id, "Tipo de cuenta");
+    const moduloRef      = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.modulo, modulo_id, "Módulo");
+    const clienteRef     = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.clientes, cliente_id, "Cliente");
+
+    const tipoPersonaNormalizada = tipo_persona ? normalizeTipoPersonaForUsuariosInput(tipo_persona) : null;
+    if (tipo_persona && !tipoPersonaNormalizada) {
+      return res.status(400).json({ error: "Tipo de persona inválido" });
+    }
+
+    const sexoNormalizado = toNullableTrimmedString(sexo);
+    const validSexos = ["Hombre", "Mujer", "Otro"];
+    if (sexoNormalizado && !validSexos.includes(sexoNormalizado)) {
+      return res.status(400).json({ error: "Sexo inválido. Debe ser Hombre, Mujer u Otro" });
+    }
+
+    const tipoContratoNormalizado = toNullableTrimmedString(tipo_contrato);
+    const validTiposContrato = ["Full time", "Indefinido", "Por horas", "Aprendizaje"];
+    if (tipoContratoNormalizado && !validTiposContrato.includes(tipoContratoNormalizado)) {
+      return res.status(400).json({ error: "Tipo de contrato inválido" });
+    }
+
+    const facturaVal =
+      factura_en_colombia === true || factura_en_colombia === "true" || factura_en_colombia === 1
+        ? true
+        : factura_en_colombia === false || factura_en_colombia === "false" || factura_en_colombia === 0
+          ? false
+          : null;
+
+    const result = await pool.query(`
+      INSERT INTO personas (
+        numero_documento, tipo_documento_id, nombre, apellidos,
+        fecha_nacimiento, sexo, numero_contacto, correo_electronico,
+        direccion_residencia, ciudad_residencia, departamento_pais,
+        titulo_profesional, tipo_persona, factura_en_colombia,
+        nombre_contacto_emergencia, telefono_contacto_emergencia, parentesco,
+        banco_id, tipo_cuenta_id, numero_cuenta,
+        composicion_familiar, hijos, personas_a_cargo,
+        eps, afp, arl, tipo_contrato, modalidad,
+        modulo_id, modulo_otro, cliente_id, cliente_otro,
+        created_by
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6::tipo_sexo,$7,$8,$9,$10,$11,
+        $12,$13::tipo_persona,$14,$15,$16,$17,$18,$19,$20,
+        $21,$22,$23,$24,$25,$26,$27::tipo_contrato,$28,$29,$30,$31,$32,$33
+      )
+      RETURNING id, public_id, numero_documento, nombre, apellidos, estado, created_at
+    `, [
+      toNullableTrimmedString(numero_documento),
+      tipoDocumentoRef.id,
+      toNullableTrimmedString(nombre),
+      toNullableTrimmedString(apellidos),
+      fecha_nacimiento || null,
+      sexoNormalizado,
+      toNullableTrimmedString(numero_contacto),
+      toNullableTrimmedString(correo_electronico)?.toLowerCase() || null,
+      toNullableTrimmedString(direccion_residencia),
+      toNullableTrimmedString(ciudad_residencia),
+      toNullableTrimmedString(departamento_pais),
+      toNullableTrimmedString(titulo_profesional),
+      tipoPersonaNormalizada,
+      facturaVal,
+      toNullableTrimmedString(nombre_contacto_emergencia),
+      toNullableTrimmedString(telefono_contacto_emergencia),
+      toNullableTrimmedString(parentesco),
+      bancoRef.id,
+      tipoCuentaRef.id,
+      toNullableTrimmedString(numero_cuenta),
+      toNullableTrimmedString(composicion_familiar),
+      Number.isFinite(Number(hijos)) ? Math.max(0, Math.floor(Number(hijos))) : 0,
+      Number.isFinite(Number(personas_a_cargo)) ? Math.max(0, Math.floor(Number(personas_a_cargo))) : 0,
+      toNullableTrimmedString(eps),
+      toNullableTrimmedString(afp),
+      toNullableTrimmedString(arl),
+      tipoContratoNormalizado,
+      toNullableTrimmedString(modalidad),
+      moduloRef.id,
+      toNullableTrimmedString(modulo_otro),
+      clienteRef.id,
+      toNullableTrimmedString(cliente_otro),
+      req.user?.id || null
+    ]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === "23505") return res.status(409).json({ error: "El número de documento ya está en uso" });
+    if (err?.status === 400) return res.status(400).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Error al crear persona" });
+  }
+});
+
+// GET /admin/personas — listado de todos los usuarios con datos de persona (admin + coordinador + TH)
 app.get("/admin/personas", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
-        u.public_id            AS id,
+        u.public_id                                        AS id,
         u.nombre_usuario,
         u.email,
         u.activo,
-        u.ciudad,
         u.ultimo_inicio_sesion,
         u.azure_oid,
-        r.titulo               AS rol
+        r.titulo                                           AS rol,
+        p.public_id                                        AS persona_public_id,
+        COALESCE(p.ciudad_residencia, u.ciudad)            AS ciudad,
+        COALESCE(p.numero_documento, u.cedula)             AS cedula,
+        COALESCE(p.tipo_persona, u.tipo_persona)           AS tipo_persona,
+        p.estado                                           AS persona_estado,
+        p.nombre                                           AS persona_nombre,
+        p.apellidos                                        AS persona_apellidos
       FROM usuarios u
-      LEFT JOIN roles r ON r.id = u.rol_usuario_id
+      LEFT JOIN roles r    ON r.id = u.rol_usuario_id
+      LEFT JOIN personas p ON p.id = u.persona_id
       ORDER BY u.nombre_usuario ASC
     `);
     res.json((result.rows || []).map((row) => sanitizePersonaForRead(row, req)));
@@ -8867,45 +9269,87 @@ app.get("/admin/personas", requireAccess({ roles: ["Administrador", "Coordinador
   }
 });
 
-// GET /admin/personas/:id — ficha completa (admin + coordinador + TH)
+// GET /admin/personas/:id — ficha completa con datos de persona (admin + coordinador + TH)
 app.get("/admin/personas/:id", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(`
       SELECT
-        u.public_id                AS id,
+        u.public_id                                              AS id,
         u.nombre_usuario,
         u.email,
         u.activo,
         u.azure_oid,
         u.ultimo_inicio_sesion,
-        u.tipo_persona,
         u.moneda_cobro,
-        u.factura_en_colombia,
         u.tipo_consultor,
-        u.cedula,
-        u.telefono,
-        u.direccion,
-        u.ciudad,
-        u.nro_cuenta_bancaria,
         u.observaciones,
-        r.public_id                AS rol_id,
-        r.titulo                   AS rol,
-        b.public_id                AS banco_id,
-        b.titulo                   AS banco,
-        tc.public_id               AS tipo_cuenta_id,
-        tc.titulo                  AS tipo_cuenta,
-        di.public_id               AS tipo_documento_id,
-        di.titulo                  AS tipo_documento,
-        di.codigo                  AS tipo_documento_codigo,
-        cp.public_id               AS consultor_principal_id,
-        cp.nombre_usuario          AS consultor_principal_nombre
+
+        -- Rol
+        r.public_id                                             AS rol_id,
+        r.titulo                                                AS rol,
+
+        -- Consultor principal
+        cp.public_id                                            AS consultor_principal_id,
+        cp.nombre_usuario                                       AS consultor_principal_nombre,
+
+        -- Persona (COALESCE: persona primero, usuario como fallback)
+        p.public_id                                             AS persona_public_id,
+        p.estado                                                AS persona_estado,
+        COALESCE(p.tipo_persona, u.tipo_persona)                AS tipo_persona,
+        COALESCE(p.factura_en_colombia, u.factura_en_colombia)  AS factura_en_colombia,
+        COALESCE(p.numero_documento, u.cedula)                  AS cedula,
+        COALESCE(p.numero_contacto, u.telefono)                 AS telefono,
+        COALESCE(p.direccion_residencia, u.direccion)           AS direccion,
+        COALESCE(p.ciudad_residencia, u.ciudad)                 AS ciudad,
+        p.departamento_pais,
+        p.titulo_profesional,
+        p.sexo,
+        p.fecha_nacimiento,
+        p.nombre                                                AS persona_nombre,
+        p.apellidos                                             AS persona_apellidos,
+        COALESCE(p.numero_cuenta, u.nro_cuenta_bancaria)        AS nro_cuenta_bancaria,
+        p.eps,
+        p.afp,
+        p.arl,
+        p.composicion_familiar,
+        p.hijos,
+        p.personas_a_cargo,
+        p.nombre_contacto_emergencia,
+        p.telefono_contacto_emergencia,
+        p.parentesco,
+        p.tipo_contrato,
+        p.modalidad,
+        m.public_id                                             AS persona_modulo_id,
+        m.titulo                                                AS persona_modulo,
+        p.modulo_otro,
+        cl.public_id                                            AS persona_cliente_id,
+        cl.titulo                                               AS persona_cliente,
+        p.cliente_otro,
+
+        -- Bancario (persona primero, luego usuario)
+        COALESCE(b_p.public_id, b_u.public_id)                 AS banco_id,
+        COALESCE(b_p.titulo, b_u.titulo)                       AS banco,
+        COALESCE(tc_p.public_id, tc_u.public_id)               AS tipo_cuenta_id,
+        COALESCE(tc_p.titulo, tc_u.titulo)                     AS tipo_cuenta,
+
+        -- Documento (persona primero, luego usuario)
+        COALESCE(di_p.public_id, di_u.public_id)               AS tipo_documento_id,
+        COALESCE(di_p.titulo, di_u.titulo)                     AS tipo_documento,
+        COALESCE(di_p.codigo, di_u.codigo)                     AS tipo_documento_codigo
+
       FROM usuarios u
-      LEFT JOIN roles r   ON r.id  = u.rol_usuario_id
-      LEFT JOIN bancos b  ON b.id  = u.banco_id
-      LEFT JOIN tipo_cuenta_bancaria tc ON tc.id = u.tipo_cuenta_id
-      LEFT JOIN documento_identidad  di ON di.id = u.tipo_documento_id
-      LEFT JOIN usuarios cp ON cp.id = u.id_consultor_principal
+      LEFT JOIN roles r                  ON r.id  = u.rol_usuario_id
+      LEFT JOIN personas p               ON p.id  = u.persona_id
+      LEFT JOIN bancos b_p               ON b_p.id  = p.banco_id
+      LEFT JOIN bancos b_u               ON b_u.id  = u.banco_id
+      LEFT JOIN tipo_cuenta_bancaria tc_p ON tc_p.id = p.tipo_cuenta_id
+      LEFT JOIN tipo_cuenta_bancaria tc_u ON tc_u.id = u.tipo_cuenta_id
+      LEFT JOIN documento_identidad di_p  ON di_p.id = p.tipo_documento_id
+      LEFT JOIN documento_identidad di_u  ON di_u.id = u.tipo_documento_id
+      LEFT JOIN modulo m                 ON m.id  = p.modulo_id
+      LEFT JOIN clientes cl              ON cl.id = p.cliente_id
+      LEFT JOIN usuarios cp              ON cp.id = u.id_consultor_principal
       WHERE u.public_id = $1
     `, [id]);
 
@@ -8965,56 +9409,155 @@ app.put("/admin/personas/:id/identidad", requireAccess({ roles: ["Administrador"
   }
 });
 
-// PUT /admin/personas/:id/personal — tipo_documento, cédula, teléfono, dirección, ciudad, tipo_persona (admin + TH)
+// PUT /admin/personas/:id/personal — escribe a tabla personas (crea si no existe) + fallback usuarios (admin + TH)
 app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
   const { id } = req.params;
-  const { tipo_documento_id, cedula, telefono, direccion, ciudad, tipo_persona } = req.body || {};
+  const {
+    tipo_documento_id, cedula, telefono, direccion, ciudad, tipo_persona,
+    apellidos, fecha_nacimiento, sexo, departamento_pais, titulo_profesional
+  } = req.body || {};
+  const client = await pool.connect();
   try {
-    const tipoDocumentoRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.documentoIdentidad, tipo_documento_id, "Tipo de documento");
+    await client.query("BEGIN");
+
+    const tipoDocumentoRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.documentoIdentidad, tipo_documento_id, "Tipo de documento");
     const tipoPersonaNormalizada = tipo_persona === undefined
       ? undefined
       : normalizeTipoPersonaForUsuariosInput(tipo_persona);
 
     if (tipo_persona !== undefined && tipo_persona !== null && !tipoPersonaNormalizada) {
+      await client.query("ROLLBACK");
       return res.status(400).json({ error: "Tipo de persona inválido" });
     }
 
-    const result = await pool.query(`
-      UPDATE usuarios SET
-        tipo_documento_id = $1,
-        cedula            = $2,
-        telefono          = $3,
-        direccion         = $4,
-        ciudad            = $5,
-        tipo_persona      = $6::tipo_persona,
-        updated_at        = CURRENT_TIMESTAMP
-      WHERE public_id = $7
-      RETURNING public_id AS id, cedula, telefono, direccion, ciudad, tipo_persona
-    `, [
-      tipoDocumentoRef.id,
-      toNullableTrimmedString(cedula),
-      toNullableTrimmedString(telefono),
-      toNullableTrimmedString(direccion),
-      toNullableTrimmedString(ciudad),
-      tipoPersonaNormalizada ?? null,
-      id
-    ]);
-    if (result.rowCount === 0) return res.status(404).json({ error: "Persona no encontrada" });
-    res.json(result.rows[0]);
+    const sexoNormalizado = toNullableTrimmedString(sexo);
+    const validSexos = ["Hombre", "Mujer", "Otro"];
+    if (sexoNormalizado && !validSexos.includes(sexoNormalizado)) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Sexo inválido. Debe ser Hombre, Mujer u Otro" });
+    }
+
+    // Obtener usuario y su persona_id (nombre_usuario para poblar persona.nombre si se crea desde aquí)
+    const usuarioRes = await client.query(
+      "SELECT id, persona_id, nombre_usuario FROM usuarios WHERE public_id = $1",
+      [id]
+    );
+    if (usuarioRes.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Persona no encontrada" });
+    }
+    const usuario = usuarioRes.rows[0];
+    let personaId = usuario.persona_id;
+
+    if (!personaId) {
+      // Crear nueva persona y vincularla.
+      // Se puebla nombre con nombre_usuario para que la persona no quede completamente vacía.
+      const newPersona = await client.query(`
+        INSERT INTO personas (
+          nombre,
+          numero_documento, tipo_documento_id, tipo_persona,
+          numero_contacto, direccion_residencia, ciudad_residencia,
+          apellidos, fecha_nacimiento, sexo, departamento_pais, titulo_profesional,
+          created_by
+        ) VALUES ($1, $2, $3, $4::tipo_persona, $5, $6, $7, $8, $9, $10::tipo_sexo, $11, $12, $13)
+        RETURNING id
+      `, [
+        usuario.nombre_usuario,
+        toNullableTrimmedString(cedula),
+        tipoDocumentoRef.id,
+        tipoPersonaNormalizada ?? null,
+        toNullableTrimmedString(telefono),
+        toNullableTrimmedString(direccion),
+        toNullableTrimmedString(ciudad),
+        toNullableTrimmedString(apellidos),
+        fecha_nacimiento || null,
+        sexoNormalizado,
+        toNullableTrimmedString(departamento_pais),
+        toNullableTrimmedString(titulo_profesional),
+        usuario.id
+      ]);
+      personaId = newPersona.rows[0].id;
+      await client.query(
+        "UPDATE usuarios SET persona_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+        [personaId, usuario.id]
+      );
+    } else {
+      // Actualizar persona existente
+      await client.query(`
+        UPDATE personas SET
+          numero_documento     = $1,
+          tipo_documento_id    = $2,
+          tipo_persona         = $3::tipo_persona,
+          numero_contacto      = $4,
+          direccion_residencia = $5,
+          ciudad_residencia    = $6,
+          apellidos            = $7,
+          fecha_nacimiento     = $8,
+          sexo                 = $9::tipo_sexo,
+          departamento_pais    = $10,
+          titulo_profesional   = $11,
+          updated_at           = CURRENT_TIMESTAMP
+        WHERE id = $12
+      `, [
+        toNullableTrimmedString(cedula),
+        tipoDocumentoRef.id,
+        tipoPersonaNormalizada ?? null,
+        toNullableTrimmedString(telefono),
+        toNullableTrimmedString(direccion),
+        toNullableTrimmedString(ciudad),
+        toNullableTrimmedString(apellidos),
+        fecha_nacimiento || null,
+        sexoNormalizado,
+        toNullableTrimmedString(departamento_pais),
+        toNullableTrimmedString(titulo_profesional),
+        personaId
+      ]);
+    }
+
+    await client.query("COMMIT");
+
+    const updated = await pool.query(`
+      SELECT
+        COALESCE(p.numero_documento, u.cedula)             AS cedula,
+        COALESCE(p.numero_contacto, u.telefono)            AS telefono,
+        COALESCE(p.direccion_residencia, u.direccion)      AS direccion,
+        COALESCE(p.ciudad_residencia, u.ciudad)            AS ciudad,
+        COALESCE(p.tipo_persona, u.tipo_persona)           AS tipo_persona,
+        p.apellidos,
+        p.fecha_nacimiento,
+        p.sexo,
+        p.departamento_pais,
+        p.titulo_profesional,
+        p.public_id                                        AS persona_public_id,
+        di.public_id  AS tipo_documento_id,
+        di.titulo     AS tipo_documento,
+        di.codigo     AS tipo_documento_codigo
+      FROM usuarios u
+      LEFT JOIN personas p              ON p.id  = u.persona_id
+      LEFT JOIN documento_identidad di  ON di.id = p.tipo_documento_id
+      WHERE u.public_id = $1
+    `, [id]);
+
+    res.json(updated.rows[0] || {});
   } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    if (err.code === "23505") return res.status(409).json({ error: "El número de documento ya está en uso" });
     if (err?.status === 400) return res.status(400).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: "Error al actualizar datos personales" });
+  } finally {
+    client.release();
   }
 });
 
-// PUT /admin/personas/:id/cobro — moneda, banco, tipo_cuenta, nro_cuenta (admin + TH)
+// PUT /admin/personas/:id/cobro — moneda queda en usuarios; banco/cuenta/factura van a personas (admin + TH)
 app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
   const { id } = req.params;
   const { moneda_cobro, banco_id, tipo_cuenta_id, nro_cuenta_bancaria, factura_en_colombia } = req.body || {};
+  const client = await pool.connect();
   try {
-    const bancoRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.bancos, banco_id, "Banco");
-    const tipoCuentaRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.tipoCuentaBancaria, tipo_cuenta_id, "Tipo de cuenta");
+    const bancoRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.bancos, banco_id, "Banco");
+    const tipoCuentaRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.tipoCuentaBancaria, tipo_cuenta_id, "Tipo de cuenta");
     const monedaNormalizada = moneda_cobro === undefined ? undefined : normalizeValue(moneda_cobro).toUpperCase();
     const facturaEnColombiaNormalizada =
       factura_en_colombia === undefined
@@ -9034,30 +9577,206 @@ app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador", "T
       return res.status(400).json({ error: "Factura en Colombia no válida" });
     }
 
-    const result = await pool.query(`
-      UPDATE usuarios SET
-        moneda_cobro        = $1::tipo_moneda,
-        banco_id            = $2,
-        tipo_cuenta_id      = $3,
-        nro_cuenta_bancaria = $4,
-        factura_en_colombia = $5,
-        updated_at        = CURRENT_TIMESTAMP
-      WHERE public_id = $6
-      RETURNING public_id AS id, moneda_cobro, nro_cuenta_bancaria, factura_en_colombia
-    `, [
-      monedaNormalizada,
-      bancoRef.id,
-      tipoCuentaRef.id,
-      toNullableTrimmedString(nro_cuenta_bancaria),
-      facturaEnColombiaNormalizada,
-      id
-    ]);
-    if (result.rowCount === 0) return res.status(404).json({ error: "Persona no encontrada" });
-    res.json(result.rows[0]);
+    await client.query("BEGIN");
+
+    // Obtener usuario (nombre_usuario para poblar persona.nombre si se crea desde aquí)
+    const usuarioRes = await client.query(
+      "SELECT id, persona_id, nombre_usuario FROM usuarios WHERE public_id = $1",
+      [id]
+    );
+    if (usuarioRes.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Persona no encontrada" });
+    }
+    const usuario = usuarioRes.rows[0];
+    let personaId = usuario.persona_id;
+
+    // Moneda se actualiza en usuarios
+    await client.query(
+      "UPDATE usuarios SET moneda_cobro = $1::tipo_moneda, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+      [monedaNormalizada, usuario.id]
+    );
+
+    if (!personaId) {
+      // Crear persona con datos de cobro y vincular.
+      // Se puebla nombre con nombre_usuario para que la persona no quede completamente vacía.
+      const newPersona = await client.query(`
+        INSERT INTO personas (nombre, banco_id, tipo_cuenta_id, numero_cuenta, factura_en_colombia, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id
+      `, [usuario.nombre_usuario, bancoRef.id, tipoCuentaRef.id, toNullableTrimmedString(nro_cuenta_bancaria), facturaEnColombiaNormalizada ?? null, usuario.id]);
+      personaId = newPersona.rows[0].id;
+      await client.query(
+        "UPDATE usuarios SET persona_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+        [personaId, usuario.id]
+      );
+    } else {
+      // Actualizar datos bancarios en persona
+      await client.query(`
+        UPDATE personas SET
+          banco_id            = $1,
+          tipo_cuenta_id      = $2,
+          numero_cuenta       = $3,
+          factura_en_colombia = $4,
+          updated_at          = CURRENT_TIMESTAMP
+        WHERE id = $5
+      `, [bancoRef.id, tipoCuentaRef.id, toNullableTrimmedString(nro_cuenta_bancaria), facturaEnColombiaNormalizada ?? null, personaId]);
+    }
+
+    await client.query("COMMIT");
+
+    const updated = await pool.query(`
+      SELECT
+        u.moneda_cobro,
+        COALESCE(p.factura_en_colombia, u.factura_en_colombia)  AS factura_en_colombia,
+        COALESCE(p.numero_cuenta, u.nro_cuenta_bancaria)        AS nro_cuenta_bancaria,
+        COALESCE(b_p.public_id, b_u.public_id)                 AS banco_id,
+        COALESCE(b_p.titulo, b_u.titulo)                       AS banco,
+        COALESCE(tc_p.public_id, tc_u.public_id)               AS tipo_cuenta_id,
+        COALESCE(tc_p.titulo, tc_u.titulo)                     AS tipo_cuenta
+      FROM usuarios u
+      LEFT JOIN personas p               ON p.id  = u.persona_id
+      LEFT JOIN bancos b_p               ON b_p.id  = p.banco_id
+      LEFT JOIN bancos b_u               ON b_u.id  = u.banco_id
+      LEFT JOIN tipo_cuenta_bancaria tc_p ON tc_p.id = p.tipo_cuenta_id
+      LEFT JOIN tipo_cuenta_bancaria tc_u ON tc_u.id = u.tipo_cuenta_id
+      WHERE u.public_id = $1
+    `, [id]);
+
+    res.json(updated.rows[0] || {});
   } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
     if (err?.status === 400) return res.status(400).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: "Error al actualizar datos de cobro" });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /admin/personas/:id/contratacion — tipo_contrato, módulo, cliente, seguridad social, familiar, emergencia (admin + TH)
+app.put("/admin/personas/:id/contratacion", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+  const { id } = req.params;
+  const {
+    tipo_contrato, modalidad,
+    modulo_id, modulo_otro, cliente_id, cliente_otro,
+    eps, afp, arl,
+    composicion_familiar, hijos, personas_a_cargo,
+    nombre_contacto_emergencia, telefono_contacto_emergencia, parentesco,
+    apellidos, fecha_nacimiento, sexo, departamento_pais, titulo_profesional
+  } = req.body || {};
+  const client = await pool.connect();
+  try {
+    const moduloRef  = await resolvePersonaReferenceOrThrow(client, ID_TABLES.modulo, modulo_id, "Módulo");
+    const clienteRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.clientes, cliente_id, "Cliente");
+
+    const tipoContratoNormalizado = toNullableTrimmedString(tipo_contrato);
+    const validTiposContrato = ["Full time", "Indefinido", "Por horas", "Aprendizaje"];
+    if (tipoContratoNormalizado && !validTiposContrato.includes(tipoContratoNormalizado)) {
+      return res.status(400).json({ error: "Tipo de contrato inválido" });
+    }
+
+    const sexoNormalizado = toNullableTrimmedString(sexo);
+    const validSexos = ["Hombre", "Mujer", "Otro"];
+    if (sexoNormalizado && !validSexos.includes(sexoNormalizado)) {
+      return res.status(400).json({ error: "Sexo inválido. Debe ser Hombre, Mujer u Otro" });
+    }
+
+    await client.query("BEGIN");
+
+    const usuarioRes = await client.query(
+      "SELECT id, persona_id, nombre_usuario FROM usuarios WHERE public_id = $1",
+      [id]
+    );
+    if (usuarioRes.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Persona no encontrada" });
+    }
+    const usuario = usuarioRes.rows[0];
+    let personaId = usuario.persona_id;
+
+    const params = [
+      tipoContratoNormalizado,
+      toNullableTrimmedString(modalidad),
+      moduloRef.id,
+      toNullableTrimmedString(modulo_otro),
+      clienteRef.id,
+      toNullableTrimmedString(cliente_otro),
+      toNullableTrimmedString(eps),
+      toNullableTrimmedString(afp),
+      toNullableTrimmedString(arl),
+      toNullableTrimmedString(composicion_familiar),
+      Number.isFinite(Number(hijos)) ? Math.max(0, Math.floor(Number(hijos))) : 0,
+      Number.isFinite(Number(personas_a_cargo)) ? Math.max(0, Math.floor(Number(personas_a_cargo))) : 0,
+      toNullableTrimmedString(nombre_contacto_emergencia),
+      toNullableTrimmedString(telefono_contacto_emergencia),
+      toNullableTrimmedString(parentesco),
+      toNullableTrimmedString(apellidos),
+      fecha_nacimiento || null,
+      sexoNormalizado,
+      toNullableTrimmedString(departamento_pais),
+      toNullableTrimmedString(titulo_profesional)
+    ];
+
+    if (!personaId) {
+      // Se puebla nombre con nombre_usuario para que la persona no quede completamente vacía.
+      const newPersona = await client.query(`
+        INSERT INTO personas (
+          nombre,
+          tipo_contrato, modalidad, modulo_id, modulo_otro, cliente_id, cliente_otro,
+          eps, afp, arl, composicion_familiar, hijos, personas_a_cargo,
+          nombre_contacto_emergencia, telefono_contacto_emergencia, parentesco,
+          apellidos, fecha_nacimiento, sexo, departamento_pais, titulo_profesional,
+          created_by
+        ) VALUES (
+          $1,
+          $2::tipo_contrato,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
+          $14,$15,$16,$17,$18,$19::tipo_sexo,$20,$21,$22
+        )
+        RETURNING id
+      `, [usuario.nombre_usuario, ...params, usuario.id]);
+      personaId = newPersona.rows[0].id;
+      await client.query(
+        "UPDATE usuarios SET persona_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+        [personaId, usuario.id]
+      );
+    } else {
+      await client.query(`
+        UPDATE personas SET
+          tipo_contrato                = $1::tipo_contrato,
+          modalidad                    = $2,
+          modulo_id                    = $3,
+          modulo_otro                  = $4,
+          cliente_id                   = $5,
+          cliente_otro                 = $6,
+          eps                          = $7,
+          afp                          = $8,
+          arl                          = $9,
+          composicion_familiar         = $10,
+          hijos                        = $11,
+          personas_a_cargo             = $12,
+          nombre_contacto_emergencia   = $13,
+          telefono_contacto_emergencia = $14,
+          parentesco                   = $15,
+          apellidos                    = $16,
+          fecha_nacimiento             = $17,
+          sexo                         = $18::tipo_sexo,
+          departamento_pais            = $19,
+          titulo_profesional           = $20,
+          updated_at                   = CURRENT_TIMESTAMP
+        WHERE id = $21
+      `, [...params, personaId]);
+    }
+
+    await client.query("COMMIT");
+    res.json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    if (err?.status === 400) return res.status(400).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar datos de contratación" });
+  } finally {
+    client.release();
   }
 });
 

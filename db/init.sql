@@ -177,6 +177,23 @@ CREATE TYPE cargo_tipo AS ENUM
     'Consultor IBP'
 );
 
+-- Sexo de la persona
+CREATE TYPE tipo_sexo AS ENUM
+(
+    'Hombre',
+    'Mujer',
+    'Otro'
+);
+
+-- Tipo de contrato laboral
+CREATE TYPE tipo_contrato AS ENUM
+(
+    'Full time',
+    'Indefinido',
+    'Por horas',
+    'Aprendizaje'
+);
+
 -- ============================================================================
 -- TABLAS DE CATÁLOGO (Tablas maestras sin dependencias)
 -- ============================================================================
@@ -394,6 +411,91 @@ CREATE INDEX idx_usuarios_tipo_consultor ON usuarios(tipo_consultor);
 COMMENT ON TABLE usuarios IS 'Usuarios del sistema - Reemplaza campos Person/Group de SharePoint';
 COMMENT ON COLUMN usuarios.sharepoint_user_id IS 'ID del usuario en SharePoint para migración';
 COMMENT ON COLUMN usuarios.email IS 'Email del usuario - usado para mapear Person/Group';
+
+-- ============================================================================
+-- TABLA PERSONAS (fuente de verdad de datos personales)
+-- Creada después de usuarios para poder referenciar usuarios.id en created_by
+-- ============================================================================
+
+CREATE TABLE personas
+(
+    id        SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+
+    -- Identificación
+    numero_documento  VARCHAR(50) UNIQUE,
+    tipo_documento_id INTEGER REFERENCES documento_identidad(id),
+    estado            VARCHAR(20) NOT NULL DEFAULT 'activo'
+                        CHECK (estado IN ('activo', 'inactivo')),
+
+    -- Datos personales
+    nombre           VARCHAR(200),
+    apellidos        VARCHAR(200),
+    fecha_nacimiento DATE,
+    sexo             tipo_sexo,
+
+    -- Contacto principal
+    numero_contacto      VARCHAR(50),
+    correo_electronico   VARCHAR(255),
+    direccion_residencia TEXT,
+    ciudad_residencia    VARCHAR(100),
+    departamento_pais    VARCHAR(100),
+
+    -- Profesional
+    titulo_profesional  TEXT,
+    tipo_persona        tipo_persona,
+    factura_en_colombia BOOLEAN,
+
+    -- Contacto de emergencia
+    nombre_contacto_emergencia   VARCHAR(200),
+    telefono_contacto_emergencia VARCHAR(50),
+    parentesco                   VARCHAR(100),
+
+    -- Datos bancarios
+    banco_id       INTEGER REFERENCES bancos(id),
+    tipo_cuenta_id INTEGER REFERENCES tipo_cuenta_bancaria(id),
+    numero_cuenta  VARCHAR(50),
+
+    -- Composición familiar
+    composicion_familiar VARCHAR(100),
+    hijos                INTEGER DEFAULT 0,
+    personas_a_cargo     INTEGER DEFAULT 0,
+
+    -- Seguridad social
+    eps VARCHAR(100),
+    afp VARCHAR(100),
+    arl VARCHAR(100),
+
+    -- Contrato (snapshot del estado actual)
+    tipo_contrato tipo_contrato,
+    modalidad     VARCHAR(50),
+
+    -- Módulo asignado (de catálogo o libre)
+    modulo_id   INTEGER REFERENCES modulo(id),
+    modulo_otro VARCHAR(150),
+
+    -- Cliente asignado (de catálogo o libre)
+    cliente_id   INTEGER REFERENCES clientes(id),
+    cliente_otro VARCHAR(200),
+
+    -- Auditoría
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL
+);
+
+CREATE INDEX idx_personas_documento   ON personas(numero_documento);
+CREATE INDEX idx_personas_correo      ON personas(correo_electronico);
+CREATE INDEX idx_personas_estado      ON personas(estado);
+CREATE INDEX idx_personas_cliente     ON personas(cliente_id);
+CREATE INDEX idx_personas_modulo      ON personas(modulo_id);
+CREATE INDEX idx_personas_nombre_trgm ON personas USING gin(nombre gin_trgm_ops);
+
+COMMENT ON TABLE personas IS 'Datos permanentes de personas (físicas o jurídicas) vinculadas al sistema';
+
+-- Vincular usuarios con personas (FK circular resuelta con ALTER después de crear personas)
+ALTER TABLE usuarios ADD COLUMN persona_id INTEGER REFERENCES personas(id);
+CREATE UNIQUE INDEX idx_usuarios_persona ON usuarios(persona_id) WHERE persona_id IS NOT NULL;
 
 -- Tabla: UsuarioLicenciasBackup
 CREATE TABLE usuario_licencias_backup
@@ -898,6 +1000,10 @@ CREATE INDEX idx_preregistro_usuario_creado ON preregistro_personas(id_usuario_c
 CREATE INDEX idx_preregistro_updated ON preregistro_personas(updated_at DESC);
 CREATE UNIQUE INDEX uq_preregistro_solicitud_activa ON preregistro_personas(id_solicitud_rrhh) WHERE estado <> 'Anulado';
 
+-- Vincular personas con preregistros (FK diferida porque preregistro_personas se crea después)
+ALTER TABLE personas ADD COLUMN preregistro_id INTEGER REFERENCES preregistro_personas(id) ON DELETE SET NULL;
+CREATE INDEX idx_personas_preregistro ON personas(preregistro_id);
+
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -1268,21 +1374,24 @@ SELECT
     u.id,
     u.nombre_usuario,
     u.email,
-    u.cedula,
-    u.telefono,
+    COALESCE(p.numero_documento, u.cedula)       AS cedula,
+    COALESCE(p.numero_contacto, u.telefono)      AS telefono,
     r.titulo as rol,
     u.tipo_consultor,
     u.moneda_cobro,
-    b.titulo as banco,
-    u.nro_cuenta_bancaria,
-    tc.titulo as tipo_cuenta,
+    COALESCE(b_p.titulo, b_u.titulo)             AS banco,
+    COALESCE(p.numero_cuenta, u.nro_cuenta_bancaria) AS nro_cuenta_bancaria,
+    COALESCE(tc_p.titulo, tc_u.titulo)           AS tipo_cuenta,
     cp.nombre_usuario as consultor_principal,
     u.activo
 FROM usuarios u
-    LEFT JOIN roles r ON u.rol_usuario_id = r.id
-    LEFT JOIN bancos b ON u.banco_id = b.id
-    LEFT JOIN tipo_cuenta_bancaria tc ON u.tipo_cuenta_id = tc.id
-    LEFT JOIN usuarios cp ON u.id_consultor_principal = cp.id
+    LEFT JOIN roles r                  ON u.rol_usuario_id  = r.id
+    LEFT JOIN personas p               ON u.persona_id      = p.id
+    LEFT JOIN bancos b_p               ON p.banco_id        = b_p.id
+    LEFT JOIN bancos b_u               ON u.banco_id        = b_u.id
+    LEFT JOIN tipo_cuenta_bancaria tc_p ON p.tipo_cuenta_id = tc_p.id
+    LEFT JOIN tipo_cuenta_bancaria tc_u ON u.tipo_cuenta_id = tc_u.id
+    LEFT JOIN usuarios cp              ON u.id_consultor_principal = cp.id
 WHERE u.activo = true
     AND r.titulo IN ('Consultor', 'Consultor Principal');
 
@@ -1328,6 +1437,80 @@ WHERE tc.activo = true
     AND (tc.vigencia_hasta IS NULL OR tc.vigencia_hasta >= CURRENT_DATE);
 
 COMMENT ON VIEW v_tarifas_vigentes IS 'Tarifas vigentes de consultores';
+
+-- Vista: Usuario completo con datos de persona
+CREATE OR REPLACE VIEW v_usuarios_completo AS
+SELECT
+    u.id,
+    u.public_id,
+    u.nombre_usuario,
+    u.email,
+    u.azure_oid,
+    u.activo,
+    u.tipo_consultor,
+    u.moneda_cobro,
+    u.foto_url,
+    u.observaciones,
+    u.ultimo_inicio_sesion,
+    u.persona_id,
+
+    r.titulo           AS rol,
+    cp.nombre_usuario  AS consultor_principal,
+
+    -- Persona
+    p.public_id        AS persona_public_id,
+    p.estado           AS persona_estado,
+    p.numero_documento,
+    p.tipo_documento_id,
+    di.titulo          AS tipo_documento,
+    di.codigo          AS tipo_documento_codigo,
+    p.tipo_persona,
+    p.factura_en_colombia,
+    p.nombre           AS persona_nombre,
+    p.apellidos        AS persona_apellidos,
+    p.numero_contacto  AS telefono,
+    p.correo_electronico,
+    p.direccion_residencia AS direccion,
+    p.ciudad_residencia    AS ciudad,
+    p.departamento_pais,
+    p.titulo_profesional,
+    p.sexo,
+    p.fecha_nacimiento,
+    p.nombre_contacto_emergencia,
+    p.telefono_contacto_emergencia,
+    p.parentesco,
+    p.eps,
+    p.afp,
+    p.arl,
+    p.composicion_familiar,
+    p.hijos,
+    p.personas_a_cargo,
+    p.tipo_contrato,
+    p.modalidad,
+    p.modulo_id,
+    m.titulo           AS modulo_titulo,
+    p.modulo_otro,
+    p.cliente_id,
+    cl.titulo          AS cliente_titulo,
+    p.cliente_otro,
+    p.banco_id,
+    b.titulo           AS banco,
+    p.tipo_cuenta_id,
+    tcb.titulo         AS tipo_cuenta,
+    p.numero_cuenta    AS nro_cuenta_bancaria,
+    p.preregistro_id
+
+FROM usuarios u
+LEFT JOIN roles r                  ON u.rol_usuario_id    = r.id
+LEFT JOIN personas p               ON u.persona_id        = p.id
+LEFT JOIN documento_identidad di   ON p.tipo_documento_id = di.id
+LEFT JOIN bancos b                 ON p.banco_id          = b.id
+LEFT JOIN tipo_cuenta_bancaria tcb ON p.tipo_cuenta_id    = tcb.id
+LEFT JOIN modulo m                 ON p.modulo_id         = m.id
+LEFT JOIN clientes cl              ON p.cliente_id        = cl.id
+LEFT JOIN usuarios cp              ON u.id_consultor_principal = cp.id;
+
+COMMENT ON VIEW v_usuarios_completo IS 'Vista completa de usuarios con datos de persona, bancarios y de contrato';
 
 -- ============================================================================
 -- FUNCIONES ÚTILES

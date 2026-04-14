@@ -373,7 +373,7 @@ body.sidebar-collapsed .app-main {
 }
 
 /* Posicionamiento de overlays: fixed anclado al área de contenido (excluye navbar y sidebar) */
-.view-overlay {
+/*.view-overlay {
     position: fixed;
     top: var(--navbar-height);
     right: 0;
@@ -383,6 +383,18 @@ body.sidebar-collapsed .app-main {
     display: flex;
     align-items: center;
     justify-content: center;
+}*/
+
+.view-overlay {
+    position: fixed;
+    top: var(--navbar-height);
+    right: 0;
+    bottom: 0;
+    left: var(--sidebar-width);
+    z-index: 300;
+    display: grid;
+    place-items: center;
+    overflow-y: auto;
 }
 
 body.sidebar-collapsed .view-overlay {

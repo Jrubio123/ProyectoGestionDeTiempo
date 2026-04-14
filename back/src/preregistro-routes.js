@@ -21,6 +21,22 @@ module.exports = function registerPreregistroRoutes(deps) {
     anulado: "Anulado"
   });
 
+  function normalizeRequesterRole(value) {
+    return normalizeValue(value);
+  }
+
+  function resolveContinuationRoleForRequester(value) {
+    const role = normalizeRequesterRole(value);
+    if (role === "comercial") return "Comercial";
+    return "Coordinador";
+  }
+
+  function resolveInitialPreregistroStateForRequester(value) {
+    return resolveContinuationRoleForRequester(value) === "Comercial"
+      ? ESTADOS.pendienteComercial
+      : ESTADOS.pendienteCoordinador;
+  }
+
   function mapPreregistroEstadoToSolicitudEstado(estado) {
     const raw = String(estado || "").trim();
     if (!raw) return null;
@@ -211,7 +227,8 @@ module.exports = function registerPreregistroRoutes(deps) {
       s.prioridad, s.observaciones_rrhh,
       c.public_id AS cliente_public_id, c.titulo AS cliente_nombre,
       m.public_id AS modulo_public_id, m.titulo AS modulo_nombre,
-      su.public_id AS coordinador_public_id, su.nombre_usuario AS coordinador_nombre, su.email AS coordinador_email
+      su.public_id AS coordinador_public_id, su.nombre_usuario AS coordinador_nombre, su.email AS coordinador_email,
+      rsol.titulo AS solicitante_rol_titulo
     FROM preregistro_personas p
     JOIN solicitudes_rrhh s ON s.id = p.id_solicitud_rrhh
     LEFT JOIN bancos b ON b.id = p.banco_id
@@ -219,6 +236,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     LEFT JOIN clientes c ON c.id = s.cliente_id
     LEFT JOIN modulo m ON m.id = s.modulo_id
     LEFT JOIN usuarios su ON su.id = s.coordinador_id
+    LEFT JOIN roles rsol ON rsol.id = su.rol_usuario_id
     LEFT JOIN usuarios creador ON creador.id = p.creado_por
     LEFT JOIN usuarios coordDone ON coordDone.id = p.completado_coordinador_por
     LEFT JOIN usuarios thDone ON thDone.id = p.completado_th_por
@@ -239,7 +257,14 @@ module.exports = function registerPreregistroRoutes(deps) {
         estado: row.solicitud_estado,
         cliente: { id: row.cliente_public_id, nombre: row.cliente_nombre },
         modulo: { id: row.modulo_public_id, nombre: row.modulo_nombre },
-        coordinador: { id: row.coordinador_public_id, nombre: row.coordinador_nombre, email: row.coordinador_email }
+        coordinador: {
+          id: row.coordinador_public_id,
+          nombre: row.coordinador_nombre,
+          email: row.coordinador_email,
+          rol: row.solicitante_rol_titulo || null
+        },
+        solicitante_rol: row.solicitante_rol_titulo || null,
+        responsable_continuacion_rol: resolveContinuationRoleForRequester(row.solicitante_rol_titulo)
       },
       nombre: row.nombre,
       apellidos: row.apellidos,
@@ -476,7 +501,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     try {
       await client.query("BEGIN");
       const solicitudRes = await client.query(
-        `SELECT s.id, s.estado, su.email AS coordinador_email, su.nombre_usuario AS coordinador_nombre, s.perfil
+        `SELECT s.id, s.estado, su.email AS coordinador_email, su.nombre_usuario AS coordinador_nombre, rsol.titulo AS solicitante_rol_titulo, s.perfil
               , s.public_id AS solicitud_public_id, s.coordinador_id, s.cliente_id, s.modulo_id
               , s.modalidad, s.ubicacion, s.fecha_inicio_esperada, s.descripcion, s.informacion_adicional, s.observaciones_rrhh
               , c.titulo AS cliente_nombre, m.titulo AS modulo_nombre
@@ -484,6 +509,7 @@ module.exports = function registerPreregistroRoutes(deps) {
          LEFT JOIN clientes c ON c.id = s.cliente_id
          LEFT JOIN modulo m ON m.id = s.modulo_id
          LEFT JOIN usuarios su ON su.id = s.coordinador_id
+         LEFT JOIN roles rsol ON rsol.id = su.rol_usuario_id
          WHERE s.public_id = $1 FOR UPDATE OF s`,
         [req.params.public_id]
       );
@@ -492,6 +518,8 @@ module.exports = function registerPreregistroRoutes(deps) {
         await client.query("ROLLBACK");
         return res.status(404).json({ error: "Solicitud no encontrada" });
       }
+      const continuationRole = resolveContinuationRoleForRequester(solicitud.solicitante_rol_titulo);
+      const initialPreregistroState = resolveInitialPreregistroStateForRequester(solicitud.solicitante_rol_titulo);
       const solicitudId = solicitud.id;
       if (!["Entrevistas", "Entrevista", "Reclutamiento"].includes(String(solicitud.estado || ""))) {
         await client.query("ROLLBACK");
@@ -530,7 +558,7 @@ module.exports = function registerPreregistroRoutes(deps) {
           facturaEnColombia,
           tarifaMesParsed.value,
           tarifaHoraParsed.value,
-          ESTADOS.pendienteComercial,
+          initialPreregistroState,
           req.user?.id
         ]
       );
@@ -611,7 +639,7 @@ module.exports = function registerPreregistroRoutes(deps) {
               )
               VALUES (
                 'Nuevo',
-                'Pendiente Comercial',
+                $22,
                 $1,
                 $2,
                 $3,
@@ -659,7 +687,8 @@ module.exports = function registerPreregistroRoutes(deps) {
                 necesidadTiResumen || null,
                 solicitud.observaciones_rrhh || null,
                 JSON.stringify(datosExtra),
-                requiereConfirmacionCliente
+                requiereConfirmacionCliente,
+                initialPreregistroState
               ]
             );
           }
@@ -690,7 +719,8 @@ module.exports = function registerPreregistroRoutes(deps) {
             title: "Preregistro pendiente por completar",
             intro: `Se creo un preregistro para la solicitud ${solicitud.perfil || ""}.`,
             blocks: [
-              { label: "Estado", value: ESTADOS.pendienteCoordinador },
+              { label: "Responsable", value: continuationRole },
+              { label: "Estado", value: initialPreregistroState },
               { label: "ID preregistro", value: String(created.rows[0]?.public_id || "") }
             ]
           })

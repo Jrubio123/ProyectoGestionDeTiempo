@@ -890,15 +890,33 @@ window.preregistrosCoordApp = function () {
             );
         },
 
+        responsableContinuacion(item) {
+            const requesterRole = this.normalizarTexto(
+                item?.coordinador?.rol ||
+                item?.solicitud?.responsable_continuacion_rol ||
+                item?.solicitud?.solicitante_rol ||
+                ""
+            );
+            if (requesterRole === "comercial") return "comercial";
+            return "coordinador";
+        },
+
         puedeContinuar(item) {
             const estado = this.normalizarTexto(item?.estado);
             const roleKey = window.auth?.getRoleKey?.() || "other";
-            const estadosContinuable = roleKey === "comercial"
-                ? ["pendiente", "pendiente comercial"]
-                : ["pendiente", "pendiente coordinador"];
+            const responsibleRole = this.responsableContinuacion(item);
+            const estadosContinuable = ["pendiente", "pendiente coordinador", "pendiente comercial"];
+            const currentUserId = String(window.auth?.getUser?.()?.id || "").trim();
+            const ownerId = String(item?.coordinador?.id || "").trim();
+            const sameOwner = currentUserId && ownerId && currentUserId === ownerId;
+            const canActByRole =
+                roleKey === "administrador" ||
+                roleKey === responsibleRole ||
+                (responsibleRole === "coordinador" && roleKey === "coordinador" && sameOwner);
             return (
                 !!item &&
                 item.tipo_solicitud === "Nuevo" &&
+                canActByRole &&
                 estadosContinuable.includes(estado)
             );
         },

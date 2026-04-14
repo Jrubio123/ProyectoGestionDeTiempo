@@ -46,6 +46,7 @@ module.exports = function registerContratacionesRoutes(deps) {
       coord.public_id AS coordinador_public_id,
       coord.nombre_usuario AS coordinador_nombre,
       coord.email AS coordinador_email,
+      coord_rol.titulo AS coordinador_rol_titulo,
       sc.persona_usuario_id,
       persona.public_id AS persona_public_id,
       persona.nombre_usuario AS persona_nombre,
@@ -103,6 +104,7 @@ module.exports = function registerContratacionesRoutes(deps) {
       sc.updated_at
     FROM solicitudes_contratacion sc
     LEFT JOIN usuarios coord ON coord.id = sc.coordinador_solicitante_id
+    LEFT JOIN roles coord_rol ON coord_rol.id = coord.rol_usuario_id
     LEFT JOIN usuarios persona ON persona.id = sc.persona_usuario_id
     LEFT JOIN usuarios sup ON sup.id = sc.supervisor_id
     LEFT JOIN clientes c ON c.id = sc.cliente_id
@@ -892,7 +894,8 @@ module.exports = function registerContratacionesRoutes(deps) {
         ? {
             id: row.coordinador_public_id,
             nombre: row.coordinador_nombre,
-            email: row.coordinador_email || null
+            email: row.coordinador_email || null,
+            rol: row.coordinador_rol_titulo || null
           }
         : null,
       persona: row.persona_public_id

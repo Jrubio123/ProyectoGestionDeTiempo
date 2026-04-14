@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(grep -v \"const\\\\|function\\\\|//\")",
-      "Read(//c/Users/JuanPabloRubioMejía/Downloads/ProyectoGestionDeTiempo/**)"
+      "Read(//c/Users/JuanPabloRubioMejía/Downloads/ProyectoGestionDeTiempo/**)",
+      "Bash(grep -E \"\\\\.\\(ts|js\\)$\")",
+      "Bash(xargs grep:*)"
     ]
   }
 }

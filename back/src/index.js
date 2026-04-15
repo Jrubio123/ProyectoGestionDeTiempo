@@ -15366,45 +15366,40 @@ app.post("/webhooks/clicksign/signature", async (req, res) => {
           "data.public_id"
         ]);
 
+        const CUENTA_COBRO_SELECT = `
+            SELECT
+              cc.id,
+              cc.public_id,
+              cc.created_by,
+              cc.fecha_correspondiente,
+              cc.created_at,
+              cc.datos_adjuntos,
+              u.nombre_usuario,
+              u.email
+            FROM cuenta_cobro cc
+            LEFT JOIN usuarios u ON u.id = cc.created_by`;
+
         let cuentaResult = null;
         if (publicIdFromEvent) {
           cuentaResult = await pool.query(
-            `
-            SELECT
-              cc.id,
-              cc.public_id,
-              cc.created_by,
-              cc.fecha_correspondiente,
-              cc.created_at,
-              cc.datos_adjuntos,
-              u.nombre_usuario,
-              u.email
-            FROM cuenta_cobro cc
-            LEFT JOIN usuarios u ON u.id = cc.created_by
-            WHERE cc.public_id = $1
-            LIMIT 1
-            `,
+            `${CUENTA_COBRO_SELECT} WHERE cc.public_id = $1 LIMIT 1`,
             [publicIdFromEvent]
           );
-        } else if (requestId) {
+        }
+        if (!cuentaResult?.rows?.length && requestId) {
           cuentaResult = await pool.query(
-            `
-            SELECT
-              cc.id,
-              cc.public_id,
-              cc.created_by,
-              cc.fecha_correspondiente,
-              cc.created_at,
-              cc.datos_adjuntos,
-              u.nombre_usuario,
-              u.email
-            FROM cuenta_cobro cc
-            LEFT JOIN usuarios u ON u.id = cc.created_by
+            `${CUENTA_COBRO_SELECT}
             WHERE cc.datos_adjuntos->'firma'->>'request_id' = $1
-            ORDER BY cc.id DESC
-            LIMIT 1
-            `,
+            ORDER BY cc.id DESC LIMIT 1`,
             [requestId]
+          );
+        }
+        if (!cuentaResult?.rows?.length && contractId) {
+          cuentaResult = await pool.query(
+            `${CUENTA_COBRO_SELECT}
+            WHERE cc.datos_adjuntos->'firma'->>'contract_id' = $1
+            ORDER BY cc.id DESC LIMIT 1`,
+            [contractId]
           );
         }
 
@@ -16542,10 +16537,175 @@ const server = app.listen(port, "0.0.0.0", () => {
   console.log(`Server running on port ${port}`);
 });
 
+// ── Job: reconciliación server-side de cuentas en firma ──────────────────────
+// Busca cuentas que llevan más de 20 min en estado "En Firma" y tienen IDs de
+// Click&Sign guardados. Las cuentas migradas sin esos IDs se ignoran.
+const RECONCILIACION_JOB_INTERVAL_MS = 10 * 60 * 1000; // cada 10 minutos
+const RECONCILIACION_MIN_EDAD_MIN = 20; // solo cuentas con más de 20 min sin actualizar
+const RECONCILIACION_BATCH = 10; // máximo por ciclo
+
+async function jobReconciliarCuentasEnFirma() {
+  if (isShuttingDown) return;
+  try {
+    const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
+    const result = await pool.query(
+      `SELECT cc.id, cc.public_id, cc.created_by, cc.fecha_correspondiente,
+              cc.created_at, cc.datos_adjuntos, u.nombre_usuario, u.email
+       FROM cuenta_cobro cc
+       LEFT JOIN usuarios u ON u.id = cc.created_by
+       WHERE cc.estado = $1::tipo_estado_reporte
+         AND cc.updated_at < NOW() - ($2 || ' minutes')::INTERVAL
+         AND (
+           cc.datos_adjuntos->'firma'->>'request_id' IS NOT NULL
+           OR cc.datos_adjuntos->'firma'->>'contract_id' IS NOT NULL
+         )
+         AND (cc.datos_adjuntos->'firma'->>'documento_firmado' IS NULL
+              OR cc.datos_adjuntos->'firma'->'documento_firmado'->>'url' IS NULL
+              OR cc.datos_adjuntos->'firma'->'documento_firmado'->>'url' = '')
+       ORDER BY cc.updated_at ASC
+       LIMIT $3`,
+      [estadoEnFirma, String(RECONCILIACION_MIN_EDAD_MIN), RECONCILIACION_BATCH]
+    );
+
+    const cuentas = result.rows || [];
+    if (cuentas.length === 0) return;
+
+    console.log(`[reconciliar-job] ${cuentas.length} cuenta(s) en firma pendientes de reconciliar.`);
+
+    for (const cuenta of cuentas) {
+      if (isShuttingDown) break;
+      try {
+        const prevFirma = cuenta.datos_adjuntos?.firma || {};
+        const requestId = String(prevFirma.request_id || "").trim();
+        const contractId = String(prevFirma.contract_id || "").trim();
+        const signatureId = String(prevFirma.signature_id || "").trim();
+
+        const snapshot = await fetchClickSignSignatureSnapshot({ requestId, contractId, signatureId });
+        const event = snapshot.event && typeof snapshot.event === "object" ? snapshot.event : {};
+        const rawStatus = snapshot.rawStatus || prevFirma.ultimo_evento || "pending";
+        let status = normalizeClickSignStatus(rawStatus);
+        const nowIso = new Date().toISOString();
+
+        let documentoFirmado = prevFirma.documento_firmado || null;
+        let documentoFirmadoError = "";
+        let uploadedExtras = [];
+
+        if (status === "signed" || !status || status === "pending") {
+          const artifacts = await resolveClickSignArtifacts({
+            event,
+            requestId,
+            contractId,
+            publicId: String(cuenta.public_id || ""),
+            signatureId: signatureId || extractClickSignSignatureId(event) || ""
+          });
+          const resolvedPdf = artifacts?.signedPdf || null;
+          if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
+            try {
+              const uploadResult = await uploadSignedPdfToOneDrive(cuenta, resolvedPdf.buffer, resolvedPdf.fileName);
+              documentoFirmado = {
+                ...uploadResult.archivo,
+                carpeta: uploadResult.carpeta,
+                origen: resolvedPdf.source || "clicksign",
+                actualizado_en: nowIso
+              };
+              status = "signed";
+              try {
+                const extrasResult = await uploadClickSignExtraFilesToOneDrive(cuenta, artifacts?.extraFiles || [], uploadResult.carpeta || "");
+                uploadedExtras = extrasResult.uploaded || [];
+              } catch (extraErr) {
+                console.warn(`[reconciliar-job] Extras no subidos para ${cuenta.public_id}:`, extraErr?.message);
+              }
+            } catch (uploadErr) {
+              documentoFirmadoError = `Error OneDrive: ${uploadErr.message || "desconocido"}`;
+            }
+          }
+        }
+
+        const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object" ? cuenta.datos_adjuntos : {};
+        const prevSoportes = prevAdjuntos.soportes && typeof prevAdjuntos.soportes === "object" ? prevAdjuntos.soportes : {};
+        const firma = {
+          ...prevFirma,
+          estado: status || prevFirma.estado || "pending",
+          actualizado_en: nowIso,
+          ultimo_evento: rawStatus || status || "reconciliar-job"
+        };
+        if (documentoFirmado?.url) firma.documento_firmado = documentoFirmado;
+        if (documentoFirmadoError) firma.documento_firmado_error = documentoFirmadoError;
+        else if (status === "signed") firma.documento_firmado_error = null;
+
+        const adjuntos = { ...prevAdjuntos, firma };
+        if (documentoFirmado?.url) {
+          adjuntos.soportes = {
+            ...prevSoportes,
+            carpeta: documentoFirmado.carpeta || prevSoportes.carpeta || "",
+            actualizado_en: nowIso,
+            cuenta_cobro_firmada: {
+              id: documentoFirmado.id || prevSoportes?.cuenta_cobro_firmada?.id || null,
+              nombre: documentoFirmado.nombre || prevSoportes?.cuenta_cobro_firmada?.nombre || "CuentaCobroFirmada.pdf",
+              url: documentoFirmado.url
+            }
+          };
+          const extraSeguridad = uploadedExtras.find((x) => x.kind === "seguridad_social_firma" && x.url);
+          if (extraSeguridad && !sameResourceUrl(extraSeguridad.url, documentoFirmado.url)) {
+            adjuntos.soportes.seguridad_social_firma = { id: extraSeguridad.id || null, nombre: extraSeguridad.nombre || "SeguridadSocial.pdf", url: extraSeguridad.url };
+            if (!adjuntos.soportes.seguridad_social?.url) adjuntos.soportes.seguridad_social = { ...adjuntos.soportes.seguridad_social_firma };
+          }
+        }
+
+        let estadoDestino = null;
+        if (status === "signed") {
+          const estadoAprobado = await getCuentaCobroEstadoAprobado();
+          estadoDestino = documentoFirmado?.url ? estadoAprobado : estadoEnFirma;
+        } else if (status === "rejected") {
+          estadoDestino = "Rechazado";
+        }
+
+        if (estadoDestino) {
+          await pool.query(
+            `UPDATE cuenta_cobro SET datos_adjuntos = $1::jsonb, estado = $2::tipo_estado_reporte, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
+            [JSON.stringify(adjuntos), estadoDestino, cuenta.id]
+          );
+        } else {
+          await pool.query(
+            `UPDATE cuenta_cobro SET datos_adjuntos = $1::jsonb, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+            [JSON.stringify(adjuntos), cuenta.id]
+          );
+        }
+
+        if (status === "signed" && documentoFirmado?.url) {
+          await notifyCuentaCobroFirmadaToProveedores({
+            cuenta,
+            documentoFirmado,
+            attachments: buildCuentaCobroEmailAttachments({ cuenta, signedPdf: null }),
+            prevNotification: prevFirma.notificacion_proveedores || {},
+            nowIso
+          }).catch((err) => console.warn(`[reconciliar-job] Notificación fallida para ${cuenta.public_id}:`, err?.message));
+        }
+
+        console.log(`[reconciliar-job] ${cuenta.public_id} → estado: ${estadoDestino || status || "sin cambio"}`);
+      } catch (cuentaErr) {
+        console.error(`[reconciliar-job] Error procesando ${cuenta.public_id}:`, cuentaErr?.message || cuentaErr);
+      }
+    }
+  } catch (err) {
+    console.error("[reconciliar-job] Error en ciclo:", err?.message || err);
+  }
+}
+
+// Primer ciclo a los 2 min del arranque para no sobrecargar el inicio
+let reconciliarJobInterval = null;
+setTimeout(() => {
+  if (isShuttingDown) return;
+  void jobReconciliarCuentasEnFirma();
+  reconciliarJobInterval = setInterval(() => { void jobReconciliarCuentasEnFirma(); }, RECONCILIACION_JOB_INTERVAL_MS);
+}, 2 * 60 * 1000);
+// ─────────────────────────────────────────────────────────────────────────────
+
 let isShuttingDown = false;
 async function gracefulShutdown(signal) {
   if (isShuttingDown) return;
   isShuttingDown = true;
+  if (reconciliarJobInterval) clearInterval(reconciliarJobInterval);
   console.log(`[shutdown] Se?al recibida: ${signal}. Cerrando API...`);
 
   const forceExitTimeout = setTimeout(() => {

@@ -16548,6 +16548,7 @@ async function jobReconciliarCuentasEnFirma() {
   if (isShuttingDown) return;
   try {
     const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
+    // Fix #2: filtrar IDs vacíos con NULLIF+BTRIM para no agarrar cuentas migradas con ""
     const result = await pool.query(
       `SELECT cc.id, cc.public_id, cc.created_by, cc.fecha_correspondiente,
               cc.created_at, cc.datos_adjuntos, u.nombre_usuario, u.email
@@ -16556,12 +16557,10 @@ async function jobReconciliarCuentasEnFirma() {
        WHERE cc.estado = $1::tipo_estado_reporte
          AND cc.updated_at < NOW() - ($2 || ' minutes')::INTERVAL
          AND (
-           cc.datos_adjuntos->'firma'->>'request_id' IS NOT NULL
-           OR cc.datos_adjuntos->'firma'->>'contract_id' IS NOT NULL
+           NULLIF(BTRIM(cc.datos_adjuntos->'firma'->>'request_id'), '') IS NOT NULL
+           OR NULLIF(BTRIM(cc.datos_adjuntos->'firma'->>'contract_id'), '') IS NOT NULL
          )
-         AND (cc.datos_adjuntos->'firma'->>'documento_firmado' IS NULL
-              OR cc.datos_adjuntos->'firma'->'documento_firmado'->>'url' IS NULL
-              OR cc.datos_adjuntos->'firma'->'documento_firmado'->>'url' = '')
+         AND COALESCE(cc.datos_adjuntos->'firma'->'documento_firmado'->>'url', '') = ''
        ORDER BY cc.updated_at ASC
        LIMIT $3`,
       [estadoEnFirma, String(RECONCILIACION_MIN_EDAD_MIN), RECONCILIACION_BATCH]
@@ -16575,7 +16574,10 @@ async function jobReconciliarCuentasEnFirma() {
     for (const cuenta of cuentas) {
       if (isShuttingDown) break;
       try {
-        const prevFirma = cuenta.datos_adjuntos?.firma || {};
+        const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object" ? cuenta.datos_adjuntos : {};
+        const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object" ? prevAdjuntos.firma : {};
+        const prevSoportes = prevAdjuntos.soportes && typeof prevAdjuntos.soportes === "object" ? prevAdjuntos.soportes : {};
+
         const requestId = String(prevFirma.request_id || "").trim();
         const contractId = String(prevFirma.contract_id || "").trim();
         const signatureId = String(prevFirma.signature_id || "").trim();
@@ -16586,9 +16588,10 @@ async function jobReconciliarCuentasEnFirma() {
         let status = normalizeClickSignStatus(rawStatus);
         const nowIso = new Date().toISOString();
 
-        let documentoFirmado = prevFirma.documento_firmado || null;
+        let documentoFirmado = null;
         let documentoFirmadoError = "";
         let uploadedExtras = [];
+        let resolvedPdfForEmail = null;
 
         if (status === "signed" || !status || status === "pending") {
           const artifacts = await resolveClickSignArtifacts({
@@ -16600,6 +16603,7 @@ async function jobReconciliarCuentasEnFirma() {
           });
           const resolvedPdf = artifacts?.signedPdf || null;
           if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
+            resolvedPdfForEmail = resolvedPdf;
             try {
               const uploadResult = await uploadSignedPdfToOneDrive(cuenta, resolvedPdf.buffer, resolvedPdf.fileName);
               documentoFirmado = {
@@ -16618,11 +16622,12 @@ async function jobReconciliarCuentasEnFirma() {
             } catch (uploadErr) {
               documentoFirmadoError = `Error OneDrive: ${uploadErr.message || "desconocido"}`;
             }
+          } else if (status === "signed") {
+            // Fix #5: dejar error observable cuando Click&Sign dice firmado pero no hay PDF
+            documentoFirmadoError = "No se encontró PDF firmado en API de Click&Sign (job).";
           }
         }
 
-        const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object" ? cuenta.datos_adjuntos : {};
-        const prevSoportes = prevAdjuntos.soportes && typeof prevAdjuntos.soportes === "object" ? prevAdjuntos.soportes : {};
         const firma = {
           ...prevFirma,
           estado: status || prevFirma.estado || "pending",
@@ -16635,6 +16640,7 @@ async function jobReconciliarCuentasEnFirma() {
 
         const adjuntos = { ...prevAdjuntos, firma };
         if (documentoFirmado?.url) {
+          const cuentaFirmadaUrl = documentoFirmado.url;
           adjuntos.soportes = {
             ...prevSoportes,
             carpeta: documentoFirmado.carpeta || prevSoportes.carpeta || "",
@@ -16642,13 +16648,22 @@ async function jobReconciliarCuentasEnFirma() {
             cuenta_cobro_firmada: {
               id: documentoFirmado.id || prevSoportes?.cuenta_cobro_firmada?.id || null,
               nombre: documentoFirmado.nombre || prevSoportes?.cuenta_cobro_firmada?.nombre || "CuentaCobroFirmada.pdf",
-              url: documentoFirmado.url
+              url: cuentaFirmadaUrl
             }
           };
+          // Fix #4: replicar todos los extras igual que el webhook/manual
           const extraSeguridad = uploadedExtras.find((x) => x.kind === "seguridad_social_firma" && x.url);
-          if (extraSeguridad && !sameResourceUrl(extraSeguridad.url, documentoFirmado.url)) {
+          const extraEvidencia = uploadedExtras.find((x) => x.kind === "evidencia_firma" && x.url);
+          const extraAnexo = uploadedExtras.find((x) => x.kind === "anexo_firma" && x.url);
+          if (extraSeguridad && !sameResourceUrl(extraSeguridad.url, cuentaFirmadaUrl)) {
             adjuntos.soportes.seguridad_social_firma = { id: extraSeguridad.id || null, nombre: extraSeguridad.nombre || "SeguridadSocial.pdf", url: extraSeguridad.url };
             if (!adjuntos.soportes.seguridad_social?.url) adjuntos.soportes.seguridad_social = { ...adjuntos.soportes.seguridad_social_firma };
+          }
+          if (extraEvidencia && !sameResourceUrl(extraEvidencia.url, cuentaFirmadaUrl)) {
+            adjuntos.soportes.evidencia_firma = { id: extraEvidencia.id || null, nombre: extraEvidencia.nombre || "EvidenciaFirma.pdf", url: extraEvidencia.url };
+          }
+          if (extraAnexo && !sameResourceUrl(extraAnexo.url, cuentaFirmadaUrl)) {
+            adjuntos.soportes.anexo_firma = { id: extraAnexo.id || null, nombre: extraAnexo.nombre || "AnexoFirma.pdf", url: extraAnexo.url };
           }
         }
 
@@ -16660,26 +16675,63 @@ async function jobReconciliarCuentasEnFirma() {
           estadoDestino = "Rechazado";
         }
 
+        // UPDATE condicional: no pisar si el webhook ganó la carrera.
+        // Doble guard: URL vacía (caso firmado-con-PDF) + estado sigue en EnFirma
+        // (cubre el caso rechazado-sin-URL que el check de URL no detecta).
+        let updateResult;
         if (estadoDestino) {
-          await pool.query(
-            `UPDATE cuenta_cobro SET datos_adjuntos = $1::jsonb, estado = $2::tipo_estado_reporte, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
-            [JSON.stringify(adjuntos), estadoDestino, cuenta.id]
+          updateResult = await pool.query(
+            `UPDATE cuenta_cobro
+             SET datos_adjuntos = $1::jsonb, estado = $2::tipo_estado_reporte, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $3
+               AND estado = $4::tipo_estado_reporte
+               AND COALESCE(datos_adjuntos->'firma'->'documento_firmado'->>'url', '') = ''`,
+            [JSON.stringify(adjuntos), estadoDestino, cuenta.id, estadoEnFirma]
           );
         } else {
-          await pool.query(
-            `UPDATE cuenta_cobro SET datos_adjuntos = $1::jsonb, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
-            [JSON.stringify(adjuntos), cuenta.id]
+          updateResult = await pool.query(
+            `UPDATE cuenta_cobro
+             SET datos_adjuntos = $1::jsonb, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2
+               AND estado = $3::tipo_estado_reporte
+               AND COALESCE(datos_adjuntos->'firma'->'documento_firmado'->>'url', '') = ''`,
+            [JSON.stringify(adjuntos), cuenta.id, estadoEnFirma]
           );
         }
 
-        if (status === "signed" && documentoFirmado?.url) {
-          await notifyCuentaCobroFirmadaToProveedores({
+        // Fix #1 y #3: solo notificar si el UPDATE ganó la carrera, y persistir resultado
+        if (updateResult.rowCount > 0 && status === "signed" && documentoFirmado?.url) {
+          // Fix #4: pasar el PDF real al correo igual que webhook/manual
+          const attachments = buildCuentaCobroEmailAttachments({
             cuenta,
-            documentoFirmado,
-            attachments: buildCuentaCobroEmailAttachments({ cuenta, signedPdf: null }),
-            prevNotification: prevFirma.notificacion_proveedores || {},
-            nowIso
-          }).catch((err) => console.warn(`[reconciliar-job] Notificación fallida para ${cuenta.public_id}:`, err?.message));
+            signedPdf: resolvedPdfForEmail
+              ? { buffer: resolvedPdfForEmail.buffer, fileName: resolvedPdfForEmail.fileName }
+              : null,
+            extraFiles: uploadedExtras
+          });
+          try {
+            const notificacion = await notifyCuentaCobroFirmadaToProveedores({
+              cuenta,
+              documentoFirmado,
+              attachments,
+              prevNotification: prevFirma.notificacion_proveedores || {},
+              nowIso
+            });
+            // Fix #3: persistir el resultado de la notificación
+            if (notificacion) {
+              await pool.query(
+                `UPDATE cuenta_cobro
+                 SET datos_adjuntos = jsonb_set(datos_adjuntos, '{firma,notificacion_proveedores}', $1::jsonb),
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $2`,
+                [JSON.stringify(notificacion), cuenta.id]
+              );
+            }
+          } catch (notifErr) {
+            console.warn(`[reconciliar-job] Notificación fallida para ${cuenta.public_id}:`, notifErr?.message);
+          }
+        } else if (updateResult.rowCount === 0) {
+          console.log(`[reconciliar-job] ${cuenta.public_id} omitida — ya fue resuelta por webhook.`);
         }
 
         console.log(`[reconciliar-job] ${cuenta.public_id} → estado: ${estadoDestino || status || "sin cambio"}`);

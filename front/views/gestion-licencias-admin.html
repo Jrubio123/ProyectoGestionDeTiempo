@@ -127,6 +127,55 @@
         </div>
     </div>
 
+    <!-- Panel de resultado de la última operación -->
+    <div x-show="resultado" x-transition class="rounded-2xl border p-4 text-sm space-y-2"
+         :class="resultado?.ok ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'">
+
+        <div class="flex items-center justify-between">
+            <p class="font-bold" :class="resultado?.ok ? 'text-emerald-700' : 'text-red-700'"
+               x-text="resultado?.ok
+                 ? (resultado.activar ? 'Usuario activado correctamente' : 'Usuario desactivado correctamente')
+                 : 'Error al procesar la operación'">
+            </p>
+            <button @click="resultado = null" class="text-gray-400 hover:text-gray-600 text-xs">✕ Cerrar</button>
+        </div>
+
+        <p x-show="!resultado?.ok" class="text-red-600" x-text="resultado?.error"></p>
+
+        <template x-if="resultado?.ok">
+            <div class="space-y-1 text-xs text-gray-600">
+                <!-- Entra ID -->
+                <div class="flex items-center gap-2">
+                    <span x-show="resultado.entra?.ok" class="text-emerald-600 font-bold">✓</span>
+                    <span x-show="!resultado.entra?.ok" class="text-amber-600 font-bold">⚠</span>
+                    <span x-show="resultado.entra?.ok">Entra ID sincronizado</span>
+                    <span x-show="!resultado.entra?.ok" x-text="'Entra ID: ' + (resultado.entra?.error || 'sin sincronizar')"></span>
+                </div>
+                <!-- Licencias -->
+                <template x-if="resultado.licencia">
+                    <div class="flex items-start gap-2">
+                        <span x-show="resultado.licencia?.ok" class="text-emerald-600 font-bold">✓</span>
+                        <span x-show="!resultado.licencia?.ok" class="text-amber-600 font-bold">⚠</span>
+                        <div>
+                            <span x-show="resultado.licencia?.ok && resultado.licencia?.mode === 'release'"
+                                  x-text="'Licencias liberadas: ' + (resultado.licencia?.remove_licenses?.length ?? 0)"></span>
+                            <span x-show="resultado.licencia?.ok && resultado.licencia?.mode === 'restore'"
+                                  x-text="'Licencias restauradas: ' + (resultado.licencia?.add_licenses?.length ?? 0)"></span>
+                            <span x-show="!resultado.licencia?.ok"
+                                  x-text="'Licencias: ' + (resultado.licencia?.error || 'error desconocido')"></span>
+                            <p x-show="resultado.licencia?.ok && resultado.licencia?.note"
+                               class="text-gray-400" x-text="resultado.licencia?.note"></p>
+                            <p x-show="resultado.licencia?.ok && resultado.licencia?.backup_group_id"
+                               class="text-gray-400">
+                                Respaldo guardado: <span class="font-mono" x-text="resultado.licencia?.backup_group_id"></span>
+                            </p>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </template>
+    </div>
+
     <!-- Modal de confirmación -->
     <div x-show="modal.open"
          x-transition:enter="transition ease-out duration-200"
@@ -163,12 +212,24 @@
                     : 'El usuario no podrá ingresar al sistema.'">
                 </span>
             </p>
-            <p x-show="modal.tieneAzure" class="text-xs text-blue-600 bg-blue-50 rounded-lg p-2 mb-4">
-                Este usuario tiene cuenta en Entra ID — el cambio también se aplicará allí.
-            </p>
             <p x-show="!modal.tieneAzure" class="text-xs text-gray-400 bg-gray-50 rounded-lg p-2 mb-4">
                 Este usuario solo tiene acceso local — el cambio aplica únicamente en la BD.
             </p>
+
+            <div x-show="modal.tieneAzure" class="rounded-xl border border-blue-100 bg-blue-50/60 p-3 mb-4 space-y-2">
+                <p class="text-xs text-blue-700 font-semibold">Este usuario tiene cuenta en Entra ID</p>
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" x-model="modal.manejarLicencias" class="w-4 h-4 rounded accent-indigo-600">
+                    <span class="text-sm text-gray-700"
+                          x-text="modal.activar
+                            ? 'Restaurar licencia de Microsoft 365 desde el último respaldo'
+                            : 'Liberar licencia de Microsoft 365 y guardar respaldo'">
+                    </span>
+                </label>
+                <p x-show="!modal.manejarLicencias" class="text-xs text-amber-600">
+                    Solo se actualizará el acceso (<code>accountEnabled</code>), sin tocar licencias.
+                </p>
+            </div>
 
             <div class="flex gap-3 justify-end">
                 <button @click="modal.open = false"

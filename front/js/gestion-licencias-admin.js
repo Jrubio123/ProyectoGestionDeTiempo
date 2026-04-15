@@ -15,8 +15,11 @@ window.gestionLicenciasApp = function () {
             publicId: null,
             nombre: "",
             activar: false,
-            tieneAzure: false
+            tieneAzure: false,
+            manejarLicencias: true
         },
+
+        resultado: null,
 
         async init() {
             await this.cargarUsuarios();
@@ -56,39 +59,52 @@ window.gestionLicenciasApp = function () {
         },
 
         abrirConfirmacion(usuario) {
+            this.resultado = null;
             this.modal = {
                 open: true,
                 publicId: usuario.id,
                 nombre: usuario.nombre_usuario,
                 activar: !usuario.activo,
-                tieneAzure: !!usuario.azure_oid
+                tieneAzure: !!usuario.azure_oid,
+                manejarLicencias: true
             };
         },
 
         async confirmar() {
             if (!this.modal.publicId) return;
 
-            const { publicId, activar } = this.modal;
+            const { publicId, activar, tieneAzure, manejarLicencias } = this.modal;
             this.modal.open = false;
+            this.resultado = null;
             this.procesando = publicId;
 
             try {
                 const token = window.auth?.getToken?.() || localStorage.getItem("token");
-                const res = await axios.patch(
-                    `${API}/admin/usuarios-licencias/${publicId}/estado`,
-                    { activo: activar },
+
+                const body = { activo: activar };
+                if (tieneAzure && manejarLicencias) {
+                    if (!activar) body.liberar_licencias = true;
+                    else          body.restaurar_licencias = true;
+                }
+
+                const res = await axios.put(
+                    `${API}/admin/usuarios/${publicId}/activo`,
+                    body,
                     { headers: { Authorization: `Bearer ${token}` } }
                 );
 
                 const usuario = this.usuarios.find((u) => u.id === publicId);
                 if (usuario) usuario.activo = activar;
 
-                if (res.status === 207) {
-                    alert(`⚠️ ${res.data?.warning || "Se actualizó la BD pero hubo un problema con Entra ID."}`);
-                }
+                this.resultado = {
+                    ok: true,
+                    activar,
+                    entra: res.data?.entra_sync || null,
+                    licencia: res.data?.licencia_sync || null
+                };
             } catch (e) {
                 const msg = e?.response?.data?.error || "Error al actualizar el usuario";
-                alert(`Error: ${msg}`);
+                this.resultado = { ok: false, error: msg };
                 await this.cargarUsuarios();
             } finally {
                 this.procesando = null;

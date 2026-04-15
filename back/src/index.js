@@ -10652,13 +10652,17 @@ app.post("/auth/microsoft", async (req, res) => {
     }
 
     let userRes = await pool.query(
-      `SELECT u.id, u.public_id, u.nombre_usuario, u.email, u.rol_usuario_id, u.tipo_consultor, u.azure_oid, r.titulo AS rol
+      `SELECT u.id, u.public_id, u.nombre_usuario, u.email, u.rol_usuario_id, u.tipo_consultor, u.azure_oid, u.activo, r.titulo AS rol
        FROM usuarios u
        LEFT JOIN roles r ON u.rol_usuario_id = r.id
-       WHERE (u.azure_oid = $1 OR u.email = $2) AND u.activo = true
+       WHERE (u.azure_oid = $1 OR u.email = $2)
        LIMIT 1`,
       [oid, email]
     );
+
+    if (userRes.rows.length > 0 && !userRes.rows[0].activo) {
+      return res.status(403).json({ error: "Tu cuenta está desactivada. Contacta al administrador." });
+    }
 
     if (userRes.rows.length === 0) {
       userRes = await pool.query(

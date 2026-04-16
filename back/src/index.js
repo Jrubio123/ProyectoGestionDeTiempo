@@ -1549,6 +1549,7 @@ async function getSolicitudContratacionDetalleById(internalId) {
       sc.origen_flujo,
       sc.modalidad_contrato,
       sc.persona_usuario_id,
+      sc.coordinador_solicitante_id,
       sc.nombre,
       sc.apellidos,
       sc.numero_documento,
@@ -1819,20 +1820,34 @@ async function listActiveAnexoItemsForPersonaContext(personaContext, { lockRows 
   }
 }
 
+function anexoAssignmentMatchesPayload(item, payload) {
+  if (!item || !payload) return false;
+  return (
+    normalizeAnexoTipoInput(item.tipo_asignacion) === normalizeAnexoTipoInput(payload.tipo_asignacion) &&
+    (toNullableInteger(item.cliente_id) || null) === (toNullableInteger(payload.cliente_id) || null) &&
+    (toNullableInteger(item.modulo_id) || null) === (toNullableInteger(payload.modulo_id) || null)
+  );
+}
+
+function selectActiveAnexoForPayload(existingItems, payload) {
+  const items = Array.isArray(existingItems) ? existingItems : [];
+  return items.find((item) => anexoAssignmentMatchesPayload(item, payload)) || null;
+}
+
 async function syncExtensionAnexoFromContext({ proceso, personaContext, createdBy = null, strict = false }) {
   if (!proceso || !personaContext) return null;
 
   const existingItems = await listActiveAnexoItemsForPersonaContext(personaContext);
-  const currentItem = existingItems[0] || null;
+  const baseItem = existingItems[0] || null;
   const tipoBase =
     normalizeAnexoTipoInput(personaContext?.datos_extra?.tipo_asignacion) ||
-    normalizeAnexoTipoInput(currentItem?.tipo_asignacion) ||
+    normalizeAnexoTipoInput(baseItem?.tipo_asignacion) ||
     inferAnexoTipoFromContext(personaContext);
   const valorTarifa = inferAnexoTarifaFromContext(personaContext, tipoBase);
   const fechaInicioTarget =
     normalizeDateOnlyInput(personaContext?.fecha_extension_desde) ||
     normalizeDateOnlyInput(personaContext?.fecha_inicio) ||
-    normalizeDateOnlyInput(currentItem?.fecha_inicio) ||
+    normalizeDateOnlyInput(baseItem?.fecha_inicio) ||
     normalizeDateOnlyInput(personaContext?.created_at) ||
     new Date().toISOString().slice(0, 10);
 
@@ -1845,7 +1860,7 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
     fechaFinTarget =
       normalizeDateOnlyInput(personaContext?.fecha_extension_hasta) ||
       normalizeDateOnlyInput(personaContext?.fecha_fin) ||
-      normalizeDateOnlyInput(currentItem?.fecha_fin) ||
+      normalizeDateOnlyInput(baseItem?.fecha_fin) ||
       computeYearEndDate(fechaInicioTarget) ||
       fechaInicioTarget;
     fechaFinCalculadaTarget = !normalizeDateOnlyInput(personaContext?.fecha_extension_hasta);
@@ -1858,7 +1873,20 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
         "La extension no tiene suficientes datos para sincronizar el anexo tecnico."
       );
     }
-    return currentItem;
+    return baseItem;
+  }
+
+  // Resolver solicitante desde la solicitud de contratación origen
+  const solicitanteIdExt = personaContext.solicitud?.coordinador_solicitante_id || null;
+  let rolSolicitanteExt = null;
+  if (solicitanteIdExt) {
+    try {
+      const rolRes = await pool.query(
+        `SELECT r.titulo FROM usuarios u JOIN roles r ON r.id = u.rol_usuario_id WHERE u.id = $1 LIMIT 1`,
+        [solicitanteIdExt]
+      );
+      rolSolicitanteExt = rolRes.rows[0]?.titulo || null;
+    } catch (_) {}
   }
 
   const payload = buildAnexoInsertPayload({
@@ -1869,7 +1897,7 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
       fecha_fin: fechaFinTarget,
       fecha_fin_calculada: fechaFinCalculadaTarget,
       moneda: personaContext?.moneda,
-      modulo_id: personaContext?.modulo_id || currentItem?.modulo_id || null,
+      modulo_id: personaContext?.modulo_id || baseItem?.modulo_id || null,
       nombre_persona: personaContext?.nombreCompleto,
       numero_documento: personaContext?.numeroDocumento,
       correo_personal: personaContext?.correoPersonal
@@ -1877,11 +1905,15 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
     personaContext,
     solicitudId: proceso.solicitud_id || null,
     preregistroId: proceso.preregistro_id || null,
-    clienteId: personaContext?.clienteId || currentItem?.cliente_id || null,
-    clienteNombre: personaContext?.clienteNombre || currentItem?.cliente_nombre || "",
+    clienteId: personaContext?.clienteId || baseItem?.cliente_id || null,
+    clienteNombre: personaContext?.clienteNombre || baseItem?.cliente_nombre || "",
     creadoPor: createdBy || null,
-    origen: "automatico"
+    origen: "automatico",
+    solicitanteId: solicitanteIdExt,
+    rolSolicitante: rolSolicitanteExt
   });
+
+  const currentItem = selectActiveAnexoForPayload(existingItems, payload);
 
   if (!currentItem) {
     const created = await insertAnexoTecnicoItem(payload);
@@ -1891,16 +1923,22 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
   const sameSource =
     (proceso?.solicitud_id && Number(currentItem.solicitud_contratacion_id) === Number(proceso.solicitud_id)) ||
     (proceso?.preregistro_id && Number(currentItem.preregistro_id) === Number(proceso.preregistro_id));
+  const currentFechaInicio = normalizeDateOnlyInput(currentItem.fecha_inicio);
   const shouldSplitHistory =
     !sameSource &&
     payload.fecha_inicio &&
-    currentItem.fecha_inicio &&
-    payload.fecha_inicio > currentItem.fecha_inicio;
+    currentFechaInicio &&
+    payload.fecha_inicio > currentFechaInicio;
+
+  if (!sameSource && !shouldSplitHistory) {
+    const inserted = await insertAnexoTecnicoItem(payload);
+    return inserted.row;
+  }
 
   if (shouldSplitHistory) {
     const cierreAnterior = addDaysToDateYmd(payload.fecha_inicio, -1);
     const fechaFinAnterior =
-      cierreAnterior && cierreAnterior >= currentItem.fecha_inicio
+      cierreAnterior && currentFechaInicio && cierreAnterior >= currentFechaInicio
         ? cierreAnterior
         : currentItem.fecha_fin;
 
@@ -1949,8 +1987,10 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
       estado = 'activo',
       estado_firma = $17,
       updated_by = $18,
+      solicitante_id = COALESCE($19, solicitante_id),
+      rol_solicitante = COALESCE($20, rol_solicitante),
       updated_at = NOW()
-    WHERE id = $19
+    WHERE id = $21
     RETURNING *
     `,
     [
@@ -1972,6 +2012,8 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
       payload.origen,
       currentItem.estado_firma === "firmado" ? "pendiente" : (currentItem.estado_firma || "pendiente"),
       createdBy || null,
+      payload.solicitante_id || null,
+      payload.rol_solicitante || null,
       currentItem.id
     ]
   );
@@ -2138,7 +2180,9 @@ function buildAnexoInsertPayload({
   clienteId = null,
   clienteNombre = null,
   creadoPor = null,
-  origen = "manual"
+  origen = "manual",
+  solicitanteId = null,
+  rolSolicitante = null
 }) {
   const tipoAsignacion = normalizeAnexoTipoInput(input?.tipo_asignacion || input?.tipo);
   if (!tipoAsignacion) {
@@ -2190,9 +2234,6 @@ function buildAnexoInsertPayload({
       err.status = 400;
       throw err;
     }
-  } else {
-    resolvedClienteId = null;
-    resolvedClienteNombre = "";
   }
 
   const nombrePersona =
@@ -2225,7 +2266,9 @@ function buildAnexoInsertPayload({
     estado: "activo",
     estado_firma: "pendiente",
     creado_por: creadoPor || null,
-    updated_by: null
+    updated_by: null,
+    solicitante_id: solicitanteId || null,
+    rol_solicitante: rolSolicitante || null
   };
 }
 
@@ -2314,6 +2357,8 @@ async function insertAnexoTecnicoItem(payload) {
         estado_firma = COALESCE($18, estado_firma, 'pendiente'),
         creado_por = COALESCE($19, creado_por),
         updated_by = COALESCE($20, updated_by),
+        solicitante_id = COALESCE($22, solicitante_id),
+        rol_solicitante = COALESCE($23, rol_solicitante),
         updated_at = NOW()
       WHERE id = $21
       RETURNING *
@@ -2339,7 +2384,9 @@ async function insertAnexoTecnicoItem(payload) {
         payload.estado_firma || "pendiente",
         payload.creado_por,
         payload.updated_by,
-        existingBySource.id
+        existingBySource.id,
+        payload.solicitante_id || null,
+        payload.rol_solicitante || null
       ]
     );
     return { row: update.rows[0] || null, duplicated: false, updated: true };
@@ -2373,12 +2420,14 @@ async function insertAnexoTecnicoItem(payload) {
       estado,
       estado_firma,
       creado_por,
-      updated_by
+      updated_by,
+      solicitante_id,
+      rol_solicitante
     )
     VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8,
       $9, $10, $11, $12, $13, $14, $15, $16,
-      $17, $18, $19, $20
+      $17, $18, $19, $20, $21, $22
     )
     RETURNING *
     `,
@@ -2402,7 +2451,9 @@ async function insertAnexoTecnicoItem(payload) {
       payload.estado,
       payload.estado_firma || "pendiente",
       payload.creado_por,
-      payload.updated_by
+      payload.updated_by,
+      payload.solicitante_id || null,
+      payload.rol_solicitante || null
     ]
   );
 
@@ -2437,6 +2488,19 @@ async function ensureAutomaticAnexoFromContext({ proceso, personaContext, create
     return null;
   }
 
+  // Resolver solicitante (coordinador o comercial que originó la solicitud)
+  const solicitanteInternalId = personaContext.solicitud?.coordinador_solicitante_id || null;
+  let rolSolicitante = null;
+  if (solicitanteInternalId) {
+    try {
+      const rolRes = await pool.query(
+        `SELECT r.titulo FROM usuarios u JOIN roles r ON r.id = u.rol_usuario_id WHERE u.id = $1 LIMIT 1`,
+        [solicitanteInternalId]
+      );
+      rolSolicitante = rolRes.rows[0]?.titulo || null;
+    } catch (_) {}
+  }
+
   const input = {
     tipo_asignacion: tipo,
     valor_tarifa: valorTarifa,
@@ -2458,7 +2522,9 @@ async function ensureAutomaticAnexoFromContext({ proceso, personaContext, create
       clienteId: personaContext.clienteId || null,
       clienteNombre: personaContext.clienteNombre || "",
       creadoPor: createdBy || null,
-      origen: "automatico"
+      origen: "automatico",
+      solicitanteId: solicitanteInternalId,
+      rolSolicitante
     });
   } catch (err) {
     if (strict) {
@@ -2824,11 +2890,15 @@ async function buildAnexoIndividualItemPayload({ input, userRow, existingRow = n
 
   let clienteId = null;
   let clienteNombre = "";
-  if (anexoTipoRequiereCliente(tipoAsignacion)) {
-    const clienteInput = input?.cliente_id || existingRow?.cliente_public_id || existingRow?.cliente_id || null;
+  const clienteInput = input?.cliente_id || existingRow?.cliente_public_id || existingRow?.cliente_id || null;
+  if (clienteInput || anexoTipoRequiereCliente(tipoAsignacion)) {
     clienteId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.clientes, clienteInput);
     if (!clienteId) {
-      const err = new Error("cliente_id es obligatorio para el tipo seleccionado");
+      const err = new Error(
+        anexoTipoRequiereCliente(tipoAsignacion)
+          ? "cliente_id es obligatorio para el tipo seleccionado"
+          : "cliente_id no encontrado"
+      );
       err.status = 400;
       throw err;
     }
@@ -7909,6 +7979,20 @@ app.post("/th/anexo-individual/items", requireAccess({ roles: ["Administrador", 
     const userRow = await getUsuarioAnexoIndividualById(req.body?.usuario_id);
     if (!userRow) return res.status(404).json({ error: "Usuario no encontrado" });
 
+    // Resolver solicitante opcional pasado por TH (public_id del coordinador/comercial)
+    let solicitanteInternalId = null;
+    let rolSolicitante = null;
+    if (req.body?.solicitante_id) {
+      const solRes = await pool.query(
+        `SELECT u.id, r.titulo AS rol FROM usuarios u JOIN roles r ON r.id = u.rol_usuario_id WHERE u.public_id::text = $1::text LIMIT 1`,
+        [req.body.solicitante_id]
+      );
+      if (solRes.rows[0]) {
+        solicitanteInternalId = solRes.rows[0].id;
+        rolSolicitante = solRes.rows[0].rol || null;
+      }
+    }
+
     const payload = await buildAnexoIndividualItemPayload({
       input: req.body || {},
       userRow,
@@ -7938,11 +8022,14 @@ app.post("/th/anexo-individual/items", requireAccess({ roles: ["Administrador", 
         estado,
         estado_firma,
         creado_por,
-        updated_by
+        updated_by,
+        solicitante_id,
+        rol_solicitante
       )
       VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+        $21, $22
       )
       RETURNING id
       `,
@@ -7966,7 +8053,9 @@ app.post("/th/anexo-individual/items", requireAccess({ roles: ["Administrador", 
         payload.estado,
         "pendiente",
         payload.creado_por,
-        null
+        null,
+        solicitanteInternalId,
+        rolSolicitante
       ]
     );
 
@@ -9055,7 +9144,7 @@ app.put("/admin/personas/p/:personaId/contratacion", requireAccess({ roles: ["Ad
     const clienteRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.clientes, cliente_id, "Cliente");
 
     const tipoContratoNormalizado = toNullableTrimmedString(tipo_contrato);
-    if (tipoContratoNormalizado && !["Full time", "Indefinido", "Por horas", "Aprendizaje"].includes(tipoContratoNormalizado)) {
+    if (tipoContratoNormalizado && !["Full time", "Por horas", "Aprendiz", "Vinculado"].includes(tipoContratoNormalizado)) {
       return res.status(400).json({ error: "Tipo de contrato inválido" });
     }
 
@@ -9163,7 +9252,7 @@ app.post("/admin/personas", requireAccess({ roles: ["Administrador", "Talento Hu
     }
 
     const tipoContratoNormalizado = toNullableTrimmedString(tipo_contrato);
-    const validTiposContrato = ["Full time", "Indefinido", "Por horas", "Aprendizaje"];
+    const validTiposContrato = ["Full time", "Por horas", "Aprendiz", "Vinculado"];
     if (tipoContratoNormalizado && !validTiposContrato.includes(tipoContratoNormalizado)) {
       return res.status(400).json({ error: "Tipo de contrato inválido" });
     }
@@ -9671,7 +9760,7 @@ app.put("/admin/personas/:id/contratacion", requireAccess({ roles: ["Administrad
     const clienteRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.clientes, cliente_id, "Cliente");
 
     const tipoContratoNormalizado = toNullableTrimmedString(tipo_contrato);
-    const validTiposContrato = ["Full time", "Indefinido", "Por horas", "Aprendizaje"];
+    const validTiposContrato = ["Full time", "Por horas", "Aprendiz", "Vinculado"];
     if (tipoContratoNormalizado && !validTiposContrato.includes(tipoContratoNormalizado)) {
       return res.status(400).json({ error: "Tipo de contrato inválido" });
     }

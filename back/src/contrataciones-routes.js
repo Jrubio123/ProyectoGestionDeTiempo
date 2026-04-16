@@ -763,6 +763,9 @@ module.exports = function registerContratacionesRoutes(deps) {
   }
 
   function buildExtensionExtraContext(currentContext, requestedValues) {
+    const requestedTipoAsignacion =
+      normalizeAnexoTipo(requestedValues?.tipo_asignacion) ||
+      normalizeAnexoTipo(requestedValues?.modalidad_contrato);
     const base = currentContext
       ? {
           tipo_asignacion: currentContext.tipo_asignacion || null,
@@ -842,7 +845,7 @@ module.exports = function registerContratacionesRoutes(deps) {
     });
 
     return {
-      tipo_asignacion: currentContext?.tipo_asignacion || null,
+      tipo_asignacion: requestedTipoAsignacion || currentContext?.tipo_asignacion || null,
       extension_base: base,
       extension_cambios: changes
     };
@@ -1674,6 +1677,8 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (payload.modulo && !datosExtra.modulo) datosExtra.modulo = payload.modulo;
         if (perfil && !datosExtra.modulo) datosExtra.modulo = perfil;
         if (clienteNombre && !datosExtra.cliente_nombre) datosExtra.cliente_nombre = clienteNombre;
+        // Guardar perfil libre como modulo_otro cuando no se seleccionó un módulo del catálogo
+        if (!datosExtra.modulo_id && perfil && !datosExtra.modulo_otro) datosExtra.modulo_otro = perfil;
 
         if (tipoSolicitud === TIPO_EXTENSION) {
           const [extensionContext, supervisorMeta] = await Promise.all([
@@ -1692,6 +1697,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             supervisor_nombre: supervisorMeta?.nombre_usuario || extensionContext?.supervisor_nombre || null,
             perfil,
             moneda: monedaFinal,
+            modalidad_contrato: modalidadContrato,
             fecha_extension_desde: fechaExtensionDesde,
             fecha_extension_hasta: fechaExtensionHasta,
             tarifa_hora: payload.tarifa_hora,
@@ -2016,6 +2022,8 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (payload.modulo && !datosExtra.modulo) datosExtra.modulo = payload.modulo;
         if (perfil && !datosExtra.modulo) datosExtra.modulo = perfil;
         if (clienteNombre && !datosExtra.cliente_nombre) datosExtra.cliente_nombre = clienteNombre;
+        // Guardar perfil libre como modulo_otro cuando no se seleccionó un módulo del catálogo
+        if (!datosExtra.modulo_id && perfil && !datosExtra.modulo_otro) datosExtra.modulo_otro = perfil;
 
         if (tipoSolicitud === TIPO_EXTENSION) {
           const [extensionContext, supervisorMeta] = await Promise.all([
@@ -2034,6 +2042,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             supervisor_nombre: supervisorMeta?.nombre_usuario || extensionContext?.supervisor_nombre || null,
             perfil,
             moneda,
+            modalidad_contrato: modalidadContrato,
             fecha_extension_desde: fechaExtensionDesde,
             fecha_extension_hasta: fechaExtensionHasta,
             tarifa_hora: payload.tarifa_hora !== undefined ? payload.tarifa_hora : current.tarifa_hora,
@@ -2369,6 +2378,67 @@ module.exports = function registerContratacionesRoutes(deps) {
         let personaUsuarioId = row.persona_usuario_id || null;
         let usuarioCreado = null;
 
+        // ── UPSERT en tabla personas (núcleo de datos personales) ─────────────
+        const moduloUuidContrat = datosExtra.modulo_id || null;
+        let moduloInternoIdContrat = null;
+        if (moduloUuidContrat) {
+          const modRes = await client.query(`SELECT id FROM modulo WHERE public_id::text = $1::text LIMIT 1`, [moduloUuidContrat]);
+          moduloInternoIdContrat = modRes.rows[0]?.id || null;
+        }
+        const moduloOtroContrat = !moduloInternoIdContrat ? (datosExtra.modulo || row.perfil || null) : null;
+
+        const tipoCuentaResPersona = await client.query(
+          `SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) LIMIT 1`,
+          [`${tipoCuenta}%`]
+        );
+
+        const personaResContrat = await client.query(
+          `INSERT INTO personas (
+            numero_documento, tipo_documento_id, nombre, apellidos,
+            numero_contacto, correo_electronico, direccion_residencia, ciudad_residencia,
+            tipo_persona, factura_en_colombia,
+            banco_id, tipo_cuenta_id, numero_cuenta,
+            modulo_id, modulo_otro,
+            created_by
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12, $13, $14, $15, $16)
+          ON CONFLICT (numero_documento) DO UPDATE SET
+            nombre              = COALESCE(EXCLUDED.nombre, personas.nombre),
+            apellidos           = COALESCE(EXCLUDED.apellidos, personas.apellidos),
+            numero_contacto     = COALESCE(EXCLUDED.numero_contacto, personas.numero_contacto),
+            correo_electronico  = COALESCE(EXCLUDED.correo_electronico, personas.correo_electronico),
+            direccion_residencia= COALESCE(EXCLUDED.direccion_residencia, personas.direccion_residencia),
+            ciudad_residencia   = COALESCE(EXCLUDED.ciudad_residencia, personas.ciudad_residencia),
+            tipo_persona        = COALESCE(EXCLUDED.tipo_persona, personas.tipo_persona),
+            factura_en_colombia = COALESCE(EXCLUDED.factura_en_colombia, personas.factura_en_colombia),
+            banco_id            = COALESCE(EXCLUDED.banco_id, personas.banco_id),
+            tipo_cuenta_id      = COALESCE(EXCLUDED.tipo_cuenta_id, personas.tipo_cuenta_id),
+            numero_cuenta       = COALESCE(EXCLUDED.numero_cuenta, personas.numero_cuenta),
+            modulo_id           = COALESCE(EXCLUDED.modulo_id, personas.modulo_id),
+            modulo_otro         = COALESCE(EXCLUDED.modulo_otro, personas.modulo_otro),
+            updated_at          = NOW()
+          RETURNING id`,
+          [
+            row.numero_documento || null,
+            row.tipo_documento_id || null,
+            row.nombre || null,
+            row.apellidos || null,
+            row.telefono || null,
+            row.correo_personal || null,
+            direccion,
+            row.ubicacion || null,
+            tipoPersona,
+            facturaEnColombia,
+            bancoId,
+            tipoCuentaResPersona.rows[0]?.id || null,
+            numeroCuenta,
+            moduloInternoIdContrat,
+            moduloOtroContrat,
+            req.user?.id || null
+          ]
+        );
+        const personaIdContrat = personaResContrat.rows[0]?.id || null;
+        // ────────────────────────────────────────────────────────────────────
+
         if (!personaUsuarioId) {
           const dup = await client.query(`SELECT id FROM usuarios WHERE LOWER(email) = LOWER($1) LIMIT 1`, [correoSilver]);
           if (dup.rows.length > 0) {
@@ -2390,9 +2460,9 @@ module.exports = function registerContratacionesRoutes(deps) {
           const moneda = normalizeMoneda(row.moneda) || "COP";
           const usuarioRes = await client.query(
             `INSERT INTO usuarios
-              (nombre_usuario, email, rol_usuario_id, activo, nro_cuenta_bancaria, banco_id, tipo_cuenta_id, tipo_documento_id, cedula, direccion, telefono, ciudad, tipo_persona, moneda_cobro, factura_en_colombia, created_by, azure_oid)
+              (nombre_usuario, email, rol_usuario_id, activo, nro_cuenta_bancaria, banco_id, tipo_cuenta_id, tipo_documento_id, cedula, direccion, telefono, ciudad, tipo_persona, moneda_cobro, factura_en_colombia, persona_id, created_by, azure_oid)
              VALUES
-              ($1, $2, $3, true, $4, $5, $6, $7, $8, $9, $10, $11, $12::tipo_persona, $13::tipo_moneda, $14, 'contratacion_th', NULL)
+              ($1, $2, $3, true, $4, $5, $6, $7, $8, $9, $10, $11, $12::tipo_persona, $13::tipo_moneda, $14, $15, 'contratacion_th', NULL)
              RETURNING id, public_id, nombre_usuario, email`,
             [
               nombreCompleto || correoSilver,
@@ -2408,12 +2478,21 @@ module.exports = function registerContratacionesRoutes(deps) {
               row.ubicacion || null,
               tipoPersona,
               moneda,
-              facturaEnColombia
+              facturaEnColombia,
+              personaIdContrat
             ]
           );
 
           personaUsuarioId = usuarioRes.rows[0]?.id || null;
           usuarioCreado = usuarioRes.rows[0] || null;
+        } else {
+          // Persona ya tenía usuario: vincular persona_id si aún no está seteado
+          if (personaIdContrat) {
+            await client.query(
+              `UPDATE usuarios SET persona_id = $1, updated_at = NOW() WHERE id = $2 AND persona_id IS NULL`,
+              [personaIdContrat, personaUsuarioId]
+            );
+          }
         }
 
         const observaciones = toNullableString(req.body?.observaciones_th);

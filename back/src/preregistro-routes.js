@@ -1174,12 +1174,77 @@ module.exports = function registerPreregistroRoutes(deps) {
         return res.status(500).json({ error: "No existe el rol Consultor" });
       }
 
+      // ── UPSERT en tabla personas (núcleo de datos personales) ──────────────
+      // Detectar si el módulo es "Otros" para poblar modulo_otro
+      const linkedSolicitud = await client.query(
+        `SELECT datos_extra, coordinador_solicitante_id FROM solicitudes_contratacion WHERE preregistro_id = $1 AND estado <> 'Cancelado' ORDER BY updated_at DESC LIMIT 1`,
+        [id]
+      );
+      const solicitudDatosExtra = linkedSolicitud.rows[0]?.datos_extra || {};
+      const moduloUuidPreregistro = solicitudDatosExtra.modulo_id || null;
+      let moduloInternoIdPreregistro = null;
+      if (moduloUuidPreregistro) {
+        const modRes = await client.query(`SELECT id FROM modulo WHERE public_id::text = $1::text LIMIT 1`, [moduloUuidPreregistro]);
+        moduloInternoIdPreregistro = modRes.rows[0]?.id || null;
+      }
+      const moduloOtroPreregistro = !moduloInternoIdPreregistro ? (solicitudDatosExtra.modulo || current.perfil || null) : null;
+      const tipoPersonaParaPersonas = normalizeTipoPersonaForUsuarios(current.tipo_persona) || null;
+
+      const personaRes = await client.query(
+        `INSERT INTO personas (
+          numero_documento, tipo_documento_id, nombre, apellidos,
+          numero_contacto, correo_electronico, direccion_residencia, ciudad_residencia,
+          tipo_persona, factura_en_colombia,
+          banco_id, tipo_cuenta_id, numero_cuenta,
+          modulo_id, modulo_otro,
+          preregistro_id, created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12, $13, $14, $15, $16, $17)
+        ON CONFLICT (numero_documento) DO UPDATE SET
+          nombre              = COALESCE(EXCLUDED.nombre, personas.nombre),
+          apellidos           = COALESCE(EXCLUDED.apellidos, personas.apellidos),
+          numero_contacto     = COALESCE(EXCLUDED.numero_contacto, personas.numero_contacto),
+          correo_electronico  = COALESCE(EXCLUDED.correo_electronico, personas.correo_electronico),
+          direccion_residencia= COALESCE(EXCLUDED.direccion_residencia, personas.direccion_residencia),
+          ciudad_residencia   = COALESCE(EXCLUDED.ciudad_residencia, personas.ciudad_residencia),
+          tipo_persona        = COALESCE(EXCLUDED.tipo_persona, personas.tipo_persona),
+          factura_en_colombia = COALESCE(EXCLUDED.factura_en_colombia, personas.factura_en_colombia),
+          banco_id            = COALESCE(EXCLUDED.banco_id, personas.banco_id),
+          tipo_cuenta_id      = COALESCE(EXCLUDED.tipo_cuenta_id, personas.tipo_cuenta_id),
+          numero_cuenta       = COALESCE(EXCLUDED.numero_cuenta, personas.numero_cuenta),
+          modulo_id           = COALESCE(EXCLUDED.modulo_id, personas.modulo_id),
+          modulo_otro         = COALESCE(EXCLUDED.modulo_otro, personas.modulo_otro),
+          preregistro_id      = COALESCE(EXCLUDED.preregistro_id, personas.preregistro_id),
+          updated_at          = NOW()
+        RETURNING id`,
+        [
+          current.numero_documento || null,
+          current.tipo_documento_id || null,
+          current.nombre || null,
+          current.apellidos || null,
+          current.telefono || null,
+          current.correo_personal || null,
+          current.direccion || null,
+          current.ciudad || null,
+          tipoPersonaParaPersonas,
+          current.factura_en_colombia === null || current.factura_en_colombia === undefined ? null : Boolean(current.factura_en_colombia),
+          current.banco_id || null,
+          tipoCuentaRes.rows[0]?.id || null,
+          current.numero_cuenta || null,
+          moduloInternoIdPreregistro,
+          moduloOtroPreregistro,
+          id,
+          req.user?.id || null
+        ]
+      );
+      const personaId = personaRes.rows[0]?.id || null;
+      // ────────────────────────────────────────────────────────────────────────
+
       const nombreCompleto = `${current.nombre || ""} ${current.apellidos || ""}`.trim();
       const usuarioRes = await client.query(
         `INSERT INTO usuarios
-          (nombre_usuario, email, rol_usuario_id, activo, nro_cuenta_bancaria, banco_id, tipo_cuenta_id, tipo_documento_id, cedula, direccion, telefono, ciudad, tipo_persona, moneda_cobro, factura_en_colombia, created_by, azure_oid)
+          (nombre_usuario, email, rol_usuario_id, activo, nro_cuenta_bancaria, banco_id, tipo_cuenta_id, tipo_documento_id, cedula, direccion, telefono, ciudad, tipo_persona, moneda_cobro, factura_en_colombia, persona_id, created_by, azure_oid)
          VALUES
-          ($1, $2, $3, true, $4, $5, $6, $7, $8, $9, $10, $11, $12::tipo_persona, $13::tipo_moneda, $14, 'preregistro_th', NULL)
+          ($1, $2, $3, true, $4, $5, $6, $7, $8, $9, $10, $11, $12::tipo_persona, $13::tipo_moneda, $14, $15, 'preregistro_th', NULL)
          RETURNING id, public_id, nombre_usuario, email`,
         [
           nombreCompleto || correoSilver,
@@ -1197,7 +1262,8 @@ module.exports = function registerPreregistroRoutes(deps) {
           current.moneda || "COP",
           current.factura_en_colombia === null || current.factura_en_colombia === undefined
             ? null
-            : Boolean(current.factura_en_colombia)
+            : Boolean(current.factura_en_colombia),
+          personaId
         ]
       );
 

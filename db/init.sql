@@ -1097,7 +1097,7 @@ CREATE TABLE anexo_tecnico_items (
     ),
     CHECK (
       (tipo_asignacion IN ('full_time', 'medio_tiempo', 'proyecto') AND cliente_id IS NOT NULL)
-      OR (tipo_asignacion IN ('horas', 'capacitacion') AND cliente_id IS NULL)
+      OR tipo_asignacion IN ('horas', 'capacitacion')
     ),
     CHECK (
       (tipo_asignacion IN ('full_time', 'medio_tiempo', 'proyecto') AND fecha_fin >= fecha_inicio)

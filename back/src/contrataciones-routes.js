@@ -210,6 +210,95 @@ module.exports = function registerContratacionesRoutes(deps) {
     return null;
   }
 
+  async function resolveBancoPublicId(db, bancoInternalId) {
+    if (!bancoInternalId) return null;
+    const result = await db.query(`SELECT public_id FROM bancos WHERE id = $1 LIMIT 1`, [bancoInternalId]);
+    return result.rows[0]?.public_id || null;
+  }
+
+  async function fetchPersonaLegalContext(db, { personaUsuarioId = null, numeroDocumento = null } = {}) {
+    if (!personaUsuarioId && !numeroDocumento) return null;
+
+    const result = await db.query(
+      `
+      WITH usuario_base AS (
+        SELECT u.*
+        FROM usuarios u
+        WHERE
+          ($1::int IS NOT NULL AND u.id = $1)
+          OR ($2::text IS NOT NULL AND COALESCE(u.cedula, '') = $2)
+        ORDER BY
+          CASE WHEN $1::int IS NOT NULL AND u.id = $1 THEN 0 ELSE 1 END,
+          u.id DESC
+        LIMIT 1
+      ),
+      persona_base AS (
+        SELECT p.*
+        FROM personas p
+        LEFT JOIN usuario_base u ON TRUE
+        WHERE
+          (u.persona_id IS NOT NULL AND p.id = u.persona_id)
+          OR ($2::text IS NOT NULL AND COALESCE(p.numero_documento, '') = $2)
+          OR (u.cedula IS NOT NULL AND COALESCE(p.numero_documento, '') = u.cedula)
+        ORDER BY
+          CASE WHEN p.id = (SELECT persona_id FROM usuario_base LIMIT 1) THEN 0 ELSE 1 END,
+          p.updated_at DESC NULLS LAST,
+          p.id DESC
+        LIMIT 1
+      )
+      SELECT
+        COALESCE(p.direccion_residencia, u.direccion) AS direccion,
+        COALESCE(p.tipo_persona::text, u.tipo_persona::text) AS tipo_persona,
+        COALESCE(p.factura_en_colombia, u.factura_en_colombia) AS factura_en_colombia,
+        COALESCE(bp.public_id, bu.public_id) AS banco_id,
+        COALESCE(bp.titulo, bu.titulo) AS banco_nombre,
+        COALESCE(tcp.titulo, tcu.titulo) AS tipo_cuenta,
+        COALESCE(p.numero_cuenta, u.nro_cuenta_bancaria) AS numero_cuenta
+      FROM usuario_base u
+      FULL JOIN persona_base p ON TRUE
+      LEFT JOIN bancos bp ON bp.id = p.banco_id
+      LEFT JOIN bancos bu ON bu.id = u.banco_id
+      LEFT JOIN tipo_cuenta_bancaria tcp ON tcp.id = p.tipo_cuenta_id
+      LEFT JOIN tipo_cuenta_bancaria tcu ON tcu.id = u.tipo_cuenta_id
+      LIMIT 1
+      `,
+      [personaUsuarioId || null, numeroDocumento || null]
+    );
+
+    return result.rows[0] || null;
+  }
+
+  function mergeLegalContextIntoDatosExtra(datosExtra, legalContext) {
+    if (!legalContext) return datosExtra;
+
+    const next = datosExtra || {};
+    const tipoPersona = normalizeTipoPersonaForForm(legalContext.tipo_persona);
+    if (!next.direccion && legalContext.direccion) next.direccion = legalContext.direccion;
+    if (!next.tipo_persona && tipoPersona) next.tipo_persona = tipoPersona;
+    if (next.factura_en_colombia === undefined || next.factura_en_colombia === null) {
+      if (legalContext.factura_en_colombia !== undefined && legalContext.factura_en_colombia !== null) {
+        next.factura_en_colombia = Boolean(legalContext.factura_en_colombia);
+      }
+    }
+    if (!next.banco_id && legalContext.banco_id) next.banco_id = legalContext.banco_id;
+    if (!next.banco_nombre && legalContext.banco_nombre) next.banco_nombre = legalContext.banco_nombre;
+    if (!next.tipo_cuenta && legalContext.tipo_cuenta) next.tipo_cuenta = legalContext.tipo_cuenta;
+    if (!next.numero_cuenta && legalContext.numero_cuenta) next.numero_cuenta = legalContext.numero_cuenta;
+    return next;
+  }
+
+  function normalizeTipoPersonaForForm(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    const ascii = raw
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    if (ascii.includes("jur")) return "Juridica";
+    if (ascii === "natural") return "Natural";
+    return raw;
+  }
+
   function isValidSilverEmail(value) {
     return /^[^\s@]+@silverconsulting\.com\.co$/i.test(String(value || "").trim());
   }
@@ -1824,6 +1913,11 @@ module.exports = function registerContratacionesRoutes(deps) {
         // Guardar perfil libre como modulo_otro cuando no se seleccionó un módulo del catálogo
         if (!datosExtra.modulo_id && perfil && !datosExtra.modulo_otro) datosExtra.modulo_otro = perfil;
 
+        if (tipoSolicitud === TIPO_NUEVO && (personaUsuarioId || numeroDocumento)) {
+          const legalContext = await fetchPersonaLegalContext(pool, { personaUsuarioId, numeroDocumento });
+          mergeLegalContextIntoDatosExtra(datosExtra, legalContext);
+        }
+
         // Validar pertenencia del anexo seleccionado antes del INSERT para evitar solicitudes huérfanas
         if (tipoSolicitud === TIPO_RETIRO && datosExtra?.anexo_item_id) {
           const anexoCheck = await pool.query(
@@ -2193,6 +2287,11 @@ module.exports = function registerContratacionesRoutes(deps) {
             : null;
         }
 
+        if (tipoSolicitud === TIPO_NUEVO && (personaUsuarioId || numeroDocumento)) {
+          const legalContext = await fetchPersonaLegalContext(pool, { personaUsuarioId, numeroDocumento });
+          mergeLegalContextIntoDatosExtra(datosExtra, legalContext);
+        }
+
         if (tipoSolicitud === TIPO_EXTENSION) {
           const [extensionContext, supervisorMeta] = await Promise.all([
             buildPersonaExtensionContext({
@@ -2447,6 +2546,7 @@ module.exports = function registerContratacionesRoutes(deps) {
           return res.status(400).json({ error: "Banco no válido" });
         }
 
+        const bancoPublicId = await resolveBancoPublicId(pool, bancoId);
         const nextEstado = correoSilver ? ESTADOS.pendienteRevisionTh : ESTADOS.pendienteCorreoSilver;
 
         // Guarda datos bancarios en datos_extra y correo silver en correo_empresarial
@@ -2463,7 +2563,7 @@ module.exports = function registerContratacionesRoutes(deps) {
           [
             correoSilver,
             JSON.stringify({
-              banco_id:      bancoId,
+              banco_id:      bancoPublicId || bancoId,
               tipo_cuenta:   tipoCuenta,
               numero_cuenta: numeroCuenta,
               direccion:     direccion,

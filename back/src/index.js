@@ -10117,7 +10117,7 @@ app.get("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Reclutador"
 });
 
 // Crear solicitud (solo coordinador)
-app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administrador", ["Comercial"] }), async (req, res) => {
+app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administrador", "Comercial"] }), async (req, res) => {
   const {
     cliente_id,
     modulo_id,

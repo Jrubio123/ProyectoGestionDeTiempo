@@ -10064,13 +10064,13 @@ app.get("/supervisores", requireAccess({ roles: ["Administrador", "Coordinador",
    API - RRHH SOLICITUDES
 =============================== */
 
-// Listar solicitudes: administrador ve todas; los demás ven solo las propias.
+// Listar solicitudes: administrador y reclutador ven todas; coordinador/comercial ven solo las propias.
 app.get("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Reclutador", "Comercial", "Administrador"] }), async (req, res) => {
   try {
     const role = normalizeValue(req.user?.rol);
     const params = [];
     let where = "";
-    if (role !== "administrador") {
+    if (!["administrador", "reclutador"].includes(role)) {
       params.push(req.user?.id);
       where = "WHERE s.coordinador_id = $1";
     }

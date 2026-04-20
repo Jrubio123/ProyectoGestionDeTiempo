@@ -83,12 +83,12 @@
             <form @submit.prevent="enviarSolicitud" class="space-y-4">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <select x-model="form.cliente_id" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
-                        <option value="">Selecciona Cliente...</option>
+                        <option value="">Cliente *</option>
                         <template x-for="c in clientes" :key="c.id"><option :value="c.id" x-text="c.titulo"></option></template>
                     </select>
 
                     <select x-model="form.modulo_id" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
-                        <option value="">Tecnología / Módulo...</option>
+                        <option value="">Tecnología / Módulo *</option>
                         <template x-for="m in modulos" :key="m.id"><option :value="m.id" x-text="m.titulo"></option></template>
                         <option value="__otros__">Otros</option>
                     </select>
@@ -107,7 +107,7 @@
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <input type="text" x-model="form.tiempo" placeholder="Tiempo estimado (Ej: 6 meses)" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                    <input type="text" x-model="form.tiempo" placeholder="Tiempo estimado (Ej: 6 meses) *" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
                     <select x-model="form.modalidad" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
                         <option value="Full time">Full time</option>
                         <option value="Medio tiempo">Medio tiempo</option>
@@ -140,19 +140,22 @@
                     </select>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
-                    <div class="relative">
-                        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 pointer-events-none">Desde&nbsp;&dollar;</span>
-                        <input type="number" min="0" x-model="form.presupuesto_min" placeholder="0" class="w-full bg-white/50 border border-slate-200 rounded-2xl pl-14 pr-3 py-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
-                    </div>
-                    <div class="relative">
-                        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 pointer-events-none">Hasta&nbsp;&dollar;</span>
-                        <input type="number" min="0" x-model="form.presupuesto_max" placeholder="0" class="w-full bg-white/50 border border-slate-200 rounded-2xl pl-14 pr-3 py-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                <div>
+                    <p class="text-xs text-slate-500 mb-1.5">Presupuesto * <span class="text-slate-400 font-normal">(al menos un valor)</span></p>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="relative">
+                            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 pointer-events-none">Desde&nbsp;&dollar;</span>
+                            <input type="number" min="0" x-model="form.presupuesto_min" placeholder="0" class="w-full bg-white/50 border border-slate-200 rounded-2xl pl-14 pr-3 py-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                        </div>
+                        <div class="relative">
+                            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 pointer-events-none">Hasta&nbsp;&dollar;</span>
+                            <input type="number" min="0" x-model="form.presupuesto_max" placeholder="0" class="w-full bg-white/50 border border-slate-200 rounded-2xl pl-14 pr-3 py-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                        </div>
                     </div>
                 </div>
 
                 <textarea x-model="form.experiencia" rows="3" placeholder="Experiencia requerida" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"></textarea>
-                <textarea x-model="form.descripcion" rows="4" placeholder="Descripción de la solicitud" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"></textarea>
+                <textarea x-model="form.descripcion" rows="4" placeholder="Descripción de la solicitud *" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"></textarea>
                 <textarea x-model="form.informacion_adicional" rows="3" placeholder="Información adicional (opcional)" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"></textarea>
 
                 <div x-show="touched && !formValido" class="rounded-2xl border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-700">

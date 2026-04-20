@@ -573,6 +573,54 @@ module.exports = function registerContratacionesRoutes(deps) {
     return result.rows[0] || null;
   }
 
+  async function findAllActiveAnexosForPersona({
+    userInternalId = null,
+    numeroDocumento = null,
+    correoPersonal = null,
+    correoEmpresarial = null
+  } = {}) {
+    if (!userInternalId && !numeroDocumento && !correoPersonal && !correoEmpresarial) return [];
+    const result = await pool.query(
+      `
+      SELECT
+        ati.id,
+        ati.public_id,
+        ati.usuario_id,
+        ati.tipo_asignacion,
+        ati.correo_personal,
+        ati.cliente_id,
+        c.public_id AS cliente_public_id,
+        COALESCE(c.titulo, ati.cliente_nombre) AS cliente_nombre,
+        ati.modulo_id,
+        m.public_id AS modulo_public_id,
+        m.titulo AS modulo_titulo,
+        ati.moneda,
+        ati.valor_tarifa,
+        ati.fecha_inicio,
+        ati.fecha_fin,
+        ati.fecha_fin_calculada,
+        ati.estado_firma
+      FROM anexo_tecnico_items ati
+      LEFT JOIN clientes c ON c.id = ati.cliente_id
+      LEFT JOIN modulo m ON m.id = ati.modulo_id
+      WHERE ati.estado = 'activo'
+        AND (
+          ($1::int IS NOT NULL AND ati.usuario_id = $1)
+          OR ($2::text IS NOT NULL AND ati.numero_documento = $2)
+          OR ($3::text IS NOT NULL AND LOWER(COALESCE(ati.correo_personal, '')) = LOWER($3))
+          OR ($4::text IS NOT NULL AND LOWER(COALESCE(ati.correo_personal, '')) = LOWER($4))
+        )
+      ORDER BY
+        CASE WHEN ati.usuario_id = $1 THEN 0 ELSE 1 END,
+        ati.fecha_inicio DESC NULLS LAST,
+        ati.updated_at DESC NULLS LAST,
+        ati.created_at DESC
+      `,
+      [userInternalId || null, numeroDocumento || null, correoPersonal || null, correoEmpresarial || null]
+    );
+    return result.rows;
+  }
+
   async function findLatestSolicitudForPersona({ userInternalId = null, numeroDocumento = null, correoEmpresarial = null } = {}) {
     if (!userInternalId && !numeroDocumento && !correoEmpresarial) return null;
     const result = await pool.query(
@@ -661,7 +709,8 @@ module.exports = function registerContratacionesRoutes(deps) {
     numeroDocumento = null,
     correoPersonal = null,
     correoEmpresarial = null,
-    baseUserRow = null
+    baseUserRow = null,
+    preferAnexoItemId = null
   } = {}) {
     const baseUser =
       baseUserRow ||
@@ -673,8 +722,8 @@ module.exports = function registerContratacionesRoutes(deps) {
     const resolvedUserId = baseUser?.id || userInternalId || null;
     const resolvedDocumento = numeroDocumento || baseUser?.cedula || null;
 
-    const [anexoActivo, solicitudActual, preregistroActual] = await Promise.all([
-      findActiveAnexoForPersona({
+    const [todosAnexosActivos, solicitudActual, preregistroActual] = await Promise.all([
+      findAllActiveAnexosForPersona({
         userInternalId: resolvedUserId,
         numeroDocumento: resolvedDocumento,
         correoPersonal,
@@ -691,6 +740,9 @@ module.exports = function registerContratacionesRoutes(deps) {
         correoPersonal
       })
     ]);
+    const anexoActivo = (preferAnexoItemId
+      ? todosAnexosActivos.find((a) => String(a.public_id) === String(preferAnexoItemId))
+      : null) || todosAnexosActivos[0] || null;
 
     const tipoAsignacion =
       normalizeAnexoTipo(anexoActivo?.tipo_asignacion) ||
@@ -758,7 +810,22 @@ module.exports = function registerContratacionesRoutes(deps) {
             fecha_fin_calculada: Boolean(anexoActivo.fecha_fin_calculada),
             estado_firma: anexoActivo.estado_firma || "pendiente"
           }
-        : null
+        : null,
+      anexos_activos: todosAnexosActivos.map((a) => ({
+        id: a.public_id,
+        tipo_asignacion: a.tipo_asignacion,
+        tipo_asignacion_label: anexoTipoLabel(a.tipo_asignacion),
+        cliente_id: a.cliente_public_id || null,
+        cliente_nombre: a.cliente_nombre || null,
+        modulo_id: a.modulo_public_id || null,
+        modulo_nombre: a.modulo_titulo || null,
+        moneda: a.moneda || null,
+        valor_tarifa: a.valor_tarifa === null ? null : Number(a.valor_tarifa),
+        fecha_inicio: a.fecha_inicio || null,
+        fecha_fin: a.fecha_fin || null,
+        fecha_fin_calculada: Boolean(a.fecha_fin_calculada),
+        estado_firma: a.estado_firma || "pendiente"
+      }))
     };
   }
 
@@ -995,7 +1062,13 @@ module.exports = function registerContratacionesRoutes(deps) {
 
   async function syncAnexoDesdeSolicitud(internalId, userId = null) {
     const row = await getByInternalId(pool, internalId);
-    if (!row || row.tipo_solicitud === TIPO_RETIRO) return row;
+    if (!row) return row;
+
+    if (row.tipo_solicitud === TIPO_RETIRO) {
+      // La finalización del anexo ya ocurrió en dispatchAndFinalizeSolicitud
+      return row;
+    }
+
     try {
       await ensurePersistedAnexoFromProceso({
         solicitudId: internalId,
@@ -1125,31 +1198,50 @@ module.exports = function registerContratacionesRoutes(deps) {
     };
   }
 
-  function buildMailMesaRetiro(solicitud) {
+  function buildMailMesaRetiro(solicitud, { selectedAnexo = null, remainingCount = 0 } = {}) {
     const blocks = baseBlocks(solicitud);
+    if (selectedAnexo) {
+      blocks.push({ label: "Contrato finalizado", value: `${selectedAnexo.tipo_asignacion_label || selectedAnexo.tipo_asignacion} - ${selectedAnexo.cliente_nombre || "Sin cliente"}` });
+      if (selectedAnexo.fecha_inicio || selectedAnexo.fecha_fin) {
+        blocks.push({ label: "Vigencia del contrato", value: `${formatDateForEmail(selectedAnexo.fecha_inicio)} - ${formatDateForEmail(selectedAnexo.fecha_fin)}` });
+      }
+    }
+    const introRetiro = remainingCount === 0
+      ? "Favor bloquear TODOS los accesos (Microsoft, VPN, licencias, S-user). Esta persona no tendra contratos activos despues de este retiro."
+      : `Favor retirar accesos asociados al contrato seleccionado. La persona conservara ${remainingCount} contrato(s) activo(s).`;
     return {
       subject: "Retirar usuarios, licencias y VPN",
       text:
-        "Favor bloquear accesos (Microsoft y VPN), retirar licencias y S user.\n\n" +
+        `${introRetiro}\n\n` +
         blocks.map((item) => `${item.label}: ${item.value}`).join("\n"),
       html: buildEmailLayout({
         title: "Retiro - Acciones TI",
-        intro: "Favor bloquear accesos, retirar licencias y eliminar S user.",
+        intro: introRetiro,
         blocks
       })
     };
   }
 
-  function buildMailThRetiro(solicitud) {
+  function buildMailThRetiro(solicitud, { selectedAnexo = null, remainingCount = 0 } = {}) {
     const blocks = baseBlocks(solicitud);
+    if (selectedAnexo) {
+      blocks.push({ label: "Contrato a retirar", value: `${selectedAnexo.tipo_asignacion_label || selectedAnexo.tipo_asignacion} - ${selectedAnexo.cliente_nombre || "Sin cliente"}` });
+      if (selectedAnexo.perfil) blocks.push({ label: "Perfil del contrato", value: selectedAnexo.perfil });
+      if (selectedAnexo.fecha_inicio || selectedAnexo.fecha_fin) {
+        blocks.push({ label: "Vigencia del contrato", value: `${formatDateForEmail(selectedAnexo.fecha_inicio)} - ${formatDateForEmail(selectedAnexo.fecha_fin)}` });
+      }
+    }
+    const introTh = remainingCount === 0
+      ? "Proceder con el retiro total del contrato. Esta persona NO tendra contratos activos despues de este retiro. Revisar proceso de desvinculacion segun politica interna."
+      : `Proceder con el retiro del contrato seleccionado. La persona conservara ${remainingCount} contrato(s) activo(s).`;
     return {
       subject: "Administrativos: Retirar contrato",
       text:
-        "Proceder con el retiro del contrato para:\n\n" +
+        `${introTh}\n\n` +
         blocks.map((item) => `${item.label}: ${item.value}`).join("\n"),
       html: buildEmailLayout({
         title: "Administrativos: Retiro de contrato",
-        intro: "Se solicita gestionar el retiro de contrato con la siguiente informacion.",
+        intro: introTh,
         blocks
       })
     };
@@ -1273,9 +1365,60 @@ module.exports = function registerContratacionesRoutes(deps) {
     }
 
     if (solicitud.tipo_solicitud === TIPO_RETIRO) {
-      const mesaResult = await sendMail(graphContext, DESTINOS_MESA, buildMailMesaRetiro(solicitud));
+      const datosExtraRetiro = toObjectOrEmpty(rawSolicitud.datos_extra);
+      const anexoRetiroPublicId = toNullableString(datosExtraRetiro?.anexo_item_id);
+      let selectedAnexo = null;
+      let remainingCount = 0;
+      if (anexoRetiroPublicId) {
+        // Validar pertenencia y obtener datos del anexo antes de finalizar
+        const anexoRes = await pool.query(
+          `SELECT ati.id, ati.tipo_asignacion, c.titulo AS cliente_nombre, m.titulo AS perfil,
+                  ati.moneda, ati.valor_tarifa, ati.fecha_inicio, ati.fecha_fin
+           FROM anexo_tecnico_items ati
+           LEFT JOIN clientes c ON c.id = ati.cliente_id
+           LEFT JOIN modulo m ON m.id = ati.modulo_id
+           WHERE ati.public_id::text = $1
+             AND ati.estado = 'activo'
+             AND (
+               ($2::int IS NOT NULL AND ati.usuario_id = $2)
+               OR ($3::text IS NOT NULL AND ati.numero_documento = $3)
+             )
+           LIMIT 1`,
+          [anexoRetiroPublicId, rawSolicitud.persona_usuario_id || null, rawSolicitud.numero_documento || null]
+        );
+        if (anexoRes.rows[0]) {
+          selectedAnexo = {
+            ...anexoRes.rows[0],
+            tipo_asignacion_label: anexoTipoLabel(anexoRes.rows[0].tipo_asignacion)
+          };
+          // Finalizar antes de enviar correos (Fix 3)
+          await pool.query(
+            `UPDATE anexo_tecnico_items
+             SET estado = 'finalizado',
+                 fecha_fin = COALESCE($2, fecha_fin),
+                 updated_by = $3,
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [selectedAnexo.id, rawSolicitud.fecha_retiro || null, req.user?.id || null]
+          );
+          // Contar restantes excluyendo el recién finalizado (Fix 4)
+          const countRes = await pool.query(
+            `SELECT COUNT(*)::int AS count FROM anexo_tecnico_items
+             WHERE estado = 'activo'
+               AND public_id::text <> $1::text
+               AND (
+                 ($2::int IS NOT NULL AND usuario_id = $2)
+                 OR ($3::text IS NOT NULL AND numero_documento = $3)
+               )`,
+            [anexoRetiroPublicId, rawSolicitud.persona_usuario_id || null, rawSolicitud.numero_documento || null]
+          );
+          remainingCount = countRes.rows[0]?.count || 0;
+        }
+      }
+      const retiroCtx = { selectedAnexo, remainingCount };
+      const mesaResult = await sendMail(graphContext, DESTINOS_MESA, buildMailMesaRetiro(solicitud, retiroCtx));
       mailResults.mesa = Boolean(mesaResult.ok);
-      const thResult = await sendMail(graphContext, destinosTh, buildMailThRetiro(solicitud));
+      const thResult = await sendMail(graphContext, destinosTh, buildMailThRetiro(solicitud, retiroCtx));
       mailResults.th = Boolean(thResult.ok);
       const coordResult = await sendMail(graphContext, coordinadorEmail, buildMailCoordinadorRetiro(solicitud));
       mailResults.coordinador = Boolean(coordResult.ok);
@@ -1413,7 +1556,8 @@ module.exports = function registerContratacionesRoutes(deps) {
               tarifa_mes: context?.tarifa_mes ?? null,
               tarifa_medio_tiempo: context?.tarifa_medio_tiempo ?? null,
               tarifa_capacitacion: context?.tarifa_capacitacion ?? null,
-              anexo_activo: context?.anexo_activo || null
+              anexo_activo: context?.anexo_activo || null,
+              anexos_activos: context?.anexos_activos || []
             };
           })
         );
@@ -1680,13 +1824,32 @@ module.exports = function registerContratacionesRoutes(deps) {
         // Guardar perfil libre como modulo_otro cuando no se seleccionó un módulo del catálogo
         if (!datosExtra.modulo_id && perfil && !datosExtra.modulo_otro) datosExtra.modulo_otro = perfil;
 
+        // Validar pertenencia del anexo seleccionado antes del INSERT para evitar solicitudes huérfanas
+        if (tipoSolicitud === TIPO_RETIRO && datosExtra?.anexo_item_id) {
+          const anexoCheck = await pool.query(
+            `SELECT 1 FROM anexo_tecnico_items
+             WHERE public_id::text = $1::text
+               AND estado = 'activo'
+               AND (
+                 ($2::int IS NOT NULL AND usuario_id = $2)
+                 OR ($3::text IS NOT NULL AND numero_documento = $3)
+               )
+             LIMIT 1`,
+            [datosExtra.anexo_item_id, personaUsuarioId || null, numeroDocumento || null]
+          );
+          if (!anexoCheck.rows.length) {
+            return res.status(422).json({ error: "El contrato seleccionado no existe, ya fue retirado o no pertenece a esta persona" });
+          }
+        }
+
         if (tipoSolicitud === TIPO_EXTENSION) {
           const [extensionContext, supervisorMeta] = await Promise.all([
             buildPersonaExtensionContext({
               userInternalId: personaUsuarioId,
               numeroDocumento,
               correoPersonal,
-              correoEmpresarial
+              correoEmpresarial,
+              preferAnexoItemId: toNullableString(datosExtra?.anexo_item_id)
             }),
             resolveUsuarioMeta(supervisorId)
           ]);
@@ -2036,7 +2199,8 @@ module.exports = function registerContratacionesRoutes(deps) {
               userInternalId: personaUsuarioId,
               numeroDocumento,
               correoPersonal,
-              correoEmpresarial
+              correoEmpresarial,
+              preferAnexoItemId: toNullableString(datosExtra?.anexo_item_id)
             }),
             resolveUsuarioMeta(supervisorId)
           ]);

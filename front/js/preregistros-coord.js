@@ -36,6 +36,7 @@ window.preregistrosCoordApp = function () {
         tarifa_medio_tiempo: "",
         tarifa_capacitacion: "",
         tipo_asignacion: "",
+        anexo_item_id: "",
         modalidad_contrato: "",
         fecha_inicio: "",
         fecha_fin: "",
@@ -71,6 +72,8 @@ window.preregistrosCoordApp = function () {
         busquedaPersona: "",
         personasEncontradas: [],
         personaSeleccionada: null,
+        anexosActivos: [],
+        anexoSeleccionadoId: "",
         mostrarSugerenciasPersona: false,
         buscandoPersonas: false,
         debounceBusquedaPersona: null,
@@ -547,6 +550,8 @@ window.preregistrosCoordApp = function () {
             this.personasEncontradas = [];
             this.busquedaPersona = "";
             this.personaSeleccionada = null;
+            this.anexosActivos = [];
+            this.anexoSeleccionadoId = "";
             this.mostrarSugerenciasPersona = false;
             this.buscandoPersonas = false;
             this.erroresFormulario = [];
@@ -622,15 +627,35 @@ window.preregistrosCoordApp = function () {
         seleccionarPersona(persona) {
             if (!persona) return;
             this.personaSeleccionada = { ...persona };
+            this.anexosActivos = Array.isArray(persona.anexos_activos) ? persona.anexos_activos : (persona.anexo_activo ? [persona.anexo_activo] : []);
+            this.anexoSeleccionadoId = this.anexosActivos.length === 1 ? this.anexosActivos[0].id : "";
+            if (this.anexoSeleccionadoId) this.form.anexo_item_id = this.anexoSeleccionadoId;
             this.poblarFormularioDesdePersona(persona);
             this.busquedaPersona = String(persona.nombre_usuario || persona.nombre || "").trim() || this.busquedaPersona;
             this.personasEncontradas = [];
             this.mostrarSugerenciasPersona = false;
         },
 
+        seleccionarAnexo(anexo) {
+            if (!anexo) return;
+            this.anexoSeleccionadoId = anexo.id;
+            this.form.anexo_item_id = anexo.id;
+            if (this.tipoModal === "Extension") {
+                if (anexo.cliente_id) this.form.cliente_id = anexo.cliente_id;
+                if (anexo.moneda) this.form.moneda = anexo.moneda;
+                if (anexo.modulo_id) this.form.modulo_id = anexo.modulo_id;
+                if (anexo.modulo_nombre) this.form.perfil = anexo.modulo_nombre;
+                if (anexo.fecha_inicio) this.form.fecha_extension_desde = anexo.fecha_inicio;
+                if (anexo.fecha_fin) this.form.fecha_extension_hasta = anexo.fecha_fin;
+            }
+        },
+
         limpiarPersonaSeleccionada() {
             this.form.persona_usuario_id = "";
+            this.form.anexo_item_id = "";
             this.personaSeleccionada = null;
+            this.anexosActivos = [];
+            this.anexoSeleccionadoId = "";
             this.busquedaPersona = "";
             this.personasEncontradas = [];
             this.mostrarSugerenciasPersona = false;
@@ -716,9 +741,15 @@ window.preregistrosCoordApp = function () {
                 if (!String(this.form.supervisor_id || "").trim()) errors.push("Responsable / Coordinador");
                 if (!String(this.form.fecha_retiro || "").trim()) errors.push("Fecha de retiro");
                 if (!String(this.form.necesidad_ti || "").trim()) errors.push("Acciones requeridas a TI");
+                if (this.anexosActivos.length > 0 && !this.anexoSeleccionadoId) {
+                    errors.push("Selecciona el contrato que se va a retirar");
+                }
             }
 
             if (this.tipoModal === "Extension") {
+                if (this.anexosActivos.length > 1 && !this.anexoSeleccionadoId) {
+                    errors.push("Selecciona el contrato que se va a modificar");
+                }
                 if (!String(this.form.numero_documento || "").trim() && !String(this.form.persona_usuario_id || "").trim()) {
                     errors.push("Busca una persona existente o digita el numero de documento");
                 }
@@ -763,9 +794,18 @@ window.preregistrosCoordApp = function () {
             return this.ensureMonedasDisponibles(this.form.moneda);
         },
 
+        get anexoSeleccionado() {
+            if (!this.anexoSeleccionadoId || !this.anexosActivos.length) return null;
+            return this.anexosActivos.find((a) => a.id === this.anexoSeleccionadoId) || null;
+        },
+
         get extensionBaseActual() {
+            const selectedAnexo = this.anexoSeleccionado;
+            const personaBase = selectedAnexo
+                ? this.construirBaseExtensionDesdePersona({ ...this.personaSeleccionada, anexo_activo: selectedAnexo })
+                : this.construirBaseExtensionDesdePersona(this.personaSeleccionada);
             return this.combinarBasesExtension(
-                this.construirBaseExtensionDesdePersona(this.personaSeleccionada),
+                personaBase,
                 this.construirBaseExtensionDesdeDatos(this.datosExtraBase?.extension_base)
             );
         },
@@ -817,6 +857,11 @@ window.preregistrosCoordApp = function () {
                 enviar_correos: true,
                 datos_extra: datosExtra
             };
+
+            if (this.tipoModal === "Extension" || this.tipoModal === "Retiro") {
+                if (this.form.anexo_item_id) datosExtra.anexo_item_id = this.form.anexo_item_id;
+                base.datos_extra = datosExtra;
+            }
 
             if (this.tipoModal === "Nuevo") {
                 // Tipo de asignación explícito para el anexo técnico

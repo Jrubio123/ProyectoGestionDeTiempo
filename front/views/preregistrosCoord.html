@@ -134,9 +134,37 @@
                         <button type="button" @click="limpiarPersonaSeleccionada" class="text-emerald-700 hover:text-emerald-900">Limpiar</button>
                     </div>
 
-                    <div x-show="tipoModal === 'Extension' && extensionBaseActual" class="grid grid-cols-1 md:grid-cols-3 gap-3" style="display: none;">
+                    <!-- Lista de contratos activos para Extension / Retiro -->
+                    <div x-show="(tipoModal === 'Extension' || tipoModal === 'Retiro') && anexosActivos.length > 0" style="display: none;">
+                        <p class="text-[11px] uppercase tracking-wide font-bold mb-2"
+                           :class="tipoModal === 'Retiro' ? 'text-red-700' : 'text-emerald-700'"
+                           x-text="tipoModal === 'Retiro' ? 'Selecciona el contrato a retirar *' : (anexosActivos.length > 1 ? 'Selecciona el contrato a modificar *' : 'Contrato activo')"></p>
+                        <div class="space-y-2">
+                            <template x-for="anexo in anexosActivos" :key="anexo.id">
+                                <button type="button" @click="seleccionarAnexo(anexo)"
+                                    class="w-full text-left rounded-xl border px-4 py-3 transition"
+                                    :class="anexoSeleccionadoId === anexo.id
+                                        ? (tipoModal === 'Retiro' ? 'border-red-400 bg-red-50 ring-2 ring-red-300' : 'border-emerald-400 bg-emerald-50 ring-2 ring-emerald-300')
+                                        : 'border-slate-200 bg-white/60 hover:border-slate-300'">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <div>
+                                            <p class="text-sm font-semibold text-slate-800" x-text="[anexo.tipo_asignacion_label, anexo.cliente_nombre].filter(Boolean).join(' — ')"></p>
+                                            <p class="text-xs text-slate-500 mt-0.5" x-text="[anexo.modulo_nombre, `${formatFecha(anexo.fecha_inicio)} → ${formatFecha(anexo.fecha_fin)}`].filter(Boolean).join(' · ')"></p>
+                                            <p class="text-xs text-slate-400 mt-0.5" x-text="`${anexo.moneda || ''} ${anexo.valor_tarifa != null ? Number(anexo.valor_tarifa).toLocaleString('es-CO') : '-'} · Firma: ${anexo.estado_firma || 'pendiente'}`"></p>
+                                        </div>
+                                        <div x-show="anexoSeleccionadoId === anexo.id"
+                                             :class="tipoModal === 'Retiro' ? 'text-red-500' : 'text-emerald-500'"
+                                             class="shrink-0 text-lg">✓</div>
+                                    </div>
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Contexto del contrato seleccionado (Extension) -->
+                    <div x-show="tipoModal === 'Extension' && extensionBaseActual && anexoSeleccionadoId" class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2" style="display: none;">
                         <div class="rounded-xl border border-emerald-200 bg-white/70 p-3">
-                            <p class="text-[11px] uppercase tracking-wide text-emerald-700 font-bold">Contrato actual detectado</p>
+                            <p class="text-[11px] uppercase tracking-wide text-emerald-700 font-bold">Contrato seleccionado</p>
                             <p class="text-sm font-semibold text-slate-800 mt-1" x-text="extensionBaseActual?.tipo_asignacion_label || 'Sin tipo detectado'"></p>
                             <p class="text-xs text-slate-600 mt-1" x-text="`${formatFecha(extensionBaseActual?.fecha_inicio)} -> ${formatFecha(extensionBaseActual?.fecha_fin)}`"></p>
                         </div>

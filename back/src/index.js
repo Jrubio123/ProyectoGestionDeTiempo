@@ -1182,7 +1182,7 @@ function parseJsonObject(value) {
     try {
       const parsed = JSON.parse(value);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
-    } catch (_) {}
+    } catch (_) { }
   }
   return {};
 }
@@ -1886,7 +1886,7 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
         [solicitanteIdExt]
       );
       rolSolicitanteExt = rolRes.rows[0]?.titulo || null;
-    } catch (_) {}
+    } catch (_) { }
   }
 
   const payload = buildAnexoInsertPayload({
@@ -2498,7 +2498,7 @@ async function ensureAutomaticAnexoFromContext({ proceso, personaContext, create
         [solicitanteInternalId]
       );
       rolSolicitante = rolRes.rows[0]?.titulo || null;
-    } catch (_) {}
+    } catch (_) { }
   }
 
   const input = {
@@ -3081,12 +3081,12 @@ async function uploadAnexoIndividualFirmadoToOneDrive(proceso, pdfBuffer, fileNa
 function buildAnexoIndividualFirmaCompletadaEmail({ proceso }) {
   const fechaFirma = proceso?.firmado_at
     ? new Date(proceso.firmado_at).toLocaleString("es-CO", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit"
-      })
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    })
     : new Date().toLocaleString("es-CO");
   const url = String(proceso?.onedrive_url || "").trim();
 
@@ -3179,7 +3179,7 @@ async function notifyAnexoIndividualFirmaCompletada(tokenId) {
   } catch (err) {
     try {
       await client.query("ROLLBACK");
-    } catch {}
+    } catch { }
     throw err;
   } finally {
     client.release();
@@ -6588,7 +6588,7 @@ app.post("/sub-consultores/asociar", requireAccess({ roles: ["Administrador", "C
       const checkA = await pool.query("SELECT id, id_consultor_principal FROM usuarios WHERE public_id = $1 AND activo = true", [asociado_id]);
       if (checkA.rowCount === 0) return res.status(404).json({ error: "Consultor asociado no encontrado" });
       if (String(checkA.rows[0].id_consultor_principal || "") !== "") return res.status(400).json({ error: "El consultor ya está asociado a otro principal" });
-      
+
       return res.status(500).json({ error: "Error lógico desconocido" });
     }
 
@@ -6627,7 +6627,7 @@ app.delete("/sub-consultores/:asociadoId", requireAccess({ roles: ["Administrado
     if (result.rowCount === 0) {
       const checkP = await pool.query("SELECT id FROM usuarios WHERE public_id = $1", [principal_id]);
       const checkA = await pool.query("SELECT id, id_consultor_principal FROM usuarios WHERE public_id = $1 AND activo = true", [asociadoId]);
-      
+
       if (checkA.rowCount === 0) return res.status(404).json({ error: "Consultor asociado no encontrado" });
       if (checkP.rowCount > 0 && String(checkA.rows[0].id_consultor_principal || "") !== String(checkP.rows[0].id)) {
         return res.status(403).json({ error: "No autorizado para desvincular" });
@@ -6741,7 +6741,7 @@ app.put("/admin/modulos/:id", requireAccess({ roles: ["Administrador"] }), async
   const activo = req.body?.activo;
   try {
     if (!titulo) return res.status(400).json({ error: "El título es obligatorio" });
-    
+
     // CTE para resolver el id interno, validar duplicados y hacer update en un viaje
     const result = await pool.query(
       `
@@ -6775,7 +6775,7 @@ app.put("/admin/modulos/:id", requireAccess({ roles: ["Administrador"] }), async
       }
       return res.status(404).json({ error: "Módulo no encontrado" });
     }
-    
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -6895,7 +6895,7 @@ app.put("/admin/roles/:id", requireAccess({ roles: ["Administrador"] }), async (
       }
       return res.status(404).json({ error: "Rol no encontrado" });
     }
-    
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -6930,15 +6930,15 @@ app.delete("/admin/roles/:id", requireAccess({ roles: ["Administrador"] }), asyn
         "SELECT id FROM roles WHERE public_id = $1", [id]
       );
       if (checkOriginal.rowCount === 0) return res.status(404).json({ error: "Rol no encontrado" });
-      
+
       const checkUso = await pool.query(
         "SELECT id FROM usuarios WHERE rol_usuario_id = $1 LIMIT 1", [checkOriginal.rows[0].id]
       );
       if (checkUso.rowCount > 0) return res.status(400).json({ error: "No se puede eliminar: el rol está asignado a usuarios" });
-      
+
       return res.status(500).json({ error: "Error lógico desconocido al eliminar" });
     }
-    
+
     res.json(result.rows[0] || { ok: true });
   } catch (err) {
     console.error(err);
@@ -7041,7 +7041,7 @@ app.put("/admin/bancos/:id", requireAccess({ roles: ["Administrador"] }), async 
       }
       return res.status(404).json({ error: "Banco no encontrado" });
     }
-    
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -7076,15 +7076,15 @@ app.delete("/admin/bancos/:id", requireAccess({ roles: ["Administrador"] }), asy
         "SELECT id FROM bancos WHERE public_id = $1", [id]
       );
       if (checkOriginal.rowCount === 0) return res.status(404).json({ error: "Banco no encontrado" });
-      
+
       const checkUso = await pool.query(
         "SELECT id FROM usuarios WHERE banco_id = $1 LIMIT 1", [checkOriginal.rows[0].id]
       );
       if (checkUso.rowCount > 0) return res.status(400).json({ error: "No se puede eliminar: el banco está asignado a usuarios" });
-      
+
       return res.status(500).json({ error: "Error lógico desconocido al eliminar" });
     }
-    
+
     res.json(result.rows[0] || { ok: true });
   } catch (err) {
     console.error(err);
@@ -7218,7 +7218,7 @@ app.put("/admin/usuarios/:id/rol", requireAccess({ roles: ["Administrador"] }), 
   const { rol_id } = req.body || {};
   try {
     if (!rol_id) return res.status(400).json({ error: "Falta rol_id" });
-    
+
     // CTE para resolver usuario y rol en 1 query
     const result = await pool.query(
       `
@@ -7239,10 +7239,10 @@ app.put("/admin/usuarios/:id/rol", requireAccess({ roles: ["Administrador"] }), 
       // Verificar manual (sin error crash) si fue porque no existe el rol o el usuario
       const checkRol = await pool.query("SELECT id FROM roles WHERE public_id = $1", [rol_id]);
       if (checkRol.rowCount === 0) return res.status(404).json({ error: "Rol no encontrado" });
-      
+
       const checkUser = await pool.query("SELECT id FROM usuarios WHERE public_id = $1", [id]);
       if (checkUser.rowCount === 0) return res.status(404).json({ error: "Usuario no encontrado" });
-      
+
       return res.status(500).json({ error: "Error desconocido al asignar rol" });
     }
 
@@ -7438,11 +7438,11 @@ function buildContratoFirmaCompletadaEmail({ proceso, docs = [] }) {
           ${metaHtml}
         </ul>
         ${carpetaOneDrive
-          ? `<p style="margin:0 0 14px;font-size:14px;">
+      ? `<p style="margin:0 0 14px;font-size:14px;">
               <strong>Carpeta de OneDrive:</strong><br>
               <a href="${escapeHtmlText(carpetaOneDrive)}" style="color:#2563eb;text-decoration:none;">${escapeHtmlText(carpetaOneDrive)}</a>
             </p>`
-          : ""}
+      : ""}
         <p style="margin:0 0 10px;font-size:13px;color:#475569;font-weight:700;">Documentos firmados</p>
         <ul style="margin:0 0 8px 18px;padding:0;font-size:14px;color:#334155;">
           ${docsHtml}
@@ -7557,7 +7557,7 @@ async function notifyContratoFirmaCompletada(tokenId) {
   } catch (err) {
     try {
       await client.query("ROLLBACK");
-    } catch {}
+    } catch { }
     throw err;
   } finally {
     client.release();
@@ -8297,14 +8297,14 @@ app.post("/th/anexo-individual/iniciar-firma", requireAccess({ roles: ["Administ
             {
               level_order: 0,
               required_signatories_to_complete_level: 1,
-                signatories: [
-                  {
-                    email: correoFinal,
-                    name: userRow.nombre_usuario || correoFinal,
-                    external_id: signatoryExternalId
-                  }
-                ]
-              }
+              signatories: [
+                {
+                  email: correoFinal,
+                  name: userRow.nombre_usuario || correoFinal,
+                  external_id: signatoryExternalId
+                }
+              ]
+            }
           ],
           file: [
             {
@@ -8432,7 +8432,7 @@ app.post("/th/anexo-individual/iniciar-firma", requireAccess({ roles: ["Administ
     } catch (err) {
       try {
         await client.query("ROLLBACK");
-      } catch {}
+      } catch { }
       throw err;
     } finally {
       client.release();
@@ -8528,7 +8528,7 @@ app.delete("/th/anexo-individual/cancelar-firma/:tokenId", requireAccess({ roles
   } catch (err) {
     try {
       await client.query("ROLLBACK");
-    } catch {}
+    } catch { }
     console.error(err);
     res.status(500).json({ error: "Error cancelando el envio de firma" });
   } finally {
@@ -9102,12 +9102,12 @@ app.put("/admin/personas/p/:personaId/cobro", requireAccess({ roles: ["Administr
   const { personaId } = req.params;
   const { banco_id, tipo_cuenta_id, nro_cuenta_bancaria, factura_en_colombia } = req.body || {};
   try {
-    const bancoRef      = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.bancos, banco_id, "Banco");
+    const bancoRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.bancos, banco_id, "Banco");
     const tipoCuentaRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.tipoCuentaBancaria, tipo_cuenta_id, "Tipo de cuenta");
     const facturaVal =
-      factura_en_colombia === true  || factura_en_colombia === "true"  || factura_en_colombia === 1 ? true
-      : factura_en_colombia === false || factura_en_colombia === "false" || factura_en_colombia === 0 ? false
-      : null;
+      factura_en_colombia === true || factura_en_colombia === "true" || factura_en_colombia === 1 ? true
+        : factura_en_colombia === false || factura_en_colombia === "false" || factura_en_colombia === 0 ? false
+          : null;
 
     const result = await pool.query(`
       UPDATE personas SET
@@ -9140,7 +9140,7 @@ app.put("/admin/personas/p/:personaId/contratacion", requireAccess({ roles: ["Ad
     nombre_contacto_emergencia, telefono_contacto_emergencia, parentesco
   } = req.body || {};
   try {
-    const moduloRef  = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.modulo, modulo_id, "Módulo");
+    const moduloRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.modulo, modulo_id, "Módulo");
     const clienteRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.clientes, cliente_id, "Cliente");
 
     const tipoContratoNormalizado = toNullableTrimmedString(tipo_contrato);
@@ -9235,10 +9235,10 @@ app.post("/admin/personas", requireAccess({ roles: ["Administrador", "Talento Hu
 
   try {
     const tipoDocumentoRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.documentoIdentidad, tipo_documento_id, "Tipo de documento");
-    const bancoRef       = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.bancos, banco_id, "Banco");
-    const tipoCuentaRef  = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.tipoCuentaBancaria, tipo_cuenta_id, "Tipo de cuenta");
-    const moduloRef      = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.modulo, modulo_id, "Módulo");
-    const clienteRef     = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.clientes, cliente_id, "Cliente");
+    const bancoRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.bancos, banco_id, "Banco");
+    const tipoCuentaRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.tipoCuentaBancaria, tipo_cuenta_id, "Tipo de cuenta");
+    const moduloRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.modulo, modulo_id, "Módulo");
+    const clienteRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.clientes, cliente_id, "Cliente");
 
     const tipoPersonaNormalizada = tipo_persona ? normalizeTipoPersonaForUsuariosInput(tipo_persona) : null;
     if (tipo_persona && !tipoPersonaNormalizada) {
@@ -9629,7 +9629,7 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
 
     res.json(updated.rows[0] || {});
   } catch (err) {
-    await client.query("ROLLBACK").catch(() => {});
+    await client.query("ROLLBACK").catch(() => { });
     if (err.code === "23505") return res.status(409).json({ error: "El número de documento ya está en uso" });
     if (err?.status === 400) return res.status(400).json({ error: err.message });
     console.error(err);
@@ -9734,7 +9734,7 @@ app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador", "T
 
     res.json(updated.rows[0] || {});
   } catch (err) {
-    await client.query("ROLLBACK").catch(() => {});
+    await client.query("ROLLBACK").catch(() => { });
     if (err?.status === 400) return res.status(400).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: "Error al actualizar datos de cobro" });
@@ -9756,7 +9756,7 @@ app.put("/admin/personas/:id/contratacion", requireAccess({ roles: ["Administrad
   } = req.body || {};
   const client = await pool.connect();
   try {
-    const moduloRef  = await resolvePersonaReferenceOrThrow(client, ID_TABLES.modulo, modulo_id, "Módulo");
+    const moduloRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.modulo, modulo_id, "Módulo");
     const clienteRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.clientes, cliente_id, "Cliente");
 
     const tipoContratoNormalizado = toNullableTrimmedString(tipo_contrato);
@@ -9860,7 +9860,7 @@ app.put("/admin/personas/:id/contratacion", requireAccess({ roles: ["Administrad
     await client.query("COMMIT");
     res.json({ success: true });
   } catch (err) {
-    await client.query("ROLLBACK").catch(() => {});
+    await client.query("ROLLBACK").catch(() => { });
     if (err?.status === 400) return res.status(400).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: "Error al actualizar datos de contratación" });
@@ -10117,7 +10117,7 @@ app.get("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Reclutador"
 });
 
 // Crear solicitud (solo coordinador)
-app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administrador"] }), async (req, res) => {
+app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administrador", ["Comercial"] }), async (req, res) => {
   const {
     cliente_id,
     modulo_id,
@@ -10845,13 +10845,13 @@ const CONTRATOS_STATIC_DIR = path.join(__dirname, "static", "contratos");
 
 // plantilla: true ? el frontend descarga automáticamente al confirmar lectura
 const DOCS_ESTATICOS = [
-  { clave: "politica_pago",     archivo: "POL\u00CDTICA DE PAGO A PROVEEDORES - GENERAL.pdf",                          label: "Politica de pago de proveedores" },
-  { clave: "codigo_etica",      archivo: "Silver Consulting - C\u00F3digo de \u00E9tica y conducta.pdf",                    label: "Codigo de etica y conducta" },
-  { clave: "requisitos",        archivo: "REQUISITOS DE CONTRATO OUTSOURCING.pdf",                                label: "Requisitos de Contrato" },
-  { clave: "plantilla_tiempos", archivo: "SC-PS-Seguridad Equipos V1.pdf",                                        label: "Seguridad de Equipos",            plantilla: true, descarga_archivo: "PLANTILLA DE TIEMPOS.xlsx" },
+  { clave: "politica_pago", archivo: "POL\u00CDTICA DE PAGO A PROVEEDORES - GENERAL.pdf", label: "Politica de pago de proveedores" },
+  { clave: "codigo_etica", archivo: "Silver Consulting - C\u00F3digo de \u00E9tica y conducta.pdf", label: "Codigo de etica y conducta" },
+  { clave: "requisitos", archivo: "REQUISITOS DE CONTRATO OUTSOURCING.pdf", label: "Requisitos de Contrato" },
+  { clave: "plantilla_tiempos", archivo: "SC-PS-Seguridad Equipos V1.pdf", label: "Seguridad de Equipos", plantilla: true, descarga_archivo: "PLANTILLA DE TIEMPOS.xlsx" },
   { clave: "guia_autenticador", archivo: "Silver Consulting - Configurar Autenticaci\u00F3n Multifactor - Office 365.pdf", label: "Guia Autenticador Office 365" },
-  { clave: "guia_mfa_365",      archivo: "Silver Consulting - configurar MFA Silver Consulting - Office 365.pdf", label: "Guia MFA Office 365" },
-  { clave: "guia_ingreso_365",  archivo: "Silver Consulting - Ingresar a Microsoft 365 Est\u00E1ndar.pdf",        label: "Guia ingreso Microsoft 365 Estandar" },
+  { clave: "guia_mfa_365", archivo: "Silver Consulting - configurar MFA Silver Consulting - Office 365.pdf", label: "Guia MFA Office 365" },
+  { clave: "guia_ingreso_365", archivo: "Silver Consulting - Ingresar a Microsoft 365 Est\u00E1ndar.pdf", label: "Guia ingreso Microsoft 365 Estandar" },
 ];
 
 const ARCHIVOS_ESTATICOS_CONTRATACION = new Set(
@@ -12231,10 +12231,10 @@ app.put("/consultorias/:id", requireAccess({ roles: ["Administrador"] }), async 
       // Verificar manual (sin error crash)
       const checkC = await pool.query("SELECT id FROM consultorias WHERE public_id = $1", [id]);
       if (checkC.rowCount === 0) return res.status(404).json({ error: "Consultoría no encontrada" });
-      
+
       return res.status(404).json({ error: "Cliente, coordinador o tipo de asignación no válido" });
     }
-    
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -12318,7 +12318,7 @@ app.get("/mis-asignaciones-coordinador", requireAccess({ roles: ["Coordinador"] 
         )
       ORDER BY ra.id DESC
     `, [coordinador_id || null, userId]);
-    
+
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -13255,7 +13255,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           error: `Máximo de ${MAX_TICKETS_POR_ASIGNACION} tickets por asignación alcanzado`
         });
       }
-      
+
       saved = await client.query(
         `INSERT INTO reporte_horas
           (id_registro_asignacion, horas_reportadas, total_cobrar, tipo_servicio, nro_caso_int_ext,
@@ -13354,7 +13354,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     res.json(savedRow);
   } catch (err) {
     if (txStarted) {
-      try { await client.query("ROLLBACK"); } catch (_) {}
+      try { await client.query("ROLLBACK"); } catch (_) { }
     }
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {
       return res.status(404).json({ error: "Ticket o reporte no encontrado" });
@@ -13423,7 +13423,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     );
     if (!tipoValido.rows.length) {
       if (!tipoValido.rows.diag_asignacion) {
-         return res.status(404).json({ error: "Ticket o asignación no encontrado" });
+        return res.status(404).json({ error: "Ticket o asignación no encontrado" });
       }
       return res.status(404).json({ error: "Ticket no encontrado" });
     }
@@ -14373,23 +14373,23 @@ app.post("/cuentas-cobro/:id/firma/iniciar", requireAccess({ roles: ["Consultor"
           }
         ],
         file: [
-  {
-    filename: fileName,
-    content: pdfBuffer.toString("base64"),
-    sign_on_landing: "Y",
-    signature_position: [
-      {
-        signatory_external_id: signatoryExternalId,
-        page: "last",
-        x: 140,
-        y: 240,
-        width: 84,
-        height: 36,
-        rotation: 0
-      }
-    ]
-  }
-]
+          {
+            filename: fileName,
+            content: pdfBuffer.toString("base64"),
+            sign_on_landing: "Y",
+            signature_position: [
+              {
+                signatory_external_id: signatoryExternalId,
+                page: "last",
+                x: 140,
+                y: 240,
+                width: 84,
+                height: 36,
+                rotation: 0
+              }
+            ]
+          }
+        ]
       }
     };
     const fallbackWebhookBase = getRequestPublicBaseUrl(req);
@@ -16135,16 +16135,16 @@ app.put("/registro-asignaciones/:id", requireAccess({ roles: ["Administrador", "
     const row = result.rows[0];
 
     if (!row || !row.id) {
-       // Check diagnostics
-       if (!row) return res.status(404).json({ error: "Asignación o referencias no encontradas" });
-       if (!row.diag_asignacion) return res.status(404).json({ error: "Asignación no encontrada" });
-       if (consultor_responsable_id && !row.diag_consultor) return res.status(404).json({ error: "Consultor no encontrado" });
-       if (id_modulo && !row.diag_modulo) return res.status(404).json({ error: "Módulo no encontrado" });
-       
-       if (row.diag_es_tcf && esCostoTotalInput && !(Number(totalPagarNum) > 0)) {
-         return res.status(400).json({ error: "Debes indicar un presupuesto total mayor a 0 para costo total." });
-       }
-       return res.status(500).json({ error: "Error desconocido al actualizar asignación" });
+      // Check diagnostics
+      if (!row) return res.status(404).json({ error: "Asignación o referencias no encontradas" });
+      if (!row.diag_asignacion) return res.status(404).json({ error: "Asignación no encontrada" });
+      if (consultor_responsable_id && !row.diag_consultor) return res.status(404).json({ error: "Consultor no encontrado" });
+      if (id_modulo && !row.diag_modulo) return res.status(404).json({ error: "Módulo no encontrado" });
+
+      if (row.diag_es_tcf && esCostoTotalInput && !(Number(totalPagarNum) > 0)) {
+        return res.status(400).json({ error: "Debes indicar un presupuesto total mayor a 0 para costo total." });
+      }
+      return res.status(500).json({ error: "Error desconocido al actualizar asignación" });
     }
 
     delete row.diag_asignacion;
@@ -16523,24 +16523,24 @@ app.post("/registro-asignaciones", requireAccess({ roles: ["Administrador", "Coo
 
     // If no row or an empty row without our inserted ID was returned, it means validation failed inside CTE
     if (!row || !row.id) {
-       // Using the diag flags from RIGHT JOIN
-       if (!row) return res.status(404).json({ error: "Consultoría o referencias no encontradas" });
-       if (!row.diag_consultoria) return res.status(404).json({ error: "Consultoría no válida" });
-       if (!row.diag_consultor) return res.status(404).json({ error: "Consultor no encontrado" });
-       if (!row.diag_modulo) return res.status(404).json({ error: "Módulo no encontrado" });
-       if (row.diag_dup) {
-         return res.status(400).json({
-           error: "Ya existe una asignación activa para este consultor y módulo en la consultoría seleccionada (mismo período)."
-         });
-       }
-       
-       if (row.diag_es_mf && !(Number(row.diag_tarifa_calc) > 0)) {
-         return res.status(400).json({ error: "No existe una tarifa vigente para este consultor, cliente, módulo y tipo de asignación." });
-       }
-       if (row.diag_es_tcf && esCostoTotalInput && !(Number(totalPagarInput) > 0)) {
-         return res.status(400).json({ error: "Debes indicar un presupuesto total mayor a 0 para costo total." });
-       }
-       return res.status(500).json({ error: "Error desconocido al procesar asignación" });
+      // Using the diag flags from RIGHT JOIN
+      if (!row) return res.status(404).json({ error: "Consultoría o referencias no encontradas" });
+      if (!row.diag_consultoria) return res.status(404).json({ error: "Consultoría no válida" });
+      if (!row.diag_consultor) return res.status(404).json({ error: "Consultor no encontrado" });
+      if (!row.diag_modulo) return res.status(404).json({ error: "Módulo no encontrado" });
+      if (row.diag_dup) {
+        return res.status(400).json({
+          error: "Ya existe una asignación activa para este consultor y módulo en la consultoría seleccionada (mismo período)."
+        });
+      }
+
+      if (row.diag_es_mf && !(Number(row.diag_tarifa_calc) > 0)) {
+        return res.status(400).json({ error: "No existe una tarifa vigente para este consultor, cliente, módulo y tipo de asignación." });
+      }
+      if (row.diag_es_tcf && esCostoTotalInput && !(Number(totalPagarInput) > 0)) {
+        return res.status(400).json({ error: "Debes indicar un presupuesto total mayor a 0 para costo total." });
+      }
+      return res.status(500).json({ error: "Error desconocido al procesar asignación" });
     }
 
     const created = row;

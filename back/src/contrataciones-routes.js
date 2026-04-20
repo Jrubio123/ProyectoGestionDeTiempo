@@ -2022,8 +2022,13 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (payload.modulo && !datosExtra.modulo) datosExtra.modulo = payload.modulo;
         if (perfil && !datosExtra.modulo) datosExtra.modulo = perfil;
         if (clienteNombre && !datosExtra.cliente_nombre) datosExtra.cliente_nombre = clienteNombre;
-        // Guardar perfil libre como modulo_otro cuando no se seleccionó un módulo del catálogo
         if (!datosExtra.modulo_id && perfil && !datosExtra.modulo_otro) datosExtra.modulo_otro = perfil;
+        if (payload.factura_en_colombia !== undefined) {
+          datosExtra.factura_en_colombia =
+            payload.factura_en_colombia === true || payload.factura_en_colombia === "true" ? true
+            : payload.factura_en_colombia === false || payload.factura_en_colombia === "false" ? false
+            : null;
+        }
 
         if (tipoSolicitud === TIPO_EXTENSION) {
           const [extensionContext, supervisorMeta] = await Promise.all([
@@ -2398,9 +2403,9 @@ module.exports = function registerContratacionesRoutes(deps) {
             numero_contacto, correo_electronico, direccion_residencia, ciudad_residencia,
             tipo_persona, factura_en_colombia,
             banco_id, tipo_cuenta_id, numero_cuenta,
-            modulo_id, modulo_otro,
+            modulo_id, modulo_otro, cliente_id,
             created_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12, $13, $14, $15, $16)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12, $13, $14, $15, $16, $17)
           ON CONFLICT (numero_documento) DO UPDATE SET
             nombre              = COALESCE(EXCLUDED.nombre, personas.nombre),
             apellidos           = COALESCE(EXCLUDED.apellidos, personas.apellidos),
@@ -2415,6 +2420,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             numero_cuenta       = COALESCE(EXCLUDED.numero_cuenta, personas.numero_cuenta),
             modulo_id           = COALESCE(EXCLUDED.modulo_id, personas.modulo_id),
             modulo_otro         = COALESCE(EXCLUDED.modulo_otro, personas.modulo_otro),
+            cliente_id          = COALESCE(EXCLUDED.cliente_id, personas.cliente_id),
             updated_at          = NOW()
           RETURNING id`,
           [
@@ -2433,6 +2439,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             numeroCuenta,
             moduloInternoIdContrat,
             moduloOtroContrat,
+            row.cliente_id || null,
             req.user?.id || null
           ]
         );

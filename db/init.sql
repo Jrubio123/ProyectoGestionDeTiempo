@@ -189,9 +189,9 @@ CREATE TYPE tipo_sexo AS ENUM
 CREATE TYPE tipo_contrato AS ENUM
 (
     'Full time',
-    'Indefinido',
     'Por horas',
-    'Aprendizaje'
+    'Aprendiz',
+    'Vinculado'
 );
 
 -- ============================================================================
@@ -845,6 +845,7 @@ CREATE TABLE solicitudes_contratacion (
         CHECK (estado IN (
             'Pendiente',
             'Pendiente Coordinador',
+            'Pendiente Comercial',
             'En Proceso',
             'Pendiente Confirmación Cliente',
             'Pendiente Revision TH',
@@ -936,6 +937,7 @@ CREATE TABLE preregistro_personas (
 
     cargo cargo_tipo,
     responsable_supervisor_id INT REFERENCES usuarios(id),
+    responsable_supervisor VARCHAR(150),
     fecha_fin DATE,
     moneda tipo_moneda,
     pais_pago VARCHAR(100),
@@ -955,12 +957,14 @@ CREATE TABLE preregistro_personas (
     tipo_persona tipo_persona,
     banco_id INT REFERENCES bancos(id),
     tipo_cuenta_id INT REFERENCES tipo_cuenta_bancaria(id),
+    tipo_cuenta VARCHAR(50),
     numero_cuenta VARCHAR(50),
     correo_silver VARCHAR(150) UNIQUE,
 
     estado VARCHAR(50) NOT NULL DEFAULT 'Pendiente Coordinador'
         CHECK (estado IN (
             'Pendiente Coordinador',
+            'Pendiente Comercial',
             'Pendiente Revision TH',
             'Pendiente Correo Silver',
             'Completado',
@@ -1084,6 +1088,8 @@ CREATE TABLE anexo_tecnico_items (
         CHECK (estado IN ('activo', 'finalizado', 'cancelado')),
     estado_firma VARCHAR(20) NOT NULL DEFAULT 'pendiente'
         CHECK (estado_firma IN ('pendiente', 'enviado', 'firmado')),
+    solicitante_id INT REFERENCES usuarios(id) ON DELETE SET NULL,
+    rol_solicitante TEXT,
     creado_por INT REFERENCES usuarios(id) ON DELETE SET NULL,
     updated_by INT REFERENCES usuarios(id) ON DELETE SET NULL,
 
@@ -1282,7 +1288,8 @@ VALUES
     ('Consultor', 'Consultor externo o interno', true),
     ('Contabilidad', 'equipo contable', true),
     ('Reclutador', 'Usuario encargado de reclutar y gestionar candidatos y consultores', true),
-    ('Talento Humano', 'Usuario de Talento Humano para onboarding y aprobacion de preregistros', true);
+    ('Talento Humano', 'Usuario de Talento Humano para onboarding y aprobacion de preregistros', true),
+    ('Comercial', 'Usuario del área comercial para solicitudes de contratación', true);
 
 INSERT INTO documento_identidad
     (titulo, codigo, activo)

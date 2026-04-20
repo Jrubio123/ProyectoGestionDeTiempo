@@ -166,7 +166,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     if (["contabilidad", "contable", "finanzas"].includes(key)) return "CONTABILIDAD";
     if (["comercial", "ventas"].includes(key)) return "COMERCIAL";
     if (["otro", "otros"].includes(key)) return "Otro";
-    return "Otro";
+    return null;
   }
 
   function normalizeGrupoDistribucionInput(value) {
@@ -503,6 +503,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       const solicitudRes = await client.query(
         `SELECT s.id, s.estado, su.email AS coordinador_email, su.nombre_usuario AS coordinador_nombre, rsol.titulo AS solicitante_rol_titulo, s.perfil
               , s.public_id AS solicitud_public_id, s.coordinador_id, s.cliente_id, s.modulo_id
+              , c.public_id AS cliente_public_id, m.public_id AS modulo_public_id
               , s.modalidad, s.ubicacion, s.fecha_inicio_esperada, s.descripcion, s.informacion_adicional, s.observaciones_rrhh
               , c.titulo AS cliente_nombre, m.titulo AS modulo_nombre
          FROM solicitudes_rrhh s
@@ -602,8 +603,9 @@ module.exports = function registerPreregistroRoutes(deps) {
               origen: "rrhh",
               rrhh_solicitud_id: String(solicitud.solicitud_public_id || ""),
               preregistro_id: String(created.rows[0]?.public_id || ""),
-              modulo_id: solicitud.modulo_id || null,
+              modulo_id: solicitud.modulo_public_id || null,
               modulo_nombre: solicitud.modulo_nombre || null,
+              cliente_id: solicitud.cliente_public_id || null,
               cliente_nombre: solicitud.cliente_nombre || null
             };
 
@@ -1188,6 +1190,14 @@ module.exports = function registerPreregistroRoutes(deps) {
         moduloInternoIdPreregistro = modRes.rows[0]?.id || null;
       }
       const moduloOtroPreregistro = !moduloInternoIdPreregistro ? (solicitudDatosExtra.modulo || current.perfil || null) : null;
+
+      const clienteUuidPreregistro = solicitudDatosExtra.cliente_id || null;
+      let clienteInternoIdPreregistro = null;
+      if (clienteUuidPreregistro) {
+        const cliRes = await client.query(`SELECT id FROM clientes WHERE public_id::text = $1::text LIMIT 1`, [clienteUuidPreregistro]);
+        clienteInternoIdPreregistro = cliRes.rows[0]?.id || null;
+      }
+
       const tipoPersonaParaPersonas = normalizeTipoPersonaForUsuarios(current.tipo_persona) || null;
 
       const personaRes = await client.query(
@@ -1196,9 +1206,9 @@ module.exports = function registerPreregistroRoutes(deps) {
           numero_contacto, correo_electronico, direccion_residencia, ciudad_residencia,
           tipo_persona, factura_en_colombia,
           banco_id, tipo_cuenta_id, numero_cuenta,
-          modulo_id, modulo_otro,
+          modulo_id, modulo_otro, cliente_id,
           preregistro_id, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12, $13, $14, $15, $16, $17)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         ON CONFLICT (numero_documento) DO UPDATE SET
           nombre              = COALESCE(EXCLUDED.nombre, personas.nombre),
           apellidos           = COALESCE(EXCLUDED.apellidos, personas.apellidos),
@@ -1213,6 +1223,7 @@ module.exports = function registerPreregistroRoutes(deps) {
           numero_cuenta       = COALESCE(EXCLUDED.numero_cuenta, personas.numero_cuenta),
           modulo_id           = COALESCE(EXCLUDED.modulo_id, personas.modulo_id),
           modulo_otro         = COALESCE(EXCLUDED.modulo_otro, personas.modulo_otro),
+          cliente_id          = COALESCE(EXCLUDED.cliente_id, personas.cliente_id),
           preregistro_id      = COALESCE(EXCLUDED.preregistro_id, personas.preregistro_id),
           updated_at          = NOW()
         RETURNING id`,
@@ -1232,6 +1243,7 @@ module.exports = function registerPreregistroRoutes(deps) {
           current.numero_cuenta || null,
           moduloInternoIdPreregistro,
           moduloOtroPreregistro,
+          clienteInternoIdPreregistro,
           id,
           req.user?.id || null
         ]
@@ -1275,11 +1287,24 @@ module.exports = function registerPreregistroRoutes(deps) {
         [ESTADOS.completado, req.user?.id, usuario.id, id]
       );
       const updatedPreregistro = await getByInternalId(client, id);
-      await syncSolicitudYAnexoDesdePreregistro(client, updatedPreregistro, req.user?.id, {
+      // Sincronizar solicitud_contratacion dentro de la transacción (necesita el client)
+      const solicitudId = await syncSolicitudContratacionFromPreregistro(client, updatedPreregistro, {
         estado: ESTADOS.completado,
         personaUsuarioId: usuario.id
       });
       await client.query("COMMIT");
+
+      // Generar anexo DESPUÉS del COMMIT para que pool vea id_usuario_creado ya confirmado
+      try {
+        await ensurePersistedAnexoFromProceso({
+          solicitudId: solicitudId || null,
+          preregistroId: id,
+          createdBy: req.user?.id || null,
+          strict: false
+        });
+      } catch (err) {
+        console.warn("No se pudo sincronizar anexo tecnico desde preregistro:", err?.message || err);
+      }
 
       const tasks = [
         sendEmailSafe({ ...getGraphContext(req), to: current.correo_personal, subject: "Bienvenido(a) - cuenta creada", text: `Tu usuario fue creado. Correo Silver: ${correoSilver}` })

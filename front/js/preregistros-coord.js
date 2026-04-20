@@ -35,6 +35,7 @@ window.preregistrosCoordApp = function () {
         tarifa_mes: "",
         tarifa_medio_tiempo: "",
         tarifa_capacitacion: "",
+        tipo_asignacion: "",
         modalidad_contrato: "",
         fecha_inicio: "",
         fecha_fin: "",
@@ -818,6 +819,9 @@ window.preregistrosCoordApp = function () {
             };
 
             if (this.tipoModal === "Nuevo") {
+                // Tipo de asignación explícito para el anexo técnico
+                if (this.form.tipo_asignacion) datosExtra.tipo_asignacion = this.form.tipo_asignacion;
+                base.datos_extra = datosExtra;
                 // Campos técnicos del nuevo modal
                 base.vpn_corona       = Boolean(this.form.vpn_corona);
                 base.necesita_s_user  = Boolean(this.form.necesita_s_user);

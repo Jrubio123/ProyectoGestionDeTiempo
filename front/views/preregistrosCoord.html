@@ -223,6 +223,14 @@
                             <input x-show="perfilEsOtro" x-model="form.perfil" type="text" class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Especifica el perfil *" style="display:none">
                         </div>
                         <input x-model="form.pais_ubicacion" type="text" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="País de ubicación (donde vive)">
+                        <select x-model="form.tipo_asignacion" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Tipo de asignación *</option>
+                            <option value="full_time">Full time</option>
+                            <option value="medio_tiempo">Medio tiempo</option>
+                            <option value="horas">Por horas</option>
+                            <option value="capacitacion">Capacitación</option>
+                            <option value="proyecto">Proyecto</option>
+                        </select>
                     </div>
 
                     <!-- Accesos técnicos -->

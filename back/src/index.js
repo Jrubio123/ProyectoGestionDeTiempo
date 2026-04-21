@@ -7612,64 +7612,163 @@ app.get("/admin/firma-contratos", requireAccess({ roles: ["Administrador", TALEN
 
 app.get("/admin/firma-contratos/candidatos", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
   try {
-    const [solRes, preRes] = await Promise.all([
-      // Agrupa por persona (numero_documento o correo como fallback) para evitar duplicados
-      pool.query(`
-        SELECT
-          COALESCE(sc.numero_documento, sc.correo_personal) AS persona_key,
-          MIN(sc.numero_documento) AS numero_documento,
-          MIN(sc.nombre || ' ' || sc.apellidos) AS nombre_completo,
-          MIN(sc.correo_personal) AS correo_personal,
-          json_agg(
-            json_build_object(
-              'id', sc.public_id,
-              'modalidad', sc.modalidad_contrato,
-              'estado', sc.estado,
-              'tiene_token_activo', EXISTS(
-                SELECT 1 FROM tokens_firma_contrato tf
-                WHERE tf.solicitud_id = sc.id AND tf.estado IN ('pendiente', 'en_proceso')
-              ),
-              'created_at', sc.created_at
-            ) ORDER BY sc.created_at DESC
-          ) AS solicitudes
-        FROM solicitudes_contratacion sc
-        WHERE sc.tipo_solicitud = 'Nuevo'
-          AND sc.estado IN ('Completado', 'Pendiente Revision TH', 'Pendiente')
-          AND sc.correo_personal IS NOT NULL
-        GROUP BY COALESCE(sc.numero_documento, sc.correo_personal)
-        ORDER BY MAX(sc.created_at) DESC
-        LIMIT 200
-      `),
-      pool.query(`
-        SELECT
-          pp.public_id AS id,
-          'preregistro' AS origen,
-          pp.nombre || ' ' || pp.apellidos AS nombre_completo,
-          pp.correo_personal,
-          pp.numero_documento,
-          pp.estado,
-          EXISTS (
-            SELECT 1
-            FROM tokens_firma_contrato tf
-            LEFT JOIN solicitudes_contratacion sc2 ON sc2.id = tf.solicitud_id
-            LEFT JOIN preregistro_personas pp2 ON pp2.id = tf.preregistro_id
-            WHERE tf.estado = 'completado'
-              AND COALESCE(sc2.estado, 'Completado') <> 'Cancelado'
-              AND COALESCE(pp2.estado, 'Completado') <> 'Anulado'
-              AND (
-                (pp.numero_documento IS NOT NULL AND (COALESCE(sc2.numero_documento, '') = pp.numero_documento OR COALESCE(pp2.numero_documento, '') = pp.numero_documento))
-                OR (pp.correo_personal IS NOT NULL AND LOWER(tf.correo_personal) = LOWER(pp.correo_personal))
+    // Fuente primaria: tabla personas (personas ya aprobadas/registradas)
+    // con sus solicitudes/preregistros completados como "asignaciones"
+    const personasQuery = pool.query(`
+      SELECT
+        COALESCE(NULLIF(BTRIM(p.numero_documento), ''), LOWER(NULLIF(BTRIM(p.correo_electronico), ''))) AS persona_key,
+        CONCAT_WS(' ', NULLIF(BTRIM(p.nombre), ''), NULLIF(BTRIM(p.apellidos), '')) AS nombre_completo,
+        p.correo_electronico AS correo_personal,
+        p.numero_documento,
+        'persona' AS origen,
+        p.created_at,
+        (
+          SELECT COALESCE(json_agg(a ORDER BY a_date DESC), '[]'::json)
+          FROM (
+            SELECT
+              json_build_object(
+                'id', sc.public_id,
+                'fuente', 'solicitud',
+                'modalidad', sc.modalidad_contrato,
+                'estado', sc.estado,
+                'tiene_token_activo', EXISTS(
+                  SELECT 1 FROM tokens_firma_contrato tf
+                  WHERE tf.solicitud_id = sc.id AND tf.estado IN ('pendiente','en_proceso')
+                )
+              ) AS a,
+              sc.created_at AS a_date
+            FROM solicitudes_contratacion sc
+            WHERE (
+                (NULLIF(BTRIM(p.numero_documento), '') IS NOT NULL AND NULLIF(BTRIM(sc.numero_documento), '') = NULLIF(BTRIM(p.numero_documento), ''))
+                OR LOWER(NULLIF(BTRIM(sc.correo_personal), '')) = LOWER(NULLIF(BTRIM(p.correo_electronico), ''))
               )
-          ) AS tiene_contrato_base,
-          pp.created_at
-        FROM preregistro_personas pp
-        WHERE pp.estado IN ('Completado', 'Pendiente Revision TH', 'Pendiente Correo Silver')
-          AND pp.correo_personal IS NOT NULL
-        ORDER BY pp.created_at DESC
-        LIMIT 200
-      `)
-    ]);
-    res.json({ personas: solRes.rows, preregistros: preRes.rows });
+              AND sc.tipo_solicitud = 'Nuevo'
+              AND sc.estado = 'Completado'
+            UNION ALL
+            SELECT
+              json_build_object(
+                'id', pp.public_id,
+                'fuente', 'preregistro',
+                'modalidad', NULL,
+                'estado', pp.estado,
+                'tiene_token_activo', EXISTS(
+                  SELECT 1 FROM tokens_firma_contrato tf
+                  WHERE tf.preregistro_id = pp.id AND tf.estado IN ('pendiente','en_proceso')
+                )
+              ) AS a,
+              pp.created_at AS a_date
+            FROM preregistro_personas pp
+            WHERE (
+                (NULLIF(BTRIM(p.numero_documento), '') IS NOT NULL AND NULLIF(BTRIM(pp.numero_documento), '') = NULLIF(BTRIM(p.numero_documento), ''))
+                OR LOWER(NULLIF(BTRIM(pp.correo_personal), '')) = LOWER(NULLIF(BTRIM(p.correo_electronico), ''))
+              )
+              AND pp.estado = 'Completado'
+          ) sub
+        ) AS asignaciones
+      FROM personas p
+      WHERE p.correo_electronico IS NOT NULL
+        AND BTRIM(p.correo_electronico) <> ''
+      ORDER BY p.created_at DESC
+      LIMIT 200
+    `);
+
+    // Excepcion: solicitudes en vuelo que aun no tienen fila en personas
+    const evSolQuery = pool.query(`
+      SELECT
+        COALESCE(NULLIF(BTRIM(sc.numero_documento), ''), LOWER(NULLIF(BTRIM(sc.correo_personal), ''))) AS persona_key,
+        MIN(CONCAT_WS(' ', NULLIF(BTRIM(sc.nombre), ''), NULLIF(BTRIM(sc.apellidos), ''))) AS nombre_completo,
+        MIN(sc.correo_personal) AS correo_personal,
+        MIN(sc.numero_documento) AS numero_documento,
+        'en_vuelo' AS origen,
+        MAX(sc.created_at) AS created_at,
+        json_agg(
+          json_build_object(
+            'id', sc.public_id,
+            'fuente', 'solicitud',
+            'modalidad', sc.modalidad_contrato,
+            'estado', sc.estado,
+            'tiene_token_activo', (
+              SELECT COUNT(*) > 0 FROM tokens_firma_contrato tf
+              WHERE tf.solicitud_id = sc.id AND tf.estado IN ('pendiente','en_proceso')
+            )
+          ) ORDER BY sc.created_at DESC
+        ) AS asignaciones
+      FROM solicitudes_contratacion sc
+      WHERE sc.tipo_solicitud = 'Nuevo'
+        AND sc.estado IN ('Pendiente Revision TH', 'Pendiente Correo Silver')
+        AND sc.correo_personal IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM personas p
+          WHERE (
+              NULLIF(BTRIM(sc.numero_documento), '') IS NOT NULL
+              AND NULLIF(BTRIM(p.numero_documento), '') = NULLIF(BTRIM(sc.numero_documento), '')
+            )
+            OR LOWER(NULLIF(BTRIM(p.correo_electronico), '')) = LOWER(NULLIF(BTRIM(sc.correo_personal), ''))
+        )
+      GROUP BY COALESCE(NULLIF(BTRIM(sc.numero_documento), ''), LOWER(NULLIF(BTRIM(sc.correo_personal), '')))
+      ORDER BY MAX(sc.created_at) DESC
+      LIMIT 200
+    `);
+
+    // Excepcion: preregistros en vuelo que aun no tienen fila en personas
+    const evPreQuery = pool.query(`
+      SELECT
+        COALESCE(NULLIF(BTRIM(pp.numero_documento), ''), LOWER(NULLIF(BTRIM(pp.correo_personal), ''))) AS persona_key,
+        CONCAT_WS(' ', NULLIF(BTRIM(pp.nombre), ''), NULLIF(BTRIM(pp.apellidos), '')) AS nombre_completo,
+        pp.correo_personal,
+        pp.numero_documento,
+        'en_vuelo' AS origen,
+        pp.created_at,
+        json_build_array(json_build_object(
+          'id', pp.public_id,
+          'fuente', 'preregistro',
+          'modalidad', NULL,
+          'estado', pp.estado,
+          'tiene_token_activo', EXISTS(
+            SELECT 1 FROM tokens_firma_contrato tf
+            WHERE tf.preregistro_id = pp.id AND tf.estado IN ('pendiente','en_proceso')
+          )
+        )) AS asignaciones
+      FROM preregistro_personas pp
+      WHERE pp.estado IN ('Pendiente Revision TH', 'Pendiente Correo Silver')
+        AND pp.correo_personal IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM personas p
+          WHERE (
+              NULLIF(BTRIM(pp.numero_documento), '') IS NOT NULL
+              AND NULLIF(BTRIM(p.numero_documento), '') = NULLIF(BTRIM(pp.numero_documento), '')
+            )
+            OR LOWER(NULLIF(BTRIM(p.correo_electronico), '')) = LOWER(NULLIF(BTRIM(pp.correo_personal), ''))
+        )
+      ORDER BY pp.created_at DESC
+      LIMIT 200
+    `);
+
+    const [personasRes, evSolRes, evPreRes] = await Promise.all([personasQuery, evSolQuery, evPreQuery]);
+
+    // Merge: personas primero (tienen precedencia), luego en-vuelo deduplicando por persona_key
+    const seen = new Map();
+    for (const row of personasRes.rows) {
+      seen.set(row.persona_key, row);
+    }
+    for (const row of evSolRes.rows) {
+      if (!seen.has(row.persona_key)) seen.set(row.persona_key, row);
+    }
+    for (const row of evPreRes.rows) {
+      if (seen.has(row.persona_key)) {
+        // Si ya existe (por solicitud en-vuelo), agregar asignaciones del preregistro
+        const existing = seen.get(row.persona_key);
+        existing.asignaciones = [...(existing.asignaciones || []), ...(row.asignaciones || [])];
+      } else {
+        seen.set(row.persona_key, row);
+      }
+    }
+
+    const candidatos = [...seen.values()]
+      .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+      .slice(0, 200);
+
+    res.json({ candidatos });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al obtener candidatos" });

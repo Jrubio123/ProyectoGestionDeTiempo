@@ -21,9 +21,11 @@ window.firmaContratosApp = function () {
 
     return {
         tokens: [],
-        // personas: lista deduplicada por documento, cada una con .solicitudes[]
-        // preregistros: lista plana (ya son únicos por persona en flujo RRHH)
-        candidatos: { personas: [], preregistros: [] },
+        // candidatos: lista unificada de personas (de tabla personas + en-vuelo)
+        // Cada entrada tiene: persona_key, nombre_completo, correo_personal, numero_documento,
+        //   origen ('persona' | 'en_vuelo'), asignaciones[]
+        // Cada asignacion: { id, fuente ('solicitud'|'preregistro'), modalidad, estado, tiene_token_activo }
+        candidatos: { candidatos: [] },
         cargando: false,
         autoRefreshMs: 10000,
         _refreshTimer: null,
@@ -32,11 +34,8 @@ window.firmaContratosApp = function () {
 
         modal: {
             tipo: null,        // 'generar' | 'detalle' | 'anular'
-            fuente: "solicitud",
-            // Para fuente=solicitud: primero se elige persona (persona_key), luego solicitud_id
             persona_key: "",
-            solicitud_id: "",
-            preregistro_id: "",
+            asignacion_id: "",
             nombre_persona: "",
             correo_personal: "",
             item: null,
@@ -73,9 +72,9 @@ window.firmaContratosApp = function () {
         async cargarCandidatos() {
             try {
                 const res = await axios.get(`${API}/admin/firma-contratos/candidatos`, { headers: getHeaders() });
-                this.candidatos = res.data || { personas: [], preregistros: [] };
+                this.candidatos = res.data || { candidatos: [] };
             } catch (e) {
-                this.candidatos = { personas: [], preregistros: [] };
+                this.candidatos = { candidatos: [] };
             }
         },
 
@@ -92,27 +91,30 @@ window.firmaContratosApp = function () {
             });
         },
 
-        // Persona seleccionada en el primer nivel del selector
         get personaSeleccionada() {
             if (!this.modal.persona_key) return null;
-            return (this.candidatos.personas || []).find(p => p.persona_key === this.modal.persona_key) || null;
+            return (this.candidatos.candidatos || []).find(p => p.persona_key === this.modal.persona_key) || null;
         },
 
-        // Solicitudes de la persona seleccionada
-        get solicitudesDePersona() {
-            return this.personaSeleccionada?.solicitudes || [];
+        get asignacionesDePersona() {
+            return this.personaSeleccionada?.asignaciones || [];
+        },
+
+        get asignacionSeleccionada() {
+            if (!this.modal.asignacion_id) return null;
+            return this.asignacionesDePersona.find(a => a.id === this.modal.asignacion_id) || null;
         },
 
         formatModalidad(modalidad) {
-            if (!modalidad) return "";
+            if (!modalidad) return "Sin modalidad";
             return MODALIDAD_LABELS[modalidad] || modalidad;
         },
 
-        labelSolicitud(s) {
-            const modalidad = this.formatModalidad(s.modalidad);
-            const estado = s.estado || "";
-            const warning = s.tiene_token_activo ? " ⚠ tiene proceso activo" : "";
-            return modalidad ? `${modalidad} — ${estado}${warning}` : `${estado}${warning}`;
+        labelAsignacion(a) {
+            const modalidad = this.formatModalidad(a.modalidad);
+            const estado = a.estado || "";
+            const warning = a.tiene_token_activo ? " ⚠ proceso activo" : "";
+            return `${modalidad} — ${estado}${warning}`;
         },
 
         normalizeDocIndex(value) {
@@ -187,10 +189,8 @@ window.firmaContratosApp = function () {
         abrirModalGenerar() {
             this.modal = {
                 tipo: "generar",
-                fuente: "solicitud",
                 persona_key: "",
-                solicitud_id: "",
-                preregistro_id: "",
+                asignacion_id: "",
                 nombre_persona: "",
                 correo_personal: "",
                 item: null,
@@ -200,36 +200,23 @@ window.firmaContratosApp = function () {
             };
         },
 
-        // Al elegir una persona del primer selector
         onPersonaSeleccionada() {
-            this.modal.solicitud_id = "";
+            this.modal.asignacion_id = "";
             this.modal.nombre_persona = "";
             this.modal.correo_personal = "";
             const persona = this.personaSeleccionada;
             if (!persona) return;
-            // Prellenar nombre y correo desde la persona
             this.modal.nombre_persona = persona.nombre_completo || "";
             this.modal.correo_personal = persona.correo_personal || "";
-            // Si tiene una sola solicitud, seleccionarla automáticamente
-            const solis = persona.solicitudes || [];
-            if (solis.length === 1) {
-                this.modal.solicitud_id = solis[0].id;
-            }
-        },
-
-        autocompletarDesde(fuente) {
-            if (fuente === "preregistro" && this.modal.preregistro_id) {
-                const p = (this.candidatos.preregistros || []).find(x => x.id === this.modal.preregistro_id);
-                if (p) {
-                    this.modal.nombre_persona = p.nombre_completo || "";
-                    this.modal.correo_personal = p.correo_personal || "";
-                }
+            const asignaciones = persona.asignaciones || [];
+            if (asignaciones.length === 1) {
+                this.modal.asignacion_id = asignaciones[0].id;
             }
         },
 
         async generarToken() {
             this.modal.error = "";
-            if (this.modal.fuente === "solicitud" && !this.modal.solicitud_id) {
+            if (!this.modal.asignacion_id) {
                 this.modal.error = "Selecciona la persona y la asignación para generar el contrato.";
                 return;
             }
@@ -238,19 +225,20 @@ window.firmaContratosApp = function () {
                 return;
             }
 
+            const asignacion = this.asignacionSeleccionada;
+            if (!asignacion) {
+                this.modal.error = "Asignación no válida.";
+                return;
+            }
+
             this.modal.guardando = true;
             try {
                 const payload = {
                     nombre_persona: this.modal.nombre_persona,
                     correo_personal: this.modal.correo_personal,
-                    solicitud_id: this.modal.fuente === "solicitud" ? this.modal.solicitud_id || null : null,
-                    preregistro_id: this.modal.fuente === "preregistro" ? this.modal.preregistro_id || null : null
+                    solicitud_id: asignacion.fuente === "solicitud" ? asignacion.id : null,
+                    preregistro_id: asignacion.fuente === "preregistro" ? asignacion.id : null
                 };
-
-                if (!payload.solicitud_id && !payload.preregistro_id) {
-                    payload.solicitud_id = null;
-                    payload.preregistro_id = null;
-                }
 
                 const res = await axios.post(`${API}/admin/firma-contratos/generar`, payload, { headers: getHeaders() });
                 const correoDestino = String(res?.data?.correo_destino || "").trim();

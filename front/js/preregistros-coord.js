@@ -8,6 +8,7 @@ window.preregistrosCoordApp = function () {
         persona_usuario_id: "",
         tipo_documento_id: "",
         cliente_id: "",
+        cliente_nombre_prospecto: "",
         supervisor_id: "",
         modulo_id: "",
         nombre: "",
@@ -727,7 +728,9 @@ window.preregistrosCoordApp = function () {
             if (!String(this.form.apellidos || "").trim()) errors.push("Apellidos");
 
             if (this.tipoModal === "Nuevo") {
+                const esProspecto = this.form.cliente_id === "__prospecto__";
                 if (!String(this.form.cliente_id || "").trim()) errors.push("Cliente");
+                if (esProspecto && !String(this.form.cliente_nombre_prospecto || "").trim()) errors.push("Nombre del cliente prospecto");
                 if (!String(this.form.moneda || "").trim()) errors.push("Moneda");
                 if (!String(this.form.fecha_inicio || "").trim()) errors.push("Fecha inicio");
                 const alguna = [
@@ -874,6 +877,12 @@ window.preregistrosCoordApp = function () {
             }
 
             if (this.tipoModal === "Nuevo") {
+                // Prospecto: enviar cliente_nombre en datos_extra, null cliente_id
+                const esProspecto = this.form.cliente_id === "__prospecto__";
+                if (esProspecto) {
+                    base.cliente_id = null;
+                    datosExtra.cliente_nombre = String(this.form.cliente_nombre_prospecto || "").trim() || null;
+                }
                 // Tipo de asignación explícito para el anexo técnico
                 if (this.form.tipo_asignacion) datosExtra.tipo_asignacion = this.form.tipo_asignacion;
                 base.datos_extra = datosExtra;

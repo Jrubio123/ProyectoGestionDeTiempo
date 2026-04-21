@@ -82,10 +82,16 @@
 
             <form @submit.prevent="enviarSolicitud" class="space-y-4">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <select x-model="form.cliente_id" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
-                        <option value="">Cliente *</option>
-                        <template x-for="c in clientes" :key="c.id"><option :value="c.id" x-text="c.titulo"></option></template>
-                    </select>
+                    <div>
+                        <select x-model="form.cliente_id" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                            <option value="">Cliente *</option>
+                            <template x-for="c in clientes" :key="c.id"><option :value="c.id" x-text="c.titulo"></option></template>
+                            <option value="__prospecto__">Prospecto / No está en lista</option>
+                        </select>
+                        <input x-show="form.cliente_id === '__prospecto__'" x-model="form.cliente_nombre_otro"
+                            type="text" placeholder="Nombre del cliente prospecto *"
+                            class="mt-2 w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all" />
+                    </div>
 
                     <select x-model="form.modulo_id" class="w-full bg-white/50 border border-slate-200 rounded-2xl p-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
                         <option value="">Tecnología / Módulo *</option>

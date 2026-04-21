@@ -1846,8 +1846,9 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (payload.persona_usuario_id && !refs.persona_usuario_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
         if (payload.supervisor_id && !refs.supervisor_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
         if (payload.tipo_documento_id && !refs.tipo_documento_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
-        if (tipoSolicitud === TIPO_NUEVO && (!payload.cliente_id || !refs.cliente_id)) {
-           return res.status(400).json({ error: "Cliente obligatorio para solicitudes Nuevo" });
+        const clienteNombreProspecto = toNullableString(payload.datos_extra?.cliente_nombre);
+        if (tipoSolicitud === TIPO_NUEVO && !refs.cliente_id && !clienteNombreProspecto) {
+           return res.status(400).json({ error: "Selecciona un cliente o escribe el nombre del prospecto" });
         }
         if (payload.cliente_id && !refs.cliente_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
 
@@ -2248,8 +2249,12 @@ module.exports = function registerContratacionesRoutes(deps) {
           });
         }
 
-        if (tipoSolicitud === TIPO_NUEVO && !clienteId) {
-          return res.status(400).json({ error: "Cliente obligatorio para solicitudes Nuevo" });
+        const clienteNombreProspectoCompletar = toNullableString(
+          (payload.datos_extra && !Array.isArray(payload.datos_extra) ? payload.datos_extra : {})?.cliente_nombre
+          || (current.datos_extra && !Array.isArray(current.datos_extra) ? current.datos_extra : {})?.cliente_nombre
+        );
+        if (tipoSolicitud === TIPO_NUEVO && !clienteId && !clienteNombreProspectoCompletar) {
+          return res.status(400).json({ error: "Selecciona un cliente o escribe el nombre del prospecto" });
         }
         if (tipoSolicitud === TIPO_RETIRO && !fechaRetiro) {
           return res.status(400).json({ error: "fecha_retiro es obligatoria para solicitudes de retiro" });

@@ -222,12 +222,18 @@
                     <!-- Contrato -->
                     <p class="text-xs uppercase tracking-wide text-slate-500 font-bold pt-1">Contrato</p>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <select x-model="form.cliente_id" class="px-3 py-2 rounded-xl border border-slate-200">
-                            <option value="">Cliente *</option>
-                            <template x-for="cliente in clientes" :key="cliente.id">
-                                <option :value="cliente.id" x-text="cliente.titulo"></option>
-                            </template>
-                        </select>
+                        <div>
+                            <select x-model="form.cliente_id" class="w-full px-3 py-2 rounded-xl border border-slate-200">
+                                <option value="">Cliente *</option>
+                                <template x-for="cliente in clientes" :key="cliente.id">
+                                    <option :value="cliente.id" x-text="cliente.titulo"></option>
+                                </template>
+                                <option value="__prospecto__">Prospecto / No está en lista</option>
+                            </select>
+                            <input x-show="form.cliente_id === '__prospecto__'" x-model="form.cliente_nombre_prospecto"
+                                type="text" placeholder="Nombre del cliente prospecto *"
+                                class="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200" />
+                        </div>
                         <select x-model="form.supervisor_id" class="px-3 py-2 rounded-xl border border-slate-200">
                             <option value="">Responsable / Supervisor</option>
                             <template x-for="sup in supervisores" :key="sup.id">

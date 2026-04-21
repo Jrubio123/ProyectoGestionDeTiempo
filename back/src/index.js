@@ -10088,6 +10088,8 @@ app.get("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Reclutador"
         s.public_id AS id,
         coord.public_id AS coordinador_id,
         c.public_id AS cliente_id,
+        COALESCE(c.titulo, s.cliente_nombre_otro) AS cliente,
+        s.cliente_nombre_otro,
         m.public_id AS modulo_id,
         s.perfil,
         s.nivel,
@@ -10105,7 +10107,6 @@ app.get("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Reclutador"
         s.observaciones_rrhh,
         s.created_at,
         s.updated_at,
-        c.titulo AS cliente,
         m.titulo AS modulo,
         coord.nombre_usuario AS solicitante
       FROM solicitudes_rrhh s
@@ -10128,6 +10129,7 @@ app.get("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Reclutador"
 app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administrador", "Comercial"] }), async (req, res) => {
   const {
     cliente_id,
+    cliente_nombre_otro,
     modulo_id,
     perfil,
     nivel,
@@ -10143,12 +10145,20 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
     prioridad
   } = req.body;
   try {
-    if (!cliente_id || !nivel) {
+    const clienteNombreOtro = toNullableString(cliente_nombre_otro);
+    const esProspecto = !cliente_id && clienteNombreOtro;
+    if (!nivel) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
-    const clienteInternalId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.clientes, cliente_id);
-    if (!clienteInternalId) {
-      return res.status(404).json({ error: "Cliente no encontrado o inválido" });
+    if (!cliente_id && !clienteNombreOtro) {
+      return res.status(400).json({ error: "Selecciona un cliente o escribe el nombre del prospecto" });
+    }
+    let clienteInternalId = null;
+    if (!esProspecto) {
+      clienteInternalId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.clientes, cliente_id);
+      if (!clienteInternalId) {
+        return res.status(404).json({ error: "Cliente no encontrado o inválido" });
+      }
     }
     const moduloInternalId = modulo_id
       ? await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.modulo, modulo_id)
@@ -10173,6 +10183,7 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
         (
           coordinador_id,
           cliente_id,
+          cliente_nombre_otro,
           modulo_id,
           perfil,
           nivel,
@@ -10188,12 +10199,13 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
           prioridad
         )
       VALUES
-        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING id
       `,
       [
         req.user?.id,
         clienteInternalId,
+        clienteNombreOtro,
         moduloInternalId,
         perfilFinal,
         nivel,
@@ -10219,6 +10231,8 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
         s.public_id AS id,
         coord.public_id AS coordinador_id,
         c.public_id AS cliente_id,
+        COALESCE(c.titulo, s.cliente_nombre_otro) AS cliente,
+        s.cliente_nombre_otro,
         m.public_id AS modulo_id,
         s.perfil,
         s.nivel,
@@ -10236,7 +10250,6 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
         s.observaciones_rrhh,
         s.created_at,
         s.updated_at,
-        c.titulo AS cliente,
         m.titulo AS modulo,
         coord.nombre_usuario AS solicitante
       FROM solicitudes_rrhh s

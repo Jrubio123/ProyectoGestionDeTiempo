@@ -10,6 +10,7 @@ window.solicitudesCoordApp = function () {
         touched: false,
         form: {
             cliente_id: "",
+            cliente_nombre_otro: "",
             modulo_id: "",
             perfil: "",
             nivel: "Junior",
@@ -61,6 +62,7 @@ window.solicitudesCoordApp = function () {
         resetForm() {
             this.form = {
                 cliente_id: "",
+                cliente_nombre_otro: "",
                 modulo_id: "",
                 perfil: "",
                 nivel: "Junior",
@@ -107,8 +109,10 @@ window.solicitudesCoordApp = function () {
                 presupuesto = `${max.toLocaleString("es-CO")}`;
             }
 
+            const esProspecto = this.form.cliente_id === "__prospecto__";
             const payload = {
-                cliente_id: this.form.cliente_id,
+                cliente_id: esProspecto ? null : (this.form.cliente_id || null),
+                cliente_nombre_otro: esProspecto ? String(this.form.cliente_nombre_otro || "").trim() || null : null,
                 modulo_id: this.form.modulo_id && !esOtros ? this.form.modulo_id : null,
                 perfil,
                 nivel: this.form.nivel,
@@ -137,8 +141,10 @@ window.solicitudesCoordApp = function () {
         get camposFaltantes() {
             const faltan = [];
             const esOtros = this.form.modulo_id === "__otros__";
+            const esProspecto = this.form.cliente_id === "__prospecto__";
             const perfil = String(this.form.perfil || "").trim();
             if (!this.form.cliente_id) faltan.push("Cliente");
+            if (esProspecto && !String(this.form.cliente_nombre_otro || "").trim()) faltan.push("Nombre del cliente prospecto");
             if (!this.form.modulo_id) faltan.push("Tecnología / Módulo");
             if (esOtros && !perfil) faltan.push("Perfil (requerido al elegir Otros)");
             if (!this.form.nivel) faltan.push("Nivel");

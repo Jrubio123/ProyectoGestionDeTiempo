@@ -986,8 +986,8 @@ window.onboardingThApp = function () {
                     modulo_id: data.modulo_id || "",
                     moneda: data.moneda || "COP",
                     valor_tarifa: data.valor_tarifa ?? "",
-                    fecha_inicio: data.fecha_inicio || "",
-                    fecha_fin: data.fecha_fin || "",
+                    fecha_inicio: this.toDateInput(data.fecha_inicio),
+                    fecha_fin: this.toDateInput(data.fecha_fin),
                     correo_personal: data.correo_personal || this.anexoCorreoSugerido || ""
                 };
             } catch (e) {
@@ -1268,9 +1268,19 @@ window.onboardingThApp = function () {
             }
         },
 
+        toDateInput(value) {
+            if (!value) return "";
+            return String(value).substring(0, 10);
+        },
+
         formatFecha(fecha) {
             if (!fecha) return "-";
-            const d = new Date(fecha);
+            const ymd = String(fecha).substring(0, 10);
+            const parts = ymd.split("-");
+            if (parts.length !== 3) return String(fecha);
+            const [year, month, day] = parts.map(Number);
+            if (!year || !month || !day) return String(fecha);
+            const d = new Date(year, month - 1, day);
             if (Number.isNaN(d.getTime())) return String(fecha);
             return d.toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" });
         },

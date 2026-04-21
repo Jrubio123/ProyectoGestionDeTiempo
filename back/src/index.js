@@ -1913,7 +1913,19 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
     rolSolicitante: rolSolicitanteExt
   });
 
-  const currentItem = selectActiveAnexoForPayload(existingItems, payload);
+  // Si el usuario seleccionó un item específico, usarlo como target directo
+  const directAnexoPublicId = toNullableTrimmedString(personaContext?.datos_extra?.anexo_item_id);
+  let currentItem = null;
+  if (directAnexoPublicId) {
+    const directRes = await pool.query(
+      `SELECT * FROM anexo_tecnico_items WHERE public_id::text = $1 AND estado = 'activo' LIMIT 1`,
+      [directAnexoPublicId]
+    );
+    currentItem = directRes.rows[0] || null;
+  }
+  if (!currentItem) {
+    currentItem = selectActiveAnexoForPayload(existingItems, payload);
+  }
 
   if (!currentItem) {
     const created = await insertAnexoTecnicoItem(payload);
@@ -1937,6 +1949,11 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
         ? cierreAnterior
         : currentItem.fecha_fin;
 
+    // horas/capacitacion: constraint check2 exige fecha_fin = 31-dic; no cambiar
+    const isCurrentCorteAnual =
+      currentItem.tipo_asignacion === "horas" || currentItem.tipo_asignacion === "capacitacion";
+    const fechaFinParaSplit = isCurrentCorteAnual ? null : fechaFinAnterior;
+
     await pool.query(
       `
       UPDATE anexo_tecnico_items
@@ -1948,7 +1965,7 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
         updated_at = NOW()
       WHERE id = $1
       `,
-      [currentItem.id, fechaFinAnterior, createdBy || null]
+      [currentItem.id, fechaFinParaSplit, createdBy || null]
     );
 
     const inserted = await insertAnexoTecnicoItem({

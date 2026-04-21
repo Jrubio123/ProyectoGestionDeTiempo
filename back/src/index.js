@@ -7613,34 +7613,31 @@ app.get("/admin/firma-contratos", requireAccess({ roles: ["Administrador", TALEN
 app.get("/admin/firma-contratos/candidatos", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
   try {
     const [solRes, preRes] = await Promise.all([
+      // Agrupa por persona (numero_documento o correo como fallback) para evitar duplicados
       pool.query(`
         SELECT
-          sc.public_id AS id,
-          'solicitud'  AS origen,
-          sc.nombre || ' ' || sc.apellidos AS nombre_completo,
-          sc.correo_personal,
-          sc.numero_documento,
-          sc.modalidad_contrato,
-          sc.estado,
-          EXISTS (
-            SELECT 1
-            FROM tokens_firma_contrato tf
-            LEFT JOIN solicitudes_contratacion sc2 ON sc2.id = tf.solicitud_id
-            LEFT JOIN preregistro_personas pp2 ON pp2.id = tf.preregistro_id
-            WHERE tf.estado = 'completado'
-              AND COALESCE(sc2.estado, 'Completado') <> 'Cancelado'
-              AND COALESCE(pp2.estado, 'Completado') <> 'Anulado'
-              AND (
-                (sc.numero_documento IS NOT NULL AND (COALESCE(sc2.numero_documento, '') = sc.numero_documento OR COALESCE(pp2.numero_documento, '') = sc.numero_documento))
-                OR (sc.correo_personal IS NOT NULL AND LOWER(tf.correo_personal) = LOWER(sc.correo_personal))
-              )
-          ) AS tiene_contrato_base,
-          sc.created_at
+          COALESCE(sc.numero_documento, sc.correo_personal) AS persona_key,
+          MIN(sc.numero_documento) AS numero_documento,
+          MIN(sc.nombre || ' ' || sc.apellidos) AS nombre_completo,
+          MIN(sc.correo_personal) AS correo_personal,
+          json_agg(
+            json_build_object(
+              'id', sc.public_id,
+              'modalidad', sc.modalidad_contrato,
+              'estado', sc.estado,
+              'tiene_token_activo', EXISTS(
+                SELECT 1 FROM tokens_firma_contrato tf
+                WHERE tf.solicitud_id = sc.id AND tf.estado IN ('pendiente', 'en_proceso')
+              ),
+              'created_at', sc.created_at
+            ) ORDER BY sc.created_at DESC
+          ) AS solicitudes
         FROM solicitudes_contratacion sc
         WHERE sc.tipo_solicitud = 'Nuevo'
           AND sc.estado IN ('Completado', 'Pendiente Revision TH', 'Pendiente')
           AND sc.correo_personal IS NOT NULL
-        ORDER BY sc.created_at DESC
+        GROUP BY COALESCE(sc.numero_documento, sc.correo_personal)
+        ORDER BY MAX(sc.created_at) DESC
         LIMIT 200
       `),
       pool.query(`
@@ -7672,7 +7669,7 @@ app.get("/admin/firma-contratos/candidatos", requireAccess({ roles: ["Administra
         LIMIT 200
       `)
     ]);
-    res.json({ solicitudes: solRes.rows, preregistros: preRes.rows });
+    res.json({ personas: solRes.rows, preregistros: preRes.rows });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al obtener candidatos" });
@@ -7722,6 +7719,20 @@ app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrado
       "";
     if (!nombreFinal || !correoFinal) {
       return res.status(400).json({ error: "No se pudo resolver nombre_persona o correo_personal del proceso" });
+    }
+
+    // Expirar tokens activos previos para la misma solicitud/preregistro antes de crear uno nuevo
+    if (solId) {
+      await pool.query(
+        "UPDATE tokens_firma_contrato SET estado = 'expirado', updated_at = NOW() WHERE solicitud_id = $1 AND estado IN ('pendiente', 'en_proceso')",
+        [solId]
+      );
+    }
+    if (preId) {
+      await pool.query(
+        "UPDATE tokens_firma_contrato SET estado = 'expirado', updated_at = NOW() WHERE preregistro_id = $1 AND estado IN ('pendiente', 'en_proceso')",
+        [preId]
+      );
     }
 
     const hasBaseContract = await hasContratoBaseFirmado({

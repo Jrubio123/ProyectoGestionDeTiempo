@@ -1,6 +1,14 @@
 window.firmaContratosApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
 
+    const MODALIDAD_LABELS = {
+        full_time: "Full time",
+        medio_tiempo: "Medio tiempo",
+        horas: "Por horas",
+        capacitacion: "Capacitación",
+        proyecto: "Proyecto"
+    };
+
     function getHeaders() {
         const token = window.auth?.getToken?.() || localStorage.getItem("token");
         const graphToken = window.auth?.getGraphToken?.() || localStorage.getItem("graph_access_token");
@@ -13,7 +21,9 @@ window.firmaContratosApp = function () {
 
     return {
         tokens: [],
-        candidatos: { solicitudes: [], preregistros: [] },
+        // personas: lista deduplicada por documento, cada una con .solicitudes[]
+        // preregistros: lista plana (ya son únicos por persona en flujo RRHH)
+        candidatos: { personas: [], preregistros: [] },
         cargando: false,
         autoRefreshMs: 10000,
         _refreshTimer: null,
@@ -23,6 +33,8 @@ window.firmaContratosApp = function () {
         modal: {
             tipo: null,        // 'generar' | 'detalle' | 'anular'
             fuente: "solicitud",
+            // Para fuente=solicitud: primero se elige persona (persona_key), luego solicitud_id
+            persona_key: "",
             solicitud_id: "",
             preregistro_id: "",
             nombre_persona: "",
@@ -61,9 +73,9 @@ window.firmaContratosApp = function () {
         async cargarCandidatos() {
             try {
                 const res = await axios.get(`${API}/admin/firma-contratos/candidatos`, { headers: getHeaders() });
-                this.candidatos = res.data || { solicitudes: [], preregistros: [] };
+                this.candidatos = res.data || { personas: [], preregistros: [] };
             } catch (e) {
-                this.candidatos = { solicitudes: [], preregistros: [] };
+                this.candidatos = { personas: [], preregistros: [] };
             }
         },
 
@@ -78,6 +90,29 @@ window.firmaContratosApp = function () {
                 }
                 return true;
             });
+        },
+
+        // Persona seleccionada en el primer nivel del selector
+        get personaSeleccionada() {
+            if (!this.modal.persona_key) return null;
+            return (this.candidatos.personas || []).find(p => p.persona_key === this.modal.persona_key) || null;
+        },
+
+        // Solicitudes de la persona seleccionada
+        get solicitudesDePersona() {
+            return this.personaSeleccionada?.solicitudes || [];
+        },
+
+        formatModalidad(modalidad) {
+            if (!modalidad) return "";
+            return MODALIDAD_LABELS[modalidad] || modalidad;
+        },
+
+        labelSolicitud(s) {
+            const modalidad = this.formatModalidad(s.modalidad);
+            const estado = s.estado || "";
+            const warning = s.tiene_token_activo ? " ⚠ tiene proceso activo" : "";
+            return modalidad ? `${modalidad} — ${estado}${warning}` : `${estado}${warning}`;
         },
 
         normalizeDocIndex(value) {
@@ -153,6 +188,7 @@ window.firmaContratosApp = function () {
             this.modal = {
                 tipo: "generar",
                 fuente: "solicitud",
+                persona_key: "",
                 solicitud_id: "",
                 preregistro_id: "",
                 nombre_persona: "",
@@ -164,15 +200,26 @@ window.firmaContratosApp = function () {
             };
         },
 
+        // Al elegir una persona del primer selector
+        onPersonaSeleccionada() {
+            this.modal.solicitud_id = "";
+            this.modal.nombre_persona = "";
+            this.modal.correo_personal = "";
+            const persona = this.personaSeleccionada;
+            if (!persona) return;
+            // Prellenar nombre y correo desde la persona
+            this.modal.nombre_persona = persona.nombre_completo || "";
+            this.modal.correo_personal = persona.correo_personal || "";
+            // Si tiene una sola solicitud, seleccionarla automáticamente
+            const solis = persona.solicitudes || [];
+            if (solis.length === 1) {
+                this.modal.solicitud_id = solis[0].id;
+            }
+        },
+
         autocompletarDesde(fuente) {
-            if (fuente === "solicitud" && this.modal.solicitud_id) {
-                const s = this.candidatos.solicitudes.find(x => x.id === this.modal.solicitud_id);
-                if (s) {
-                    this.modal.nombre_persona = s.nombre_completo || "";
-                    this.modal.correo_personal = s.correo_personal || "";
-                }
-            } else if (fuente === "preregistro" && this.modal.preregistro_id) {
-                const p = this.candidatos.preregistros.find(x => x.id === this.modal.preregistro_id);
+            if (fuente === "preregistro" && this.modal.preregistro_id) {
+                const p = (this.candidatos.preregistros || []).find(x => x.id === this.modal.preregistro_id);
                 if (p) {
                     this.modal.nombre_persona = p.nombre_completo || "";
                     this.modal.correo_personal = p.correo_personal || "";
@@ -182,6 +229,10 @@ window.firmaContratosApp = function () {
 
         async generarToken() {
             this.modal.error = "";
+            if (this.modal.fuente === "solicitud" && !this.modal.solicitud_id) {
+                this.modal.error = "Selecciona la persona y la asignación para generar el contrato.";
+                return;
+            }
             if (!this.modal.nombre_persona.trim() || !this.modal.correo_personal.trim()) {
                 this.modal.error = "Nombre y correo son obligatorios.";
                 return;
@@ -207,7 +258,7 @@ window.firmaContratosApp = function () {
                     this.modal.correo_personal = correoDestino;
                 }
                 this.modal.exito = true;
-                await this.cargar();
+                await Promise.all([this.cargar(), this.cargarCandidatos()]);
             } catch (e) {
                 this.modal.error = e?.response?.data?.error || "Error generando el proceso. Intenta de nuevo.";
             } finally {
@@ -227,7 +278,7 @@ window.firmaContratosApp = function () {
                     preregistro_id: preId
                 }, { headers: getHeaders() });
                 alert("Correo reenviado correctamente.");
-                await this.cargar();
+                await Promise.all([this.cargar(), this.cargarCandidatos()]);
             } catch (e) {
                 alert(e?.response?.data?.error || "Error reenviando correo.");
             }

@@ -154,16 +154,41 @@
                 </div>
             </div>
 
-            <!-- Selector de persona (solicitudes) -->
-            <div x-show="modal.fuente === 'solicitud'" class="mb-4">
-                <label class="text-xs font-bold text-gray-400 uppercase">Solicitud</label>
-                <select x-model="modal.solicitud_id" @change="autocompletarDesde('solicitud')"
+            <!-- Selector de persona (solicitudes) — paso 1: elegir persona deduplicada -->
+            <div x-show="modal.fuente === 'solicitud'" class="mb-3">
+                <label class="text-xs font-bold text-gray-400 uppercase">Persona</label>
+                <select x-model="modal.persona_key" @change="onPersonaSeleccionada()"
                         class="w-full mt-1 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400">
-                    <option value="">Seleccionar...</option>
-                    <template x-for="s in candidatos.solicitudes" :key="s.id">
-                        <option :value="s.id" x-text="s.nombre_completo + ' (' + s.estado + ')'"></option>
+                    <option value="">Seleccionar persona...</option>
+                    <template x-for="p in candidatos.personas" :key="p.persona_key">
+                        <option :value="p.persona_key" x-text="p.nombre_completo + (p.numero_documento ? ' — ' + p.numero_documento : '')"></option>
                     </template>
                 </select>
+            </div>
+
+            <!-- Selector de asignación — paso 2: elegir cuál solicitud de esa persona (si tiene varias) -->
+            <div x-show="modal.fuente === 'solicitud' && modal.persona_key && solicitudesDePersona.length > 1" class="mb-4">
+                <label class="text-xs font-bold text-gray-400 uppercase">Asignación / Modalidad</label>
+                <select x-model="modal.solicitud_id"
+                        class="w-full mt-1 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400">
+                    <option value="">Seleccionar asignación...</option>
+                    <template x-for="s in solicitudesDePersona" :key="s.id">
+                        <option :value="s.id" x-text="labelSolicitud(s)"></option>
+                    </template>
+                </select>
+            </div>
+
+            <!-- Info cuando solo tiene una asignación -->
+            <div x-show="modal.fuente === 'solicitud' && modal.persona_key && solicitudesDePersona.length === 1" class="mb-4">
+                <p class="text-xs text-gray-500 mt-1">
+                    Asignación: <span class="font-semibold text-gray-700" x-text="labelSolicitud(solicitudesDePersona[0] || {})"></span>
+                </p>
+            </div>
+
+            <!-- Aviso token activo -->
+            <div x-show="modal.fuente === 'solicitud' && modal.solicitud_id && solicitudesDePersona.find(s => s.id === modal.solicitud_id)?.tiene_token_activo"
+                 class="mb-3 bg-amber-50 border border-amber-200 text-amber-800 text-xs p-2 rounded-lg">
+                Esta asignación ya tiene un proceso activo (pendiente o en proceso). Al generar uno nuevo, el anterior quedará expirado.
             </div>
 
             <!-- Selector de persona (preregistros) -->

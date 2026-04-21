@@ -155,35 +155,10 @@
                 </select>
             </div>
 
-            <!-- Paso 2: Elegir asignación (solo si tiene varias) -->
-            <div x-show="modal.persona_key && asignacionesDePersona.length > 1" class="mb-3">
-                <label class="text-xs font-bold text-gray-400 uppercase">Asignación</label>
-                <select x-model="modal.asignacion_id"
-                        class="w-full mt-1 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400">
-                    <option value="">Seleccionar asignación...</option>
-                    <template x-for="a in asignacionesDePersona" :key="a.id">
-                        <option :value="a.id" x-text="labelAsignacion(a)"></option>
-                    </template>
-                </select>
-            </div>
-
-            <!-- Info cuando solo tiene una asignación -->
-            <div x-show="modal.persona_key && asignacionesDePersona.length === 1" class="mb-3">
-                <p class="text-xs text-gray-500">
-                    Asignación: <span class="font-semibold text-gray-700" x-text="labelAsignacion(asignacionesDePersona[0] || {})"></span>
-                </p>
-            </div>
-
-            <!-- Aviso: sin asignaciones (persona sin solicitud completada) -->
-            <div x-show="modal.persona_key && asignacionesDePersona.length === 0"
-                 class="mb-3 bg-gray-50 border border-gray-200 text-gray-600 text-xs p-2 rounded-lg">
-                Esta persona no tiene asignaciones completadas asociadas. No se puede generar contrato.
-            </div>
-
-            <!-- Aviso: token activo existente -->
-            <div x-show="asignacionSeleccionada?.tiene_token_activo"
+            <!-- Aviso: proceso activo existente -->
+            <div x-show="personaSeleccionada?.tiene_proceso_activo"
                  class="mb-3 bg-amber-50 border border-amber-200 text-amber-800 text-xs p-2 rounded-lg">
-                Esta asignación ya tiene un proceso activo. Al generar uno nuevo, el anterior quedará expirado.
+                Esta persona ya tiene un proceso de firma activo. Al generar uno nuevo, el anterior quedará expirado.
             </div>
 
             <!-- Nombre y correo -->

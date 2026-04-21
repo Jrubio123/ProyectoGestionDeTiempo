@@ -1,14 +1,6 @@
 window.firmaContratosApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
 
-    const MODALIDAD_LABELS = {
-        full_time: "Full time",
-        medio_tiempo: "Medio tiempo",
-        horas: "Por horas",
-        capacitacion: "Capacitación",
-        proyecto: "Proyecto"
-    };
-
     function getHeaders() {
         const token = window.auth?.getToken?.() || localStorage.getItem("token");
         const graphToken = window.auth?.getGraphToken?.() || localStorage.getItem("graph_access_token");
@@ -35,7 +27,6 @@ window.firmaContratosApp = function () {
         modal: {
             tipo: null,        // 'generar' | 'detalle' | 'anular'
             persona_key: "",
-            asignacion_id: "",
             nombre_persona: "",
             correo_personal: "",
             item: null,
@@ -94,27 +85,6 @@ window.firmaContratosApp = function () {
         get personaSeleccionada() {
             if (!this.modal.persona_key) return null;
             return (this.candidatos.candidatos || []).find(p => p.persona_key === this.modal.persona_key) || null;
-        },
-
-        get asignacionesDePersona() {
-            return this.personaSeleccionada?.asignaciones || [];
-        },
-
-        get asignacionSeleccionada() {
-            if (!this.modal.asignacion_id) return null;
-            return this.asignacionesDePersona.find(a => a.id === this.modal.asignacion_id) || null;
-        },
-
-        formatModalidad(modalidad) {
-            if (!modalidad) return "Sin modalidad";
-            return MODALIDAD_LABELS[modalidad] || modalidad;
-        },
-
-        labelAsignacion(a) {
-            const modalidad = this.formatModalidad(a.modalidad);
-            const estado = a.estado || "";
-            const warning = a.tiene_token_activo ? " ⚠ proceso activo" : "";
-            return `${modalidad} — ${estado}${warning}`;
         },
 
         normalizeDocIndex(value) {
@@ -190,7 +160,6 @@ window.firmaContratosApp = function () {
             this.modal = {
                 tipo: "generar",
                 persona_key: "",
-                asignacion_id: "",
                 nombre_persona: "",
                 correo_personal: "",
                 item: null,
@@ -201,23 +170,18 @@ window.firmaContratosApp = function () {
         },
 
         onPersonaSeleccionada() {
-            this.modal.asignacion_id = "";
             this.modal.nombre_persona = "";
             this.modal.correo_personal = "";
             const persona = this.personaSeleccionada;
             if (!persona) return;
             this.modal.nombre_persona = persona.nombre_completo || "";
             this.modal.correo_personal = persona.correo_personal || "";
-            const asignaciones = persona.asignaciones || [];
-            if (asignaciones.length === 1) {
-                this.modal.asignacion_id = asignaciones[0].id;
-            }
         },
 
         async generarToken() {
             this.modal.error = "";
-            if (!this.modal.asignacion_id) {
-                this.modal.error = "Selecciona la persona y la asignación para generar el contrato.";
+            if (!this.modal.persona_key) {
+                this.modal.error = "Selecciona una persona para generar el contrato.";
                 return;
             }
             if (!this.modal.nombre_persona.trim() || !this.modal.correo_personal.trim()) {
@@ -225,19 +189,13 @@ window.firmaContratosApp = function () {
                 return;
             }
 
-            const asignacion = this.asignacionSeleccionada;
-            if (!asignacion) {
-                this.modal.error = "Asignación no válida.";
-                return;
-            }
-
+            const persona = this.personaSeleccionada;
             this.modal.guardando = true;
             try {
                 const payload = {
                     nombre_persona: this.modal.nombre_persona,
                     correo_personal: this.modal.correo_personal,
-                    solicitud_id: asignacion.fuente === "solicitud" ? asignacion.id : null,
-                    preregistro_id: asignacion.fuente === "preregistro" ? asignacion.id : null
+                    numero_documento: persona?.numero_documento || null
                 };
 
                 const res = await axios.post(`${API}/admin/firma-contratos/generar`, payload, { headers: getHeaders() });
@@ -257,13 +215,11 @@ window.firmaContratosApp = function () {
         async reenviarCorreo(token) {
             if (!confirm(`¿Reenviar el correo a ${token.correo_personal}?`)) return;
             try {
-                const solId = token.solicitud_public_id || null;
-                const preId = token.preregistro_public_id || null;
                 await axios.post(`${API}/admin/firma-contratos/generar`, {
                     nombre_persona: token.nombre_persona,
                     correo_personal: token.correo_personal,
-                    solicitud_id: solId,
-                    preregistro_id: preId
+                    solicitud_id: token.solicitud_public_id || null,
+                    preregistro_id: token.preregistro_public_id || null
                 }, { headers: getHeaders() });
                 alert("Correo reenviado correctamente.");
                 await Promise.all([this.cargar(), this.cargarCandidatos()]);

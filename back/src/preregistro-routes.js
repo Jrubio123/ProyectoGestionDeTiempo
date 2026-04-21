@@ -1038,7 +1038,11 @@ module.exports = function registerPreregistroRoutes(deps) {
   });
 
   app.patch("/api/preregistros/:public_id/seccion-3", requireAccess({ roles: ["Talento Humano"] }), async (req, res) => {
-    const { direccion, tipo_persona, banco_id, tipo_cuenta, numero_cuenta, correo_silver } = req.body || {};
+    const {
+      direccion, tipo_persona, banco_id, tipo_cuenta, numero_cuenta, correo_silver,
+      razon_social, nit_empresa, representante_legal,
+      tipo_documento_representante, numero_documento_representante
+    } = req.body || {};
     if (!direccion || !tipo_persona || !banco_id || !tipo_cuenta || !numero_cuenta) {
       return res.status(400).json({ error: "Faltan campos obligatorios de la seccion 3" });
     }
@@ -1080,9 +1084,19 @@ module.exports = function registerPreregistroRoutes(deps) {
         `UPDATE preregistro_personas
          SET direccion = $1, tipo_persona = $2, banco_id = $3, tipo_cuenta = $4, numero_cuenta = $5,
              correo_silver = COALESCE($6, correo_silver), estado = $7,
-             completado_th_por = $8, fecha_completado_th = NOW()
+             completado_th_por = $8, fecha_completado_th = NOW(),
+             razon_social = $10, nit_empresa = $11, representante_legal = $12,
+             tipo_documento_representante = $13, numero_documento_representante = $14
          WHERE id = $9`,
-        [direccion, tipoPersonaNorm, bancoId, String(tipo_cuenta).trim(), String(numero_cuenta).trim(), correoSilverNorm, nextState, req.user?.id, id]
+        [
+          direccion, tipoPersonaNorm, bancoId, String(tipo_cuenta).trim(), String(numero_cuenta).trim(),
+          correoSilverNorm, nextState, req.user?.id, id,
+          razon_social ? String(razon_social).trim() : null,
+          nit_empresa ? String(nit_empresa).trim() : null,
+          representante_legal ? String(representante_legal).trim() : null,
+          tipo_documento_representante ? String(tipo_documento_representante).trim() : null,
+          numero_documento_representante ? String(numero_documento_representante).trim() : null
+        ]
       );
 
       const updated = await getByInternalId(client, id);
@@ -1207,25 +1221,32 @@ module.exports = function registerPreregistroRoutes(deps) {
           tipo_persona, factura_en_colombia,
           banco_id, tipo_cuenta_id, numero_cuenta,
           modulo_id, modulo_otro, cliente_id,
+          razon_social, nit_empresa, representante_legal,
+          tipo_documento_representante, numero_documento_representante,
           preregistro_id, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
         ON CONFLICT (numero_documento) DO UPDATE SET
-          nombre              = COALESCE(EXCLUDED.nombre, personas.nombre),
-          apellidos           = COALESCE(EXCLUDED.apellidos, personas.apellidos),
-          numero_contacto     = COALESCE(EXCLUDED.numero_contacto, personas.numero_contacto),
-          correo_electronico  = COALESCE(EXCLUDED.correo_electronico, personas.correo_electronico),
-          direccion_residencia= COALESCE(EXCLUDED.direccion_residencia, personas.direccion_residencia),
-          ciudad_residencia   = COALESCE(EXCLUDED.ciudad_residencia, personas.ciudad_residencia),
-          tipo_persona        = COALESCE(EXCLUDED.tipo_persona, personas.tipo_persona),
-          factura_en_colombia = COALESCE(EXCLUDED.factura_en_colombia, personas.factura_en_colombia),
-          banco_id            = COALESCE(EXCLUDED.banco_id, personas.banco_id),
-          tipo_cuenta_id      = COALESCE(EXCLUDED.tipo_cuenta_id, personas.tipo_cuenta_id),
-          numero_cuenta       = COALESCE(EXCLUDED.numero_cuenta, personas.numero_cuenta),
-          modulo_id           = COALESCE(EXCLUDED.modulo_id, personas.modulo_id),
-          modulo_otro         = COALESCE(EXCLUDED.modulo_otro, personas.modulo_otro),
-          cliente_id          = COALESCE(EXCLUDED.cliente_id, personas.cliente_id),
-          preregistro_id      = COALESCE(EXCLUDED.preregistro_id, personas.preregistro_id),
-          updated_at          = NOW()
+          nombre                         = COALESCE(EXCLUDED.nombre, personas.nombre),
+          apellidos                      = COALESCE(EXCLUDED.apellidos, personas.apellidos),
+          numero_contacto                = COALESCE(EXCLUDED.numero_contacto, personas.numero_contacto),
+          correo_electronico             = COALESCE(EXCLUDED.correo_electronico, personas.correo_electronico),
+          direccion_residencia           = COALESCE(EXCLUDED.direccion_residencia, personas.direccion_residencia),
+          ciudad_residencia              = COALESCE(EXCLUDED.ciudad_residencia, personas.ciudad_residencia),
+          tipo_persona                   = COALESCE(EXCLUDED.tipo_persona, personas.tipo_persona),
+          factura_en_colombia            = COALESCE(EXCLUDED.factura_en_colombia, personas.factura_en_colombia),
+          banco_id                       = COALESCE(EXCLUDED.banco_id, personas.banco_id),
+          tipo_cuenta_id                 = COALESCE(EXCLUDED.tipo_cuenta_id, personas.tipo_cuenta_id),
+          numero_cuenta                  = COALESCE(EXCLUDED.numero_cuenta, personas.numero_cuenta),
+          modulo_id                      = COALESCE(EXCLUDED.modulo_id, personas.modulo_id),
+          modulo_otro                    = COALESCE(EXCLUDED.modulo_otro, personas.modulo_otro),
+          cliente_id                     = COALESCE(EXCLUDED.cliente_id, personas.cliente_id),
+          razon_social                   = COALESCE(EXCLUDED.razon_social, personas.razon_social),
+          nit_empresa                    = COALESCE(EXCLUDED.nit_empresa, personas.nit_empresa),
+          representante_legal            = COALESCE(EXCLUDED.representante_legal, personas.representante_legal),
+          tipo_documento_representante   = COALESCE(EXCLUDED.tipo_documento_representante, personas.tipo_documento_representante),
+          numero_documento_representante = COALESCE(EXCLUDED.numero_documento_representante, personas.numero_documento_representante),
+          preregistro_id                 = COALESCE(EXCLUDED.preregistro_id, personas.preregistro_id),
+          updated_at                     = NOW()
         RETURNING id`,
         [
           current.numero_documento || null,
@@ -1244,6 +1265,11 @@ module.exports = function registerPreregistroRoutes(deps) {
           moduloInternoIdPreregistro,
           moduloOtroPreregistro,
           clienteInternoIdPreregistro,
+          current.razon_social || null,
+          current.nit_empresa || null,
+          current.representante_legal || null,
+          current.tipo_documento_representante || null,
+          current.numero_documento_representante || null,
           id,
           req.user?.id || null
         ]

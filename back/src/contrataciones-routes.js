@@ -2649,6 +2649,11 @@ module.exports = function registerContratacionesRoutes(deps) {
             : datosExtra.factura_en_colombia === false || datosExtra.factura_en_colombia === "false"
               ? false
               : null;
+        const razonSocialContrat = toNullableString(datosExtra.razon_social);
+        const nitEmpresaContrat = toNullableString(datosExtra.nit_empresa);
+        const repLegalContrat = toNullableString(datosExtra.representante_legal);
+        const tipoDocRepContrat = toNullableString(datosExtra.tipo_documento_representante);
+        const numDocRepContrat = toNullableString(datosExtra.numero_documento_representante);
 
         if (!direccion || !bancoId || !tipoCuenta || !numeroCuenta || !tipoPersona) {
           await client.query("ROLLBACK");
@@ -2682,24 +2687,31 @@ module.exports = function registerContratacionesRoutes(deps) {
             tipo_persona, factura_en_colombia,
             banco_id, tipo_cuenta_id, numero_cuenta,
             modulo_id, modulo_otro, cliente_id,
+            razon_social, nit_empresa, representante_legal,
+            tipo_documento_representante, numero_documento_representante,
             created_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12, $13, $14, $15, $16, $17)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
           ON CONFLICT (numero_documento) DO UPDATE SET
-            nombre              = COALESCE(EXCLUDED.nombre, personas.nombre),
-            apellidos           = COALESCE(EXCLUDED.apellidos, personas.apellidos),
-            numero_contacto     = COALESCE(EXCLUDED.numero_contacto, personas.numero_contacto),
-            correo_electronico  = COALESCE(EXCLUDED.correo_electronico, personas.correo_electronico),
-            direccion_residencia= COALESCE(EXCLUDED.direccion_residencia, personas.direccion_residencia),
-            ciudad_residencia   = COALESCE(EXCLUDED.ciudad_residencia, personas.ciudad_residencia),
-            tipo_persona        = COALESCE(EXCLUDED.tipo_persona, personas.tipo_persona),
-            factura_en_colombia = COALESCE(EXCLUDED.factura_en_colombia, personas.factura_en_colombia),
-            banco_id            = COALESCE(EXCLUDED.banco_id, personas.banco_id),
-            tipo_cuenta_id      = COALESCE(EXCLUDED.tipo_cuenta_id, personas.tipo_cuenta_id),
-            numero_cuenta       = COALESCE(EXCLUDED.numero_cuenta, personas.numero_cuenta),
-            modulo_id           = COALESCE(EXCLUDED.modulo_id, personas.modulo_id),
-            modulo_otro         = COALESCE(EXCLUDED.modulo_otro, personas.modulo_otro),
-            cliente_id          = COALESCE(EXCLUDED.cliente_id, personas.cliente_id),
-            updated_at          = NOW()
+            nombre                         = COALESCE(EXCLUDED.nombre, personas.nombre),
+            apellidos                      = COALESCE(EXCLUDED.apellidos, personas.apellidos),
+            numero_contacto                = COALESCE(EXCLUDED.numero_contacto, personas.numero_contacto),
+            correo_electronico             = COALESCE(EXCLUDED.correo_electronico, personas.correo_electronico),
+            direccion_residencia           = COALESCE(EXCLUDED.direccion_residencia, personas.direccion_residencia),
+            ciudad_residencia              = COALESCE(EXCLUDED.ciudad_residencia, personas.ciudad_residencia),
+            tipo_persona                   = COALESCE(EXCLUDED.tipo_persona, personas.tipo_persona),
+            factura_en_colombia            = COALESCE(EXCLUDED.factura_en_colombia, personas.factura_en_colombia),
+            banco_id                       = COALESCE(EXCLUDED.banco_id, personas.banco_id),
+            tipo_cuenta_id                 = COALESCE(EXCLUDED.tipo_cuenta_id, personas.tipo_cuenta_id),
+            numero_cuenta                  = COALESCE(EXCLUDED.numero_cuenta, personas.numero_cuenta),
+            modulo_id                      = COALESCE(EXCLUDED.modulo_id, personas.modulo_id),
+            modulo_otro                    = COALESCE(EXCLUDED.modulo_otro, personas.modulo_otro),
+            cliente_id                     = COALESCE(EXCLUDED.cliente_id, personas.cliente_id),
+            razon_social                   = COALESCE(EXCLUDED.razon_social, personas.razon_social),
+            nit_empresa                    = COALESCE(EXCLUDED.nit_empresa, personas.nit_empresa),
+            representante_legal            = COALESCE(EXCLUDED.representante_legal, personas.representante_legal),
+            tipo_documento_representante   = COALESCE(EXCLUDED.tipo_documento_representante, personas.tipo_documento_representante),
+            numero_documento_representante = COALESCE(EXCLUDED.numero_documento_representante, personas.numero_documento_representante),
+            updated_at                     = NOW()
           RETURNING id`,
           [
             row.numero_documento || null,
@@ -2718,6 +2730,11 @@ module.exports = function registerContratacionesRoutes(deps) {
             moduloInternoIdContrat,
             moduloOtroContrat,
             row.cliente_id || null,
+            razonSocialContrat,
+            nitEmpresaContrat,
+            repLegalContrat,
+            tipoDocRepContrat,
+            numDocRepContrat,
             req.user?.id || null
           ]
         );

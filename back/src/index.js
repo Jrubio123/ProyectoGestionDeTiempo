@@ -719,7 +719,38 @@ const CONTRATOS_REPRESENTANTE_LEGAL = String(process.env.CONTRATOS_REPRESENTANTE
 const CONTRATOS_CEDULA_REPRESENTANTE = String(process.env.CONTRATOS_CEDULA_REPRESENTANTE || "1128472903").trim();
 const CONTRATOS_NIT_SILVER = String(process.env.CONTRATOS_NIT_SILVER || "901149190-0").trim();
 const CONTRATOS_CIUDAD_SILVER = String(process.env.CONTRATOS_CIUDAD_SILVER || "Medellin").trim();
+const CONTRATOS_SILVER_RAZON_SOCIAL = String(process.env.CONTRATOS_SILVER_RAZON_SOCIAL || "SILVER CONSULTING S.A.S.").trim();
+const CONTRATOS_SILVER_DOMICILIO = String(process.env.CONTRATOS_SILVER_DOMICILIO || "Medellín – Antioquia").trim();
+const CONTRATOS_CAPITAL_RAZON_SOCIAL = String(process.env.CONTRATOS_CAPITAL_RAZON_SOCIAL || "CAPITALINK S.A.S.").trim();
+const CONTRATOS_CAPITAL_REPRESENTANTE_LEGAL = String(process.env.CONTRATOS_CAPITAL_REPRESENTANTE_LEGAL || "CINDY CATALINA LOAIZA CARDONA").trim();
+const CONTRATOS_CAPITAL_CEDULA_REPRESENTANTE = String(process.env.CONTRATOS_CAPITAL_CEDULA_REPRESENTANTE || "1036629658").trim();
+const CONTRATOS_CAPITAL_NIT = String(process.env.CONTRATOS_CAPITAL_NIT || "901473416-8").trim();
+const CONTRATOS_CAPITAL_CIUDAD = String(process.env.CONTRATOS_CAPITAL_CIUDAD || "Medellin").trim();
+const CONTRATOS_CAPITAL_DOMICILIO = String(process.env.CONTRATOS_CAPITAL_DOMICILIO || "Medellín – Antioquia").trim();
 const CONTRATOS_DOCX_DIR = path.join(__dirname, "static", "contratos");
+function resolveEmpresaContratoConfig(facturaEnColombia) {
+  if (facturaEnColombia === false) {
+    return {
+      key: "capital",
+      razonSocial: CONTRATOS_CAPITAL_RAZON_SOCIAL,
+      representanteLegal: CONTRATOS_CAPITAL_REPRESENTANTE_LEGAL,
+      cedulaRepresentante: CONTRATOS_CAPITAL_CEDULA_REPRESENTANTE,
+      nit: CONTRATOS_CAPITAL_NIT,
+      ciudad: CONTRATOS_CAPITAL_CIUDAD,
+      domicilio: CONTRATOS_CAPITAL_DOMICILIO
+    };
+  }
+  return {
+    key: "silver",
+    razonSocial: CONTRATOS_SILVER_RAZON_SOCIAL,
+    representanteLegal: CONTRATOS_REPRESENTANTE_LEGAL,
+    cedulaRepresentante: CONTRATOS_CEDULA_REPRESENTANTE,
+    nit: CONTRATOS_NIT_SILVER,
+    ciudad: CONTRATOS_CIUDAD_SILVER,
+    domicilio: CONTRATOS_SILVER_DOMICILIO
+  };
+}
+
 const CONTRATO_DOC_DEFINITIONS_FULL = Object.freeze([
   {
     doc_key: "contrato_prestacion_servicios",
@@ -1560,6 +1591,8 @@ async function getSolicitudContratacionDetalleById(internalId) {
       sc.cliente_id,
       c.public_id AS cliente_public_id,
       c.titulo AS cliente_nombre,
+      (sc.datos_extra->>'factura_en_colombia')::boolean AS factura_en_colombia,
+      sc.datos_extra->>'tipo_persona' AS tipo_persona,
       sc.moneda,
       sc.tarifa_hora,
       sc.tarifa_mes,
@@ -1609,6 +1642,13 @@ async function getPreregistroDetalleById(internalId) {
       pp.fecha_fin,
       pp.created_at,
       pp.id_solicitud_rrhh,
+      pp.factura_en_colombia,
+      pp.tipo_persona,
+      pp.razon_social,
+      pp.nit_empresa,
+      pp.representante_legal,
+      pp.tipo_documento_representante,
+      pp.numero_documento_representante,
       sr.modulo_id,
       m.public_id AS modulo_public_id,
       m.titulo AS modulo_titulo,
@@ -1708,6 +1748,37 @@ async function resolveContratoPersonaContext(proceso) {
     toNullableTrimmedString(solicitud?.ubicacion) ||
     CONTRATOS_CIUDAD_SILVER;
 
+  // factura_en_colombia: columna directa en preregistro; en solicitud viene de datos_extra
+  const facturaEnColombiaRaw =
+    preregistro?.factura_en_colombia ??
+    solicitud?.factura_en_colombia ??
+    null;
+  const facturaEnColombia =
+    facturaEnColombiaRaw === true || facturaEnColombiaRaw === "true" ? true
+      : facturaEnColombiaRaw === false || facturaEnColombiaRaw === "false" ? false
+        : null;
+
+  const tipoPersona =
+    toNullableTrimmedString(preregistro?.tipo_persona) ||
+    toNullableTrimmedString(solicitud?.tipo_persona) ||
+    null;
+
+  const razonSocial =
+    toNullableTrimmedString(preregistro?.razon_social) ||
+    null;
+  const nitEmpresa =
+    toNullableTrimmedString(preregistro?.nit_empresa) ||
+    null;
+  const representanteLegalContratista =
+    toNullableTrimmedString(preregistro?.representante_legal) ||
+    null;
+  const tipoDocumentoRepresentante =
+    toNullableTrimmedString(preregistro?.tipo_documento_representante) ||
+    null;
+  const numeroDocumentoRepresentante =
+    toNullableTrimmedString(preregistro?.numero_documento_representante) ||
+    null;
+
   return {
     solicitud,
     preregistro,
@@ -1720,6 +1791,13 @@ async function resolveContratoPersonaContext(proceso) {
     telefono,
     direccion,
     ciudad,
+    facturaEnColombia,
+    tipoPersona,
+    razonSocial,
+    nitEmpresa,
+    representanteLegalContratista,
+    tipoDocumentoRepresentante,
+    numeroDocumentoRepresentante,
     clienteId: solicitud?.cliente_id || preregistro?.cliente_id || null,
     clienteNombre: solicitud?.cliente_nombre || preregistro?.cliente_nombre || "",
     moneda: normalizeMonedaContrato(solicitud?.moneda || preregistro?.moneda || "COP") || "COP",
@@ -3797,6 +3875,26 @@ async function convertDocxBufferToPdfBuffer(docxBuffer, fileBaseName) {
   throw lastError || new Error("No se pudo convertir DOCX a PDF con Adobe PDF Services");
 }
 
+function buildContratistaComparecencia(personaContext) {
+  const nombre = personaContext?.nombreCompleto || "";
+  const tipoDoc = personaContext?.tipoDocumento || "";
+  const numDoc = personaContext?.numeroDocumento || "";
+  const tipoPersona = personaContext?.tipoPersona || "Natural";
+
+  if (tipoPersona === "Jurídica" || tipoPersona === "Juridica") {
+    const razonSocial = personaContext?.razonSocial || nombre;
+    const nitEmpresa = personaContext?.nitEmpresa || "";
+    const repLegal = personaContext?.representanteLegalContratista || nombre;
+    const tipoDocRep = personaContext?.tipoDocumentoRepresentante || tipoDoc;
+    const numDocRep = personaContext?.numeroDocumentoRepresentante || numDoc;
+    const nitPart = nitEmpresa ? `, persona jurídica identificada con NIT ${nitEmpresa}` : "";
+    return `${razonSocial}${nitPart}, representada legalmente por ${repLegal}, identificado con ${tipoDocRep} ${numDocRep}`;
+  }
+
+  // Persona natural
+  return `${nombre}, identificado con ${tipoDoc} ${numDoc}, obrando en nombre propio`;
+}
+
 function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correoOverride = null } = {}) {
   const now = new Date();
   const diaMes = new Intl.DateTimeFormat("es-CO", {
@@ -3809,6 +3907,21 @@ function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correo
   }).format(now);
   const mesTexto = formatMonthNameEs(now.toISOString().slice(0, 10));
 
+  // Fecha de inicio del contrato: fecha_inicio de la solicitud → fecha de generación
+  const fechaInicioRaw =
+    personaContext?.fecha_inicio ||
+    personaContext?.fecha_extension_desde ||
+    null;
+  const fechaInicioDate = fechaInicioRaw
+    ? new Date(`${String(fechaInicioRaw).slice(0, 10)}T12:00:00.000Z`)
+    : now;
+  const fechaInicioDia = new Intl.DateTimeFormat("es-CO", { day: "2-digit", timeZone: "America/Bogota" }).format(fechaInicioDate);
+  const fechaInicioAnio = new Intl.DateTimeFormat("es-CO", { year: "numeric", timeZone: "America/Bogota" }).format(fechaInicioDate);
+  const fechaInicioMesTexto = formatMonthNameEs(fechaInicioDate.toISOString().slice(0, 10));
+  const fechaInicioContrato = `${Number(fechaInicioDia)} de ${fechaInicioMesTexto} de ${fechaInicioAnio}`;
+
+  const empresa = resolveEmpresaContratoConfig(personaContext?.facturaEnColombia ?? null);
+
   return {
     NombreCompleto: personaContext?.nombreCompleto || proceso?.nombre_persona || "",
     TipoDocumento: personaContext?.tipoDocumento || "",
@@ -3816,15 +3929,29 @@ function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correo
     Telefono: personaContext?.telefono || "",
     Correo: correoOverride || personaContext?.correoPersonal || proceso?.correo_personal || "",
     CorreoPersonal: correoOverride || personaContext?.correoPersonal || proceso?.correo_personal || "",
-    Ciudad: personaContext?.ciudad || CONTRATOS_CIUDAD_SILVER,
+    Ciudad: personaContext?.ciudad || empresa.ciudad,
     DiaMes: diaMes,
     MesTexto: mesTexto,
     Anio: anio,
+    // Fecha de inicio del contrato (dinámica según solicitud)
+    FechaInicioDia: fechaInicioDia,
+    FechaInicioMesTexto: fechaInicioMesTexto,
+    FechaInicioAnio: fechaInicioAnio,
+    FechaInicioContrato: fechaInicioContrato,
     Direccion: personaContext?.direccion || "",
-    RepresentanteLegal: CONTRATOS_REPRESENTANTE_LEGAL,
-    CedulaRL: CONTRATOS_CEDULA_REPRESENTANTE,
-    NitSilver: CONTRATOS_NIT_SILVER,
-    CiudadSilver: CONTRATOS_CIUDAD_SILVER
+    ContratistaComparecencia: buildContratistaComparecencia(personaContext),
+    // Tags de empresa contratante (genéricos, compatibles Silver y Capital)
+    EmpresaRazonSocial: empresa.razonSocial,
+    EmpresaRepresentanteLegal: empresa.representanteLegal,
+    EmpresaCedulaRepresentante: empresa.cedulaRepresentante,
+    EmpresaNit: empresa.nit,
+    EmpresaCiudad: empresa.ciudad,
+    EmpresaDomicilio: empresa.domicilio,
+    // Tags legacy Silver — se mantienen por compatibilidad con plantillas existentes
+    RepresentanteLegal: empresa.representanteLegal,
+    CedulaRL: empresa.cedulaRepresentante,
+    NitSilver: empresa.nit,
+    CiudadSilver: empresa.ciudad
   };
 }
 
@@ -7610,158 +7737,133 @@ app.get("/admin/firma-contratos", requireAccess({ roles: ["Administrador", TALEN
   }
 });
 
+// Resuelve la solicitud o preregistro más reciente para una persona identificada por numero_documento o correo.
+// Prioriza solicitudes tipo 'Nuevo' sobre preregistros.
+async function resolveProcesoForPersona(pgClient, { numero_documento, correo_personal }) {
+  const numDoc = toNullableTrimmedString(numero_documento);
+  const correo = toNullableTrimmedString(correo_personal)?.toLowerCase() || null;
+  if (!numDoc && !correo) return { solicitud_id: null, preregistro_id: null };
+
+  const conditions = [];
+  const params = [];
+  if (numDoc) {
+    params.push(numDoc);
+    conditions.push(`NULLIF(BTRIM(numero_documento),'') = $${params.length}`);
+  }
+  if (correo) {
+    params.push(correo);
+    conditions.push(`LOWER(NULLIF(BTRIM(correo_personal),'')) = $${params.length}`);
+  }
+  const where = conditions.join(" OR ");
+
+  const solR = await pgClient.query(
+    `SELECT id FROM solicitudes_contratacion
+     WHERE tipo_solicitud = 'Nuevo'
+       AND estado IN ('Completado', 'Pendiente Revision TH', 'Pendiente Correo Silver')
+       AND (${where})
+     ORDER BY updated_at DESC LIMIT 1`,
+    params
+  );
+  if (solR.rows[0]) return { solicitud_id: solR.rows[0].id, preregistro_id: null };
+
+  const preR = await pgClient.query(
+    `SELECT id FROM preregistro_personas
+     WHERE estado IN ('Completado', 'Pendiente Revision TH', 'Pendiente Correo Silver')
+       AND (${where})
+     ORDER BY updated_at DESC LIMIT 1`,
+    params
+  );
+  return { solicitud_id: null, preregistro_id: preR.rows[0]?.id || null };
+}
+
 app.get("/admin/firma-contratos/candidatos", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
   try {
-    // Fuente primaria: tabla personas (personas ya aprobadas/registradas)
-    // con sus solicitudes/preregistros completados como "asignaciones"
+    // Personas registradas en tabla personas
     const personasQuery = pool.query(`
       SELECT
         COALESCE(NULLIF(BTRIM(p.numero_documento), ''), LOWER(NULLIF(BTRIM(p.correo_electronico), ''))) AS persona_key,
         CONCAT_WS(' ', NULLIF(BTRIM(p.nombre), ''), NULLIF(BTRIM(p.apellidos), '')) AS nombre_completo,
         p.correo_electronico AS correo_personal,
         p.numero_documento,
+        p.factura_en_colombia,
         'persona' AS origen,
         p.created_at,
-        (
-          SELECT COALESCE(json_agg(a ORDER BY a_date DESC), '[]'::json)
-          FROM (
-            SELECT
-              json_build_object(
-                'id', sc.public_id,
-                'fuente', 'solicitud',
-                'modalidad', sc.modalidad_contrato,
-                'estado', sc.estado,
-                'tiene_token_activo', EXISTS(
-                  SELECT 1 FROM tokens_firma_contrato tf
-                  WHERE tf.solicitud_id = sc.id AND tf.estado IN ('pendiente','en_proceso')
-                )
-              ) AS a,
-              sc.created_at AS a_date
-            FROM solicitudes_contratacion sc
-            WHERE (
-                (NULLIF(BTRIM(p.numero_documento), '') IS NOT NULL AND NULLIF(BTRIM(sc.numero_documento), '') = NULLIF(BTRIM(p.numero_documento), ''))
-                OR LOWER(NULLIF(BTRIM(sc.correo_personal), '')) = LOWER(NULLIF(BTRIM(p.correo_electronico), ''))
-              )
-              AND sc.tipo_solicitud = 'Nuevo'
-              AND sc.estado = 'Completado'
-            UNION ALL
-            SELECT
-              json_build_object(
-                'id', pp.public_id,
-                'fuente', 'preregistro',
-                'modalidad', NULL,
-                'estado', pp.estado,
-                'tiene_token_activo', EXISTS(
-                  SELECT 1 FROM tokens_firma_contrato tf
-                  WHERE tf.preregistro_id = pp.id AND tf.estado IN ('pendiente','en_proceso')
-                )
-              ) AS a,
-              pp.created_at AS a_date
-            FROM preregistro_personas pp
-            WHERE (
-                (NULLIF(BTRIM(p.numero_documento), '') IS NOT NULL AND NULLIF(BTRIM(pp.numero_documento), '') = NULLIF(BTRIM(p.numero_documento), ''))
-                OR LOWER(NULLIF(BTRIM(pp.correo_personal), '')) = LOWER(NULLIF(BTRIM(p.correo_electronico), ''))
-              )
-              AND pp.estado = 'Completado'
-          ) sub
-        ) AS asignaciones
+        EXISTS (
+          SELECT 1 FROM tokens_firma_contrato tf
+          WHERE tf.estado IN ('pendiente','en_proceso')
+            AND (
+              EXISTS (SELECT 1 FROM solicitudes_contratacion sc WHERE sc.id = tf.solicitud_id AND NULLIF(BTRIM(sc.numero_documento),'') = NULLIF(BTRIM(p.numero_documento),''))
+              OR EXISTS (SELECT 1 FROM preregistro_personas pp WHERE pp.id = tf.preregistro_id AND NULLIF(BTRIM(pp.numero_documento),'') = NULLIF(BTRIM(p.numero_documento),''))
+            )
+        ) AS tiene_proceso_activo
       FROM personas p
-      WHERE p.correo_electronico IS NOT NULL
-        AND BTRIM(p.correo_electronico) <> ''
+      WHERE p.correo_electronico IS NOT NULL AND BTRIM(p.correo_electronico) <> ''
       ORDER BY p.created_at DESC
       LIMIT 200
     `);
 
-    // Excepcion: solicitudes en vuelo que aun no tienen fila en personas
-    const evSolQuery = pool.query(`
+    // Personas en vuelo: solicitudes o preregistros pendientes sin fila en personas aún
+    const evQuery = pool.query(`
       SELECT
-        COALESCE(NULLIF(BTRIM(sc.numero_documento), ''), LOWER(NULLIF(BTRIM(sc.correo_personal), ''))) AS persona_key,
-        MIN(CONCAT_WS(' ', NULLIF(BTRIM(sc.nombre), ''), NULLIF(BTRIM(sc.apellidos), ''))) AS nombre_completo,
-        MIN(sc.correo_personal) AS correo_personal,
-        MIN(sc.numero_documento) AS numero_documento,
+        COALESCE(NULLIF(BTRIM(x.numero_documento),''), LOWER(NULLIF(BTRIM(x.correo_personal),''))) AS persona_key,
+        x.nombre_completo,
+        x.correo_personal,
+        x.numero_documento,
+        NULL::boolean AS factura_en_colombia,
         'en_vuelo' AS origen,
-        MAX(sc.created_at) AS created_at,
-        json_agg(
-          json_build_object(
-            'id', sc.public_id,
-            'fuente', 'solicitud',
-            'modalidad', sc.modalidad_contrato,
-            'estado', sc.estado,
-            'tiene_token_activo', (
-              SELECT COUNT(*) > 0 FROM tokens_firma_contrato tf
-              WHERE tf.solicitud_id = sc.id AND tf.estado IN ('pendiente','en_proceso')
+        x.created_at,
+        EXISTS (
+          SELECT 1 FROM tokens_firma_contrato tf
+          WHERE tf.estado IN ('pendiente','en_proceso')
+            AND (
+              EXISTS (SELECT 1 FROM solicitudes_contratacion sc WHERE sc.id = tf.solicitud_id AND NULLIF(BTRIM(sc.numero_documento),'') = NULLIF(BTRIM(x.numero_documento),''))
+              OR EXISTS (SELECT 1 FROM preregistro_personas pp WHERE pp.id = tf.preregistro_id AND NULLIF(BTRIM(pp.numero_documento),'') = NULLIF(BTRIM(x.numero_documento),''))
             )
-          ) ORDER BY sc.created_at DESC
-        ) AS asignaciones
-      FROM solicitudes_contratacion sc
-      WHERE sc.tipo_solicitud = 'Nuevo'
-        AND sc.estado IN ('Pendiente Revision TH', 'Pendiente Correo Silver')
-        AND sc.correo_personal IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM personas p
-          WHERE (
-              NULLIF(BTRIM(sc.numero_documento), '') IS NOT NULL
-              AND NULLIF(BTRIM(p.numero_documento), '') = NULLIF(BTRIM(sc.numero_documento), '')
-            )
-            OR LOWER(NULLIF(BTRIM(p.correo_electronico), '')) = LOWER(NULLIF(BTRIM(sc.correo_personal), ''))
-        )
-      GROUP BY COALESCE(NULLIF(BTRIM(sc.numero_documento), ''), LOWER(NULLIF(BTRIM(sc.correo_personal), '')))
-      ORDER BY MAX(sc.created_at) DESC
-      LIMIT 200
-    `);
-
-    // Excepcion: preregistros en vuelo que aun no tienen fila en personas
-    const evPreQuery = pool.query(`
-      SELECT
-        COALESCE(NULLIF(BTRIM(pp.numero_documento), ''), LOWER(NULLIF(BTRIM(pp.correo_personal), ''))) AS persona_key,
-        CONCAT_WS(' ', NULLIF(BTRIM(pp.nombre), ''), NULLIF(BTRIM(pp.apellidos), '')) AS nombre_completo,
-        pp.correo_personal,
-        pp.numero_documento,
-        'en_vuelo' AS origen,
-        pp.created_at,
-        json_build_array(json_build_object(
-          'id', pp.public_id,
-          'fuente', 'preregistro',
-          'modalidad', NULL,
-          'estado', pp.estado,
-          'tiene_token_activo', EXISTS(
-            SELECT 1 FROM tokens_firma_contrato tf
-            WHERE tf.preregistro_id = pp.id AND tf.estado IN ('pendiente','en_proceso')
+        ) AS tiene_proceso_activo
+      FROM (
+        SELECT
+          BTRIM(sc.numero_documento) AS numero_documento,
+          BTRIM(sc.correo_personal)  AS correo_personal,
+          CONCAT_WS(' ', NULLIF(BTRIM(sc.nombre),''), NULLIF(BTRIM(sc.apellidos),'')) AS nombre_completo,
+          MAX(sc.created_at) AS created_at
+        FROM solicitudes_contratacion sc
+        WHERE sc.tipo_solicitud = 'Nuevo'
+          AND sc.estado IN ('Pendiente Revision TH', 'Pendiente Correo Silver')
+          AND sc.correo_personal IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM personas p
+            WHERE NULLIF(BTRIM(p.numero_documento),'') = NULLIF(BTRIM(sc.numero_documento),'')
+              OR LOWER(NULLIF(BTRIM(p.correo_electronico),'')) = LOWER(NULLIF(BTRIM(sc.correo_personal),''))
           )
-        )) AS asignaciones
-      FROM preregistro_personas pp
-      WHERE pp.estado IN ('Pendiente Revision TH', 'Pendiente Correo Silver')
-        AND pp.correo_personal IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM personas p
-          WHERE (
-              NULLIF(BTRIM(pp.numero_documento), '') IS NOT NULL
-              AND NULLIF(BTRIM(p.numero_documento), '') = NULLIF(BTRIM(pp.numero_documento), '')
-            )
-            OR LOWER(NULLIF(BTRIM(p.correo_electronico), '')) = LOWER(NULLIF(BTRIM(pp.correo_personal), ''))
-        )
-      ORDER BY pp.created_at DESC
+        GROUP BY BTRIM(sc.numero_documento), BTRIM(sc.correo_personal),
+                 CONCAT_WS(' ', NULLIF(BTRIM(sc.nombre),''), NULLIF(BTRIM(sc.apellidos),''))
+        UNION ALL
+        SELECT
+          BTRIM(pp.numero_documento) AS numero_documento,
+          BTRIM(pp.correo_personal)  AS correo_personal,
+          CONCAT_WS(' ', NULLIF(BTRIM(pp.nombre),''), NULLIF(BTRIM(pp.apellidos),'')) AS nombre_completo,
+          MAX(pp.created_at) AS created_at
+        FROM preregistro_personas pp
+        WHERE pp.estado IN ('Pendiente Revision TH', 'Pendiente Correo Silver')
+          AND pp.correo_personal IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM personas p
+            WHERE NULLIF(BTRIM(p.numero_documento),'') = NULLIF(BTRIM(pp.numero_documento),'')
+              OR LOWER(NULLIF(BTRIM(p.correo_electronico),'')) = LOWER(NULLIF(BTRIM(pp.correo_personal),''))
+          )
+        GROUP BY BTRIM(pp.numero_documento), BTRIM(pp.correo_personal),
+                 CONCAT_WS(' ', NULLIF(BTRIM(pp.nombre),''), NULLIF(BTRIM(pp.apellidos),''))
+      ) x
+      ORDER BY x.created_at DESC
       LIMIT 200
     `);
 
-    const [personasRes, evSolRes, evPreRes] = await Promise.all([personasQuery, evSolQuery, evPreQuery]);
+    const [personasRes, evRes] = await Promise.all([personasQuery, evQuery]);
 
-    // Merge: personas primero (tienen precedencia), luego en-vuelo deduplicando por persona_key
     const seen = new Map();
-    for (const row of personasRes.rows) {
-      seen.set(row.persona_key, row);
-    }
-    for (const row of evSolRes.rows) {
+    for (const row of personasRes.rows) seen.set(row.persona_key, row);
+    for (const row of evRes.rows) {
       if (!seen.has(row.persona_key)) seen.set(row.persona_key, row);
-    }
-    for (const row of evPreRes.rows) {
-      if (seen.has(row.persona_key)) {
-        // Si ya existe (por solicitud en-vuelo), agregar asignaciones del preregistro
-        const existing = seen.get(row.persona_key);
-        existing.asignaciones = [...(existing.asignaciones || []), ...(row.asignaciones || [])];
-      } else {
-        seen.set(row.persona_key, row);
-      }
     }
 
     const candidatos = [...seen.values()]
@@ -7776,10 +7878,10 @@ app.get("/admin/firma-contratos/candidatos", requireAccess({ roles: ["Administra
 });
 
 app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
-  const { solicitud_id, preregistro_id, nombre_persona, correo_personal } = req.body || {};
+  const { solicitud_id, preregistro_id, nombre_persona, correo_personal, numero_documento } = req.body || {};
 
-  if (!solicitud_id && !preregistro_id) {
-    return res.status(400).json({ error: "Debes indicar solicitud_id o preregistro_id" });
+  if (!solicitud_id && !preregistro_id && !numero_documento && !correo_personal) {
+    return res.status(400).json({ error: "Debes indicar numero_documento, correo_personal, solicitud_id o preregistro_id" });
   }
 
   try {
@@ -7788,15 +7890,23 @@ app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrado
 
     let solId = null;
     let preId = null;
+
     if (solicitud_id) {
       const r = await pool.query("SELECT id FROM solicitudes_contratacion WHERE public_id = $1", [solicitud_id]);
       if (r.rowCount === 0) return res.status(404).json({ error: "Solicitud no encontrada" });
       solId = r.rows[0].id;
-    }
-    if (preregistro_id) {
+    } else if (preregistro_id) {
       const r = await pool.query("SELECT id FROM preregistro_personas WHERE public_id = $1", [preregistro_id]);
       if (r.rowCount === 0) return res.status(404).json({ error: "Preregistro no encontrado" });
       preId = r.rows[0].id;
+    } else {
+      // Auto-resolver por numero_documento o correo_personal
+      const resolved = await resolveProcesoForPersona(pool, {
+        numero_documento: toNullableTrimmedString(numero_documento),
+        correo_personal: toNullableTrimmedString(correo_personal)
+      });
+      solId = resolved.solicitud_id;
+      preId = resolved.preregistro_id;
     }
 
     const procesoContext = {
@@ -7820,18 +7930,31 @@ app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrado
       return res.status(400).json({ error: "No se pudo resolver nombre_persona o correo_personal del proceso" });
     }
 
-    // Expirar tokens activos previos para la misma solicitud/preregistro antes de crear uno nuevo
-    if (solId) {
+    // Expirar todos los tokens activos de la persona (por numero_documento)
+    const numDocFinal = toNullableTrimmedString(personaContext?.numeroDocumento) || toNullableTrimmedString(numero_documento);
+    if (numDocFinal) {
       await pool.query(
-        "UPDATE tokens_firma_contrato SET estado = 'expirado', updated_at = NOW() WHERE solicitud_id = $1 AND estado IN ('pendiente', 'en_proceso')",
-        [solId]
+        `UPDATE tokens_firma_contrato tf SET estado = 'expirado', updated_at = NOW()
+         WHERE tf.estado IN ('pendiente', 'en_proceso')
+           AND (
+             EXISTS (SELECT 1 FROM solicitudes_contratacion sc WHERE sc.id = tf.solicitud_id AND NULLIF(BTRIM(sc.numero_documento),'') = $1)
+             OR EXISTS (SELECT 1 FROM preregistro_personas pp WHERE pp.id = tf.preregistro_id AND NULLIF(BTRIM(pp.numero_documento),'') = $1)
+           )`,
+        [numDocFinal]
       );
-    }
-    if (preId) {
-      await pool.query(
-        "UPDATE tokens_firma_contrato SET estado = 'expirado', updated_at = NOW() WHERE preregistro_id = $1 AND estado IN ('pendiente', 'en_proceso')",
-        [preId]
-      );
+    } else {
+      if (solId) {
+        await pool.query(
+          "UPDATE tokens_firma_contrato SET estado = 'expirado', updated_at = NOW() WHERE solicitud_id = $1 AND estado IN ('pendiente', 'en_proceso')",
+          [solId]
+        );
+      }
+      if (preId) {
+        await pool.query(
+          "UPDATE tokens_firma_contrato SET estado = 'expirado', updated_at = NOW() WHERE preregistro_id = $1 AND estado IN ('pendiente', 'en_proceso')",
+          [preId]
+        );
+      }
     }
 
     const hasBaseContract = await hasContratoBaseFirmado({
@@ -9120,6 +9243,11 @@ app.get("/admin/personas/p/:personaId", requireAccess({ roles: ["Administrador",
         p.composicion_familiar, p.hijos, p.personas_a_cargo,
         p.tipo_contrato, p.modalidad,
         p.numero_cuenta           AS nro_cuenta_bancaria,
+        p.razon_social,
+        p.nit_empresa,
+        p.representante_legal,
+        p.tipo_documento_representante,
+        p.numero_documento_representante,
         p.modulo_otro, p.cliente_otro,
         di.public_id  AS tipo_documento_id,
         di.titulo     AS tipo_documento,
@@ -9157,7 +9285,9 @@ app.put("/admin/personas/p/:personaId/personal", requireAccess({ roles: ["Admini
     tipo_documento_id, cedula, nombre, apellidos,
     telefono, direccion, ciudad, tipo_persona,
     fecha_nacimiento, sexo, departamento_pais, titulo_profesional,
-    correo_electronico
+    correo_electronico,
+    razon_social, nit_empresa, representante_legal,
+    tipo_documento_representante, numero_documento_representante
   } = req.body || {};
   try {
     const tipoDocumentoRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.documentoIdentidad, tipo_documento_id, "Tipo de documento");
@@ -9172,21 +9302,26 @@ app.put("/admin/personas/p/:personaId/personal", requireAccess({ roles: ["Admini
 
     const result = await pool.query(`
       UPDATE personas SET
-        tipo_documento_id    = $1,
-        numero_documento     = $2,
-        nombre               = $3,
-        apellidos            = $4,
-        numero_contacto      = $5,
-        direccion_residencia = $6,
-        ciudad_residencia    = $7,
-        tipo_persona         = $8::tipo_persona,
-        fecha_nacimiento     = $9,
-        sexo                 = $10::tipo_sexo,
-        departamento_pais    = $11,
-        titulo_profesional   = $12,
-        correo_electronico   = $13,
-        updated_at           = CURRENT_TIMESTAMP
-      WHERE public_id = $14
+        tipo_documento_id              = $1,
+        numero_documento               = $2,
+        nombre                         = $3,
+        apellidos                      = $4,
+        numero_contacto                = $5,
+        direccion_residencia           = $6,
+        ciudad_residencia              = $7,
+        tipo_persona                   = $8::tipo_persona,
+        fecha_nacimiento               = $9,
+        sexo                           = $10::tipo_sexo,
+        departamento_pais              = $11,
+        titulo_profesional             = $12,
+        correo_electronico             = $13,
+        razon_social                   = $14,
+        nit_empresa                    = $15,
+        representante_legal            = $16,
+        tipo_documento_representante   = $17,
+        numero_documento_representante = $18,
+        updated_at                     = CURRENT_TIMESTAMP
+      WHERE public_id = $19
         AND NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.persona_id = personas.id)
       RETURNING public_id, nombre, apellidos, numero_documento AS cedula, tipo_persona, sexo, estado
     `, [
@@ -9203,6 +9338,11 @@ app.put("/admin/personas/p/:personaId/personal", requireAccess({ roles: ["Admini
       toNullableTrimmedString(departamento_pais),
       toNullableTrimmedString(titulo_profesional),
       toNullableTrimmedString(correo_electronico)?.toLowerCase() || null,
+      toNullableTrimmedString(razon_social),
+      toNullableTrimmedString(nit_empresa),
+      toNullableTrimmedString(representante_legal),
+      toNullableTrimmedString(tipo_documento_representante),
+      toNullableTrimmedString(numero_documento_representante),
       personaId
     ]);
     if (result.rowCount === 0) return res.status(404).json({ error: "Persona standalone no encontrada. Si tiene usuario vinculado, usa PUT /admin/personas/:id/personal" });
@@ -9534,6 +9674,13 @@ app.get("/admin/personas/:id", requireAccess({ roles: ["Administrador", "Coordin
         cl.titulo                                               AS persona_cliente,
         p.cliente_otro,
 
+        -- Persona jurídica (contratista)
+        p.razon_social,
+        p.nit_empresa,
+        p.representante_legal,
+        p.tipo_documento_representante,
+        p.numero_documento_representante,
+
         -- Bancario (persona primero, luego usuario)
         COALESCE(b_p.public_id, b_u.public_id)                 AS banco_id,
         COALESCE(b_p.titulo, b_u.titulo)                       AS banco,
@@ -9621,7 +9768,9 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
   const { id } = req.params;
   const {
     tipo_documento_id, cedula, telefono, direccion, ciudad, tipo_persona,
-    apellidos, fecha_nacimiento, sexo, departamento_pais, titulo_profesional
+    apellidos, fecha_nacimiento, sexo, departamento_pais, titulo_profesional,
+    razon_social, nit_empresa, representante_legal,
+    tipo_documento_representante, numero_documento_representante
   } = req.body || {};
   const client = await pool.connect();
   try {
@@ -9665,8 +9814,10 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
           numero_documento, tipo_documento_id, tipo_persona,
           numero_contacto, direccion_residencia, ciudad_residencia,
           apellidos, fecha_nacimiento, sexo, departamento_pais, titulo_profesional,
+          razon_social, nit_empresa, representante_legal,
+          tipo_documento_representante, numero_documento_representante,
           created_by
-        ) VALUES ($1, $2, $3, $4::tipo_persona, $5, $6, $7, $8, $9, $10::tipo_sexo, $11, $12, $13)
+        ) VALUES ($1, $2, $3, $4::tipo_persona, $5, $6, $7, $8, $9, $10::tipo_sexo, $11, $12, $13, $14, $15, $16, $17, $18)
         RETURNING id
       `, [
         usuario.nombre_usuario,
@@ -9681,6 +9832,11 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
         sexoNormalizado,
         toNullableTrimmedString(departamento_pais),
         toNullableTrimmedString(titulo_profesional),
+        toNullableTrimmedString(razon_social),
+        toNullableTrimmedString(nit_empresa),
+        toNullableTrimmedString(representante_legal),
+        toNullableTrimmedString(tipo_documento_representante),
+        toNullableTrimmedString(numero_documento_representante),
         usuario.id
       ]);
       personaId = newPersona.rows[0].id;
@@ -9692,19 +9848,24 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
       // Actualizar persona existente
       await client.query(`
         UPDATE personas SET
-          numero_documento     = $1,
-          tipo_documento_id    = $2,
-          tipo_persona         = $3::tipo_persona,
-          numero_contacto      = $4,
-          direccion_residencia = $5,
-          ciudad_residencia    = $6,
-          apellidos            = $7,
-          fecha_nacimiento     = $8,
-          sexo                 = $9::tipo_sexo,
-          departamento_pais    = $10,
-          titulo_profesional   = $11,
-          updated_at           = CURRENT_TIMESTAMP
-        WHERE id = $12
+          numero_documento              = $1,
+          tipo_documento_id             = $2,
+          tipo_persona                  = $3::tipo_persona,
+          numero_contacto               = $4,
+          direccion_residencia          = $5,
+          ciudad_residencia             = $6,
+          apellidos                     = $7,
+          fecha_nacimiento              = $8,
+          sexo                          = $9::tipo_sexo,
+          departamento_pais             = $10,
+          titulo_profesional            = $11,
+          razon_social                  = $12,
+          nit_empresa                   = $13,
+          representante_legal           = $14,
+          tipo_documento_representante  = $15,
+          numero_documento_representante = $16,
+          updated_at                    = CURRENT_TIMESTAMP
+        WHERE id = $17
       `, [
         toNullableTrimmedString(cedula),
         tipoDocumentoRef.id,
@@ -9717,6 +9878,11 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
         sexoNormalizado,
         toNullableTrimmedString(departamento_pais),
         toNullableTrimmedString(titulo_profesional),
+        toNullableTrimmedString(razon_social),
+        toNullableTrimmedString(nit_empresa),
+        toNullableTrimmedString(representante_legal),
+        toNullableTrimmedString(tipo_documento_representante),
+        toNullableTrimmedString(numero_documento_representante),
         personaId
       ]);
     }
@@ -9735,6 +9901,11 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
         p.sexo,
         p.departamento_pais,
         p.titulo_profesional,
+        p.razon_social,
+        p.nit_empresa,
+        p.representante_legal,
+        p.tipo_documento_representante,
+        p.numero_documento_representante,
         p.public_id                                        AS persona_public_id,
         di.public_id  AS tipo_documento_id,
         di.titulo     AS tipo_documento,

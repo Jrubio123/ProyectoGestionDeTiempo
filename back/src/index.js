@@ -1930,11 +1930,6 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
     currentFechaInicio &&
     payload.fecha_inicio > currentFechaInicio;
 
-  if (!sameSource && !shouldSplitHistory) {
-    const inserted = await insertAnexoTecnicoItem(payload);
-    return inserted.row;
-  }
-
   if (shouldSplitHistory) {
     const cierreAnterior = addDaysToDateYmd(payload.fecha_inicio, -1);
     const fechaFinAnterior =

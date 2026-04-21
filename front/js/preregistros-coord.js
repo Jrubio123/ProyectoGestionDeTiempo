@@ -247,9 +247,19 @@ window.preregistrosCoordApp = function () {
             };
         },
 
+        toDateInput(value) {
+            if (!value) return "";
+            return String(value).substring(0, 10);
+        },
+
         formatFecha(value) {
             if (!value) return "-";
-            const d = new Date(value);
+            const ymd = String(value).substring(0, 10);
+            const parts = ymd.split("-");
+            if (parts.length !== 3) return String(value);
+            const [year, month, day] = parts.map(Number);
+            if (!year || !month || !day) return String(value);
+            const d = new Date(year, month - 1, day);
             if (Number.isNaN(d.getTime())) return String(value);
             return d.toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" });
         },
@@ -490,11 +500,11 @@ window.preregistrosCoordApp = function () {
                 tarifa_medio_tiempo: item?.tarifa_medio_tiempo ?? "",
                 tarifa_capacitacion: item?.tarifa_capacitacion ?? "",
                 modalidad_contrato: item?.modalidad_contrato || "",
-                fecha_inicio: item?.fecha_inicio || "",
-                fecha_fin: item?.fecha_fin || "",
-                fecha_extension_desde: item?.fecha_extension_desde || "",
-                fecha_extension_hasta: item?.fecha_extension_hasta || "",
-                fecha_retiro: item?.fecha_retiro || "",
+                fecha_inicio: this.toDateInput(item?.fecha_inicio),
+                fecha_fin: this.toDateInput(item?.fecha_fin),
+                fecha_extension_desde: this.toDateInput(item?.fecha_extension_desde),
+                fecha_extension_hasta: this.toDateInput(item?.fecha_extension_hasta),
+                fecha_retiro: this.toDateInput(item?.fecha_retiro),
                 necesidad_ti: item?.necesidad_ti || "",
                 observaciones: item?.observaciones || ""
             };
@@ -645,8 +655,8 @@ window.preregistrosCoordApp = function () {
                 if (anexo.moneda) this.form.moneda = anexo.moneda;
                 if (anexo.modulo_id) this.form.modulo_id = anexo.modulo_id;
                 if (anexo.modulo_nombre) this.form.perfil = anexo.modulo_nombre;
-                if (anexo.fecha_inicio) this.form.fecha_extension_desde = anexo.fecha_inicio;
-                if (anexo.fecha_fin) this.form.fecha_extension_hasta = anexo.fecha_fin;
+                if (anexo.fecha_inicio) this.form.fecha_extension_desde = this.toDateInput(anexo.fecha_inicio);
+                if (anexo.fecha_fin) this.form.fecha_extension_hasta = this.toDateInput(anexo.fecha_fin);
             }
         },
 

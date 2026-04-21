@@ -1480,15 +1480,24 @@ module.exports = function registerContratacionesRoutes(deps) {
             ...anexoRes.rows[0],
             tipo_asignacion_label: anexoTipoLabel(anexoRes.rows[0].tipo_asignacion)
           };
-          // Finalizar antes de enviar correos (Fix 3)
+          // Finalizar el item respetando constraint check2 por tipo de asignación
+          const tipoAnexoRetiro = selectedAnexo.tipo_asignacion || '';
+          const isCorteAnual = tipoAnexoRetiro === 'horas' || tipoAnexoRetiro === 'capacitacion';
+          const fechaRetiroStr = rawSolicitud.fecha_retiro ? normalizeDateOnly(String(rawSolicitud.fecha_retiro)) : null;
+          const fechaInicioAnexoStr = selectedAnexo.fecha_inicio ? normalizeDateOnly(String(selectedAnexo.fecha_inicio)) : null;
+          const retiroAntesDeInicio = fechaRetiroStr && fechaInicioAnexoStr && fechaRetiroStr < fechaInicioAnexoStr;
+          const estadoRetiro = retiroAntesDeInicio ? 'cancelado' : 'finalizado';
+          // horas/capacitacion: fecha_fin debe ser 31-dic por constraint; no se modifica.
+          // Otros tipos: solo actualizar fecha_fin si retiro >= inicio del item.
+          const nuevaFechaFinRetiro = (!isCorteAnual && !retiroAntesDeInicio && fechaRetiroStr) ? fechaRetiroStr : null;
           await pool.query(
             `UPDATE anexo_tecnico_items
-             SET estado = 'finalizado',
-                 fecha_fin = COALESCE($2, fecha_fin),
-                 updated_by = $3,
+             SET estado = $2,
+                 fecha_fin = COALESCE($3, fecha_fin),
+                 updated_by = $4,
                  updated_at = NOW()
              WHERE id = $1`,
-            [selectedAnexo.id, rawSolicitud.fecha_retiro || null, req.user?.id || null]
+            [selectedAnexo.id, estadoRetiro, nuevaFechaFinRetiro, req.user?.id || null]
           );
           // Contar restantes excluyendo el recién finalizado (Fix 4)
           const countRes = await pool.query(

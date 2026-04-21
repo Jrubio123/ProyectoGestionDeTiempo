@@ -1917,11 +1917,7 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
   const directAnexoPublicId = toNullableTrimmedString(personaContext?.datos_extra?.anexo_item_id);
   let currentItem = null;
   if (directAnexoPublicId) {
-    const directRes = await pool.query(
-      `SELECT * FROM anexo_tecnico_items WHERE public_id::text = $1 AND estado = 'activo' LIMIT 1`,
-      [directAnexoPublicId]
-    );
-    currentItem = directRes.rows[0] || null;
+    currentItem = existingItems.find(item => String(item.public_id) === directAnexoPublicId) || null;
   }
   if (!currentItem) {
     currentItem = selectActiveAnexoForPayload(existingItems, payload);

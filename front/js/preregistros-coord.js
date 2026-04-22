@@ -32,6 +32,7 @@ window.preregistrosCoordApp = function () {
         grupo_app_tiempos: "",
         grupo_distribucion: "",
         moneda: "COP",
+        factura_en_colombia: "",
         tarifa_hora: "",
         tarifa_mes: "",
         tarifa_medio_tiempo: "",
@@ -452,6 +453,8 @@ window.preregistrosCoordApp = function () {
             if (persona.correo_personal) this.form.correo_personal = persona.correo_personal;
             if (persona.telefono) this.form.telefono = persona.telefono;
             if (persona.moneda) this.form.moneda = persona.moneda;
+            if (persona.factura_en_colombia === true) this.form.factura_en_colombia = "true";
+            if (persona.factura_en_colombia === false) this.form.factura_en_colombia = "false";
             if (persona.cliente_id) this.form.cliente_id = String(persona.cliente_id);
             if (persona.supervisor_id) this.form.supervisor_id = String(persona.supervisor_id);
             if (perfilData.modulo_id) this.form.modulo_id = perfilData.modulo_id;
@@ -496,6 +499,9 @@ window.preregistrosCoordApp = function () {
                 grupo_app_tiempos: item?.grupo_app_tiempos || "",
                 grupo_distribucion: item?.grupo_distribucion || "",
                 moneda: item?.moneda || "COP",
+                factura_en_colombia:
+                    item?.factura_en_colombia === true || item?.datos_extra?.factura_en_colombia === true ? "true" :
+                    item?.factura_en_colombia === false || item?.datos_extra?.factura_en_colombia === false ? "false" : "",
                 tarifa_hora: item?.tarifa_hora ?? "",
                 tarifa_mes: item?.tarifa_mes ?? "",
                 tarifa_medio_tiempo: item?.tarifa_medio_tiempo ?? "",
@@ -732,6 +738,7 @@ window.preregistrosCoordApp = function () {
                 if (!String(this.form.cliente_id || "").trim()) errors.push("Cliente");
                 if (esProspecto && !String(this.form.cliente_nombre_prospecto || "").trim()) errors.push("Nombre del cliente prospecto");
                 if (!String(this.form.moneda || "").trim()) errors.push("Moneda");
+                if (!["true", "false"].includes(String(this.form.factura_en_colombia || "").trim())) errors.push("Factura en Colombia");
                 if (!String(this.form.fecha_inicio || "").trim()) errors.push("Fecha inicio");
                 const alguna = [
                     this.form.tarifa_hora,
@@ -870,6 +877,14 @@ window.preregistrosCoordApp = function () {
                 enviar_correos: true,
                 datos_extra: datosExtra
             };
+            const facturaEnColombiaRaw = String(this.form.factura_en_colombia || "").trim();
+            if (["true", "false"].includes(facturaEnColombiaRaw)) {
+                base.factura_en_colombia = facturaEnColombiaRaw === "true";
+                datosExtra.factura_en_colombia = base.factura_en_colombia;
+            } else {
+                delete base.factura_en_colombia;
+                delete datosExtra.factura_en_colombia;
+            }
 
             if (this.tipoModal === "Extension" || this.tipoModal === "Retiro") {
                 if (this.form.anexo_item_id) datosExtra.anexo_item_id = this.form.anexo_item_id;

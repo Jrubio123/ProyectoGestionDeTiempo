@@ -186,6 +186,15 @@ module.exports = function registerContratacionesRoutes(deps) {
     return Number.isFinite(parsed) ? parsed : null;
   }
 
+  function normalizeFacturaEnColombiaInput(value) {
+    if (value === undefined || value === null || value === "") return null;
+    if (typeof value === "boolean") return value;
+    const raw = String(value).trim().toLowerCase();
+    if (["true", "1", "si", "sí", "yes", "on"].includes(raw)) return true;
+    if (["false", "0", "no", "off"].includes(raw)) return false;
+    return null;
+  }
+
   function isUuid(value) {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       String(value || "").trim()
@@ -1922,6 +1931,9 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (clienteNombre && !datosExtra.cliente_nombre) datosExtra.cliente_nombre = clienteNombre;
         // Guardar perfil libre como modulo_otro cuando no se seleccionó un módulo del catálogo
         if (!datosExtra.modulo_id && perfil && !datosExtra.modulo_otro) datosExtra.modulo_otro = perfil;
+        if (payload.factura_en_colombia !== undefined) {
+          datosExtra.factura_en_colombia = normalizeFacturaEnColombiaInput(payload.factura_en_colombia);
+        }
 
         if (tipoSolicitud === TIPO_NUEVO && (personaUsuarioId || numeroDocumento)) {
           const legalContext = await fetchPersonaLegalContext(pool, { personaUsuarioId, numeroDocumento });
@@ -2295,10 +2307,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (clienteNombre && !datosExtra.cliente_nombre) datosExtra.cliente_nombre = clienteNombre;
         if (!datosExtra.modulo_id && perfil && !datosExtra.modulo_otro) datosExtra.modulo_otro = perfil;
         if (payload.factura_en_colombia !== undefined) {
-          datosExtra.factura_en_colombia =
-            payload.factura_en_colombia === true || payload.factura_en_colombia === "true" ? true
-            : payload.factura_en_colombia === false || payload.factura_en_colombia === "false" ? false
-            : null;
+          datosExtra.factura_en_colombia = normalizeFacturaEnColombiaInput(payload.factura_en_colombia);
         }
 
         if (tipoSolicitud === TIPO_NUEVO && (personaUsuarioId || numeroDocumento)) {

@@ -751,32 +751,37 @@ function resolveEmpresaContratoConfig(facturaEnColombia) {
   };
 }
 
+function defineContratoDoc(docKey, titulo, templateFiles) {
+  const files = Object.freeze({ ...templateFiles });
+  return Object.freeze({
+    doc_key: docKey,
+    titulo,
+    template_file: files.silver,
+    template_files: files
+  });
+}
+
 const CONTRATO_DOC_DEFINITIONS_FULL = Object.freeze([
-  {
-    doc_key: "contrato_prestacion_servicios",
-    titulo: "Contrato Prestacion de Servicios",
-    template_file: "Contrato Prestación de Servicios .docx"
-  },
-  {
-    doc_key: "acuerdo_confidencialidad",
-    titulo: "Acuerdo de Confidencialidad",
-    template_file: "Acuerdo de Confidencialidad .docx"
-  },
-  {
-    doc_key: "politica_garantia",
-    titulo: "Politica de Garantia",
-    template_file: "Política de Garantía.docx"
-  },
-  {
-    doc_key: "autorizacion_datos_personales",
-    titulo: "Autorizacion de Tratamiento de Datos Personales",
-    template_file: "AUTORIZACIÓN EXPRESA PARA EL TRATAMIENTO DE DATOS PERSONALES.docx"
-  },
-  {
-    doc_key: "anexo_tecnico",
-    titulo: "Anexo Tecnico",
-    template_file: "Anexo Técnico.docx"
-  }
+  defineContratoDoc("contrato_prestacion_servicios", "Contrato Prestacion de Servicios", {
+    silver: "Contrato Prestación de Servicios .docx",
+    capital: "ContratoPrestacionServicioCapital.docx"
+  }),
+  defineContratoDoc("acuerdo_confidencialidad", "Acuerdo de Confidencialidad", {
+    silver: "Acuerdo de Confidencialidad .docx",
+    capital: "AcuerdoConfidencialdiadCapital.docx"
+  }),
+  defineContratoDoc("politica_garantia", "Politica de Garantia", {
+    silver: "Política de Garantía.docx",
+    capital: "PoliticaGarantiaCapital.docx"
+  }),
+  defineContratoDoc("autorizacion_datos_personales", "Autorizacion de Tratamiento de Datos Personales", {
+    silver: "AUTORIZACIÓN EXPRESA PARA EL TRATAMIENTO DE DATOS PERSONALES.docx",
+    capital: "AutorizacionTratamientoDatosCapital.docx"
+  }),
+  defineContratoDoc("anexo_tecnico", "Anexo Tecnico", {
+    silver: "Anexo Técnico.docx",
+    capital: "AnexoTecnicoCapital.docx"
+  })
 ]);
 const CONTRATO_DOC_DEFINITIONS_ANEXO_ONLY = Object.freeze(
   CONTRATO_DOC_DEFINITIONS_FULL.filter((d) => d.doc_key === "anexo_tecnico")
@@ -1339,18 +1344,80 @@ function createDocxtemplaterParser(tag) {
   };
 }
 
-function getContratoDocDefinition(docKey) {
-  if (!docKey) return null;
-  return CONTRATO_DOC_DEFINITIONS_BY_KEY.get(String(docKey)) || null;
+function getContratoEmpresaKey(facturaEnColombia) {
+  return resolveEmpresaContratoConfig(facturaEnColombia).key;
 }
 
-function buildDocsFirmaPlan({ hasContratoBase = false } = {}) {
-  const defs = hasContratoBase ? CONTRATO_DOC_DEFINITIONS_ANEXO_ONLY : CONTRATO_DOC_DEFINITIONS_FULL;
+function hydrateContratoDocDefinitionForEmpresa(def, facturaEnColombia = null) {
+  if (!def) return null;
+  const empresaKey = getContratoEmpresaKey(facturaEnColombia);
+  const templateFile =
+    def.template_files?.[empresaKey] ||
+    def.template_file ||
+    def.template_files?.silver ||
+    null;
+  return {
+    ...def,
+    empresa_key: empresaKey,
+    template_file: templateFile
+  };
+}
+
+function getEmpresaKeyFromContratoTemplate(def, templateFile, fallbackKey = null) {
+  const safeTemplate = toNullableTrimmedString(templateFile);
+  if (!def?.template_files || !safeTemplate) return fallbackKey;
+  const normalizedTemplate = normalizeTemplateFileName(safeTemplate);
+  const match = Object.entries(def.template_files).find(([, fileName]) => (
+    normalizeTemplateFileName(fileName) === normalizedTemplate
+  ));
+  return match?.[0] || fallbackKey;
+}
+
+function getContratoDocDefinition(docKey, facturaEnColombia = null) {
+  if (!docKey) return null;
+  return hydrateContratoDocDefinitionForEmpresa(
+    CONTRATO_DOC_DEFINITIONS_BY_KEY.get(String(docKey)) || null,
+    facturaEnColombia
+  );
+}
+
+function isDocFirmaDefinitionLocked(doc) {
+  if (!doc || typeof doc !== "object") return false;
+  if (normalizeDocStatus(doc.estado) === "signed") return true;
+  return Boolean(
+    toNullableTrimmedString(doc.request_id) ||
+    toNullableTrimmedString(doc.contract_id) ||
+    toNullableTrimmedString(doc.signature_id) ||
+    toNullableTrimmedString(doc.url_firma)
+  );
+}
+
+function resolveContratoDocDefinitionForFirma(docKey, { facturaEnColombia = null, doc = null } = {}) {
+  const def = getContratoDocDefinition(docKey, facturaEnColombia);
+  if (!def) return null;
+  const lockedTemplate = isDocFirmaDefinitionLocked(doc)
+    ? toNullableTrimmedString(doc?.template_file)
+    : null;
+  const empresaKey = lockedTemplate
+    ? getEmpresaKeyFromContratoTemplate(def, lockedTemplate, def.empresa_key)
+    : def.empresa_key;
+  return {
+    ...def,
+    empresa_key: empresaKey,
+    titulo: toNullableTrimmedString(doc?.titulo) || def.titulo,
+    template_file: lockedTemplate || def.template_file
+  };
+}
+
+function buildDocsFirmaPlan({ hasContratoBase = false, facturaEnColombia = null } = {}) {
+  const baseDefs = hasContratoBase ? CONTRATO_DOC_DEFINITIONS_ANEXO_ONLY : CONTRATO_DOC_DEFINITIONS_FULL;
+  const defs = baseDefs.map((def) => hydrateContratoDocDefinitionForEmpresa(def, facturaEnColombia));
   return defs.map((def, index) => ({
     doc_index: index + 1,
     doc_key: def.doc_key,
     titulo: def.titulo,
     template_file: def.template_file,
+    empresa_key: def.empresa_key,
     estado: "pending",
     request_id: null,
     contract_id: null,
@@ -1361,7 +1428,9 @@ function buildDocsFirmaPlan({ hasContratoBase = false } = {}) {
   }));
 }
 
-function normalizeDocsFirmaList(docsRaw) {
+function normalizeDocsFirmaList(docsRaw, options = {}) {
+  const hasFacturaContext = Object.prototype.hasOwnProperty.call(options || {}, "facturaEnColombia");
+  const facturaEnColombia = hasFacturaContext ? options.facturaEnColombia : null;
   const docs = Array.isArray(docsRaw) ? docsRaw : [];
   const normalized = docs
     .map((doc, index) => {
@@ -1370,13 +1439,25 @@ function normalizeDocsFirmaList(docsRaw) {
       const docIndex = Number.isInteger(rawIndex) && rawIndex > 0 ? rawIndex : index + 1;
       const legacyDocKey = LEGACY_DOC_INDEX_TO_KEY.get(docIndex) || null;
       const docKey = toNullableTrimmedString(doc.doc_key) || legacyDocKey;
-      const def = getContratoDocDefinition(docKey);
+      const def = resolveContratoDocDefinitionForFirma(docKey, { facturaEnColombia, doc });
+      const locked = isDocFirmaDefinitionLocked(doc);
+      const existingTemplateFile = toNullableTrimmedString(doc.template_file);
+      const resolvedTemplateFile = locked || !hasFacturaContext
+        ? (existingTemplateFile || def?.template_file || null)
+        : (def?.template_file || existingTemplateFile || null);
+      const resolvedEmpresaKey = locked || !hasFacturaContext
+        ? (
+            toNullableTrimmedString(doc.empresa_key) ||
+            getEmpresaKeyFromContratoTemplate(def, resolvedTemplateFile, def?.empresa_key || null)
+          )
+        : (def?.empresa_key || toNullableTrimmedString(doc.empresa_key) || null);
       return {
         ...doc,
         doc_index: docIndex,
         doc_key: docKey,
         titulo: toNullableTrimmedString(doc.titulo) || def?.titulo || `Documento ${docIndex}`,
-        template_file: toNullableTrimmedString(doc.template_file) || def?.template_file || null,
+        template_file: resolvedTemplateFile,
+        empresa_key: resolvedEmpresaKey,
         estado: normalizeDocStatus(doc.estado)
       };
     })
@@ -1385,10 +1466,10 @@ function normalizeDocsFirmaList(docsRaw) {
   return normalized;
 }
 
-function normalizeDocsFirmaListCompat(docsRaw) {
+function normalizeDocsFirmaListCompat(docsRaw, options = {}) {
   if (typeof normalizeDocsFirmaList === "function") {
     try {
-      return normalizeDocsFirmaList(docsRaw);
+      return normalizeDocsFirmaList(docsRaw, options);
     } catch (err) {
       console.warn("No se pudo normalizar docs_firma con funcion principal:", err?.message || err);
     }
@@ -1408,8 +1489,35 @@ function normalizeDocsFirmaListCompat(docsRaw) {
     .filter(Boolean)
     .sort((a, b) => Number(a.doc_index || 0) - Number(b.doc_index || 0));
 }
-function upsertDocFirmaEntry(docsRaw, entry) {
-  const docs = normalizeDocsFirmaListCompat(docsRaw);
+
+function refreshDocsFirmaDefinitionsForContext(docsRaw, { facturaEnColombia = null } = {}) {
+  return normalizeDocsFirmaListCompat(docsRaw, { facturaEnColombia }).map((doc) => {
+    const docKey = toNullableTrimmedString(doc.doc_key) || LEGACY_DOC_INDEX_TO_KEY.get(Number(doc.doc_index)) || null;
+    const def = getContratoDocDefinition(docKey, facturaEnColombia);
+    if (!def) return doc;
+    if (isDocFirmaDefinitionLocked(doc)) {
+      return {
+        ...doc,
+        doc_key: def.doc_key,
+        titulo: toNullableTrimmedString(doc.titulo) || def.titulo,
+        template_file: toNullableTrimmedString(doc.template_file) || def.template_file,
+        empresa_key:
+          toNullableTrimmedString(doc.empresa_key) ||
+          getEmpresaKeyFromContratoTemplate(def, doc.template_file, def.empresa_key)
+      };
+    }
+    return {
+      ...doc,
+      doc_key: def.doc_key,
+      titulo: def.titulo,
+      template_file: def.template_file,
+      empresa_key: def.empresa_key
+    };
+  });
+}
+
+function upsertDocFirmaEntry(docsRaw, entry, options = {}) {
+  const docs = normalizeDocsFirmaListCompat(docsRaw, options);
   const targetIndex = Number(entry?.doc_index || 0);
   const filtered = docs.filter((doc) => Number(doc.doc_index || 0) !== targetIndex);
   return [...filtered, entry].sort((a, b) => Number(a.doc_index || 0) - Number(b.doc_index || 0));
@@ -1460,14 +1568,27 @@ async function hasContratoBaseFirmado({ correoPersonal = null, numeroDocumento =
 }
 
 async function ensureTokenDocsFirmaPlan(tokenRow) {
-  const docsCurrent = normalizeDocsFirmaListCompat(tokenRow?.docs_firma);
-  if (docsCurrent.length > 0) return docsCurrent;
   const personaContext = await resolveContratoPersonaContext(tokenRow || {});
+  const facturaEnColombia = personaContext?.facturaEnColombia ?? null;
+  const docsStored = normalizeDocsFirmaListCompat(tokenRow?.docs_firma);
+  if (docsStored.length > 0) {
+    const refreshed = refreshDocsFirmaDefinitionsForContext(docsStored, { facturaEnColombia });
+    if (tokenRow?.id && JSON.stringify(docsStored) !== JSON.stringify(refreshed)) {
+      await pool.query(
+        `UPDATE tokens_firma_contrato
+         SET docs_firma = $1::jsonb,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [JSON.stringify(refreshed), tokenRow.id]
+      );
+    }
+    return refreshed;
+  }
   const hasBase = await hasContratoBaseFirmado({
     correoPersonal: personaContext?.correoPersonal || tokenRow?.correo_personal || null,
     numeroDocumento: personaContext?.numeroDocumento || null
   });
-  const planned = buildDocsFirmaPlan({ hasContratoBase: hasBase });
+  const planned = buildDocsFirmaPlan({ hasContratoBase: hasBase, facturaEnColombia });
   if (tokenRow?.id) {
     await pool.query(
       `UPDATE tokens_firma_contrato
@@ -1503,6 +1624,15 @@ function toBooleanInput(value, fallback = false) {
   if (["true", "1", "si", "sí", "yes", "on"].includes(raw)) return true;
   if (["false", "0", "no", "off"].includes(raw)) return false;
   return fallback;
+}
+
+function normalizeNullableBooleanInput(value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "boolean") return value;
+  const raw = String(value).trim().toLowerCase();
+  if (["true", "1", "si", "sí", "yes", "on"].includes(raw)) return true;
+  if (["false", "0", "no", "off"].includes(raw)) return false;
+  return null;
 }
 
 function inferAnexoTipoFromContext(ctx) {
@@ -1591,7 +1721,11 @@ async function getSolicitudContratacionDetalleById(internalId) {
       sc.cliente_id,
       c.public_id AS cliente_public_id,
       c.titulo AS cliente_nombre,
-      (sc.datos_extra->>'factura_en_colombia')::boolean AS factura_en_colombia,
+      CASE
+        WHEN LOWER(BTRIM(sc.datos_extra->>'factura_en_colombia')) IN ('true', 't', '1', 'yes', 'y', 'on', 'si', 'sí') THEN true
+        WHEN LOWER(BTRIM(sc.datos_extra->>'factura_en_colombia')) IN ('false', 'f', '0', 'no', 'n', 'off') THEN false
+        ELSE NULL
+      END AS factura_en_colombia,
       sc.datos_extra->>'tipo_persona' AS tipo_persona,
       sc.moneda,
       sc.tarifa_hora,
@@ -1688,6 +1822,51 @@ async function resolvePreregistroFromSolicitudDatosExtra(solicitudRow) {
   return r.rows[0]?.id || null;
 }
 
+async function resolveFacturaEnColombiaFallback({ personaUsuarioId = null, numeroDocumento = null, correoPersonal = null } = {}) {
+  const personaId = toNullableInteger(personaUsuarioId);
+  const documento = toNullableTrimmedString(numeroDocumento);
+  const correo = toNullableTrimmedString(correoPersonal);
+  if (!personaId && !documento && !correo) return null;
+
+  const r = await pool.query(
+    `
+    WITH usuario_base AS (
+      SELECT u.*
+      FROM usuarios u
+      WHERE
+        ($1::int IS NOT NULL AND u.id = $1)
+        OR ($2::text IS NOT NULL AND NULLIF(BTRIM(u.cedula), '') = $2)
+        OR ($3::text IS NOT NULL AND LOWER(NULLIF(BTRIM(u.email), '')) = LOWER($3))
+      ORDER BY
+        CASE WHEN $1::int IS NOT NULL AND u.id = $1 THEN 0 ELSE 1 END,
+        u.id DESC
+      LIMIT 1
+    ),
+    persona_base AS (
+      SELECT p.*
+      FROM personas p
+      LEFT JOIN usuario_base u ON TRUE
+      WHERE
+        (u.persona_id IS NOT NULL AND p.id = u.persona_id)
+        OR ($2::text IS NOT NULL AND NULLIF(BTRIM(p.numero_documento), '') = $2)
+        OR ($3::text IS NOT NULL AND LOWER(NULLIF(BTRIM(p.correo_electronico), '')) = LOWER($3))
+        OR (u.cedula IS NOT NULL AND NULLIF(BTRIM(p.numero_documento), '') = NULLIF(BTRIM(u.cedula), ''))
+      ORDER BY
+        CASE WHEN p.id = (SELECT persona_id FROM usuario_base LIMIT 1) THEN 0 ELSE 1 END,
+        p.updated_at DESC NULLS LAST,
+        p.id DESC
+      LIMIT 1
+    )
+    SELECT COALESCE(p.factura_en_colombia, u.factura_en_colombia) AS factura_en_colombia
+    FROM usuario_base u
+    FULL JOIN persona_base p ON TRUE
+    LIMIT 1
+    `,
+    [personaId || null, documento || null, correo || null]
+  );
+  return normalizeNullableBooleanInput(r.rows[0]?.factura_en_colombia);
+}
+
 async function resolveContratoPersonaContext(proceso) {
   const solicitud = await getSolicitudContratacionDetalleById(proceso?.solicitud_id || null);
   let preregistro = await getPreregistroDetalleById(proceso?.preregistro_id || null);
@@ -1748,15 +1927,19 @@ async function resolveContratoPersonaContext(proceso) {
     toNullableTrimmedString(solicitud?.ubicacion) ||
     CONTRATOS_CIUDAD_SILVER;
 
-  // factura_en_colombia: columna directa en preregistro; en solicitud viene de datos_extra
+  // factura_en_colombia: preregistro/solicitud tienen prioridad; personas/usuarios son fallback para flujos directos.
   const facturaEnColombiaRaw =
     preregistro?.factura_en_colombia ??
     solicitud?.factura_en_colombia ??
     null;
-  const facturaEnColombia =
-    facturaEnColombiaRaw === true || facturaEnColombiaRaw === "true" ? true
-      : facturaEnColombiaRaw === false || facturaEnColombiaRaw === "false" ? false
-        : null;
+  const facturaEnColombiaDirecta = normalizeNullableBooleanInput(facturaEnColombiaRaw);
+  const facturaEnColombia = facturaEnColombiaDirecta !== null
+    ? facturaEnColombiaDirecta
+    : await resolveFacturaEnColombiaFallback({
+        personaUsuarioId: solicitud?.persona_usuario_id || preregistro?.id_usuario_creado || null,
+        numeroDocumento,
+        correoPersonal
+      });
 
   const tipoPersona =
     toNullableTrimmedString(preregistro?.tipo_persona) ||
@@ -3895,6 +4078,27 @@ function buildContratistaComparecencia(personaContext) {
   return `${nombre}, identificado con ${tipoDoc} ${numDoc}, obrando en nombre propio`;
 }
 
+function buildContratistaFirmaPayload(personaContext) {
+  const tipoPersona = personaContext?.tipoPersona || "Natural";
+  const isJuridica = tipoPersona === "Jurídica" || tipoPersona === "Juridica";
+  const nombre = isJuridica
+    ? (personaContext?.representanteLegalContratista || personaContext?.nombreCompleto || "")
+    : (personaContext?.nombreCompleto || "");
+  const tipoDoc = isJuridica
+    ? (personaContext?.tipoDocumentoRepresentante || personaContext?.tipoDocumento || "")
+    : (personaContext?.tipoDocumento || "");
+  const numeroDoc = isJuridica
+    ? (personaContext?.numeroDocumentoRepresentante || personaContext?.numeroDocumento || "")
+    : (personaContext?.numeroDocumento || "");
+
+  return {
+    ContratistaFirmaNombre: nombre,
+    ContratistaFirmaDocumento: [tipoDoc, numeroDoc].filter(Boolean).join(" "),
+    ContratistaFirmaNit: isJuridica ? (personaContext?.nitEmpresa || "") : "",
+    ContratistaFirmaCargo: isJuridica ? "Representante Legal" : "Contratista"
+  };
+}
+
 function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correoOverride = null } = {}) {
   const now = new Date();
   const diaMes = new Intl.DateTimeFormat("es-CO", {
@@ -3921,6 +4125,7 @@ function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correo
   const fechaInicioContrato = `${Number(fechaInicioDia)} de ${fechaInicioMesTexto} de ${fechaInicioAnio}`;
 
   const empresa = resolveEmpresaContratoConfig(personaContext?.facturaEnColombia ?? null);
+  const contratistaFirma = buildContratistaFirmaPayload(personaContext);
 
   return {
     NombreCompleto: personaContext?.nombreCompleto || proceso?.nombre_persona || "",
@@ -3951,7 +4156,8 @@ function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correo
     RepresentanteLegal: empresa.representanteLegal,
     CedulaRL: empresa.cedulaRepresentante,
     NitSilver: empresa.nit,
-    CiudadSilver: empresa.ciudad
+    CiudadSilver: empresa.ciudad,
+    ...contratistaFirma
   };
 }
 
@@ -7961,7 +8167,10 @@ app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrado
       correoPersonal: toNullableTrimmedString(personaContext?.correoPersonal) || correoFinal,
       numeroDocumento: personaContext?.numeroDocumento || null
     });
-    const docsPlan = buildDocsFirmaPlan({ hasContratoBase: hasBaseContract });
+    const docsPlan = buildDocsFirmaPlan({
+      hasContratoBase: hasBaseContract,
+      facturaEnColombia: personaContext?.facturaEnColombia ?? null
+    });
     if (docsPlan.some((doc) => doc?.doc_key === "anexo_tecnico")) {
       await requirePersistedAnexoFromProceso(procesoContext, personaContext);
     }
@@ -11454,8 +11663,12 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
       });
     }
 
+    const personaContext = await resolveContratoPersonaContext(proceso);
     const docKey = docExistente.doc_key || LEGACY_DOC_INDEX_TO_KEY.get(idx) || null;
-    const docDefinition = getContratoDocDefinition(docKey);
+    const docDefinition = resolveContratoDocDefinitionForFirma(docKey, {
+      facturaEnColombia: personaContext?.facturaEnColombia ?? null,
+      doc: docExistente
+    });
     if (!docDefinition) {
       return res.status(500).json({
         error: "No se encontro la CONFIGURACIÓN de plantilla para el documento solicitado",
@@ -11463,8 +11676,6 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
         doc_key: docKey
       });
     }
-
-    const personaContext = await resolveContratoPersonaContext(proceso);
 
     const personaSlug = sanitizePathSegment(
       (personaContext?.nombreCompleto || proceso.nombre_persona || "Contratista").replace(/\s+/g, "_"),
@@ -11573,8 +11784,12 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       });
     }
 
+    const personaContext = await resolveContratoPersonaContext(proceso);
     const docKey = docExistente.doc_key || LEGACY_DOC_INDEX_TO_KEY.get(idx) || null;
-    const docDefinition = getContratoDocDefinition(docKey);
+    const docDefinition = resolveContratoDocDefinitionForFirma(docKey, {
+      facturaEnColombia: personaContext?.facturaEnColombia ?? null,
+      doc: docExistente
+    });
     if (!docDefinition) {
       return res.status(500).json({
         error: "No se encontró la CONFIGURACIÓN de plantilla para el documento solicitado",
@@ -11592,8 +11807,6 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
         ya_iniciado: true
       });
     }
-
-    const personaContext = await resolveContratoPersonaContext(proceso);
 
     const personaSlug = sanitizePathSegment(
       (personaContext?.nombreCompleto || proceso.nombre_persona || "Contratista").replace(/\s+/g, "_"),
@@ -11728,6 +11941,7 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       doc_key: docDefinition.doc_key,
       titulo: docDefinition.titulo,
       template_file: docDefinition.template_file,
+      empresa_key: docDefinition.empresa_key || null,
       request_id: resolvedRequestId || null,
       contract_id: contractId,
       signature_id: signatureId || null,
@@ -11736,7 +11950,9 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       iniciado_en: new Date().toISOString()
     };
 
-    const nuevaLista = upsertDocFirmaEntry(docsActuales, docEntry);
+    const nuevaLista = upsertDocFirmaEntry(docsActuales, docEntry, {
+      facturaEnColombia: personaContext?.facturaEnColombia ?? null
+    });
     await pool.query(
       `UPDATE tokens_firma_contrato SET docs_firma = $1::jsonb, updated_at = NOW() WHERE id = $2`,
       [JSON.stringify(nuevaLista), req.tokenFirma.token_id]
@@ -15615,6 +15831,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         doc_key: fallbackDef?.doc_key || fallbackKey,
         titulo: fallbackDef?.titulo || `Documento ${docIndex}`,
         template_file: fallbackDef?.template_file || null,
+        empresa_key: fallbackDef?.empresa_key || null,
         request_id: requestId || null,
         contract_id: contractId || null,
         signature_id: signatureId || null,

@@ -334,7 +334,11 @@
                                 <option :value="moneda.id" x-text="moneda.titulo"></option>
                             </template>
                         </select>
-                        <div></div>
+                        <select x-model="form.factura_en_colombia" class="px-3 py-2 rounded-xl border border-slate-200">
+                            <option value="">Factura en Colombia *</option>
+                            <option value="true">Sí</option>
+                            <option value="false">No</option>
+                        </select>
                         <input x-model="form.tarifa_hora" type="number" step="0.01" min="0" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa hora">
                         <input x-model="form.tarifa_mes" type="number" step="0.01" min="0" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa mes">
                         <input x-model="form.tarifa_medio_tiempo" type="number" step="0.01" min="0" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa medio tiempo">
@@ -481,6 +485,7 @@
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Perfil</p><p class="font-semibold" x-text="detalle?.perfil || '-' "></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Supervisor</p><p class="font-semibold" x-text="detalle?.supervisor?.nombre || '-' "></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Moneda</p><p class="font-semibold" x-text="detalle?.moneda || '-' "></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Factura en Colombia</p><p class="font-semibold" x-text="detalle?.factura_en_colombia === true || detalle?.datos_extra?.factura_en_colombia === true ? 'Sí' : (detalle?.factura_en_colombia === false || detalle?.datos_extra?.factura_en_colombia === false ? 'No' : '-')"></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Modalidad</p><p class="font-semibold" x-text="detalle?.modalidad_contrato || '-' "></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Tarifa hora</p><p class="font-semibold" x-text="formatMonto(detalle?.tarifa_hora, detalle?.moneda)"></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Tarifa mes</p><p class="font-semibold" x-text="formatMonto(detalle?.tarifa_mes, detalle?.moneda)"></p></div>

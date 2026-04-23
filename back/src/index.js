@@ -11454,6 +11454,7 @@ const FORM_DATOS_PERSONA = {
   clave: "datos_personales",
   label: "Datos personales"
 };
+const LEGACY_LINK_FORMULARIO_CLAVE = "link_formulario";
 const ESTADOS_CIVILES_CONTRATACION = ["Soltero", "Casado", "Unión libre", "Separado", "Viudo"];
 
 const VIDEO_BIENVENIDA = "Silver Consulting - Bienvenida.mp4";

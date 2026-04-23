@@ -10714,7 +10714,7 @@ app.post("/rrhh/solicitudes", requireAccess({ roles: ["Coordinador", "Administra
     prioridad
   } = req.body;
   try {
-    const clienteNombreOtro = toNullableString(cliente_nombre_otro);
+    const clienteNombreOtro = String(cliente_nombre_otro || "").trim() || null;
     const esProspecto = !cliente_id && clienteNombreOtro;
     if (!nivel) {
       return res.status(400).json({ error: "Faltan campos requeridos" });

@@ -11456,6 +11456,18 @@ const FORM_DATOS_PERSONA = {
 };
 const LEGACY_LINK_FORMULARIO_CLAVE = "link_formulario";
 const ESTADOS_CIVILES_CONTRATACION = ["Soltero", "Casado", "Unión libre", "Separado", "Viudo"];
+const SEXOS_CONTRATACION = ["Hombre", "Mujer", "Otro"];
+
+function normalizeSexoContratacion(value) {
+  const raw = toNullableTrimmedString(value);
+  if (!raw) return null;
+
+  const normalized = raw.toLowerCase();
+  if (["hombre", "masculino", "male", "m"].includes(normalized)) return "Hombre";
+  if (["mujer", "femenino", "female", "f"].includes(normalized)) return "Mujer";
+  if (["otro", "other", "o"].includes(normalized)) return "Otro";
+  return raw;
+}
 
 const VIDEO_BIENVENIDA = "Silver Consulting - Bienvenida.mp4";
 
@@ -11743,6 +11755,7 @@ async function getContratoPersonaBaseRecord(db, {
       p.nombre AS persona_nombre,
       p.apellidos AS persona_apellidos,
       p.fecha_nacimiento,
+      p.sexo,
       p.lugar_nacimiento,
       p.lugar_expedicion,
       p.nacionalidad,
@@ -11834,6 +11847,7 @@ function buildContratoPersonaFormData(baseRecord, personaContext, moduloRef = nu
     nombre: toNullableTrimmedString(baseRecord?.persona_nombre) || toNullableTrimmedString(ctx.nombre) || "",
     apellidos: toNullableTrimmedString(baseRecord?.persona_apellidos) || toNullableTrimmedString(ctx.apellidos) || "",
     fecha_nacimiento: normalizeDateOnlyInput(baseRecord?.fecha_nacimiento) || "",
+    sexo: normalizeSexoContratacion(baseRecord?.sexo) || "",
     lugar_nacimiento: toNullableTrimmedString(baseRecord?.lugar_nacimiento) || "",
     tipo_documento_id:
       toNullableTrimmedString(baseRecord?.tipo_documento_public_id) ||
@@ -11900,6 +11914,7 @@ function normalizeContratoPersonaFormPayload(body = {}) {
     nombre: toNullableTrimmedString(body.nombre),
     apellidos: toNullableTrimmedString(body.apellidos),
     fecha_nacimiento: normalizeDateOnlyInput(body.fecha_nacimiento),
+    sexo: normalizeSexoContratacion(body.sexo),
     lugar_nacimiento: toNullableTrimmedString(body.lugar_nacimiento),
     tipo_documento_id: toNullableTrimmedString(body.tipo_documento_id),
     numero_documento: toNullableTrimmedString(body.numero_documento),
@@ -11942,6 +11957,9 @@ function validateContratoPersonaFormData(data) {
   for (const [key, label] of requiredText) {
     if (!data[key]) missing.push(label);
   }
+  if (!data.fecha_nacimiento) missing.push("Fecha de nacimiento");
+  if (!data.sexo) missing.push("Sexo");
+  if (data.sexo && !SEXOS_CONTRATACION.includes(data.sexo)) missing.push("Sexo valido");
   if (data.hijos > 0 && !data.edades_hijos) missing.push("Edades de los hijos");
 
   if (data.correo_electronico && !isValidEmailFormat(data.correo_electronico)) {
@@ -12046,6 +12064,7 @@ app.post("/contratacion/datos-persona", requireTokenFirma, async (req, res) => {
       data.nombre,
       data.apellidos,
       data.fecha_nacimiento,
+      data.sexo,
       data.lugar_nacimiento,
       data.lugar_expedicion,
       data.nacionalidad,
@@ -12086,37 +12105,38 @@ app.post("/contratacion/datos-persona", requireTokenFirma, async (req, res) => {
           nombre                        = $3,
           apellidos                     = $4,
           fecha_nacimiento              = $5,
-          lugar_nacimiento              = $6,
-          lugar_expedicion              = $7,
-          nacionalidad                  = $8,
-          estado_civil                  = $9,
-          numero_contacto               = $10,
-          correo_electronico            = $11,
-          direccion_residencia          = $12,
-          barrio                        = $13,
-          ciudad_residencia             = $14,
-          departamento_pais             = $15,
-          pais_residencia               = $16,
-          titulo_profesional            = $17,
-          tipo_persona                  = COALESCE($18::tipo_persona, tipo_persona),
-          factura_en_colombia           = COALESCE($19, factura_en_colombia),
-          eps                           = $20,
-          arl                           = $21,
-          afp                           = $22,
-          nombre_contacto_emergencia    = $23,
-          parentesco                    = $24,
-          telefono_contacto_emergencia  = $25,
-          hijos                         = $26,
-          edades_hijos                  = $27,
-          visa_paises                   = $28,
-          acepta_tratamiento_datos      = $29,
-          tratamiento_datos_aceptado_at = CASE WHEN $29 THEN COALESCE(tratamiento_datos_aceptado_at, NOW()) ELSE NULL END,
-          modulo_id                     = COALESCE($30, modulo_id),
-          modulo_otro                   = COALESCE($31, modulo_otro),
-          cliente_id                    = COALESCE($32, cliente_id),
-          preregistro_id                = COALESCE($33, preregistro_id),
+          sexo                          = $6::tipo_sexo,
+          lugar_nacimiento              = $7,
+          lugar_expedicion              = $8,
+          nacionalidad                  = $9,
+          estado_civil                  = $10,
+          numero_contacto               = $11,
+          correo_electronico            = $12,
+          direccion_residencia          = $13,
+          barrio                        = $14,
+          ciudad_residencia             = $15,
+          departamento_pais             = $16,
+          pais_residencia               = $17,
+          titulo_profesional            = $18,
+          tipo_persona                  = COALESCE($19::tipo_persona, tipo_persona),
+          factura_en_colombia           = COALESCE($20, factura_en_colombia),
+          eps                           = $21,
+          arl                           = $22,
+          afp                           = $23,
+          nombre_contacto_emergencia    = $24,
+          parentesco                    = $25,
+          telefono_contacto_emergencia  = $26,
+          hijos                         = $27,
+          edades_hijos                  = $28,
+          visa_paises                   = $29,
+          acepta_tratamiento_datos      = $30,
+          tratamiento_datos_aceptado_at = CASE WHEN $30 THEN COALESCE(tratamiento_datos_aceptado_at, NOW()) ELSE NULL END,
+          modulo_id                     = COALESCE($31, modulo_id),
+          modulo_otro                   = COALESCE($32, modulo_otro),
+          cliente_id                    = COALESCE($33, cliente_id),
+          preregistro_id                = COALESCE($34, preregistro_id),
           updated_at                    = NOW()
-        WHERE id = $34
+        WHERE id = $35
         RETURNING id, public_id::text AS public_id
         `,
         [...personaValues, baseRecord.persona_id]
@@ -12126,23 +12146,24 @@ app.post("/contratacion/datos-persona", requireTokenFirma, async (req, res) => {
         `
         INSERT INTO personas (
           numero_documento, tipo_documento_id, nombre, apellidos,
-          fecha_nacimiento, lugar_nacimiento, lugar_expedicion, nacionalidad, estado_civil,
+          fecha_nacimiento, sexo, lugar_nacimiento, lugar_expedicion, nacionalidad, estado_civil,
           numero_contacto, correo_electronico, direccion_residencia, barrio, ciudad_residencia,
           departamento_pais, pais_residencia, titulo_profesional, tipo_persona, factura_en_colombia,
           eps, arl, afp, nombre_contacto_emergencia, parentesco, telefono_contacto_emergencia,
           hijos, edades_hijos, visa_paises, acepta_tratamiento_datos, tratamiento_datos_aceptado_at,
           modulo_id, modulo_otro, cliente_id, preregistro_id, created_by
         ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::tipo_persona,$19,
-          $20,$21,$22,$23,$24,$25,$26,$27,$28,$29,
-          CASE WHEN $29 THEN NOW() ELSE NULL END,
-          $30,$31,$32,$33,$34
+          $1,$2,$3,$4,$5,$6::tipo_sexo,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::tipo_persona,$20,
+          $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
+          CASE WHEN $30 THEN NOW() ELSE NULL END,
+          $31,$32,$33,$34,$35
         )
         ON CONFLICT (numero_documento) DO UPDATE SET
           tipo_documento_id             = EXCLUDED.tipo_documento_id,
           nombre                        = EXCLUDED.nombre,
           apellidos                     = EXCLUDED.apellidos,
           fecha_nacimiento              = EXCLUDED.fecha_nacimiento,
+          sexo                          = EXCLUDED.sexo,
           lugar_nacimiento              = EXCLUDED.lugar_nacimiento,
           lugar_expedicion              = EXCLUDED.lugar_expedicion,
           nacionalidad                  = EXCLUDED.nacionalidad,

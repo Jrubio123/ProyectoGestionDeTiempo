@@ -381,6 +381,7 @@ window.contratacionApp = function () {
                 nombre: "",
                 apellidos: "",
                 fecha_nacimiento: "",
+                sexo: "",
                 lugar_nacimiento: "",
                 tipo_documento_id: "",
                 numero_documento: "",

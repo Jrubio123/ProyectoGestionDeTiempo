@@ -260,7 +260,16 @@
                                         </label>
                                         <label class="block">
                                             <span class="text-xs font-semibold text-slate-500">Fecha de nacimiento</span>
-                                            <input x-model="personaDatos.fecha_nacimiento" type="date" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <input x-model="personaDatos.fecha_nacimiento" type="date" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Sexo</span>
+                                            <select x-model="personaDatos.sexo" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                                <option value="">Selecciona</option>
+                                                <option value="Hombre">Masculino</option>
+                                                <option value="Mujer">Femenino</option>
+                                                <option value="Otro">Otro</option>
+                                            </select>
                                         </label>
                                         <label class="block">
                                             <span class="text-xs font-semibold text-slate-500">Lugar de nacimiento</span>

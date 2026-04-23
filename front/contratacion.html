@@ -193,7 +193,7 @@
                     <template x-if="docActual?.plantilla && !isChecked(docActual?.clave)">
                         <span class="px-2.5 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-semibold flex-shrink-0">Plantilla · se descarga al confirmar</span>
                     </template>
-                    <template x-if="isChecked(docActual?.clave)">
+                    <template x-if="isChecked(docActual?.clave) && !(docActual?.tipo === 'form' && personaDatosDirty)">
                         <span class="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold flex-shrink-0">Revisado ✓</span>
                     </template>
                     <button @click="siguiente()" :disabled="docActualIdx >= allItems.length - 1"
@@ -205,7 +205,7 @@
                     </button>
                 </div>
 
-                <!-- Visor (PDF o link) -->
+                <!-- Visor (PDF o formulario) -->
                 <div class="flex-1 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col" style="min-height:0;">
 
                     <!-- Loading PDF -->
@@ -227,33 +227,187 @@
                         <iframe :src="pdfBlobUrl" class="flex-1 w-full border-none" style="min-height:0;"></iframe>
                     </template>
 
-                    <!-- Tarjeta de link externo -->
-                    <template x-if="docActual?.tipo === 'link'">
-                        <div class="flex-1 flex flex-col items-center justify-center gap-6 p-10">
-                            <div class="w-20 h-20 bg-indigo-100 rounded-2xl flex items-center justify-center">
-                                <svg class="w-10 h-10 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                    <!-- Formulario interno de datos personales -->
+                    <template x-if="docActual?.tipo === 'form'">
+                        <div class="flex-1 overflow-auto">
+                            <div x-show="personaDatosCargando" class="min-h-full flex items-center justify-center gap-3 text-slate-400">
+                                <svg class="w-6 h-6 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                                 </svg>
+                                <span class="text-sm">Cargando datos...</span>
                             </div>
-                            <div class="text-center">
-                                <h4 class="font-bold text-slate-800 text-lg" x-text="docActual?.label"></h4>
-                                <p class="text-slate-500 text-sm mt-2 max-w-sm">
-                                    Este formulario se abrirá en una nueva pestaña. Al abrirlo, quedará marcado como completado automáticamente.
-                                </p>
-                            </div>
-                            <button @click="abrirLink()"
-                                    class="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition-colors shadow-lg shadow-indigo-200">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-                                </svg>
-                                Abrir formulario en nueva pestaña
-                            </button>
-                            <p x-show="isChecked(docActual?.clave)" class="text-emerald-600 text-sm font-semibold flex items-center gap-1.5">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                                </svg>
-                                Formulario completado
-                            </p>
+
+                            <form x-show="!personaDatosCargando"
+                                  @submit.prevent="guardarDatosPersona()"
+                                  @input="marcarPersonaDatosDirty()"
+                                  @change="marcarPersonaDatosDirty()"
+                                  class="p-5 space-y-6">
+                                <div x-show="personaDatosError"
+                                     class="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm"
+                                     x-text="personaDatosError"></div>
+
+                                <section class="space-y-3">
+                                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Identificación</h4>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Nombres</span>
+                                            <input x-model="personaDatos.nombre" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Apellidos</span>
+                                            <input x-model="personaDatos.apellidos" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Fecha de nacimiento</span>
+                                            <input x-model="personaDatos.fecha_nacimiento" type="date" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Lugar de nacimiento</span>
+                                            <input x-model="personaDatos.lugar_nacimiento" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Tipo documento</span>
+                                            <select x-model="personaDatos.tipo_documento_id" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                                <option value="">Selecciona</option>
+                                                <template x-for="doc in personaCatalogos.documentos_identidad" :key="doc.id">
+                                                    <option :value="doc.id" x-text="doc.titulo"></option>
+                                                </template>
+                                            </select>
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Número documento</span>
+                                            <input x-model="personaDatos.numero_documento" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Lugar de expedición</span>
+                                            <input x-model="personaDatos.lugar_expedicion" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Nacionalidad</span>
+                                            <input x-model="personaDatos.nacionalidad" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Estado civil</span>
+                                            <select x-model="personaDatos.estado_civil" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                                <option value="">Selecciona</option>
+                                                <template x-for="estado in personaCatalogos.estados_civiles" :key="estado">
+                                                    <option :value="estado" x-text="estado"></option>
+                                                </template>
+                                            </select>
+                                        </label>
+                                    </div>
+                                </section>
+
+                                <section class="space-y-3">
+                                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Contacto</h4>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                                        <label class="block md:col-span-2">
+                                            <span class="text-xs font-semibold text-slate-500">Dirección de residencia</span>
+                                            <input x-model="personaDatos.direccion_residencia" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Barrio</span>
+                                            <input x-model="personaDatos.barrio" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Ciudad</span>
+                                            <input x-model="personaDatos.ciudad_residencia" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Departamento</span>
+                                            <input x-model="personaDatos.departamento_pais" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">País</span>
+                                            <input x-model="personaDatos.pais_residencia" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Correo personal</span>
+                                            <input x-model="personaDatos.correo_electronico" type="email" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Teléfono celular</span>
+                                            <input x-model="personaDatos.numero_contacto" type="tel" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                    </div>
+                                </section>
+
+                                <section class="space-y-3">
+                                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Profesional</h4>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Profesión</span>
+                                            <input x-model="personaDatos.titulo_profesional" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Módulo SAP</span>
+                                            <select x-model="personaDatos.modulo_id" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                                <option value="">No aplica</option>
+                                                <template x-for="modulo in personaCatalogos.modulos" :key="modulo.id">
+                                                    <option :value="modulo.id" x-text="modulo.nombre_completo ? `${modulo.titulo} - ${modulo.nombre_completo}` : modulo.titulo"></option>
+                                                </template>
+                                            </select>
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Módulo otro</span>
+                                            <input x-model="personaDatos.modulo_otro" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                    </div>
+                                </section>
+
+                                <section class="space-y-3">
+                                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Seguridad social y emergencia</h4>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">E.P.S</span>
+                                            <input x-model="personaDatos.eps" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">A.R.L</span>
+                                            <input x-model="personaDatos.arl" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Fondo de pensiones</span>
+                                            <input x-model="personaDatos.afp" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Contacto de emergencia</span>
+                                            <input x-model="personaDatos.nombre_contacto_emergencia" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Parentesco</span>
+                                            <input x-model="personaDatos.parentesco" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Teléfono emergencia</span>
+                                            <input x-model="personaDatos.telefono_contacto_emergencia" type="tel" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                    </div>
+                                </section>
+
+                                <section class="space-y-3">
+                                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Familia y autorización</h4>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Número de hijos</span>
+                                            <input x-model.number="personaDatos.hijos" min="0" type="number" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block" x-show="requiereEdadesHijos">
+                                            <span class="text-xs font-semibold text-slate-500">Edades de los hijos</span>
+                                            <input x-model="personaDatos.edades_hijos" type="text" placeholder="Ej: 4; 9; 13" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Visa</span>
+                                            <input x-model="personaDatos.visa_paises" type="text" placeholder="Países o No" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
+                                        <label class="md:col-span-2 xl:col-span-3 flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3">
+                                            <input x-model="personaDatos.acepta_tratamiento_datos" type="checkbox" class="mt-0.5 w-4 h-4 accent-blue-600 flex-shrink-0">
+                                            <span class="text-sm text-blue-900 font-medium">Acepto el manejo de información por parte de Silver Consulting S.A.S.</span>
+                                        </label>
+                                    </div>
+                                </section>
+                            </form>
                         </div>
                     </template>
                 </div>
@@ -299,8 +453,29 @@
                         </label>
                     </div>
 
+                    <!-- Guardar datos personales -->
+                    <div x-show="docActual?.tipo === 'form'" class="flex items-center gap-3 flex-1 min-w-0">
+                        <button type="button"
+                                @click="guardarDatosPersona()"
+                                :disabled="personaDatosGuardando || personaDatosCargando"
+                                class="px-4 py-2.5 rounded-lg font-bold text-sm transition-all flex items-center gap-2 flex-shrink-0"
+                                :class="personaDatosGuardando || personaDatosCargando
+                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                    : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-100'">
+                            <svg x-show="personaDatosGuardando" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                            <span x-text="personaDatosGuardando ? 'Guardando...' : 'Guardar datos'"></span>
+                        </button>
+                        <div class="flex items-center gap-2 min-w-0">
+                            <span x-show="isChecked(docActual?.clave) && !personaDatosDirty" class="text-sm font-semibold text-emerald-700">Datos guardados</span>
+                            <span x-show="personaDatosDirty" class="text-sm font-semibold text-amber-700">Cambios sin guardar</span>
+                        </div>
+                    </div>
+
                     <!-- Confirmado -->
-                    <div x-show="isChecked(docActual?.clave)" class="flex items-center gap-2 text-emerald-700 flex-1">
+                    <div x-show="docActual?.tipo !== 'form' && isChecked(docActual?.clave)" class="flex items-center gap-2 text-emerald-700 flex-1">
                         <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
                         </svg>

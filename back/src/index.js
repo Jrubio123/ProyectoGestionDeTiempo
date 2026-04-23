@@ -1447,9 +1447,9 @@ function normalizeDocsFirmaList(docsRaw, options = {}) {
         : (def?.template_file || existingTemplateFile || null);
       const resolvedEmpresaKey = locked || !hasFacturaContext
         ? (
-            toNullableTrimmedString(doc.empresa_key) ||
-            getEmpresaKeyFromContratoTemplate(def, resolvedTemplateFile, def?.empresa_key || null)
-          )
+          toNullableTrimmedString(doc.empresa_key) ||
+          getEmpresaKeyFromContratoTemplate(def, resolvedTemplateFile, def?.empresa_key || null)
+        )
         : (def?.empresa_key || toNullableTrimmedString(doc.empresa_key) || null);
       return {
         ...doc,
@@ -1718,6 +1718,7 @@ async function getSolicitudContratacionDetalleById(internalId) {
       sc.telefono,
       sc.ubicacion,
       sc.preregistro_id,
+      sc.tipo_documento_id,
       sc.cliente_id,
       c.public_id AS cliente_public_id,
       c.titulo AS cliente_nombre,
@@ -1739,6 +1740,7 @@ async function getSolicitudContratacionDetalleById(internalId) {
       sc.fecha_retiro,
       sc.datos_extra,
       sc.created_at,
+      di.public_id AS tipo_documento_public_id,
       di.titulo AS tipo_documento_titulo,
       di.codigo AS tipo_documento_codigo
     FROM solicitudes_contratacion sc
@@ -1762,6 +1764,7 @@ async function getPreregistroDetalleById(internalId) {
       pp.id_usuario_creado,
       pp.nombre,
       pp.apellidos,
+      pp.tipo_documento_id,
       pp.numero_documento,
       pp.correo_personal,
       pp.telefono,
@@ -1790,6 +1793,7 @@ async function getPreregistroDetalleById(internalId) {
       sr.cliente_id,
       c.public_id AS cliente_public_id,
       c.titulo AS cliente_nombre,
+      di.public_id AS tipo_documento_public_id,
       di.titulo AS tipo_documento_titulo,
       di.codigo AS tipo_documento_codigo
     FROM preregistro_personas pp
@@ -1879,56 +1883,114 @@ async function resolveContratoPersonaContext(proceso) {
   }
 
   const canonical = solicitud || preregistro || null;
-  const nombre =
+  const nombreBase =
     toNullableTrimmedString(canonical?.nombre) ||
     toNullableTrimmedString(solicitud?.nombre) ||
     toNullableTrimmedString(preregistro?.nombre) ||
     toNullableTrimmedString(proceso?.nombre_persona) ||
     "";
-  const apellidos =
+  const apellidosBase =
     toNullableTrimmedString(canonical?.apellidos) ||
     toNullableTrimmedString(solicitud?.apellidos) ||
     toNullableTrimmedString(preregistro?.apellidos) ||
     "";
-  const nombreCompleto = `${nombre} ${apellidos}`.trim() || toNullableTrimmedString(proceso?.nombre_persona) || "";
-  const tipoDocumentoCodigo =
+  const tipoDocumentoCodigoBase =
     toNullableTrimmedString(canonical?.tipo_documento_codigo) ||
     toNullableTrimmedString(solicitud?.tipo_documento_codigo) ||
     toNullableTrimmedString(preregistro?.tipo_documento_codigo) ||
     "";
-  const tipoDocumentoTitulo =
+  const tipoDocumentoTituloBase =
     toNullableTrimmedString(canonical?.tipo_documento_titulo) ||
     toNullableTrimmedString(solicitud?.tipo_documento_titulo) ||
     toNullableTrimmedString(preregistro?.tipo_documento_titulo) ||
     "";
-  const tipoDocumento = tipoDocumentoCodigo || tipoDocumentoTitulo || "";
-  const numeroDocumento =
+  const tipoDocumentoPublicIdBase =
+    toNullableTrimmedString(canonical?.tipo_documento_public_id) ||
+    toNullableTrimmedString(solicitud?.tipo_documento_public_id) ||
+    toNullableTrimmedString(preregistro?.tipo_documento_public_id) ||
+    "";
+  const tipoDocumentoIdBase =
+    toNullableInteger(canonical?.tipo_documento_id) ||
+    toNullableInteger(solicitud?.tipo_documento_id) ||
+    toNullableInteger(preregistro?.tipo_documento_id) ||
+    null;
+  const numeroDocumentoBase =
     toNullableTrimmedString(canonical?.numero_documento) ||
     toNullableTrimmedString(solicitud?.numero_documento) ||
     toNullableTrimmedString(preregistro?.numero_documento) ||
     null;
-  const correoPersonal =
+  const correoPersonalBase =
     toNullableTrimmedString(canonical?.correo_personal) ||
     toNullableTrimmedString(solicitud?.correo_personal) ||
     toNullableTrimmedString(preregistro?.correo_personal) ||
     toNullableTrimmedString(proceso?.correo_personal) ||
     null;
+  const usuarioContextId = solicitud?.persona_usuario_id || preregistro?.id_usuario_creado || null;
+  const preregistroContextId = preregistro?.id || solicitud?.preregistro_id || null;
+  const personaBase = await getContratoPersonaBaseRecord(pool, {
+    usuarioId: usuarioContextId,
+    numeroDocumento: numeroDocumentoBase,
+    correoPersonal: correoPersonalBase,
+    preregistroId: preregistroContextId
+  });
+
+  const nombre =
+    toNullableTrimmedString(personaBase?.persona_nombre) ||
+    nombreBase;
+  const apellidos =
+    toNullableTrimmedString(personaBase?.persona_apellidos) ||
+    apellidosBase;
+  const nombreCompleto = `${nombre} ${apellidos}`.trim() || toNullableTrimmedString(proceso?.nombre_persona) || "";
+  const tipoDocumentoCodigo =
+    toNullableTrimmedString(personaBase?.tipo_documento_codigo) ||
+    toNullableTrimmedString(personaBase?.usuario_tipo_documento_codigo) ||
+    tipoDocumentoCodigoBase;
+  const tipoDocumentoTitulo =
+    toNullableTrimmedString(personaBase?.tipo_documento_titulo) ||
+    toNullableTrimmedString(personaBase?.usuario_tipo_documento_titulo) ||
+    tipoDocumentoTituloBase;
+  const tipoDocumentoPublicId =
+    toNullableTrimmedString(personaBase?.tipo_documento_public_id) ||
+    toNullableTrimmedString(personaBase?.usuario_tipo_documento_public_id) ||
+    tipoDocumentoPublicIdBase;
+  const tipoDocumentoId =
+    toNullableInteger(personaBase?.tipo_documento_id) ||
+    tipoDocumentoIdBase;
+  const tipoDocumento = tipoDocumentoCodigo || tipoDocumentoTitulo || "";
+  const numeroDocumento =
+    toNullableTrimmedString(personaBase?.numero_documento) ||
+    numeroDocumentoBase ||
+    toNullableTrimmedString(personaBase?.usuario_cedula) ||
+    null;
+  const correoPersonal =
+    toNullableTrimmedString(personaBase?.correo_electronico) ||
+    correoPersonalBase ||
+    toNullableTrimmedString(personaBase?.usuario_email) ||
+    null;
   const telefono =
+    toNullableTrimmedString(personaBase?.numero_contacto) ||
     toNullableTrimmedString(canonical?.telefono) ||
     toNullableTrimmedString(solicitud?.telefono) ||
     toNullableTrimmedString(preregistro?.telefono) ||
+    toNullableTrimmedString(personaBase?.usuario_telefono) ||
     "";
   const direccion =
+    toNullableTrimmedString(personaBase?.direccion_residencia) ||
     toNullableTrimmedString(preregistro?.direccion) ||
     toNullableTrimmedString(parseJsonObject(solicitud?.datos_extra)?.direccion) ||
+    toNullableTrimmedString(personaBase?.usuario_direccion) ||
     "";
   const ciudad =
+    toNullableTrimmedString(personaBase?.ciudad_residencia) ||
     toNullableTrimmedString(preregistro?.ciudad) ||
     toNullableTrimmedString(solicitud?.ubicacion) ||
+    toNullableTrimmedString(personaBase?.usuario_ciudad) ||
     CONTRATOS_CIUDAD_SILVER;
 
-  // factura_en_colombia: preregistro/solicitud tienen prioridad; personas/usuarios son fallback para flujos directos.
+  // personas/usuarios tienen prioridad aqui porque el formulario publico permite corregir datos antes de firmar.
   const facturaEnColombiaRaw =
+    personaBase?.factura_en_colombia ??
+    personaBase?.usuario_factura_en_colombia ??
     preregistro?.factura_en_colombia ??
     solicitud?.factura_en_colombia ??
     null;
@@ -1936,12 +1998,14 @@ async function resolveContratoPersonaContext(proceso) {
   const facturaEnColombia = facturaEnColombiaDirecta !== null
     ? facturaEnColombiaDirecta
     : await resolveFacturaEnColombiaFallback({
-        personaUsuarioId: solicitud?.persona_usuario_id || preregistro?.id_usuario_creado || null,
-        numeroDocumento,
-        correoPersonal
-      });
+      personaUsuarioId: solicitud?.persona_usuario_id || preregistro?.id_usuario_creado || null,
+      numeroDocumento,
+      correoPersonal
+    });
 
   const tipoPersona =
+    toNullableTrimmedString(personaBase?.tipo_persona) ||
+    toNullableTrimmedString(personaBase?.usuario_tipo_persona) ||
     toNullableTrimmedString(preregistro?.tipo_persona) ||
     toNullableTrimmedString(solicitud?.tipo_persona) ||
     null;
@@ -1966,14 +2030,26 @@ async function resolveContratoPersonaContext(proceso) {
     solicitud,
     preregistro,
     fuente_principal: solicitud ? "solicitud" : (preregistro ? "preregistro" : "token"),
-    usuario_id: solicitud?.persona_usuario_id || preregistro?.id_usuario_creado || null,
+    usuario_id: usuarioContextId || personaBase?.usuario_id || null,
+    persona_id: personaBase?.persona_id || null,
+    persona_public_id: personaBase?.persona_public_id || null,
+    solicitud_id: solicitud?.id || null,
+    preregistro_id: preregistroContextId || null,
+    nombre,
+    apellidos,
     nombreCompleto,
+    tipoDocumentoId,
+    tipoDocumentoPublicId,
     tipoDocumento,
     numeroDocumento,
     correoPersonal,
     telefono,
     direccion,
     ciudad,
+    paisUbicacion:
+      toNullableTrimmedString(personaBase?.pais_residencia) ||
+      toNullableTrimmedString(preregistro?.pais_ubicacion) ||
+      null,
     facturaEnColombia,
     tipoPersona,
     razonSocial,
@@ -1986,10 +2062,13 @@ async function resolveContratoPersonaContext(proceso) {
     moneda: normalizeMonedaContrato(solicitud?.moneda || preregistro?.moneda || "COP") || "COP",
     datos_extra: parseJsonObject(solicitud?.datos_extra || {}),
     modulo_id:
+      toNullableInteger(personaBase?.modulo_id) ||
       toNullableInteger(parseJsonObject(solicitud?.datos_extra || {})?.modulo_id) ||
       preregistro?.modulo_id ||
       null,
     modulo_nombre:
+      toNullableTrimmedString(personaBase?.modulo_titulo) ||
+      toNullableTrimmedString(personaBase?.modulo_otro) ||
       toNullableTrimmedString(parseJsonObject(solicitud?.datos_extra || {})?.modulo_nombre) ||
       toNullableTrimmedString(parseJsonObject(solicitud?.datos_extra || {})?.modulo) ||
       preregistro?.modulo_titulo ||
@@ -11371,24 +11450,24 @@ const ARCHIVOS_ESTATICOS_CONTRATACION = new Set(
     .filter(Boolean)
 );
 
-const LINK_BIENVENIDA = {
-  clave: "link_formulario",
-  url: "https://forms.office.com/Pages/ResponsePage.aspx?id=Od5vnDBA50Sut8bJeqSbpMD32XAVV4FLhCKyABtmKHVUN1pUM09QTjBBRzcwWlo4Rk1OQ0ZPVzJJWS4u",
-  label: "Formulario de base de datos"
+const FORM_DATOS_PERSONA = {
+  clave: "datos_personales",
+  label: "Datos personales"
 };
+const ESTADOS_CIVILES_CONTRATACION = ["Soltero", "Casado", "Unión libre", "Separado", "Viudo"];
 
 const VIDEO_BIENVENIDA = "Silver Consulting - Bienvenida.mp4";
 
 const CLAVES_ESTATICAS_VALIDAS = new Set([
   ...DOCS_ESTATICOS.map(d => d.clave),
-  LINK_BIENVENIDA.clave,
+  LEGACY_LINK_FORMULARIO_CLAVE,
   // backward compat con tokens antiguos
   "pdf1", "pdf2", "pdf3", "pdf4", "pdf5"
 ]);
 
 const CLAVES_REQUERIDAS_FIRMA = [
   ...DOCS_ESTATICOS.map(d => d.clave),
-  LINK_BIENVENIDA.clave
+  FORM_DATOS_PERSONA.clave
 ];
 
 const requireTokenFirma = (req, res, next) => {
@@ -11525,9 +11604,639 @@ app.post("/contratacion/firma/reconciliar", requireTokenFirma, async (req, res) 
 app.get("/contratacion/docs-info", requireTokenFirma, (req, res) => {
   res.json({
     docs: DOCS_ESTATICOS.map(d => ({ clave: d.clave, label: d.label, archivo: d.archivo, plantilla: !!d.plantilla, descarga_archivo: d.descarga_archivo || null })),
-    link: { clave: LINK_BIENVENIDA.clave, url: LINK_BIENVENIDA.url, label: LINK_BIENVENIDA.label },
+    form: { clave: FORM_DATOS_PERSONA.clave, label: FORM_DATOS_PERSONA.label },
     video_disponible: fs.existsSync(path.join(CONTRATOS_STATIC_DIR, VIDEO_BIENVENIDA))
   });
+});
+
+function normalizeEstadoCivilContratacion(value) {
+  const key = normalizeTextKey(value);
+  if (!key) return null;
+  const map = new Map([
+    ["soltero", "Soltero"],
+    ["casado", "Casado"],
+    ["unionlibre", "Unión libre"],
+    ["separado", "Separado"],
+    ["viudo", "Viudo"]
+  ]);
+  return map.get(key) || null;
+}
+
+function normalizeNonNegativeIntegerInput(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return Math.floor(parsed);
+}
+
+async function getTokenFirmaProcesoPublico(db, tokenId, { forUpdate = false } = {}) {
+  const suffix = forUpdate ? " FOR UPDATE" : "";
+  const r = await db.query(
+    `SELECT id, public_id, nombre_persona, correo_personal, estado, checks_completados, docs_firma, solicitud_id, preregistro_id
+     FROM tokens_firma_contrato
+     WHERE id = $1${suffix}`,
+    [tokenId]
+  );
+  return r.rows[0] || null;
+}
+
+async function listContratacionPersonaCatalogos(db) {
+  const [docsRes, modulosRes] = await Promise.all([
+    db.query(`
+      SELECT public_id::text AS id, titulo, codigo
+      FROM documento_identidad
+      WHERE activo = true
+      ORDER BY
+        CASE UPPER(COALESCE(codigo, ''))
+          WHEN 'CC' THEN 1
+          WHEN 'CE' THEN 2
+          WHEN 'PA' THEN 3
+          WHEN 'NIT' THEN 4
+          WHEN 'OT' THEN 5
+          ELSE 9
+        END,
+        titulo ASC
+    `),
+    db.query(`
+      SELECT public_id::text AS id, titulo, nombre_completo
+      FROM modulo
+      WHERE activo = true
+      ORDER BY titulo ASC
+    `)
+  ]);
+
+  return {
+    documentos_identidad: docsRes.rows || [],
+    modulos: modulosRes.rows || [],
+    estados_civiles: [...ESTADOS_CIVILES_CONTRATACION]
+  };
+}
+
+async function getContratoPersonaBaseRecord(db, {
+  usuarioId = null,
+  numeroDocumento = null,
+  correoPersonal = null,
+  preregistroId = null
+} = {}) {
+  const userId = toNullableInteger(usuarioId);
+  const documento = toNullableTrimmedString(numeroDocumento);
+  const correo = toNullableTrimmedString(correoPersonal);
+  const preId = toNullableInteger(preregistroId);
+  if (!userId && !documento && !correo && !preId) return null;
+
+  const r = await db.query(
+    `
+    WITH usuario_base AS (
+      SELECT u.*
+      FROM usuarios u
+      WHERE
+        ($1::int IS NOT NULL AND u.id = $1)
+        OR ($2::text IS NOT NULL AND NULLIF(BTRIM(u.cedula), '') = $2)
+        OR ($3::text IS NOT NULL AND LOWER(NULLIF(BTRIM(u.email), '')) = LOWER($3))
+      ORDER BY
+        CASE WHEN $1::int IS NOT NULL AND u.id = $1 THEN 0 ELSE 1 END,
+        u.id DESC
+      LIMIT 1
+    ),
+    persona_base AS (
+      SELECT p.*
+      FROM personas p
+      LEFT JOIN usuario_base u ON TRUE
+      WHERE
+        ($4::int IS NOT NULL AND p.preregistro_id = $4)
+        OR (u.persona_id IS NOT NULL AND p.id = u.persona_id)
+        OR ($2::text IS NOT NULL AND NULLIF(BTRIM(p.numero_documento), '') = $2)
+        OR ($3::text IS NOT NULL AND LOWER(NULLIF(BTRIM(p.correo_electronico), '')) = LOWER($3))
+        OR (u.cedula IS NOT NULL AND NULLIF(BTRIM(p.numero_documento), '') = NULLIF(BTRIM(u.cedula), ''))
+      ORDER BY
+        CASE WHEN $4::int IS NOT NULL AND p.preregistro_id = $4 THEN 0 ELSE 1 END,
+        CASE WHEN p.id = (SELECT persona_id FROM usuario_base LIMIT 1) THEN 0 ELSE 1 END,
+        p.updated_at DESC NULLS LAST,
+        p.id DESC
+      LIMIT 1
+    )
+    SELECT
+      u.id AS usuario_id,
+      u.public_id::text AS usuario_public_id,
+      u.persona_id AS usuario_persona_id,
+      u.nombre_usuario,
+      u.email AS usuario_email,
+      u.cedula AS usuario_cedula,
+      u.telefono AS usuario_telefono,
+      u.direccion AS usuario_direccion,
+      u.ciudad AS usuario_ciudad,
+      u.tipo_persona AS usuario_tipo_persona,
+      u.factura_en_colombia AS usuario_factura_en_colombia,
+      di_u.public_id::text AS usuario_tipo_documento_public_id,
+      di_u.titulo AS usuario_tipo_documento_titulo,
+      di_u.codigo AS usuario_tipo_documento_codigo,
+
+      p.id AS persona_id,
+      p.public_id::text AS persona_public_id,
+      p.numero_documento,
+      p.tipo_documento_id,
+      di_p.public_id::text AS tipo_documento_public_id,
+      di_p.titulo AS tipo_documento_titulo,
+      di_p.codigo AS tipo_documento_codigo,
+      p.estado,
+      p.nombre AS persona_nombre,
+      p.apellidos AS persona_apellidos,
+      p.fecha_nacimiento,
+      p.lugar_nacimiento,
+      p.lugar_expedicion,
+      p.nacionalidad,
+      p.estado_civil,
+      p.numero_contacto,
+      p.correo_electronico,
+      p.direccion_residencia,
+      p.barrio,
+      p.ciudad_residencia,
+      p.departamento_pais,
+      p.pais_residencia,
+      p.titulo_profesional,
+      p.tipo_persona,
+      p.factura_en_colombia,
+      p.nombre_contacto_emergencia,
+      p.telefono_contacto_emergencia,
+      p.parentesco,
+      p.hijos,
+      p.edades_hijos,
+      p.visa_paises,
+      p.acepta_tratamiento_datos,
+      p.eps,
+      p.afp,
+      p.arl,
+      p.modulo_id,
+      m.public_id::text AS modulo_public_id,
+      m.titulo AS modulo_titulo,
+      p.modulo_otro,
+      p.cliente_id,
+      p.preregistro_id
+    FROM usuario_base u
+    FULL JOIN persona_base p ON TRUE
+    LEFT JOIN documento_identidad di_u ON di_u.id = u.tipo_documento_id
+    LEFT JOIN documento_identidad di_p ON di_p.id = p.tipo_documento_id
+    LEFT JOIN modulo m ON m.id = p.modulo_id
+    LIMIT 1
+    `,
+    [userId || null, documento || null, correo || null, preId || null]
+  );
+
+  return r.rows[0] || null;
+}
+
+async function resolveModuloCatalogRecord(db, value) {
+  const id = await resolveInternalIdFromPublicIdOrId(db, ID_TABLES.modulo, value);
+  if (!id) return null;
+  const r = await db.query(
+    `SELECT id, public_id::text AS public_id, titulo
+     FROM modulo
+     WHERE id = $1 AND activo = true
+     LIMIT 1`,
+    [id]
+  );
+  return r.rows[0] || null;
+}
+
+async function resolveModuloForContratoPersonaForm(db, personaContext, baseRecord = null, explicitValue = null) {
+  if (explicitValue) return resolveModuloCatalogRecord(db, explicitValue);
+  if (baseRecord?.modulo_public_id || baseRecord?.modulo_id) {
+    return {
+      id: baseRecord.modulo_id || null,
+      public_id: baseRecord.modulo_public_id || null,
+      titulo: baseRecord.modulo_titulo || null
+    };
+  }
+
+  const extra = parseJsonObject(personaContext?.datos_extra || {});
+  const candidates = [extra.modulo_id, personaContext?.modulo_id];
+  for (const candidate of candidates) {
+    const resolved = await resolveModuloCatalogRecord(db, candidate);
+    if (resolved) return resolved;
+  }
+
+  const nombre = toNullableTrimmedString(personaContext?.modulo_nombre) || toNullableTrimmedString(extra.modulo);
+  if (!nombre) return null;
+  const byName = await db.query(
+    `SELECT id, public_id::text AS public_id, titulo
+     FROM modulo
+     WHERE activo = true AND LOWER(titulo) = LOWER($1)
+     LIMIT 1`,
+    [nombre]
+  );
+  return byName.rows[0] || null;
+}
+
+function buildContratoPersonaFormData(baseRecord, personaContext, moduloRef = null) {
+  const ctx = personaContext || {};
+  return {
+    nombre: toNullableTrimmedString(baseRecord?.persona_nombre) || toNullableTrimmedString(ctx.nombre) || "",
+    apellidos: toNullableTrimmedString(baseRecord?.persona_apellidos) || toNullableTrimmedString(ctx.apellidos) || "",
+    fecha_nacimiento: normalizeDateOnlyInput(baseRecord?.fecha_nacimiento) || "",
+    lugar_nacimiento: toNullableTrimmedString(baseRecord?.lugar_nacimiento) || "",
+    tipo_documento_id:
+      toNullableTrimmedString(baseRecord?.tipo_documento_public_id) ||
+      toNullableTrimmedString(baseRecord?.usuario_tipo_documento_public_id) ||
+      toNullableTrimmedString(ctx.tipoDocumentoPublicId) ||
+      "",
+    numero_documento:
+      toNullableTrimmedString(baseRecord?.numero_documento) ||
+      toNullableTrimmedString(ctx.numeroDocumento) ||
+      toNullableTrimmedString(baseRecord?.usuario_cedula) ||
+      "",
+    lugar_expedicion: toNullableTrimmedString(baseRecord?.lugar_expedicion) || "",
+    nacionalidad: toNullableTrimmedString(baseRecord?.nacionalidad) || "",
+    estado_civil: normalizeEstadoCivilContratacion(baseRecord?.estado_civil) || "",
+    direccion_residencia:
+      toNullableTrimmedString(baseRecord?.direccion_residencia) ||
+      toNullableTrimmedString(ctx.direccion) ||
+      toNullableTrimmedString(baseRecord?.usuario_direccion) ||
+      "",
+    barrio: toNullableTrimmedString(baseRecord?.barrio) || "",
+    ciudad_residencia:
+      toNullableTrimmedString(baseRecord?.ciudad_residencia) ||
+      toNullableTrimmedString(ctx.ciudad) ||
+      toNullableTrimmedString(baseRecord?.usuario_ciudad) ||
+      "",
+    departamento_pais: toNullableTrimmedString(baseRecord?.departamento_pais) || "",
+    pais_residencia:
+      toNullableTrimmedString(baseRecord?.pais_residencia) ||
+      toNullableTrimmedString(ctx.paisUbicacion) ||
+      "",
+    correo_electronico:
+      toNullableTrimmedString(baseRecord?.correo_electronico) ||
+      toNullableTrimmedString(ctx.correoPersonal) ||
+      toNullableTrimmedString(baseRecord?.usuario_email) ||
+      "",
+    numero_contacto:
+      toNullableTrimmedString(baseRecord?.numero_contacto) ||
+      toNullableTrimmedString(ctx.telefono) ||
+      toNullableTrimmedString(baseRecord?.usuario_telefono) ||
+      "",
+    titulo_profesional: toNullableTrimmedString(baseRecord?.titulo_profesional) || "",
+    modulo_id: toNullableTrimmedString(moduloRef?.public_id) || "",
+    modulo_otro:
+      toNullableTrimmedString(baseRecord?.modulo_otro) ||
+      (!moduloRef?.public_id ? toNullableTrimmedString(ctx.modulo_nombre) : null) ||
+      "",
+    eps: toNullableTrimmedString(baseRecord?.eps) || "",
+    arl: toNullableTrimmedString(baseRecord?.arl) || "",
+    afp: toNullableTrimmedString(baseRecord?.afp) || "",
+    nombre_contacto_emergencia: toNullableTrimmedString(baseRecord?.nombre_contacto_emergencia) || "",
+    parentesco: toNullableTrimmedString(baseRecord?.parentesco) || "",
+    telefono_contacto_emergencia: toNullableTrimmedString(baseRecord?.telefono_contacto_emergencia) || "",
+    hijos: normalizeNonNegativeIntegerInput(baseRecord?.hijos) ?? 0,
+    edades_hijos: toNullableTrimmedString(baseRecord?.edades_hijos) || "",
+    visa_paises: toNullableTrimmedString(baseRecord?.visa_paises) || "",
+    acepta_tratamiento_datos: baseRecord?.acepta_tratamiento_datos === true
+  };
+}
+
+function normalizeContratoPersonaFormPayload(body = {}) {
+  const hijos = normalizeNonNegativeIntegerInput(body.hijos) ?? 0;
+  const aceptaTratamiento = normalizeNullableBooleanInput(body.acepta_tratamiento_datos);
+  return {
+    nombre: toNullableTrimmedString(body.nombre),
+    apellidos: toNullableTrimmedString(body.apellidos),
+    fecha_nacimiento: normalizeDateOnlyInput(body.fecha_nacimiento),
+    lugar_nacimiento: toNullableTrimmedString(body.lugar_nacimiento),
+    tipo_documento_id: toNullableTrimmedString(body.tipo_documento_id),
+    numero_documento: toNullableTrimmedString(body.numero_documento),
+    lugar_expedicion: toNullableTrimmedString(body.lugar_expedicion),
+    nacionalidad: toNullableTrimmedString(body.nacionalidad),
+    estado_civil: normalizeEstadoCivilContratacion(body.estado_civil),
+    direccion_residencia: toNullableTrimmedString(body.direccion_residencia),
+    barrio: toNullableTrimmedString(body.barrio),
+    ciudad_residencia: toNullableTrimmedString(body.ciudad_residencia),
+    departamento_pais: toNullableTrimmedString(body.departamento_pais),
+    pais_residencia: toNullableTrimmedString(body.pais_residencia),
+    correo_electronico: toNullableTrimmedString(body.correo_electronico)?.toLowerCase() || null,
+    numero_contacto: toNullableTrimmedString(body.numero_contacto),
+    titulo_profesional: toNullableTrimmedString(body.titulo_profesional),
+    modulo_id: toNullableTrimmedString(body.modulo_id),
+    modulo_otro: toNullableTrimmedString(body.modulo_otro),
+    eps: toNullableTrimmedString(body.eps),
+    arl: toNullableTrimmedString(body.arl),
+    afp: toNullableTrimmedString(body.afp),
+    nombre_contacto_emergencia: toNullableTrimmedString(body.nombre_contacto_emergencia),
+    parentesco: toNullableTrimmedString(body.parentesco),
+    telefono_contacto_emergencia: toNullableTrimmedString(body.telefono_contacto_emergencia),
+    hijos,
+    edades_hijos: hijos && hijos > 0 ? toNullableTrimmedString(body.edades_hijos) : null,
+    visa_paises: toNullableTrimmedString(body.visa_paises),
+    acepta_tratamiento_datos: aceptaTratamiento
+  };
+}
+
+function validateContratoPersonaFormData(data) {
+  const missing = [];
+  const requiredText = [
+    ["nombre", "Nombres"],
+    ["apellidos", "Apellidos"],
+    ["tipo_documento_id", "Tipo de documento"],
+    ["numero_documento", "Numero de documento"],
+    ["correo_electronico", "Correo electronico personal"],
+    ["titulo_profesional", "Profesion"]
+  ];
+  for (const [key, label] of requiredText) {
+    if (!data[key]) missing.push(label);
+  }
+  if (data.hijos > 0 && !data.edades_hijos) missing.push("Edades de los hijos");
+
+  if (data.correo_electronico && !isValidEmailFormat(data.correo_electronico)) {
+    missing.push("Correo electronico valido");
+  }
+  if (data.acepta_tratamiento_datos !== true) {
+    missing.push("Autorizacion de tratamiento de datos");
+  }
+
+  return missing;
+}
+
+// GET /contratacion/datos-persona - datos precargados del formulario interno
+app.get("/contratacion/datos-persona", requireTokenFirma, async (req, res) => {
+  try {
+    const proceso = await getTokenFirmaProcesoPublico(pool, req.tokenFirma.token_id);
+    if (!proceso) return res.status(404).json({ error: "Proceso no encontrado" });
+    if (proceso.estado !== "en_proceso") return res.status(400).json({ error: "Proceso no disponible para edicion" });
+
+    const personaContext = await resolveContratoPersonaContext(proceso);
+    const preregistroId = personaContext?.preregistro?.id || proceso.preregistro_id || null;
+    const baseRecord = await getContratoPersonaBaseRecord(pool, {
+      usuarioId: personaContext?.usuario_id || null,
+      numeroDocumento: personaContext?.numeroDocumento || null,
+      correoPersonal: personaContext?.correoPersonal || null,
+      preregistroId
+    });
+    const moduloRef = await resolveModuloForContratoPersonaForm(pool, personaContext, baseRecord);
+    const catalogos = await listContratacionPersonaCatalogos(pool);
+
+    res.json({
+      form: { clave: FORM_DATOS_PERSONA.clave, label: FORM_DATOS_PERSONA.label },
+      datos: buildContratoPersonaFormData(baseRecord, personaContext, moduloRef),
+      catalogos,
+      check_completado: Boolean(proceso.checks_completados?.[FORM_DATOS_PERSONA.clave])
+    });
+  } catch (err) {
+    console.error("Error cargando datos personales de contratacion:", err);
+    res.status(500).json({ error: "Error cargando datos personales" });
+  }
+});
+
+// POST /contratacion/datos-persona - guarda el formulario interno en personas
+app.post("/contratacion/datos-persona", requireTokenFirma, async (req, res) => {
+  const data = normalizeContratoPersonaFormPayload(req.body || {});
+  const faltantes = validateContratoPersonaFormData(data);
+  if (faltantes.length > 0) {
+    return res.status(422).json({
+      error: "Completa los datos personales requeridos antes de continuar",
+      faltantes
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const proceso = await getTokenFirmaProcesoPublico(client, req.tokenFirma.token_id, { forUpdate: true });
+    if (!proceso) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Proceso no encontrado" });
+    }
+    if (proceso.estado !== "en_proceso") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Proceso no disponible para edicion" });
+    }
+
+    const personaContext = await resolveContratoPersonaContext(proceso);
+    const preregistroId = personaContext?.preregistro?.id || proceso.preregistro_id || null;
+    let baseRecord = await getContratoPersonaBaseRecord(client, {
+      usuarioId: personaContext?.usuario_id || null,
+      numeroDocumento: personaContext?.numeroDocumento || null,
+      correoPersonal: personaContext?.correoPersonal || null,
+      preregistroId
+    });
+    if (!baseRecord?.persona_id && !baseRecord?.usuario_id) {
+      baseRecord = await getContratoPersonaBaseRecord(client, {
+        numeroDocumento: data.numero_documento,
+        correoPersonal: data.correo_electronico,
+        preregistroId
+      });
+    }
+
+    const tipoDocumentoRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.documentoIdentidad, data.tipo_documento_id, "Tipo de documento");
+    const moduloRef = data.modulo_id
+      ? await resolveModuloCatalogRecord(client, data.modulo_id)
+      : await resolveModuloForContratoPersonaForm(client, personaContext, baseRecord);
+    if (data.modulo_id && !moduloRef) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Modulo no valido" });
+    }
+
+    const usuarioId = toNullableInteger(baseRecord?.usuario_id) || toNullableInteger(personaContext?.usuario_id) || null;
+    const tipoPersonaNormalizada = normalizeTipoPersonaForUsuariosInput(personaContext?.tipoPersona);
+    const facturaEnColombia = normalizeNullableBooleanInput(personaContext?.facturaEnColombia);
+    const moduloOtro =
+      data.modulo_otro ||
+      (!moduloRef?.id ? toNullableTrimmedString(personaContext?.modulo_nombre) : null);
+    const personaValues = [
+      data.numero_documento,
+      tipoDocumentoRef.id,
+      data.nombre,
+      data.apellidos,
+      data.fecha_nacimiento,
+      data.lugar_nacimiento,
+      data.lugar_expedicion,
+      data.nacionalidad,
+      data.estado_civil,
+      data.numero_contacto,
+      data.correo_electronico,
+      data.direccion_residencia,
+      data.barrio,
+      data.ciudad_residencia,
+      data.departamento_pais,
+      data.pais_residencia,
+      data.titulo_profesional,
+      tipoPersonaNormalizada,
+      facturaEnColombia,
+      data.eps,
+      data.arl,
+      data.afp,
+      data.nombre_contacto_emergencia,
+      data.parentesco,
+      data.telefono_contacto_emergencia,
+      data.hijos,
+      data.edades_hijos,
+      data.visa_paises,
+      data.acepta_tratamiento_datos,
+      moduloRef?.id || null,
+      moduloOtro,
+      personaContext?.clienteId || null,
+      preregistroId || null
+    ];
+
+    let personaResult;
+    if (baseRecord?.persona_id) {
+      personaResult = await client.query(
+        `
+        UPDATE personas SET
+          numero_documento              = $1,
+          tipo_documento_id             = $2,
+          nombre                        = $3,
+          apellidos                     = $4,
+          fecha_nacimiento              = $5,
+          lugar_nacimiento              = $6,
+          lugar_expedicion              = $7,
+          nacionalidad                  = $8,
+          estado_civil                  = $9,
+          numero_contacto               = $10,
+          correo_electronico            = $11,
+          direccion_residencia          = $12,
+          barrio                        = $13,
+          ciudad_residencia             = $14,
+          departamento_pais             = $15,
+          pais_residencia               = $16,
+          titulo_profesional            = $17,
+          tipo_persona                  = COALESCE($18::tipo_persona, tipo_persona),
+          factura_en_colombia           = COALESCE($19, factura_en_colombia),
+          eps                           = $20,
+          arl                           = $21,
+          afp                           = $22,
+          nombre_contacto_emergencia    = $23,
+          parentesco                    = $24,
+          telefono_contacto_emergencia  = $25,
+          hijos                         = $26,
+          edades_hijos                  = $27,
+          visa_paises                   = $28,
+          acepta_tratamiento_datos      = $29,
+          tratamiento_datos_aceptado_at = CASE WHEN $29 THEN COALESCE(tratamiento_datos_aceptado_at, NOW()) ELSE NULL END,
+          modulo_id                     = COALESCE($30, modulo_id),
+          modulo_otro                   = COALESCE($31, modulo_otro),
+          cliente_id                    = COALESCE($32, cliente_id),
+          preregistro_id                = COALESCE($33, preregistro_id),
+          updated_at                    = NOW()
+        WHERE id = $34
+        RETURNING id, public_id::text AS public_id
+        `,
+        [...personaValues, baseRecord.persona_id]
+      );
+    } else {
+      personaResult = await client.query(
+        `
+        INSERT INTO personas (
+          numero_documento, tipo_documento_id, nombre, apellidos,
+          fecha_nacimiento, lugar_nacimiento, lugar_expedicion, nacionalidad, estado_civil,
+          numero_contacto, correo_electronico, direccion_residencia, barrio, ciudad_residencia,
+          departamento_pais, pais_residencia, titulo_profesional, tipo_persona, factura_en_colombia,
+          eps, arl, afp, nombre_contacto_emergencia, parentesco, telefono_contacto_emergencia,
+          hijos, edades_hijos, visa_paises, acepta_tratamiento_datos, tratamiento_datos_aceptado_at,
+          modulo_id, modulo_otro, cliente_id, preregistro_id, created_by
+        ) VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::tipo_persona,$19,
+          $20,$21,$22,$23,$24,$25,$26,$27,$28,$29,
+          CASE WHEN $29 THEN NOW() ELSE NULL END,
+          $30,$31,$32,$33,$34
+        )
+        ON CONFLICT (numero_documento) DO UPDATE SET
+          tipo_documento_id             = EXCLUDED.tipo_documento_id,
+          nombre                        = EXCLUDED.nombre,
+          apellidos                     = EXCLUDED.apellidos,
+          fecha_nacimiento              = EXCLUDED.fecha_nacimiento,
+          lugar_nacimiento              = EXCLUDED.lugar_nacimiento,
+          lugar_expedicion              = EXCLUDED.lugar_expedicion,
+          nacionalidad                  = EXCLUDED.nacionalidad,
+          estado_civil                  = EXCLUDED.estado_civil,
+          numero_contacto               = EXCLUDED.numero_contacto,
+          correo_electronico            = EXCLUDED.correo_electronico,
+          direccion_residencia          = EXCLUDED.direccion_residencia,
+          barrio                        = EXCLUDED.barrio,
+          ciudad_residencia             = EXCLUDED.ciudad_residencia,
+          departamento_pais             = EXCLUDED.departamento_pais,
+          pais_residencia               = EXCLUDED.pais_residencia,
+          titulo_profesional            = EXCLUDED.titulo_profesional,
+          tipo_persona                  = COALESCE(EXCLUDED.tipo_persona, personas.tipo_persona),
+          factura_en_colombia           = COALESCE(EXCLUDED.factura_en_colombia, personas.factura_en_colombia),
+          eps                           = EXCLUDED.eps,
+          arl                           = EXCLUDED.arl,
+          afp                           = EXCLUDED.afp,
+          nombre_contacto_emergencia    = EXCLUDED.nombre_contacto_emergencia,
+          parentesco                    = EXCLUDED.parentesco,
+          telefono_contacto_emergencia  = EXCLUDED.telefono_contacto_emergencia,
+          hijos                         = EXCLUDED.hijos,
+          edades_hijos                  = EXCLUDED.edades_hijos,
+          visa_paises                   = EXCLUDED.visa_paises,
+          acepta_tratamiento_datos      = EXCLUDED.acepta_tratamiento_datos,
+          tratamiento_datos_aceptado_at = CASE WHEN EXCLUDED.acepta_tratamiento_datos THEN COALESCE(personas.tratamiento_datos_aceptado_at, NOW()) ELSE NULL END,
+          modulo_id                     = COALESCE(EXCLUDED.modulo_id, personas.modulo_id),
+          modulo_otro                   = COALESCE(EXCLUDED.modulo_otro, personas.modulo_otro),
+          cliente_id                    = COALESCE(EXCLUDED.cliente_id, personas.cliente_id),
+          preregistro_id                = COALESCE(EXCLUDED.preregistro_id, personas.preregistro_id),
+          updated_at                    = NOW()
+        RETURNING id, public_id::text AS public_id
+        `,
+        [...personaValues, usuarioId]
+      );
+    }
+
+    const personaId = personaResult.rows[0]?.id || null;
+    if (usuarioId && personaId) {
+      await client.query(
+        `
+        UPDATE usuarios SET
+          persona_id          = COALESCE(persona_id, $1),
+          tipo_documento_id   = $2,
+          cedula              = $3,
+          direccion           = $4,
+          telefono            = $5,
+          ciudad              = $6,
+          tipo_persona        = COALESCE($7::tipo_persona, tipo_persona),
+          factura_en_colombia = COALESCE($8, factura_en_colombia),
+          updated_at          = NOW()
+        WHERE id = $9
+        `,
+        [
+          personaId,
+          tipoDocumentoRef.id,
+          data.numero_documento,
+          data.direccion_residencia,
+          data.numero_contacto,
+          data.ciudad_residencia,
+          tipoPersonaNormalizada,
+          facturaEnColombia,
+          usuarioId
+        ]
+      );
+    }
+
+    const checkRes = await client.query(
+      `UPDATE tokens_firma_contrato
+       SET checks_completados = jsonb_set(checks_completados, $1::text[], 'true', true),
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING checks_completados`,
+      [`{${FORM_DATOS_PERSONA.clave}}`, proceso.id]
+    );
+
+    await client.query("COMMIT");
+    res.json({
+      ok: true,
+      persona_id: personaResult.rows[0]?.public_id || null,
+      checks_completados: checkRes.rows[0]?.checks_completados || {},
+      datos: data
+    });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => { });
+    if (err.code === "23505") {
+      return res.status(409).json({ error: "El numero de documento ya esta en uso por otra persona" });
+    }
+    if (err?.status === 400) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error("Error guardando datos personales de contratacion:", err);
+    res.status(500).json({ error: "Error guardando datos personales" });
+  } finally {
+    client.release();
+  }
 });
 
 // GET /contratacion/video ? sirve video de bienvenida con soporte de rango (streaming)

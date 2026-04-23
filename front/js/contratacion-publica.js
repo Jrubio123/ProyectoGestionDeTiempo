@@ -16,9 +16,22 @@ window.contratacionApp = function () {
 
         // ── Documentos
         docs: [],            // [{ clave, label, tipo:'pdf', archivo }]
-        linkItem: null,      // { clave, label, tipo:'link', url }
+        formItem: null,      // { clave, label, tipo:'form' }
         videoDisponible: false,
         checksCompletados: {},
+
+        // Datos personales
+        personaDatos: {},
+        personaCatalogos: {
+            documentos_identidad: [],
+            modulos: [],
+            estados_civiles: []
+        },
+        personaDatosCargando: false,
+        personaDatosGuardando: false,
+        personaDatosError: "",
+        personaDatosDirty: false,
+        personaDatosCargados: false,
 
         // ── Navegación inline (sin modal overlay)
         docActualIdx: 0,
@@ -89,7 +102,7 @@ window.contratacionApp = function () {
                     headers: { Authorization: `Bearer ${this.jwt}` }
                 });
                 this.docs = res.data.docs.map(d => ({ ...d, tipo: "pdf", descarga_archivo: d?.descarga_archivo || null }));
-                this.linkItem = { ...res.data.link, tipo: "link" };
+                this.formItem = res.data.form ? { ...res.data.form, tipo: "form" } : null;
                 this.videoDisponible = res.data.video_disponible;
             } catch {
                 // La lista queda vacía; el usuario verá el visor vacío
@@ -100,7 +113,7 @@ window.contratacionApp = function () {
         // COMPUTED
         // ─────────────────────────────────────────────────────
         get allItems() {
-            return this.linkItem ? [...this.docs, this.linkItem] : [...this.docs];
+            return this.formItem ? [...this.docs, this.formItem] : [...this.docs];
         },
 
         get requiredItems() {
@@ -114,17 +127,25 @@ window.contratacionApp = function () {
         get totalItems() { return this.requiredItems.length; },
 
         get totalCheckeados() {
-            return this.requiredItems.filter(d => this.checksCompletados[d.clave]).length;
+            return this.requiredItems.filter(d => this.checksCompletados[d.clave] && !(d.tipo === "form" && this.personaDatosDirty)).length;
         },
 
         get todosChecks() {
+            if (this.formItem && this.personaDatosDirty) return false;
             return this.requiredItems.length > 0 && this.requiredItems.every(d => this.checksCompletados[d.clave]);
         },
 
         get puedeAvanzar() {
             if (!this.docActual) return false;
+            if (this.docActual.tipo === "form") {
+                return !!this.checksCompletados[this.docActual?.clave] && !this.personaDatosDirty && !this.personaDatosGuardando;
+            }
             if (this.docActual.tipo !== "pdf") return true;
             return !!this.checksCompletados[this.docActual?.clave];
+        },
+
+        get requiereEdadesHijos() {
+            return Number(this.personaDatos?.hijos || 0) > 0;
         },
 
         get videoUrl() {
@@ -145,7 +166,10 @@ window.contratacionApp = function () {
             return this.docsFirmaOrdenados.filter((d) => this.estadoDocFirma(d) === "signed").length;
         },
 
-        isChecked(clave) { return !!this.checksCompletados[clave]; },
+        isChecked(clave) {
+            if (this.formItem?.clave === clave && this.personaDatosDirty) return false;
+            return !!this.checksCompletados[clave];
+        },
 
         _extensionDesdeNombre(nombre = "") {
             const clean = String(nombre || "").trim();
@@ -225,8 +249,12 @@ window.contratacionApp = function () {
             // Reiniciar timer siempre al cambiar de doc
             this._reiniciarTimer();
 
-            // Link: no hay PDF que cargar
-            if (doc.tipo === "link") return;
+            // Formularios internos: no hay PDF que cargar
+            if (doc.tipo !== "pdf") {
+                this._limpiarPdfActual();
+                if (doc.tipo === "form") await this.cargarDatosPersona();
+                return;
+            }
 
             // PDF: evitar recarga si ya está cargado
             if (this._pdfCargadoParaIdx === this.docActualIdx && this.pdfBlobUrl) return;
@@ -257,6 +285,16 @@ window.contratacionApp = function () {
         // ─────────────────────────────────────────────────────
         // TIMER DE LECTURA
         // ─────────────────────────────────────────────────────
+        _limpiarPdfActual() {
+            this.pdfCargando = false;
+            this.pdfError = "";
+            this._pdfCargadoParaIdx = null;
+            if (this.pdfBlobUrl) {
+                URL.revokeObjectURL(this.pdfBlobUrl);
+                this.pdfBlobUrl = null;
+            }
+        },
+
         _reiniciarTimer() {
             clearInterval(this._timer);
             const clave = this.docActual?.clave;
@@ -336,13 +374,95 @@ window.contratacionApp = function () {
         },
 
         // ─────────────────────────────────────────────────────
-        // ABRIR LINK EXTERNO
+        // DATOS PERSONALES
         // ─────────────────────────────────────────────────────
-        async abrirLink() {
-            if (!this.linkItem) return;
-            window.open(this.linkItem.url, "_blank", "noopener,noreferrer");
-            if (!this.isChecked(this.linkItem.clave)) {
-                await this._registrarCheck(this.linkItem.clave);
+        _datosPersonaVacios() {
+            return {
+                nombre: "",
+                apellidos: "",
+                fecha_nacimiento: "",
+                lugar_nacimiento: "",
+                tipo_documento_id: "",
+                numero_documento: "",
+                lugar_expedicion: "",
+                nacionalidad: "",
+                estado_civil: "",
+                direccion_residencia: "",
+                barrio: "",
+                ciudad_residencia: "",
+                departamento_pais: "",
+                pais_residencia: "",
+                correo_electronico: "",
+                numero_contacto: "",
+                titulo_profesional: "",
+                modulo_id: "",
+                modulo_otro: "",
+                eps: "",
+                arl: "",
+                afp: "",
+                nombre_contacto_emergencia: "",
+                parentesco: "",
+                telefono_contacto_emergencia: "",
+                hijos: 0,
+                edades_hijos: "",
+                visa_paises: "",
+                acepta_tratamiento_datos: false
+            };
+        },
+
+        marcarPersonaDatosDirty() {
+            this.personaDatosDirty = true;
+        },
+
+        async cargarDatosPersona({ force = false } = {}) {
+            if (this.personaDatosCargados && !force) return;
+            this.personaDatosCargando = true;
+            this.personaDatosError = "";
+            try {
+                const res = await axios.get(`${API}/contratacion/datos-persona`, {
+                    headers: { Authorization: `Bearer ${this.jwt}` }
+                });
+                this.personaDatos = { ...this._datosPersonaVacios(), ...(res.data?.datos || {}) };
+                this.personaCatalogos = {
+                    documentos_identidad: res.data?.catalogos?.documentos_identidad || [],
+                    modulos: res.data?.catalogos?.modulos || [],
+                    estados_civiles: res.data?.catalogos?.estados_civiles || []
+                };
+                this.personaDatosCargados = true;
+                this.personaDatosDirty = false;
+                if (res.data?.check_completado) {
+                    this.checksCompletados = { ...this.checksCompletados, [this.formItem?.clave || "datos_personales"]: true };
+                }
+            } catch (e) {
+                this.personaDatosError = e?.response?.data?.error || "No se pudieron cargar tus datos personales.";
+            } finally {
+                this.personaDatosCargando = false;
+            }
+        },
+
+        async guardarDatosPersona() {
+            if (this.personaDatosGuardando) return;
+            this.personaDatosGuardando = true;
+            this.personaDatosError = "";
+            try {
+                const payload = { ...this.personaDatos };
+                if (Number(payload.hijos || 0) <= 0) payload.edades_hijos = "";
+                const res = await axios.post(
+                    `${API}/contratacion/datos-persona`,
+                    payload,
+                    { headers: { Authorization: `Bearer ${this.jwt}` } }
+                );
+                this.checksCompletados = res.data?.checks_completados || this.checksCompletados;
+                this.checksCompletados = { ...this.checksCompletados, [this.formItem?.clave || "datos_personales"]: true };
+                this.personaDatosDirty = false;
+                this.personaDatosCargados = true;
+            } catch (e) {
+                const faltantes = e?.response?.data?.faltantes;
+                this.personaDatosError = Array.isArray(faltantes) && faltantes.length
+                    ? `Faltan: ${faltantes.join(", ")}`
+                    : (e?.response?.data?.error || "No se pudieron guardar tus datos personales.");
+            } finally {
+                this.personaDatosGuardando = false;
             }
         },
 

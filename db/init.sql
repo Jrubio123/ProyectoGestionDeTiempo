@@ -432,14 +432,21 @@ CREATE TABLE personas
     nombre           VARCHAR(200),
     apellidos        VARCHAR(200),
     fecha_nacimiento DATE,
+    lugar_nacimiento VARCHAR(150),
+    lugar_expedicion VARCHAR(150),
+    nacionalidad     VARCHAR(100),
+    estado_civil     VARCHAR(30)
+        CHECK (estado_civil IS NULL OR estado_civil IN ('Soltero', 'Casado', 'Unión libre', 'Separado', 'Viudo')),
     sexo             tipo_sexo,
 
     -- Contacto principal
     numero_contacto      VARCHAR(50),
     correo_electronico   VARCHAR(255),
     direccion_residencia TEXT,
+    barrio               VARCHAR(120),
     ciudad_residencia    VARCHAR(100),
     departamento_pais    VARCHAR(100),
+    pais_residencia      VARCHAR(100),
 
     -- Profesional
     titulo_profesional  TEXT,
@@ -460,6 +467,10 @@ CREATE TABLE personas
     composicion_familiar VARCHAR(100),
     hijos                INTEGER DEFAULT 0,
     personas_a_cargo     INTEGER DEFAULT 0,
+    edades_hijos         TEXT,
+    visa_paises          TEXT,
+    acepta_tratamiento_datos BOOLEAN,
+    tratamiento_datos_aceptado_at TIMESTAMP,
 
     -- Seguridad social
     eps VARCHAR(100),
@@ -1297,7 +1308,8 @@ VALUES
     ('Cédula de Ciudadanía', 'CC', true),
     ('Cédula de Extranjería', 'CE', true),
     ('Pasaporte', 'PA', true),
-    ('NIT', 'NIT', true)
+    ('NIT', 'NIT', true),
+    ('Otras', 'OT', true)
 ON CONFLICT (titulo) DO NOTHING;
 
 
@@ -1480,9 +1492,15 @@ SELECT
     p.direccion_residencia AS direccion,
     p.ciudad_residencia    AS ciudad,
     p.departamento_pais,
+    p.pais_residencia,
+    p.barrio,
     p.titulo_profesional,
     p.sexo,
     p.fecha_nacimiento,
+    p.lugar_nacimiento,
+    p.lugar_expedicion,
+    p.nacionalidad,
+    p.estado_civil,
     p.nombre_contacto_emergencia,
     p.telefono_contacto_emergencia,
     p.parentesco,
@@ -1492,6 +1510,10 @@ SELECT
     p.composicion_familiar,
     p.hijos,
     p.personas_a_cargo,
+    p.edades_hijos,
+    p.visa_paises,
+    p.acepta_tratamiento_datos,
+    p.tratamiento_datos_aceptado_at,
     p.tipo_contrato,
     p.modalidad,
     p.modulo_id,

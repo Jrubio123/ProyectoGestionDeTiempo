@@ -11428,7 +11428,7 @@ app.post("/auth/microsoft", async (req, res) => {
 });
 
 // ========================================================================================================================
-//  RUTAS PÚBLICAS ? MÓDULO FIRMA DE CONTRATOS (sin auth de Microsoft)
+//  RUTAS PÚBLICAS - MÓDULO FIRMA DE CONTRATOS (sin auth de Microsoft)
 // ========================================================================================================================
 
 const CONTRATOS_STATIC_DIR = path.join(__dirname, "static", "contratos");

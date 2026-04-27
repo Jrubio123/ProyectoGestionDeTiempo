@@ -32,12 +32,27 @@
 }
 
 .navbar-logo {
-    font-size: 1.5rem;
-    font-weight: 700;
     margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    line-height: 1;
     letter-spacing: 0.2px;
     color: #f4f8fc;
     text-shadow: 0 1px 0 rgba(26, 49, 72, 0.2);
+}
+
+.navbar-logo-main {
+    font-size: 1.55rem;
+    font-weight: 800;
+}
+
+.navbar-logo-sub {
+    font-size: 0.72rem;
+    font-weight: 500;
+    opacity: 0.82;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
 }
 
 .navbar-links {
@@ -244,7 +259,15 @@
     }
 
     .navbar-logo {
-        font-size: 1.25rem;
+        gap: 0.08rem;
+    }
+
+    .navbar-logo-main {
+        font-size: 1.35rem;
+    }
+
+    .navbar-logo-sub {
+        font-size: 0.64rem;
     }
 
     .navbar-search {
@@ -266,11 +289,18 @@
     }
 
     .navbar-logo {
-        font-size: 1.1rem;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         max-width: 160px;
+    }
+
+    .navbar-logo-main {
+        font-size: 1.18rem;
+    }
+
+    .navbar-logo-sub {
+        font-size: 0.58rem;
     }
 
     .search-container {

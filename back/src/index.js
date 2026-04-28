@@ -11056,6 +11056,7 @@ registerPreregistroRoutes({
   getGraphContext,
   sendEmailSafe,
   buildEmailLayout,
+  buildPortalUrl,
   ensurePersistedAnexoFromProceso,
   resolveTalentoHumanoNotificationRecipients
 });

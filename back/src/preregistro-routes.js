@@ -8,6 +8,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     getGraphContext,
     sendEmailSafe,
     buildEmailLayout,
+    buildPortalUrl,
     ensurePersistedAnexoFromProceso,
     resolveTalentoHumanoNotificationRecipients
   } = deps;
@@ -712,21 +713,33 @@ module.exports = function registerPreregistroRoutes(deps) {
       }
 
       if (solicitud.coordinador_email) {
+        const base = {
+          toName: solicitud.coordinador_nombre || "Coordinador",
+          nombre: `${String(nombre || "").trim()} ${String(apellidos || "").trim()}`.trim() || "N/A",
+          perfil: solicitud.perfil || "Perfil",
+          preregistroId: String(created.rows[0]?.public_id || ""),
+          url: buildPortalUrl("preregistrosCoord")
+        };
         sendEmailSafe({
           ...getGraphContext(req),
           to: solicitud.coordinador_email,
-          subject: `Nuevo preregistro pendiente - ${solicitud.perfil || "Perfil"}`,
-          text: `Se creo un preregistro para la solicitud ${solicitud.perfil || ""}. ID: ${created.rows[0]?.public_id}`,
+          subject: `Nuevo preregistro pendiente - ${base.perfil}`,
+          text:
+            `Hola ${base.toName},\n\n` +
+            `Se creo un preregistro para ${base.nombre}, perfil ${base.perfil}. ID: ${base.preregistroId}\n\n` +
+            `Ver preregistro en el sistema: ${base.url}\n`,
           html: buildEmailLayout({
             title: "Preregistro pendiente por completar",
-            intro: `Se creo un preregistro para la solicitud ${solicitud.perfil || ""}.`,
-            ctaLabel: "Ver Preregistros",
-            ctaUrl: "preregistrosCoord.html",
+            intro: `Hola <strong>${base.toName}</strong>, se creo un preregistro pendiente por completar.`,
             blocks: [
+              { label: "Nombre", value: base.nombre },
+              { label: "Perfil", value: base.perfil },
               { label: "Responsable", value: continuationRole },
               { label: "Estado", value: initialPreregistroState },
-              { label: "ID preregistro", value: String(created.rows[0]?.public_id || "") }
-            ]
+              { label: "ID preregistro", value: base.preregistroId }
+            ],
+            ctaLabel: "Ver preregistro en el sistema",
+            ctaUrl: base.url
           })
         }).catch((err) => console.error("Error notificando preregistro al coordinador:", err?.message || err));
       }

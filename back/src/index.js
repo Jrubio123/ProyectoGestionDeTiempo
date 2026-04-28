@@ -1,4 +1,4 @@
-﻿const path = require("path");
+const path = require("path");
 const crypto = require("crypto");
 const fs = require("fs");
 const envFile =
@@ -47,6 +47,9 @@ app.use(helmet({
   contentSecurityPolicy: false
 }));
 
+/**
+ * Normaliza el valor del origen (origin) de CORS, extrayendo el protocolo y dominio de una URL.
+ */
 function normalizeCorsOriginValue(value) {
   const raw = String(value || "").trim();
   if (!raw) return null;
@@ -57,6 +60,9 @@ function normalizeCorsOriginValue(value) {
   }
 }
 
+/**
+ * Extrae el origen a partir de una URL pública (utilizado en la configuración CORS).
+ */
 function extractOriginFromPublicUrl(value) {
   const raw = String(value || "").trim();
   if (!raw) return null;
@@ -67,6 +73,9 @@ function extractOriginFromPublicUrl(value) {
   }
 }
 
+/**
+ * Verifica si un origen corresponde a la infraestructura de Azure Static Web Apps.
+ */
 function isAzureStaticWebAppsOrigin(origin) {
   const raw = normalizeCorsOriginValue(origin);
   if (!raw) return false;
@@ -142,6 +151,9 @@ const FALLBACK_ESTADO_ASIGNACION = Object.freeze({
   cancelado: null
 });
 
+/**
+ * Limpia y reinicia las cachés en memoria que almacenan los estados de asignación, mesas y fábricas.
+ */
 function resetEnumCaches() {
   estadoAsignacionCache = null;
   estadoMesaCache = null;
@@ -156,6 +168,9 @@ pool.on("error", (err) => {
   }
 });
 
+/**
+ * Normaliza etiquetas de texto (remueve tildes, espacios y convierte a minúsculas) para comparaciones de estados.
+ */
 function normalizeEnumLabel(value) {
   return String(value || "")
     .normalize("NFD")
@@ -165,6 +180,9 @@ function normalizeEnumLabel(value) {
     .trim();
 }
 
+/**
+ * Obtiene y cachea los valores del enum 'tipo_estado_asignacion' desde la base de datos.
+ */
 async function getEstadoAsignacionValues() {
   if (estadoAsignacionCache) return estadoAsignacionCache;
   try {
@@ -206,6 +224,9 @@ async function getEstadoAsignacionValues() {
   }
 }
 
+/**
+ * Resuelve y mapea un estado de entrada con los estados válidos de asignación, soportando alias comunes.
+ */
 function resolveEstadoAsignacionInput(value, estados) {
   if (value === undefined || value === null || value === "") return null;
   const raw = String(value).trim();
@@ -227,6 +248,9 @@ function resolveEstadoAsignacionInput(value, estados) {
   return aliasMap.get(norm) || null;
 }
 
+/**
+ * Determina si una asignación está en un estado que permite el reporte de horas (ej. Abierto o En Proceso).
+ */
 function isAsignacionReportableEstado(estado, estados) {
   const rawNorm = normalizeEnumLabel(estado);
   if (!rawNorm) return false;
@@ -235,6 +259,9 @@ function isAsignacionReportableEstado(estado, estados) {
   return rawNorm === abiertoNorm || rawNorm === procesoNorm;
 }
 
+/**
+ * Normaliza el nombre del tipo de servicio (ej. Requerimiento, Incidente) manteniendo retrocompatibilidad.
+ */
 function normalizeTipoServicioInput(value) {
   const raw = String(value || "").trim();
   if (!raw) return null;
@@ -250,6 +277,9 @@ function normalizeTipoServicioInput(value) {
   return map.get(norm) || null;
 }
 
+/**
+ * Normaliza el input del perfil de fábrica asignado (ej. ABAP, FIORI).
+ */
 function normalizePerfilFabricaInput(value) {
   const raw = String(value || "").trim();
   if (!raw) return null;
@@ -267,6 +297,9 @@ function normalizePerfilFabricaInput(value) {
   return map.get(norm) || null;
 }
 
+/**
+ * Convierte un valor de fecha a formato YYYY-MM-DD, ignorando horas.
+ */
 function normalizeDateOnlyInput(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
@@ -277,6 +310,9 @@ function normalizeDateOnlyInput(value) {
   return parsed.toISOString().slice(0, 10);
 }
 
+/**
+ * Consulta la base de datos para obtener el último perfil de fábrica reportado en una asignación.
+ */
 async function getAssignedPerfilFabrica(db, registroAsignacionId, reporteId = null) {
   const reporteInternalId = Number(reporteId || 0);
   if (reporteInternalId > 0) {
@@ -303,6 +339,9 @@ async function getAssignedPerfilFabrica(db, registroAsignacionId, reporteId = nu
   return normalizePerfilFabricaInput(latest.rows[0]?.perfil_fabrica);
 }
 
+/**
+ * Normaliza el estado de una mesa de servicio (ej. Cerrado, En proceso, Transferido).
+ */
 function normalizeEstadoMesaInput(value) {
   const raw = String(value || "").trim();
   if (!raw) return null;
@@ -316,6 +355,9 @@ function normalizeEstadoMesaInput(value) {
   return map.get(norm) || null;
 }
 
+/**
+ * Normaliza el estado de fábrica (ej. En desarrollo, Finalizado).
+ */
 function normalizeEstadoFabricaInput(value) {
   const raw = String(value || "").trim();
   if (!raw) return null;
@@ -328,6 +370,9 @@ function normalizeEstadoFabricaInput(value) {
   return map.get(norm) || null;
 }
 
+/**
+ * Consulta la base de datos genéricamente para obtener las etiquetas de un tipo Enum.
+ */
 async function getEnumLabels(typeName, fallback = []) {
   try {
     const result = await pool.query(

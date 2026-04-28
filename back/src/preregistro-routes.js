@@ -718,8 +718,10 @@ module.exports = function registerPreregistroRoutes(deps) {
           nombre: `${String(nombre || "").trim()} ${String(apellidos || "").trim()}`.trim() || "N/A",
           perfil: solicitud.perfil || "Perfil",
           preregistroId: String(created.rows[0]?.public_id || ""),
-          url: buildPortalUrl("preregistrosCoord")
+          url: buildPortalUrl("preregistrosCoord"),
+          senderName: req.user?.nombre_usuario || req.user?.email || "Silver Consulting"
         };
+        base.closing = `Atentamente, ${base.senderName}.`;
         sendEmailSafe({
           ...getGraphContext(req),
           to: solicitud.coordinador_email,
@@ -727,7 +729,8 @@ module.exports = function registerPreregistroRoutes(deps) {
           text:
             `Hola ${base.toName},\n\n` +
             `Se creo un preregistro para ${base.nombre}, perfil ${base.perfil}. ID: ${base.preregistroId}\n\n` +
-            `Ver preregistro en el sistema: ${base.url}\n`,
+            `Ver preregistro en el sistema: ${base.url}\n\n` +
+            `${base.closing}\n`,
           html: buildEmailLayout({
             title: "Preregistro pendiente por completar",
             intro: `Hola <strong>${base.toName}</strong>, se creo un preregistro pendiente por completar.`,
@@ -739,7 +742,8 @@ module.exports = function registerPreregistroRoutes(deps) {
               { label: "ID preregistro", value: base.preregistroId }
             ],
             ctaLabel: "Ver preregistro en el sistema",
-            ctaUrl: base.url
+            ctaUrl: base.url,
+            closing: base.closing
           })
         }).catch((err) => console.error("Error notificando preregistro al coordinador:", err?.message || err));
       }

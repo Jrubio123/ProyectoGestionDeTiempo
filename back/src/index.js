@@ -1080,7 +1080,8 @@ function buildRrhhEstadoEmailContent({
   modulo,
   coordinadorNombre,
   observaciones,
-  portalUrl
+  portalUrl,
+  senderName
 }) {
   const base = {
     toName: coordinadorNombre || "Coordinador",
@@ -1088,8 +1089,10 @@ function buildRrhhEstadoEmailContent({
     cliente: cliente || "N/A",
     modulo: modulo || "N/A",
     nota: observaciones || "Sin nota registrada",
-    url: portalUrl || buildPortalUrl("solicitudesCoord")
+    url: portalUrl || buildPortalUrl("solicitudesCoord"),
+    senderName: senderName || "Silver Consulting"
   };
+  base.closing = `Atentamente, ${base.senderName}.`;
 
   if (estado === "Reclutamiento") {
     return {
@@ -1098,7 +1101,8 @@ function buildRrhhEstadoEmailContent({
         `Hola ${base.toName},\n\n` +
         `Te informamos que hemos iniciado la búsqueda activa de candidatos para tu solicitud de ${base.perfil} para el cliente ${base.cliente}.\n` +
         `Estamos filtrando hojas de vida que cumplan con los requisitos del módulo ${base.modulo}.\n\n` +
-        `Ver solicitud en el sistema: ${base.url}\n`,
+        `Ver solicitud en el sistema: ${base.url}\n\n` +
+        `${base.closing}\n`,
       html: buildEmailLayout({
         title: "Solicitud en fase de reclutamiento",
         intro: `Hola <strong>${base.toName}</strong>, iniciamos la búsqueda activa de candidatos.`,
@@ -1109,7 +1113,8 @@ function buildRrhhEstadoEmailContent({
           { label: "Estado", value: "Reclutamiento" }
         ],
         ctaLabel: "Ver solicitud en el sistema",
-        ctaUrl: base.url
+        ctaUrl: base.url,
+        closing: base.closing
       })
     };
   }
@@ -1121,7 +1126,8 @@ function buildRrhhEstadoEmailContent({
         `Hola ${base.toName},\n\n` +
         `?Buenas noticias! Ya tenemos candidatos pre-seleccionados para la vacante de ${base.perfil}.\n` +
         `En los próximos días estaremos coordinando las agendas para las entrevistas técnicas/administrativas.\n\n` +
-        `Ver solicitud en el sistema: ${base.url}\n`,
+        `Ver solicitud en el sistema: ${base.url}\n\n` +
+        `${base.closing}\n`,
       html: buildEmailLayout({
         title: "Solicitud en fase de entrevistas",
         intro: `Hola <strong>${base.toName}</strong>, ya contamos con candidatos pre-seleccionados.`,
@@ -1131,7 +1137,8 @@ function buildRrhhEstadoEmailContent({
           { label: "Estado", value: "Entrevistas" }
         ],
         ctaLabel: "Ver solicitud en el sistema",
-        ctaUrl: base.url
+        ctaUrl: base.url,
+        closing: base.closing
       })
     };
   }
@@ -1144,7 +1151,8 @@ function buildRrhhEstadoEmailContent({
         `Nos alegra informarte que el proceso para ${base.perfil} ha finalizado con éxito.\n` +
         `El candidato ha sido seleccionado y el proceso de contratación está en marcha.\n` +
         `La solicitud se marca como completada.\n\n` +
-        `Ver solicitud en el sistema: ${base.url}\n`,
+        `Ver solicitud en el sistema: ${base.url}\n\n` +
+        `${base.closing}\n`,
       html: buildEmailLayout({
         title: "Solicitud completada",
         intro: `Hola <strong>${base.toName}</strong>, la vacante fue cubierta exitosamente.`,
@@ -1154,7 +1162,8 @@ function buildRrhhEstadoEmailContent({
           { label: "Estado", value: "Contratado" }
         ],
         ctaLabel: "Ver solicitud en el sistema",
-        ctaUrl: base.url
+        ctaUrl: base.url,
+        closing: base.closing
       })
     };
   }
@@ -1167,7 +1176,8 @@ function buildRrhhEstadoEmailContent({
         `Se ha registrado el cierre de la solicitud para ${base.perfil}.\n` +
         `Motivo/Nota: ${base.nota}\n\n` +
         `Por favor, revisa los detalles y comienza el proceso correspondiente.\n\n` +
-        `Ver solicitud en el sistema: ${base.url}\n`,
+        `Ver solicitud en el sistema: ${base.url}\n\n` +
+        `${base.closing}\n`,
       html: buildEmailLayout({
         title: "Solicitud cerrada",
         intro: `Hola <strong>${base.toName}</strong>, se registró el cierre de la solicitud.`,
@@ -1178,7 +1188,8 @@ function buildRrhhEstadoEmailContent({
           { label: "Motivo/Nota", value: base.nota }
         ],
         ctaLabel: "Ver solicitud en el sistema",
-        ctaUrl: base.url
+        ctaUrl: base.url,
+        closing: base.closing
       })
     };
   }
@@ -11069,7 +11080,8 @@ app.put("/rrhh/solicitudes/:id", requireAccess({ roles: ["Reclutador", "Administ
         modulo: before.modulo,
         coordinadorNombre: before.coordinador_nombre,
         observaciones: updated.observaciones_rrhh,
-        portalUrl: buildPortalUrl("solicitudesCoord")
+        portalUrl: buildPortalUrl("solicitudesCoord"),
+        senderName: req.user?.nombre_usuario || req.user?.email || "Silver Consulting"
       });
       if (contenido) {
         await sendEmailSafe({

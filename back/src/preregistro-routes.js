@@ -720,6 +720,8 @@ module.exports = function registerPreregistroRoutes(deps) {
           html: buildEmailLayout({
             title: "Preregistro pendiente por completar",
             intro: `Se creo un preregistro para la solicitud ${solicitud.perfil || ""}.`,
+            ctaLabel: "Ver Preregistros",
+            ctaUrl: "preregistrosCoord.html",
             blocks: [
               { label: "Responsable", value: continuationRole },
               { label: "Estado", value: initialPreregistroState },
@@ -733,6 +735,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     } catch (err) {
       try { await client.query("ROLLBACK"); } catch (_) {}
       if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.status(404).json({ error: "Solicitud no encontrada" });
+      if (err?.code === "23505") return res.status(400).json({ message: "El correo personal ya está registrado en nuestra BD" });
       console.error(err);
       return res.status(500).json({ error: "Error creando preregistro" });
     } finally {

@@ -5,6 +5,7 @@ const envFile =
   process.env.NODE_ENV === "production" ? ".env_produccion" : ".env";
 require("dotenv").config({ path: path.resolve(process.cwd(), envFile) });
 const express = require("express");
+const rateLimit = require("express-rate-limit");
 const cors = require("cors");
 const helmet = require("helmet");
 const bcrypt = require("bcrypt");
@@ -27,14 +28,14 @@ try {
 const { NumerosALetras } = require("numero-a-letras");
 const { sendEmail, getGraphAccessToken } = require("./email");
 const { pool, getPoolStats, isTransientDbError } = require("./db");
+const { env } = require("./config/env");
+const { requireAccess, requireAuthenticated, hasAccess } = require("./middlewares/access");
 const registerPreregistroRoutes = require("./preregistro-routes");
 const registerContratacionesRoutes = require("./contrataciones-routes");
 
 
 const app = express();
-const JWT_SECRET =
-  process.env.JWT_SECRET ||
-  (process.env.NODE_ENV === "production" ? "" : "dev_secret");
+const JWT_SECRET = env.JWT_SECRET;
 
 if (process.env.NODE_ENV === "production" && !JWT_SECRET) {
   throw new Error("JWT_SECRET no está configurado en producción.");
@@ -46,6 +47,7 @@ if (process.env.NODE_ENV === "production" && !JWT_SECRET) {
 app.use(helmet({
   contentSecurityPolicy: false
 }));
+app.set("trust proxy", 1);
 
 /**
  * Normaliza el valor del origen (origin) de CORS, extrayendo el protocolo y dominio de una URL.
@@ -94,9 +96,9 @@ const explicitCorsOrigins = new Set(
   [
     "http://localhost:3000",
     "http://localhost:4000",
-    ...(process.env.CORS_ORIGINS || "").split(","),
-    process.env.FRONT_PORTAL_BASE || "",
-    process.env.CONTRATOS_BASE_URL || ""
+    ...(env.CORS_ORIGINS || "").split(","),
+    env.FRONT_PORTAL_BASE || "",
+    env.CONTRATOS_BASE_URL || ""
   ]
     .map((value) => {
       const direct = normalizeCorsOriginValue(value);
@@ -134,6 +136,21 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json({ limit: "35mb" }));
 app.use(express.urlencoded({ extended: true, limit: "35mb" }));
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Demasiados intentos, intenta más tarde" }
+});
+const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use("/auth", authLimiter);
+app.use("/webhooks", webhookLimiter);
 app.options('*', cors(corsOptions));
 
 /* ===============================
@@ -703,7 +720,7 @@ function buildReporteResumen({ horas_reportadas, cantidad_dias_reportados, total
 }
 
 const FRONT_PORTAL_BASE =
-  process.env.FRONT_PORTAL_BASE ||
+  env.FRONT_PORTAL_BASE ||
   "https://icy-ground-03832ec1e.1.azurestaticapps.net/index.html";
 const readEnvSecret = (value) => String(value || "").trim().replace(/^['"]+|['"]+$/g, "");
 const ONEDRIVE_ENABLED = String(process.env.ONEDRIVE_ENABLED || "true").toLowerCase() === "true";
@@ -712,7 +729,7 @@ const ONEDRIVE_ROOT_FOLDER = process.env.ONEDRIVE_ROOT_FOLDER || "AdjuntosCuenta
 const CONTRATOS_ONEDRIVE_FOLDER = process.env.CONTRATOS_ONEDRIVE_FOLDER || "ContratosFirmados";
 const ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER = "AnexoTecnicoIndividual";
 const CONTRATOS_TOKEN_EXPIRY_HOURS = Math.max(1, Number(process.env.CONTRATOS_TOKEN_EXPIRY_HOURS || 72));
-const CONTRATOS_BASE_URL = String(process.env.CONTRATOS_BASE_URL || "").trim().replace(/\/+$/, "");
+const CONTRATOS_BASE_URL = String(env.CONTRATOS_BASE_URL || "").trim().replace(/\/+$/, "");
 const CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO = String(process.env.CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO || "").trim();
 const CONTRATOS_FIRMA_COMPLETADA_FALLBACK_NOTIFY = "ana.garcia@silverconsulting.com.co";
 const ANEXO_INDIVIDUAL_FALLBACK_NOTIFY_EMAIL = String(
@@ -729,13 +746,13 @@ const CLICKSIGN_CONTRATOS_CONFIG_ID = Number(process.env.CLICKSIGN_CONTRATOS_CON
 const CLICKSIGN_SIGNATURE_CB_URL = String(process.env.CLICKSIGN_SIGNATURE_CB_URL || "").trim();
 const CLICKSIGN_SIGNATORY_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_CB_URL || "").trim();
 const CLICKSIGN_SIGNATORY_EMAIL_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_EMAIL_CB_URL || "").trim();
-const CLICKSIGN_WEBHOOK_TOKEN = String(process.env.CLICKSIGN_WEBHOOK_TOKEN || "").trim();
+const CLICKSIGN_WEBHOOK_TOKEN = String(env.CLICKSIGN_WEBHOOK_TOKEN || "").trim();
 const CLICKSIGN_SIGNED_FILE_URL_TEMPLATE = String(process.env.CLICKSIGN_SIGNED_FILE_URL_TEMPLATE || "").trim();
 const CLICKSIGN_SIGNED_NOTIFY_ENABLED = String(process.env.CLICKSIGN_SIGNED_NOTIFY_ENABLED || "true").toLowerCase() === "true";
 const CLICKSIGN_SIGNED_NOTIFY_TO = String(process.env.CLICKSIGN_SIGNED_NOTIFY_TO || "proveedores@silverconsulting.com.co").trim();
 const CLICKSIGN_SIGNED_NOTIFY_CC = String(process.env.CLICKSIGN_SIGNED_NOTIFY_CC || "").trim();
 const CLICKSIGN_SIGNED_NOTIFY_BCC = String(process.env.CLICKSIGN_SIGNED_NOTIFY_BCC || "").trim();
-const DEBUG_CLICKSIGN_TOKEN = String(process.env.DEBUG_CLICKSIGN_TOKEN || "").trim();
+const DEBUG_CLICKSIGN_TOKEN = String(env.DEBUG_CLICKSIGN_TOKEN || "").trim();
 const ADOBE_PDF_CREDENTIALS_JSON = readEnvSecret(process.env.ADOBE_PDF_CREDENTIALS_JSON || process.env.ADOBE_PDF_CREDENTIALS || "");
 const ADOBE_PDF_CREDENTIALS_OBJECT = parseJsonObject(ADOBE_PDF_CREDENTIALS_JSON || "{}");
 const ADOBE_PDF_CLIENT_ID = readEnvSecret(
@@ -6745,49 +6762,7 @@ function generateCuentaCobroPdfBuffer(cuenta, detalles) {
   });
 }
 
-const hasAccess = (req, { roles = [], tipos = [] }) => {
-  const userRole = normalizeValue(req.user?.rol);
-  const userTipo = normalizeValue(req.user?.tipo_consultor);
-  const allowedRoles = roles.map(normalizeValue);
-  const allowedTipos = tipos.map(normalizeValue);
-  return (
-    (allowedRoles.length > 0 && allowedRoles.includes(userRole)) ||
-    (allowedTipos.length > 0 && allowedTipos.includes(userTipo))
-  );
-};
-
 const isAsociadoUser = (req) => normalizeValue(req?.user?.tipo_consultor) === "asociado";
-
-const requireAccess = ({ roles = [], tipos = [] } = {}) => (req, res, next) => {
-  if (!roles.length && !tipos.length) return next();
-  if (!req.user) {
-    const auth = req.headers.authorization || "";
-    const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ error: "No autorizado" });
-    try {
-      req.user = jwt.verify(token, JWT_SECRET);
-    } catch (err) {
-      return res.status(401).json({ error: "Token inválido" });
-    }
-  }
-  if (!hasAccess(req, { roles, tipos })) {
-    return res.status(403).json({ error: "Acceso denegado" });
-  }
-  return next();
-};
-
-const requireAuthenticated = (req, res, next) => {
-  if (req.user?.id) return next();
-  const auth = req.headers.authorization || "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
-  if (!token) return res.status(401).json({ error: "No autorizado" });
-  try {
-    req.user = jwt.verify(token, JWT_SECRET);
-    return next();
-  } catch (err) {
-    return res.status(401).json({ error: "Token inválido" });
-  }
-};
 
 /* ===============================
    SERVIR ARCHIVOS DEL FRONTEND
@@ -12776,13 +12751,29 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
 });
 
 app.get("/health", async (req, res) => {
+  const timestamp = new Date().toISOString();
+  try {
+    await pool.query("SELECT 1");
+    res.json({
+      status: "healthy",
+      timestamp
+    });
+  } catch (err) {
+    res.status(503).json({
+      status: "unhealthy",
+      timestamp
+    });
+  }
+});
+
+app.get("/health/deep", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   try {
     const dbCheck = await pool.query("SELECT current_database() AS db_name, version() AS pg_version");
     res.json({
       status: "healthy",
       timestamp: new Date().toISOString(),
       db_pool: getPoolStats(),
-      db_host: process.env.DB_HOST || null,
+      db_host: env.DB_HOST || null,
       db_name: dbCheck.rows[0]?.db_name || null,
       pg_version: String(dbCheck.rows[0]?.pg_version || "").split(" ").slice(0, 2).join(" ")
     });
@@ -12790,7 +12781,7 @@ app.get("/health", async (req, res) => {
     res.status(503).json({
       status: "unhealthy",
       db_pool: getPoolStats(),
-      db_host: process.env.DB_HOST || null
+      db_host: env.DB_HOST || null
     });
   }
 });
@@ -13584,12 +13575,9 @@ app.delete("/consultorias/:id", requireAccess({ roles: ["Administrador"] }), asy
 // Listar asignaciones activas para coordinador
 app.get("/mis-asignaciones-coordinador", requireAccess({ roles: ["Coordinador"] }), async (req, res) => {
   try {
-    const { coordinador_id } = req.query;
     const userId = req.user?.id || null;
 
     const result = await pool.query(`
-      WITH 
-        c_user AS (SELECT id FROM usuarios WHERE public_id::text = $1::text OR (id = $2::int AND $1::text IS NULL))
       SELECT
         ra.public_id AS id,
         con.public_id AS consultoria_id,
@@ -13623,12 +13611,9 @@ app.get("/mis-asignaciones-coordinador", requireAccess({ roles: ["Coordinador"] 
         LEFT JOIN modulo m ON ra.id_modulo = m.id
         LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
       WHERE con.activo = true
-        AND (
-          ($1::text IS NULL AND $2::int IS NULL) 
-          OR con.coordinador_responsable_id = (SELECT id FROM c_user)
-        )
+        AND con.coordinador_responsable_id = $1::int
       ORDER BY ra.id DESC
-    `, [coordinador_id || null, userId]);
+    `, [userId]);
 
     res.json(result.rows);
   } catch (err) {
@@ -13640,12 +13625,10 @@ app.get("/mis-asignaciones-coordinador", requireAccess({ roles: ["Coordinador"] 
 // Listar asignaciones activas para consultor
 app.get("/mis-asignaciones", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio"], tipos: ["Asociado"] }), async (req, res) => {
   try {
-    const { consultor_id } = req.query;
     const userId = req.user?.id || null;
+    const esConsultorPrincipal = normalizeValue(req.user?.rol) === "consultor principal";
 
     const result = await pool.query(`
-      WITH 
-        c_consultor AS (SELECT id, id_consultor_principal FROM usuarios WHERE public_id::text = $1::text OR (id = $2::int AND $1::text IS NULL))
       SELECT
         ra.public_id AS id,
         con.public_id AS consultoria_id,
@@ -13682,17 +13665,19 @@ app.get("/mis-asignaciones", requireAccess({ roles: ["Consultor", "Consultor Pri
           LIMIT 1
         ) lr ON true
       WHERE (
-        ($1::text IS NULL AND $2::int IS NULL)
-        OR ra.consultor_responsable_id = (SELECT id FROM c_consultor)
-        OR ra.consultor_responsable_id IN (
-          SELECT u.id
-          FROM usuarios u
-          WHERE u.activo = true
-            AND u.id_consultor_principal = (SELECT id FROM c_consultor)
+        ra.consultor_responsable_id = $1::int
+        OR (
+          $2::boolean = true
+          AND ra.consultor_responsable_id IN (
+            SELECT u.id
+            FROM usuarios u
+            WHERE u.activo = true
+              AND u.id_consultor_principal = $1::int
+          )
         )
       )
       ORDER BY ra.id DESC
-    `, [consultor_id || null, userId]);
+    `, [userId, esConsultorPrincipal]);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -16721,16 +16706,24 @@ async function reintentarCuentaCobroFirma(cuentaId) {
 
 app.post("/webhooks/clicksign/signature", async (req, res) => {
   try {
-    if (CLICKSIGN_WEBHOOK_TOKEN) {
-      const inboundToken = String(
-        req.headers["x-clicksign-token"] ||
-        req.headers["x-webhook-token"] ||
-        req.query?.token ||
-        ""
-      ).trim();
-      if (!inboundToken || inboundToken !== CLICKSIGN_WEBHOOK_TOKEN) {
-        return res.status(401).json({ ok: false, error: "Webhook no autorizado" });
-      }
+    if (!CLICKSIGN_WEBHOOK_TOKEN) {
+      console.error("[clicksign-webhook] CLICKSIGN_WEBHOOK_TOKEN no configurado");
+      return res.status(503).json({ ok: false, error: "Webhook deshabilitado" });
+    }
+
+    const inboundToken = String(
+      req.headers["x-clicksign-token"] ||
+      req.headers["x-webhook-token"] ||
+      req.query?.token ||
+      ""
+    ).trim();
+    const expectedTokenBuffer = Buffer.from(CLICKSIGN_WEBHOOK_TOKEN);
+    const inboundTokenBuffer = Buffer.from(inboundToken);
+    if (
+      inboundTokenBuffer.length !== expectedTokenBuffer.length ||
+      !crypto.timingSafeEqual(inboundTokenBuffer, expectedTokenBuffer)
+    ) {
+      return res.status(401).json({ ok: false, error: "Webhook no autorizado" });
     }
 
     const event = req.body && typeof req.body === "object" ? req.body : {};
@@ -17103,6 +17096,20 @@ app.put("/aprobaciones/:id", requireAccess({ roles: ["Coordinador"] }), async (r
     if (!estado) {
       return res.status(400).json({ error: "Falta estado" });
     }
+
+    const propiedad = await pool.query(
+      `SELECT rh.id
+       FROM reporte_horas rh
+       JOIN registro_asignaciones ra ON ra.id = rh.id_registro_asignacion
+       JOIN consultorias con ON con.id = ra.id_consultoria
+       WHERE rh.public_id = $1::uuid AND con.coordinador_responsable_id = $2::int`,
+      [id, req.user?.id || null]
+    );
+
+    if (propiedad.rows.length === 0) {
+      return res.status(404).json({ error: "Reporte no encontrado" });
+    }
+
     const result = await pool.query(
       `
        WITH c_reporte AS (SELECT id FROM reporte_horas WHERE public_id = $3::uuid)

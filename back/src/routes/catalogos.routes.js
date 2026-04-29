@@ -1,0 +1,20 @@
+const express = require("express");
+const router = express.Router();
+const { requireAccess, requireAuthenticated } = require("../middlewares/access");
+const { listModulosPublicos, listMonedas, listModulosAdmin, createModulo, updateModulo, deleteModulo, listRolesAdmin, createRol, updateRol, deleteRol, listBancosAdmin, createBanco, updateBanco, deleteBanco } = require("../services/catalogos.service");
+
+router.get("/modulos", requireAuthenticated, listModulosPublicos);
+router.get("/monedas", requireAuthenticated, listMonedas);
+router.get("/admin/modulos", requireAccess({ roles: ["Administrador"] }), listModulosAdmin);
+router.post("/admin/modulos", requireAccess({ roles: ["Administrador"] }), createModulo);
+router.put("/admin/modulos/:id", requireAccess({ roles: ["Administrador"] }), updateModulo);
+router.delete("/admin/modulos/:id", requireAccess({ roles: ["Administrador"] }), deleteModulo);
+router.get("/admin/roles", requireAccess({ roles: ["Administrador", "Talento Humano"] }), listRolesAdmin);
+router.post("/admin/roles", requireAccess({ roles: ["Administrador"] }), createRol);
+router.put("/admin/roles/:id", requireAccess({ roles: ["Administrador"] }), updateRol);
+router.delete("/admin/roles/:id", requireAccess({ roles: ["Administrador"] }), deleteRol);
+router.get("/admin/bancos", requireAccess({ roles: ["Administrador", "Talento Humano"] }), listBancosAdmin);
+router.post("/admin/bancos", requireAccess({ roles: ["Administrador"] }), createBanco);
+router.put("/admin/bancos/:id", requireAccess({ roles: ["Administrador"] }), updateBanco);
+router.delete("/admin/bancos/:id", requireAccess({ roles: ["Administrador"] }), deleteBanco);
+module.exports = router;

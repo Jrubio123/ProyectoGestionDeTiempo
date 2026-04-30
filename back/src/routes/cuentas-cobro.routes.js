@@ -7,7 +7,8 @@ const {
   getHistorialCuentas,
   getSoportesCuentas,
   getDetalleCuenta,
-  getCuentaPdf
+  getCuentaPdf,
+  uploadAdjuntosCuenta
 } = require("../services/cuentas-cobro.service");
 
 const router = Router();
@@ -20,5 +21,6 @@ router.get("/historial/:userId", requireAccess({ roles: ROLES_LECTURA_AMPLIA, ti
 router.get("/soportes", requireAccess({ roles: ["Administrador", "Coordinador"] }), getSoportesCuentas);
 router.get("/detalle/:cuentaId", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), getDetalleCuenta);
 router.get("/:id/pdf", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), getCuentaPdf);
+router.post("/:id/adjuntos", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), uploadAdjuntosCuenta);
 
 module.exports = router;

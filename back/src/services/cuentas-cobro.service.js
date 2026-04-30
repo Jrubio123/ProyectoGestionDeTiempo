@@ -422,11 +422,188 @@ async function getCuentaPdf(req, res) {
   }
 }
 
-module.exports = {
-  previewCuentaCobro,
-  crearCuentaCobro,
-  getHistorialCuentas,
-  getSoportesCuentas,
-  getDetalleCuenta,
-  getCuentaPdf
-};
+// Subir adjuntos (cuenta firmada + seguridad social)
+async function uploadAdjuntosCuenta(req, res) {
+  const {
+    encodeGraphPath,
+    ensureGraphFolder,
+    graphGet,
+    graphPutBinary,
+    isPdfBuffer,
+    parseGraphErrorStatus,
+    parsePdfDataUrl,
+    sanitizePathSegment,
+    sanitizePdfFileName
+  } = getIndexHelpers();
+  const ONEDRIVE_ENABLED = String(process.env.ONEDRIVE_ENABLED || "true").toLowerCase() === "true";
+  const ONEDRIVE_TARGET_USER = process.env.ONEDRIVE_TARGET_USER || "admin.apps@silverconsulting.com.co";
+  const ONEDRIVE_ROOT_FOLDER = process.env.ONEDRIVE_ROOT_FOLDER || "AdjuntosCuentasCobro";
+  const { id } = req.params;
+  const {
+    cuenta_pdf_nombre,
+    cuenta_pdf_base64,
+    seguridad_social_nombre,
+    seguridad_social_base64
+  } = req.body || {};
+
+  if (!cuenta_pdf_base64 || !seguridad_social_base64) {
+    return res.status(400).json({ error: "Debe adjuntar ambos archivos en PDF." });
+  }
+
+  if (!ONEDRIVE_ENABLED) {
+    return res.status(503).json({ error: "Servicio de carga no disponible temporalmente." });
+  }
+
+  let graphStage = "init";
+  try {
+    const ownerResult = await pool.query(
+      `
+      SELECT
+        cc.id,
+        cc.public_id,
+        cc.created_by,
+        cc.fecha_correspondiente,
+        cc.created_at,
+        cc.datos_adjuntos,
+        u.nombre_usuario
+      FROM cuenta_cobro cc
+      JOIN usuarios u ON u.id = cc.created_by
+      WHERE cc.public_id = $1
+      `,
+      [id]
+    );
+
+    const cuenta = ownerResult.rows[0];
+    if (!cuenta) return res.status(404).json({ error: "Cuenta de cobro no encontrada." });
+
+    const role = normalizeValue(req.user?.rol);
+    if (!["administrador", "coordinador"].includes(role) && String(cuenta.created_by) !== String(req.user?.id)) {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+
+    const cuentaPdfBuffer = parsePdfDataUrl(cuenta_pdf_base64);
+    const seguridadPdfBuffer = parsePdfDataUrl(seguridad_social_base64);
+
+    if (!isPdfBuffer(cuentaPdfBuffer) || !isPdfBuffer(seguridadPdfBuffer)) {
+      return res.status(400).json({ error: "Los archivos adjuntos deben estar en formato PDF válido." });
+    }
+
+    const maxSize = 8 * 1024 * 1024;
+    if (cuentaPdfBuffer.length > maxSize || seguridadPdfBuffer.length > maxSize) {
+      return res.status(400).json({ error: "Cada archivo debe pesar máximo 8MB." });
+    }
+
+    let token = null;
+    try {
+      token = await getGraphAccessToken();
+    } catch (tokenErr) {
+      const delegated = String(req?.headers?.["x-graph-access-token"] || "").trim();
+      if (!delegated) throw tokenErr;
+      token = delegated;
+    }
+    const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
+    graphStage = "graph-drive-check";
+    await graphGet(`/v1.0/users/${encodedUser}/drive`, token);
+
+    const fechaBase = String(cuenta.fecha_correspondiente || cuenta.created_at || new Date().toISOString()).slice(0, 10);
+    const consultorFolder = sanitizePathSegment(cuenta.nombre_usuario || `Consultor_${cuenta.created_by}`, `Consultor_${cuenta.created_by}`);
+    const cuentaFolderToken = String(cuenta.public_id || cuenta.id).split("-")[0];
+    const cuentaFolderName = `CuentaCobro_${cuentaFolderToken}_${fechaBase}`;
+
+    let targetPath = sanitizePathSegment(ONEDRIVE_ROOT_FOLDER, "AdjuntosCuentasCobro");
+    graphStage = "ensure-root-folder";
+    targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
+    graphStage = "ensure-consultor-folder";
+    targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, consultorFolder);
+    graphStage = "ensure-cuenta-folder";
+    targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, cuentaFolderName);
+
+    const cuentaFileName = sanitizePdfFileName(
+      cuenta_pdf_nombre || `CuentaCobroFirmada_${cuentaFolderToken}.pdf`,
+      `CuentaCobroFirmada_${cuentaFolderToken}.pdf`
+    );
+    const seguridadFileName = sanitizePdfFileName(
+      seguridad_social_nombre || `SeguridadSocial_${cuentaFolderToken}.pdf`,
+      `SeguridadSocial_${cuentaFolderToken}.pdf`
+    );
+
+    const cuentaPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${cuentaFileName}`)}:/content`;
+    const seguridadPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${seguridadFileName}`)}:/content`;
+
+    graphStage = "upload-files";
+    const [cuentaUpload, seguridadUpload] = await Promise.all([
+      graphPutBinary(cuentaPath, token, cuentaPdfBuffer, "application/pdf"),
+      graphPutBinary(seguridadPath, token, seguridadPdfBuffer, "application/pdf")
+    ]);
+
+    const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object"
+      ? cuenta.datos_adjuntos
+      : {};
+
+    const adjuntos = {
+      ...prevAdjuntos,
+      soportes: {
+        carpeta: targetPath,
+        actualizado_en: new Date().toISOString(),
+        cuenta_cobro_original: {
+          id: cuentaUpload.id,
+          nombre: cuentaUpload.name,
+          url: cuentaUpload.webUrl
+        },
+        cuenta_cobro: {
+          id: cuentaUpload.id,
+          nombre: cuentaUpload.name,
+          url: cuentaUpload.webUrl
+        },
+        seguridad_social: {
+          id: seguridadUpload.id,
+          nombre: seguridadUpload.name,
+          url: seguridadUpload.webUrl
+        }
+      }
+    };
+
+    await pool.query(
+      `
+      UPDATE cuenta_cobro
+      SET datos_adjuntos = $1::jsonb,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      `,
+      [JSON.stringify(adjuntos), cuenta.id]
+    );
+
+    res.json({
+      ok: true,
+      mensaje: "Soportes cargados exitosamente",
+      soportes: adjuntos.soportes
+    });
+  } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ ok: false, error: "Cuenta de cobro no encontrada." });
+    }
+    const status = parseGraphErrorStatus(err.message);
+    console.error("Error cargando adjuntos de cuenta:", err.message, "stage:", graphStage);
+
+    if (status === 401 || status === 403) {
+      return res.status(502).json({
+        ok: false,
+        error: "Servicio de almacenamiento no autorizado. Contacte a soporte."
+      });
+    }
+
+    if (status === 404) {
+      return res.status(502).json({
+        ok: false,
+        error: "No se encontró el repositorio de archivos configurado. Contacte a soporte."
+      });
+    }
+
+    res.status(500).json({
+      ok: false,
+      error: "Error al cargar el archivo. Por favor verifique su conexión o intente más tarde."
+    });
+  }
+}
+
+module.exports = { previewCuentaCobro, crearCuentaCobro, getHistorialCuentas, getSoportesCuentas, getDetalleCuenta, getCuentaPdf, uploadAdjuntosCuenta };

@@ -5,6 +5,9 @@ function getIndexHelpers() {
   return require("../index");
 }
 
+/**
+ * Busca usuarios corporativos disponibles para anexo individual
+ */
 async function searchAnexoIndividualUsuarios(req, res) {
   try {
     const q = String(req.query?.q || "").trim();
@@ -60,6 +63,9 @@ async function searchAnexoIndividualUsuarios(req, res) {
   }
 }
 
+/**
+ * Obtiene el tablero de anexos individuales de un usuario
+ */
 async function getAnexoIndividualUsuarioItems(req, res) {
   const {
     getUsuarioAnexoIndividualById,
@@ -79,6 +85,9 @@ async function getAnexoIndividualUsuarioItems(req, res) {
   }
 }
 
+/**
+ * Obtiene un item especifico de anexo individual
+ */
 async function getAnexoIndividualItem(req, res) {
   const {
     getAnexoIndividualItemByInput,
@@ -95,6 +104,9 @@ async function getAnexoIndividualItem(req, res) {
   }
 }
 
+/**
+ * Crea un nuevo item de anexo individual
+ */
 async function createAnexoIndividualItem(req, res) {
   const {
     getUsuarioAnexoIndividualById,
@@ -205,6 +217,9 @@ async function createAnexoIndividualItem(req, res) {
   }
 }
 
+/**
+ * Actualiza un item activo de anexo individual
+ */
 async function updateAnexoIndividualItem(req, res) {
   const {
     getAnexoIndividualItemByInput,
@@ -287,6 +302,9 @@ async function updateAnexoIndividualItem(req, res) {
   }
 }
 
+/**
+ * Marca un item de anexo individual como finalizado
+ */
 async function finalizarAnexoIndividualItem(req, res) {
   const {
     getAnexoIndividualItemByInput,
@@ -317,6 +335,9 @@ async function finalizarAnexoIndividualItem(req, res) {
   }
 }
 
+/**
+ * Genera la vista previa PDF del anexo individual
+ */
 async function previewAnexoIndividualPdf(req, res) {
   const {
     collectAnexoIndividualSignatureContext,
@@ -379,6 +400,9 @@ async function previewAnexoIndividualPdf(req, res) {
   }
 }
 
+/**
+ * Inicia el proceso de firma del anexo individual
+ */
 async function iniciarFirmaAnexoIndividual(req, res) {
   const {
     isClickSignConfigured,
@@ -638,6 +662,9 @@ async function iniciarFirmaAnexoIndividual(req, res) {
   }
 }
 
+/**
+ * Cancela un envio pendiente de firma de anexo individual
+ */
 async function cancelarFirmaAnexoIndividual(req, res) {
   const { isGuid } = getIndexHelpers();
 

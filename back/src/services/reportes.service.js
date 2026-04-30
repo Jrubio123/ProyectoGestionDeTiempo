@@ -7,6 +7,9 @@ function getIndexHelpers() {
 }
 
 // Reportar horas
+/**
+ * Registra horas o días trabajados por un consultor para una asignación específica
+ */
 async function reportarHoras(req, res) {
   const {
     toNullableNumber,
@@ -362,6 +365,9 @@ async function reportarHoras(req, res) {
 }
 
 // Reportes pendientes para coordinador
+/**
+ * Obtiene los reportes de horas que están pendientes de revisión por un coordinador
+ */
 async function listarAprobacionesPendientes(req, res) {
   const {
     applyTicketCaseFields
@@ -422,6 +428,9 @@ async function listarAprobacionesPendientes(req, res) {
 }
 
 // Aprobar / Rechazar reporte
+/**
+ * Registra la aprobación o rechazo de un reporte y notifica al consultor respectivo
+ */
 async function actualizarAprobacion(req, res) {
   const {
     getEstadoAsignacionValues,

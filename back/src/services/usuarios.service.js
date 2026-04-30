@@ -323,6 +323,9 @@ async function markLicenseBackupSnapshotRestored({
 }
 
 // Roles por usuario (admin)
+/**
+ * Obtiene la lista de usuarios activos junto con el rol de sistema asignado
+ */
 async function listUsuariosRoles(req, res) {
   try {
     const result = await pool.query(
@@ -348,6 +351,9 @@ async function listUsuariosRoles(req, res) {
 }
 
 // ====Gestión de licencias / acceso ============================================================?
+/**
+ * Lista los usuarios registrados para gestionar su estado de cuenta y accesos
+ */
 async function listUsuariosLicencias(req, res) {
   try {
     const result = await pool.query(`
@@ -371,6 +377,9 @@ async function listUsuariosLicencias(req, res) {
   }
 }
 
+/**
+ * Activa o desactiva la cuenta de un usuario y sincroniza con Entra ID
+ */
 async function patchUsuarioLicenciaEstado(req, res) {
   const { public_id } = req.params;
   const { activo } = req.body;
@@ -443,6 +452,9 @@ async function patchUsuarioLicenciaEstado(req, res) {
   }
 }
 
+/**
+ * Modifica el rol de sistema que tiene asignado un usuario en la plataforma
+ */
 async function actualizarRolUsuario(req, res) {
   const { id } = req.params;
   const { rol_id } = req.body || {};
@@ -487,6 +499,9 @@ async function actualizarRolUsuario(req, res) {
 // Requiere permisos de aplicación en Graph:
 // - User.EnableDisableAccount.All + User.Read.All (para accountEnabled)
 // - LicenseAssignment.ReadWrite.All (si se solicita liberar licencias)
+/**
+ * Modifica el estado de acceso de un usuario y gestiona sus licencias de Office
+ */
 async function actualizarUsuarioActivo(req, res) {
   const { id } = req.params;
   const {
@@ -731,6 +746,9 @@ async function actualizarUsuarioActivo(req, res) {
 }
 
 // Equivalente a: Set-MgUserLicense -UserId "..." -RemoveLicenses @("sku-id") -AddLicenses @()
+/**
+ * Agrega o remueve licencias de Entra ID directamente para un usuario
+ */
 async function asignarLicenciaUsuario(req, res) {
   const { id } = req.params;
   const { add_licenses = [], remove_licenses = [] } = req.body || {};
@@ -783,6 +801,9 @@ async function asignarLicenciaUsuario(req, res) {
 }
 
 // Historial de snapshots de licencias para un usuario
+/**
+ * Retorna el historial de cambios y respaldos de licencias aplicados a un usuario
+ */
 async function getLicenciasHistorial(req, res) {
   const { id } = req.params;
   try {

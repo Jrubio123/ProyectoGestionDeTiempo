@@ -1,5 +1,8 @@
 const { pool } = require("../db");
 
+/**
+ * Lista clientes activos del sistema
+ */
 async function listClientes(req, res) {
   try {
     const result = await pool.query(`
@@ -24,6 +27,9 @@ async function listClientes(req, res) {
   }
 }
 
+/**
+ * Crea un cliente con correlativo unico
+ */
 async function createCliente(req, res) {
   const { titulo, nit, prefijo, requiere_confirmacion_cliente } = req.body;
   const { toBooleanInput } = require("../index");
@@ -76,6 +82,9 @@ async function createCliente(req, res) {
   }
 }
 
+/**
+ * Actualiza los datos de un cliente
+ */
 async function updateCliente(req, res) {
   const { id } = req.params;
   const { titulo, nit, prefijo, requiere_confirmacion_cliente } = req.body;
@@ -110,6 +119,9 @@ async function updateCliente(req, res) {
   }
 }
 
+/**
+ * Desactiva un cliente existente
+ */
 async function deleteCliente(req, res) {
   const { id } = req.params;
 

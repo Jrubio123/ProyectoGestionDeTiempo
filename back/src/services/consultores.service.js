@@ -2,6 +2,9 @@ const { pool } = require("../db");
 
 const normalizeValue = (value) => String(value || "").toLowerCase().trim();
 
+/**
+ * Lista consultores activos disponibles
+ */
 async function listConsultores(req, res) {
   try {
     const result = await pool.query(`
@@ -22,6 +25,9 @@ async function listConsultores(req, res) {
   }
 }
 
+/**
+ * Lista consultores elegibles como principales
+ */
 async function listConsultoresPrincipales(req, res) {
   try {
     const result = await pool.query(`
@@ -43,6 +49,9 @@ async function listConsultoresPrincipales(req, res) {
   }
 }
 
+/**
+ * Lista asociados vinculados a un consultor principal
+ */
 async function listSubConsultoresPorPrincipal(req, res) {
   const { principalId } = req.params;
   try {
@@ -69,6 +78,9 @@ async function listSubConsultoresPorPrincipal(req, res) {
   }
 }
 
+/**
+ * Lista consultores disponibles para asociar
+ */
 async function listSubConsultoresDisponibles(req, res) {
   const { principalId } = req.params;
   try {
@@ -98,6 +110,9 @@ async function listSubConsultoresDisponibles(req, res) {
   }
 }
 
+/**
+ * Vincula un consultor asociado a un principal
+ */
 async function asociarSubConsultor(req, res) {
   const { principal_id, asociado_id } = req.body;
   try {
@@ -150,6 +165,9 @@ async function asociarSubConsultor(req, res) {
   }
 }
 
+/**
+ * Desvincula un consultor asociado de su principal
+ */
 async function desvincularSubConsultor(req, res) {
   const { asociadoId } = req.params;
   const { principal_id } = req.body || {};

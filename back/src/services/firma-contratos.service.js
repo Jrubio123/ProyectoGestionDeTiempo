@@ -5,6 +5,9 @@ function getIndexHelpers() {
   return require("../index");
 }
 
+/**
+ * Obtiene la lista de tokens generados para procesos de firma de contratos
+ */
 async function listFirmaContratos(req, res) {
   const {
     CLAVES_REQUERIDAS_FIRMA
@@ -47,6 +50,9 @@ async function listFirmaContratos(req, res) {
   }
 }
 
+/**
+ * Lista las personas candidatas que son elegibles para iniciar un proceso de contratación
+ */
 async function listCandidatos(req, res) {
   try {
     // Personas registradas en tabla personas
@@ -148,6 +154,9 @@ async function listCandidatos(req, res) {
   }
 }
 
+/**
+ * Genera un token único temporal y envía el enlace de firma por correo electrónico
+ */
 async function generarTokenFirma(req, res) {
   const {
     sendEmailSafe,
@@ -303,6 +312,9 @@ async function generarTokenFirma(req, res) {
   }
 }
 
+/**
+ * Obtiene la lista de ítems del anexo técnico asociados a un proceso de contratación
+ */
 async function listAnexoItems(req, res) {
   const {
     toNullableTrimmedString,
@@ -350,6 +362,9 @@ async function listAnexoItems(req, res) {
   }
 }
 
+/**
+ * Crea un nuevo registro manual para el anexo técnico de un candidato
+ */
 async function createAnexoItem(req, res) {
   const {
     resolveInternalIdFromPublicIdOrId,
@@ -429,6 +444,9 @@ async function createAnexoItem(req, res) {
   }
 }
 
+/**
+ * Anula o expira manualmente un token de firma de contrato que estaba pendiente
+ */
 async function deleteFirmaContrato(req, res) {
   try {
     const r = await pool.query(

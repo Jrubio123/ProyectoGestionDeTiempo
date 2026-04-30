@@ -9,6 +9,9 @@ function getIndexHelpers() {
 // Obtener consultorías
 // Admin ve todas (o filtra por coordinador_id opcional).
 // Coordinador solo ve las suyas propias, sin importar qué venga en query params.
+/**
+ * Obtiene la lista de consultorías activas filtradas según el rol del usuario
+ */
 async function listConsultorias(req, res) {
   try {
     const role = normalizeValue(req.user?.rol);
@@ -53,6 +56,9 @@ async function listConsultorias(req, res) {
 }
 
 // Crear consultoría (solo Administrador asigna clientes a coordinadores)
+/**
+ * Crea una nueva consultoría, asigna los responsables y envía una notificación por correo
+ */
 async function crearConsultoria(req, res) {
   const { cliente_id, coordinador_id, tipo_asignacion_id, descripcion_consultoria } = req.body;
   const { sendEmailSafe, buildPortalUrl, getGraphContext, buildEmailLayout } = getIndexHelpers();
@@ -149,6 +155,9 @@ async function crearConsultoria(req, res) {
 }
 
 // Actualizar consultoría (solo Administrador)
+/**
+ * Modifica los datos principales de una consultoría existente en la base de datos
+ */
 async function actualizarConsultoria(req, res) {
   const { id } = req.params;
   const { cliente_id, coordinador_id, tipo_asignacion_id, descripcion_consultoria } = req.body;
@@ -215,6 +224,9 @@ async function actualizarConsultoria(req, res) {
 }
 
 // Eliminar consultoría (soft delete, solo Administrador)
+/**
+ * Realiza un borrado lógico para inactivar una consultoría en el sistema
+ */
 async function eliminarConsultoria(req, res) {
   const { id } = req.params;
 

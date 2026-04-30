@@ -170,6 +170,9 @@ const isGuid = (value) =>
     String(value || "").trim()
   );
 
+/**
+ * Registra un usuario local con rol consultor
+ */
 async function registerUser(req, res) {
   if (String(process.env.AUTH_MODE || "").toLowerCase() === "ms_only") {
     return res.status(403).json({ error: "Registro deshabilitado. Usa Microsoft SSO." });
@@ -218,6 +221,9 @@ async function registerUser(req, res) {
   }
 }
 
+/**
+ * Autentica usuarios locales y emite JWT
+ */
 async function loginUser(req, res) {
   if (String(process.env.AUTH_MODE || "").toLowerCase() === "ms_only") {
     return res.status(403).json({ error: "Login deshabilitado. Usa Microsoft SSO." });
@@ -274,6 +280,9 @@ async function loginUser(req, res) {
   }
 }
 
+/**
+ * Devuelve el usuario autenticado por JWT
+ */
 async function getCurrentUser(req, res) {
   try {
     const auth = req.headers.authorization || "";
@@ -296,6 +305,9 @@ async function getCurrentUser(req, res) {
   }
 }
 
+/**
+ * Obtiene la foto Microsoft del usuario autenticado
+ */
 async function getUserPhoto(req, res) {
   try {
     const auth = req.headers.authorization || "";
@@ -342,6 +354,9 @@ async function getUserPhoto(req, res) {
   }
 }
 
+/**
+ * Autentica usuarios con Microsoft SSO y emite JWT
+ */
 async function loginWithMicrosoft(req, res) {
   const accessToken = req.body?.access_token;
   if (!accessToken) {

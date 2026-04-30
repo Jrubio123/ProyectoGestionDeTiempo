@@ -7,6 +7,9 @@ function getIndexHelpers() {
 }
 
 // Actualizar asignación (registro_asignaciones)
+/**
+ * Actualiza los detalles, tiempos y valores de una asignación ya registrada
+ */
 async function actualizarRegistroAsignacion(req, res) {
   const {
     getEstadoAsignacionValues,
@@ -212,6 +215,9 @@ async function actualizarRegistroAsignacion(req, res) {
 }
 
 // Cerrar asignación (soft delete operativo)
+/**
+ * Finaliza o cierra de manera operativa una asignación de Mesa o Fábrica
+ */
 async function eliminarRegistroAsignacion(req, res) {
   const {
     getEstadoAsignacionValues,
@@ -273,6 +279,9 @@ async function eliminarRegistroAsignacion(req, res) {
 }
 
 // Crear asignación (registro_asignaciones)
+/**
+ * Registra una nueva asignación para un consultor y le envía una notificación
+ */
 async function crearRegistroAsignacion(req, res) {
   const {
     getEstadoAsignacionValues,

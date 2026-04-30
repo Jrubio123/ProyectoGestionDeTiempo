@@ -1,6 +1,9 @@
 const { pool } = require("../db");
 
 // ============== MODULOS (publico) ==============
+/**
+ * Lista modulos activos para uso publico
+ */
 async function listModulosPublicos(req, res) {
   try {
     const result = await pool.query(`
@@ -20,6 +23,9 @@ async function listModulosPublicos(req, res) {
 }
 
 // ============== MONEDAS ==============
+/**
+ * Lista las monedas disponibles del sistema
+ */
 async function listMonedas(req, res) {
   try {
     const result = await pool.query(
@@ -35,6 +41,9 @@ async function listMonedas(req, res) {
 }
 
 // ============== MODULOS (admin) ==============
+/**
+ * Lista modulos para administracion
+ */
 async function listModulosAdmin(req, res) {
   try {
     const result = await pool.query(
@@ -58,6 +67,9 @@ async function listModulosAdmin(req, res) {
   }
 }
 
+/**
+ * Crea un nuevo modulo administrativo
+ */
 async function createModulo(req, res) {
   const titulo = String(req.body?.titulo || "").trim();
   const nombreCompleto = String(req.body?.nombre_completo || "").trim() || null;
@@ -87,6 +99,9 @@ async function createModulo(req, res) {
   }
 }
 
+/**
+ * Actualiza un modulo existente
+ */
 async function updateModulo(req, res) {
   const { id } = req.params;
   const titulo = String(req.body?.titulo || "").trim();
@@ -137,6 +152,9 @@ async function updateModulo(req, res) {
   }
 }
 
+/**
+ * Desactiva un modulo existente
+ */
 async function deleteModulo(req, res) {
   const { id } = req.params;
   try {
@@ -159,6 +177,9 @@ async function deleteModulo(req, res) {
 }
 
 // ============== ROLES (admin) ==============
+/**
+ * Lista roles para administracion
+ */
 async function listRolesAdmin(req, res) {
   try {
     const result = await pool.query(
@@ -181,6 +202,9 @@ async function listRolesAdmin(req, res) {
   }
 }
 
+/**
+ * Crea un nuevo rol
+ */
 async function createRol(req, res) {
   const titulo = String(req.body?.titulo || "").trim();
   const descripcion = String(req.body?.descripcion || "").trim() || null;
@@ -209,6 +233,9 @@ async function createRol(req, res) {
   }
 }
 
+/**
+ * Actualiza un rol existente
+ */
 async function updateRol(req, res) {
   const { id } = req.params;
   const titulo = String(req.body?.titulo || "").trim();
@@ -257,6 +284,9 @@ async function updateRol(req, res) {
   }
 }
 
+/**
+ * Desactiva un rol si no esta en uso
+ */
 async function deleteRol(req, res) {
   const { id } = req.params;
   try {
@@ -301,6 +331,9 @@ async function deleteRol(req, res) {
 }
 
 // ============== BANCOS (admin) ==============
+/**
+ * Lista bancos para administracion
+ */
 async function listBancosAdmin(req, res) {
   try {
     const result = await pool.query(
@@ -324,6 +357,9 @@ async function listBancosAdmin(req, res) {
   }
 }
 
+/**
+ * Crea un nuevo banco
+ */
 async function createBanco(req, res) {
   const titulo = String(req.body?.titulo || "").trim();
   const codigoBancolombia = String(req.body?.codigo_bancolombia || "").trim() || null;
@@ -353,6 +389,9 @@ async function createBanco(req, res) {
   }
 }
 
+/**
+ * Actualiza un banco existente
+ */
 async function updateBanco(req, res) {
   const { id } = req.params;
   const titulo = String(req.body?.titulo || "").trim();
@@ -403,6 +442,9 @@ async function updateBanco(req, res) {
   }
 }
 
+/**
+ * Desactiva un banco si no esta asignado
+ */
 async function deleteBanco(req, res) {
   const { id } = req.params;
   try {

@@ -9,6 +9,9 @@ function getIndexHelpers() {
 }
 
 // Vista previa de cuenta de cobro (total + letras)
+/**
+ * Previsualiza el total a cobrar y su valor convertido a letras
+ */
 async function previewCuentaCobro(req, res) {
   const { buildTotalLetras } = getIndexHelpers();
   const { consultor_id, ids_reportes } = req.body;
@@ -92,6 +95,9 @@ async function previewCuentaCobro(req, res) {
 }
 
 // Crear cuenta de cobro
+/**
+ * Genera una nueva cuenta de cobro y asocia los reportes de horas correspondientes
+ */
 async function crearCuentaCobro(req, res) {
   const { buildTotalLetras, getEstadoAsignacionValues, sendEmailSafe, getGraphContext } = getIndexHelpers();
   const { consultor_id, fecha_inicio, fecha_fin, total_letras, ciudad_cobro, total_numeros, ids_reportes } = req.body;
@@ -262,6 +268,9 @@ async function crearCuentaCobro(req, res) {
 }
 
 // Historial de cuentas de cobro por usuario
+/**
+ * Consulta el historial de cuentas de cobro generadas por un consultor específico
+ */
 async function getHistorialCuentas(req, res) {
   const { userId } = req.params;
   const { fecha_inicio, fecha_fin } = req.query;
@@ -308,6 +317,9 @@ async function getHistorialCuentas(req, res) {
 }
 
 // Soportes cargados de cuentas de cobro (solo admin/coordinador)
+/**
+ * Lista las cuentas de cobro que tienen archivos adjuntos cargados en el sistema
+ */
 async function getSoportesCuentas(req, res) {
   const { consultor_id } = req.query || {};
   try {
@@ -345,6 +357,9 @@ async function getSoportesCuentas(req, res) {
 }
 
 // Detalle de cuenta de cobro
+/**
+ * Retorna la lista detallada de reportes de horas asociados a una cuenta
+ */
 async function getDetalleCuenta(req, res) {
   const { cuentaId } = req.params;
   try {
@@ -391,6 +406,9 @@ async function getDetalleCuenta(req, res) {
 }
 
 // Descargar PDF de cuenta de cobro
+/**
+ * Genera y descarga el archivo PDF con el formato de la cuenta de cobro
+ */
 async function getCuentaPdf(req, res) {
   const { assertCuentaCobroOwnerAccess, getCuentaCobroPdfContext, writeCuentaCobroPdf } = getIndexHelpers();
   const { id } = req.params;
@@ -423,6 +441,9 @@ async function getCuentaPdf(req, res) {
 }
 
 // Subir adjuntos (cuenta firmada + seguridad social)
+/**
+ * Sube y asocia los documentos PDF de soporte de cobro hacia OneDrive
+ */
 async function uploadAdjuntosCuenta(req, res) {
   const {
     encodeGraphPath,

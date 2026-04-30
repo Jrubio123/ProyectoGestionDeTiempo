@@ -5,6 +5,9 @@ function getIndexHelpers() {
   return require("../index");
 }
 
+/**
+ * Reintenta procesar una cuenta de cobro firmada
+ */
 async function reintentarCuentaCobroFirma(cuentaId) {
   const {
     resolveClickSignArtifacts,
@@ -73,6 +76,9 @@ async function reintentarCuentaCobroFirma(cuentaId) {
   }
 }
 
+/**
+ * Procesa eventos webhook de firma ClickSign
+ */
 async function processSignatureEvent(event) {
   const {
     pickStringByPaths,

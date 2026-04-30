@@ -160,6 +160,7 @@ app.use("/consultorias", require("./routes/consultorias.routes"));
 app.use("/registro-asignaciones", require("./routes/registro-asignaciones.routes"));
 app.use(require("./routes/reportes.routes"));
 app.use(require("./routes/anexo-individual.routes"));
+app.use("/admin/firma-contratos", require("./routes/firma-contratos.routes"));
 app.options('*', cors(corsOptions));
 
 /* ===============================
@@ -7094,44 +7095,6 @@ async function notifyContratoFirmaCompletada(tokenId) {
   }
 }
 
-app.get("/admin/firma-contratos", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT
-        t.public_id        AS id,
-        t.nombre_persona,
-        t.correo_personal,
-        t.estado,
-        t.checks_completados,
-        t.docs_firma,
-        t.expires_at,
-        t.created_at,
-        sc.public_id       AS solicitud_public_id,
-        sc.perfil          AS solicitud_perfil,
-        pp.public_id       AS preregistro_public_id,
-        u.nombre_usuario   AS generado_por_nombre
-      FROM tokens_firma_contrato t
-        LEFT JOIN solicitudes_contratacion sc ON sc.id = t.solicitud_id
-        LEFT JOIN preregistro_personas pp ON pp.id = t.preregistro_id
-        LEFT JOIN usuarios u ON u.id = t.generado_por
-      ORDER BY t.created_at DESC
-    `);
-    const checksRequeridos = Array.isArray(CLAVES_REQUERIDAS_FIRMA) && CLAVES_REQUERIDAS_FIRMA.length
-      ? [...CLAVES_REQUERIDAS_FIRMA]
-      : ["pdf1", "pdf2", "pdf3", "pdf4", "pdf5"];
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
-    res.setHeader("Pragma", "no-cache");
-    res.setHeader("Expires", "0");
-    res.json(result.rows.map((row) => ({
-      ...row,
-      checks_requeridos: checksRequeridos
-    })));
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error al obtener tokens de firma" });
-  }
-});
-
 // Resuelve la solicitud o preregistro más reciente para una persona identificada por numero_documento o correo.
 // Prioriza solicitudes tipo 'Nuevo' sobre preregistros.
 async function resolveProcesoForPersona(pgClient, { numero_documento, correo_personal }) {
@@ -7170,368 +7133,6 @@ async function resolveProcesoForPersona(pgClient, { numero_documento, correo_per
   );
   return { solicitud_id: null, preregistro_id: preR.rows[0]?.id || null };
 }
-
-app.get("/admin/firma-contratos/candidatos", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
-  try {
-    // Personas registradas en tabla personas
-    const personasQuery = pool.query(`
-      SELECT
-        COALESCE(NULLIF(BTRIM(p.numero_documento), ''), LOWER(NULLIF(BTRIM(p.correo_electronico), ''))) AS persona_key,
-        CONCAT_WS(' ', NULLIF(BTRIM(p.nombre), ''), NULLIF(BTRIM(p.apellidos), '')) AS nombre_completo,
-        p.correo_electronico AS correo_personal,
-        p.numero_documento,
-        p.factura_en_colombia,
-        'persona' AS origen,
-        p.created_at,
-        EXISTS (
-          SELECT 1 FROM tokens_firma_contrato tf
-          WHERE tf.estado IN ('pendiente','en_proceso')
-            AND (
-              EXISTS (SELECT 1 FROM solicitudes_contratacion sc WHERE sc.id = tf.solicitud_id AND NULLIF(BTRIM(sc.numero_documento),'') = NULLIF(BTRIM(p.numero_documento),''))
-              OR EXISTS (SELECT 1 FROM preregistro_personas pp WHERE pp.id = tf.preregistro_id AND NULLIF(BTRIM(pp.numero_documento),'') = NULLIF(BTRIM(p.numero_documento),''))
-            )
-        ) AS tiene_proceso_activo
-      FROM personas p
-      WHERE p.correo_electronico IS NOT NULL AND BTRIM(p.correo_electronico) <> ''
-      ORDER BY p.created_at DESC
-      LIMIT 200
-    `);
-
-    // Personas en vuelo: solicitudes o preregistros pendientes sin fila en personas aún
-    const evQuery = pool.query(`
-      SELECT
-        COALESCE(NULLIF(BTRIM(x.numero_documento),''), LOWER(NULLIF(BTRIM(x.correo_personal),''))) AS persona_key,
-        x.nombre_completo,
-        x.correo_personal,
-        x.numero_documento,
-        NULL::boolean AS factura_en_colombia,
-        'en_vuelo' AS origen,
-        x.created_at,
-        EXISTS (
-          SELECT 1 FROM tokens_firma_contrato tf
-          WHERE tf.estado IN ('pendiente','en_proceso')
-            AND (
-              EXISTS (SELECT 1 FROM solicitudes_contratacion sc WHERE sc.id = tf.solicitud_id AND NULLIF(BTRIM(sc.numero_documento),'') = NULLIF(BTRIM(x.numero_documento),''))
-              OR EXISTS (SELECT 1 FROM preregistro_personas pp WHERE pp.id = tf.preregistro_id AND NULLIF(BTRIM(pp.numero_documento),'') = NULLIF(BTRIM(x.numero_documento),''))
-            )
-        ) AS tiene_proceso_activo
-      FROM (
-        SELECT
-          BTRIM(sc.numero_documento) AS numero_documento,
-          BTRIM(sc.correo_personal)  AS correo_personal,
-          CONCAT_WS(' ', NULLIF(BTRIM(sc.nombre),''), NULLIF(BTRIM(sc.apellidos),'')) AS nombre_completo,
-          MAX(sc.created_at) AS created_at
-        FROM solicitudes_contratacion sc
-        WHERE sc.tipo_solicitud = 'Nuevo'
-          AND sc.estado IN ('Pendiente Revision TH', 'Pendiente Correo Silver')
-          AND sc.correo_personal IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM personas p
-            WHERE NULLIF(BTRIM(p.numero_documento),'') = NULLIF(BTRIM(sc.numero_documento),'')
-              OR LOWER(NULLIF(BTRIM(p.correo_electronico),'')) = LOWER(NULLIF(BTRIM(sc.correo_personal),''))
-          )
-        GROUP BY BTRIM(sc.numero_documento), BTRIM(sc.correo_personal),
-                 CONCAT_WS(' ', NULLIF(BTRIM(sc.nombre),''), NULLIF(BTRIM(sc.apellidos),''))
-        UNION ALL
-        SELECT
-          BTRIM(pp.numero_documento) AS numero_documento,
-          BTRIM(pp.correo_personal)  AS correo_personal,
-          CONCAT_WS(' ', NULLIF(BTRIM(pp.nombre),''), NULLIF(BTRIM(pp.apellidos),'')) AS nombre_completo,
-          MAX(pp.created_at) AS created_at
-        FROM preregistro_personas pp
-        WHERE pp.estado IN ('Pendiente Revision TH', 'Pendiente Correo Silver')
-          AND pp.correo_personal IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM personas p
-            WHERE NULLIF(BTRIM(p.numero_documento),'') = NULLIF(BTRIM(pp.numero_documento),'')
-              OR LOWER(NULLIF(BTRIM(p.correo_electronico),'')) = LOWER(NULLIF(BTRIM(pp.correo_personal),''))
-          )
-        GROUP BY BTRIM(pp.numero_documento), BTRIM(pp.correo_personal),
-                 CONCAT_WS(' ', NULLIF(BTRIM(pp.nombre),''), NULLIF(BTRIM(pp.apellidos),''))
-      ) x
-      ORDER BY x.created_at DESC
-      LIMIT 200
-    `);
-
-    const [personasRes, evRes] = await Promise.all([personasQuery, evQuery]);
-
-    const seen = new Map();
-    for (const row of personasRes.rows) seen.set(row.persona_key, row);
-    for (const row of evRes.rows) {
-      if (!seen.has(row.persona_key)) seen.set(row.persona_key, row);
-    }
-
-    const candidatos = [...seen.values()]
-      .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
-      .slice(0, 200);
-
-    res.json({ candidatos });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error al obtener candidatos" });
-  }
-});
-
-app.post("/admin/firma-contratos/generar", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
-  const { solicitud_id, preregistro_id, nombre_persona, correo_personal, numero_documento } = req.body || {};
-
-  if (!solicitud_id && !preregistro_id && !numero_documento && !correo_personal) {
-    return res.status(400).json({ error: "Debes indicar numero_documento, correo_personal, solicitud_id o preregistro_id" });
-  }
-
-  try {
-    const token = crypto.randomBytes(24).toString("hex");
-    const expiresAt = new Date(Date.now() + CONTRATOS_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000);
-
-    let solId = null;
-    let preId = null;
-
-    if (solicitud_id) {
-      const r = await pool.query("SELECT id FROM solicitudes_contratacion WHERE public_id = $1", [solicitud_id]);
-      if (r.rowCount === 0) return res.status(404).json({ error: "Solicitud no encontrada" });
-      solId = r.rows[0].id;
-    } else if (preregistro_id) {
-      const r = await pool.query("SELECT id FROM preregistro_personas WHERE public_id = $1", [preregistro_id]);
-      if (r.rowCount === 0) return res.status(404).json({ error: "Preregistro no encontrado" });
-      preId = r.rows[0].id;
-    } else {
-      // Auto-resolver por numero_documento o correo_personal
-      const resolved = await resolveProcesoForPersona(pool, {
-        numero_documento: toNullableTrimmedString(numero_documento),
-        correo_personal: toNullableTrimmedString(correo_personal)
-      });
-      solId = resolved.solicitud_id;
-      preId = resolved.preregistro_id;
-    }
-
-    const procesoContext = {
-      solicitud_id: solId,
-      preregistro_id: preId,
-      nombre_persona: nombre_persona || "",
-      correo_personal: correo_personal || ""
-    };
-    const personaContext = await resolveContratoPersonaContext(procesoContext);
-    const nombreIngresado = toNullableTrimmedString(nombre_persona);
-    const correoIngresado = toNullableTrimmedString(correo_personal);
-    const nombreFinal =
-      nombreIngresado ||
-      toNullableTrimmedString(personaContext?.nombreCompleto) ||
-      "";
-    const correoFinal =
-      correoIngresado ||
-      toNullableTrimmedString(personaContext?.correoPersonal) ||
-      "";
-    if (!nombreFinal || !correoFinal) {
-      return res.status(400).json({ error: "No se pudo resolver nombre_persona o correo_personal del proceso" });
-    }
-
-    // Expirar todos los tokens activos de la persona (por numero_documento)
-    const numDocFinal = toNullableTrimmedString(personaContext?.numeroDocumento) || toNullableTrimmedString(numero_documento);
-    if (numDocFinal) {
-      await pool.query(
-        `UPDATE tokens_firma_contrato tf SET estado = 'expirado', updated_at = NOW()
-         WHERE tf.estado IN ('pendiente', 'en_proceso')
-           AND (
-             EXISTS (SELECT 1 FROM solicitudes_contratacion sc WHERE sc.id = tf.solicitud_id AND NULLIF(BTRIM(sc.numero_documento),'') = $1)
-             OR EXISTS (SELECT 1 FROM preregistro_personas pp WHERE pp.id = tf.preregistro_id AND NULLIF(BTRIM(pp.numero_documento),'') = $1)
-           )`,
-        [numDocFinal]
-      );
-    } else {
-      if (solId) {
-        await pool.query(
-          "UPDATE tokens_firma_contrato SET estado = 'expirado', updated_at = NOW() WHERE solicitud_id = $1 AND estado IN ('pendiente', 'en_proceso')",
-          [solId]
-        );
-      }
-      if (preId) {
-        await pool.query(
-          "UPDATE tokens_firma_contrato SET estado = 'expirado', updated_at = NOW() WHERE preregistro_id = $1 AND estado IN ('pendiente', 'en_proceso')",
-          [preId]
-        );
-      }
-    }
-
-    const hasBaseContract = await hasContratoBaseFirmado({
-      correoPersonal: toNullableTrimmedString(personaContext?.correoPersonal) || correoFinal,
-      numeroDocumento: personaContext?.numeroDocumento || null
-    });
-    const docsPlan = buildDocsFirmaPlan({
-      hasContratoBase: hasBaseContract,
-      facturaEnColombia: personaContext?.facturaEnColombia ?? null
-    });
-    if (docsPlan.some((doc) => doc?.doc_key === "anexo_tecnico")) {
-      await requirePersistedAnexoFromProceso(procesoContext, personaContext);
-    }
-
-    const insert = await pool.query(
-      `INSERT INTO tokens_firma_contrato
-        (token, solicitud_id, preregistro_id, nombre_persona, correo_personal, docs_firma, generado_por, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
-       RETURNING public_id AS id, token, expires_at, docs_firma`,
-      [token, solId, preId, nombreFinal, correoFinal, JSON.stringify(docsPlan), req.user.id, expiresAt]
-    );
-
-    const row = insert.rows[0];
-
-    const baseUrl = CONTRATOS_BASE_URL || "https://icy-ground-03832ec1e.1.azurestaticapps.net";
-    const link = `${baseUrl}/contratacion.html?t=${token}`;
-
-    const sendResult = await sendEmailSafe({
-      ...getGraphContext(req),
-      to: correoFinal,
-      subject: "Proceso de contratación - Silver Consulting",
-      html: buildContratoEmailHtml({ nombre: nombreFinal, token, link })
-    });
-    if (!sendResult?.ok) {
-      await pool.query("DELETE FROM tokens_firma_contrato WHERE token = $1", [token]).catch((cleanupErr) => {
-        console.error("No se pudo limpiar token de firma tras fallo de correo:", cleanupErr?.message || cleanupErr);
-      });
-      const sendErr = new Error(sendResult?.error || "No fue posible enviar el correo");
-      sendErr.status = 502;
-      throw sendErr;
-    }
-
-    res.status(201).json({
-      id: row.id,
-      token,
-      expires_at: row.expires_at,
-      docs_firma: normalizeDocsFirmaListCompat(row.docs_firma),
-      paquete_documentos: hasBaseContract ? "anexo_tecnico" : "completo",
-      link,
-      correo_destino: correoFinal,
-      correo_enviado: true
-    });
-  } catch (err) {
-    console.error(err);
-    const status = Number(err?.status || 0);
-    if (status >= 400 && status < 500) {
-      return res.status(status).json({ error: err.message || "No fue posible generar el token de firma" });
-    }
-    res.status(500).json({ error: "Error generando token de firma" });
-  }
-});
-
-app.get("/admin/firma-contratos/anexo-items", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
-  try {
-    const solicitudInput = req.query?.solicitud_id || null;
-    const preregistroInput = req.query?.preregistro_id || null;
-    let numeroDocumento = toNullableTrimmedString(req.query?.numero_documento);
-    let correoPersonal = toNullableTrimmedString(req.query?.correo_personal);
-
-    let solicitudId = null;
-    let preregistroId = null;
-    if (solicitudInput) {
-      solicitudId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.solicitudesContratacion, solicitudInput);
-      if (!solicitudId) return res.status(404).json({ error: "Solicitud no encontrada" });
-    }
-    if (preregistroInput) {
-      preregistroId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.preregistroPersonas, preregistroInput);
-      if (!preregistroId) return res.status(404).json({ error: "Preregistro no encontrado" });
-    }
-
-    if (!solicitudId && !preregistroId && !numeroDocumento && !correoPersonal) {
-      return res.status(400).json({ error: "Debes indicar solicitud_id, preregistro_id, numero_documento o correo_personal" });
-    }
-
-    // Cuando hay IDs de proceso (solicitud/preregistro), NO se resuelven ni agregan
-    // numero_documento ni correo_personal: hacerlo causaria que listAnexoTecnicoItems
-    // devuelva filas de otras recontrataciones del mismo colaborador via OR.
-    // Los identificadores personales solo se usan como fallback cuando no hay IDs.
-    const rows = await listAnexoTecnicoItems({
-      solicitudId,
-      preregistroId,
-      numeroDocumento: (!solicitudId && !preregistroId) ? numeroDocumento : null,
-      correoPersonal: (!solicitudId && !preregistroId && !numeroDocumento) ? correoPersonal : null
-    });
-    res.json(rows.map(toAnexoApiRow));
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error obteniendo items de anexo tecnico" });
-  }
-});
-
-app.post("/admin/firma-contratos/anexo-items", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
-  const payload = req.body || {};
-  try {
-    const solicitudInput = payload.solicitud_id || null;
-    const preregistroInput = payload.preregistro_id || null;
-    if (!solicitudInput && !preregistroInput) {
-      return res.status(400).json({ error: "Debes indicar solicitud_id o preregistro_id" });
-    }
-
-    let solicitudId = null;
-    let preregistroId = null;
-    if (solicitudInput) {
-      solicitudId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.solicitudesContratacion, solicitudInput);
-      if (!solicitudId) return res.status(404).json({ error: "Solicitud no encontrada" });
-    }
-    if (preregistroInput) {
-      preregistroId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.preregistroPersonas, preregistroInput);
-      if (!preregistroId) return res.status(404).json({ error: "Preregistro no encontrado" });
-    }
-
-    const personaContext = await resolveContratoPersonaContext({
-      solicitud_id: solicitudId,
-      preregistro_id: preregistroId,
-      nombre_persona: payload.nombre_persona || "",
-      correo_personal: payload.correo_personal || ""
-    });
-
-    const clienteInput = payload.cliente_id || null;
-    let clienteId = null;
-    let clienteNombre = toNullableTrimmedString(payload.cliente_nombre) || personaContext?.clienteNombre || "";
-    if (clienteInput) {
-      clienteId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.clientes, clienteInput);
-      if (!clienteId) return res.status(404).json({ error: "Cliente no encontrado" });
-      const c = await pool.query("SELECT titulo FROM clientes WHERE id = $1 LIMIT 1", [clienteId]);
-      clienteNombre = c.rows[0]?.titulo || clienteNombre || "";
-    } else if (personaContext?.clienteId) {
-      clienteId = personaContext.clienteId;
-      if (!clienteNombre) clienteNombre = personaContext?.clienteNombre || "";
-    }
-
-    const insertPayload = buildAnexoInsertPayload({
-      input: payload,
-      personaContext,
-      solicitudId,
-      preregistroId,
-      clienteId,
-      clienteNombre,
-      creadoPor: req.user.id,
-      origen: "manual"
-    });
-
-    const insert = await insertAnexoTecnicoItem(insertPayload);
-    const row = await getAnexoTecnicoItemByInternalId(insert.row?.id);
-    const statusCode = insert.duplicated ? 200 : 201;
-    return res.status(statusCode).json({
-      duplicated: insert.duplicated,
-      item: toAnexoApiRow(row)
-    });
-  } catch (err) {
-    const statusCode = Number(err?.status || 500);
-    if (statusCode >= 400 && statusCode < 500) {
-      return res.status(statusCode).json({ error: err.message || "Datos inválidos para anexo tecnico" });
-    }
-    console.error(err);
-    return res.status(500).json({ error: "Error creando item de anexo tecnico" });
-  }
-});
-
-app.delete("/admin/firma-contratos/:id", requireAccess({ roles: ["Administrador", TALENTO_HUMANO_ROL] }), async (req, res) => {
-  try {
-    const r = await pool.query(
-      "UPDATE tokens_firma_contrato SET estado = 'expirado', updated_at = NOW() WHERE public_id = $1 RETURNING id",
-      [req.params.id]
-    );
-    if (r.rowCount === 0) return res.status(404).json({ error: "Token no encontrado" });
-    res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error anulando token" });
-  }
-});
 
 // Equivalente a: Get-MgSubscribedSku | Select-Object SkuId, SkuPartNumber
 app.get("/admin/licencias-disponibles", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
@@ -14062,6 +13663,9 @@ module.exports = {
   buildCuentaCobroEmailAttachments,
   notifyCuentaCobroFirmadaToProveedores,
   handleClickSignAnexoIndividualWebhook,
+  buildAnexoInsertPayload,
+  buildContratoEmailHtml,
+  buildDocsFirmaPlan,
   getUsuarioAnexoIndividualById,
   getAnexoIndividualItemByInput,
   buildAnexoIndividualItemPayload,
@@ -14071,6 +13675,13 @@ module.exports = {
   mapAnexoIndividualTokenRow,
   toAnexoApiRow,
   getAnexoTecnicoItemByInternalId,
+  hasContratoBaseFirmado,
+  insertAnexoTecnicoItem,
+  listAnexoTecnicoItems,
+  normalizeDocsFirmaListCompat,
+  requirePersistedAnexoFromProceso,
+  resolveContratoPersonaContext,
+  resolveProcesoForPersona,
   sanitizeDownloadFileName,
   isAnexoIndividualInfraError,
   buildAnexoIndividualInfraErrorPayload,
@@ -14111,9 +13722,13 @@ module.exports = {
   normalizeTipoServicioInput,
   resolveEstadoAsignacionInput,
   resolveInternalIdFromPublicIdOrId,
+  toNullableTrimmedString,
   toNullableInteger,
   toNullableNumber,
   isGuid,
+  CONTRATOS_TOKEN_EXPIRY_HOURS,
+  CONTRATOS_BASE_URL,
+  CLAVES_REQUERIDAS_FIRMA,
   CLICKSIGN_USER,
   CLICKSIGN_CONTRATOS_CONFIG_ID,
   CLICKSIGN_SIGNATURE_CB_URL,

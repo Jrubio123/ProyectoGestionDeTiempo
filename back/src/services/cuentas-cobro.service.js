@@ -1132,4 +1132,196 @@ async function reconciliarFirmaCuenta(req, res) {
   }
 }
 
-module.exports = { previewCuentaCobro, crearCuentaCobro, getHistorialCuentas, getSoportesCuentas, getDetalleCuenta, getCuentaPdf, uploadAdjuntosCuenta, iniciarFirmaCuenta, reconciliarFirmaCuenta };
+async function adjuntarFirmaCuenta(req, res) {
+  const {
+    assertCuentaCobroOwnerAccess,
+    parsePdfDataUrl,
+    isPdfBuffer,
+    sanitizePdfFileName,
+    uploadSignedPdfToOneDrive,
+    buildCuentaCobroEmailAttachments,
+    notifyCuentaCobroFirmadaToProveedores,
+    getGraphContext,
+    getCuentaCobroEstadoAprobado,
+    parseGraphErrorStatus
+  } = getIndexHelpers();
+  const ONEDRIVE_ENABLED = String(process.env.ONEDRIVE_ENABLED || "true").toLowerCase() === "true";
+  const { id } = req.params;
+  const cuentaPdfBase64 = req.body?.cuenta_pdf_base64 || req.body?.archivo_base64 || req.body?.signed_pdf_base64 || "";
+  const cuentaPdfNombre = req.body?.cuenta_pdf_nombre || req.body?.archivo_nombre || req.body?.signed_pdf_nombre || "";
+
+  if (!ONEDRIVE_ENABLED) {
+    return res.status(503).json({ error: "Servicio de carga no disponible temporalmente." });
+  }
+  if (!cuentaPdfBase64) {
+    return res.status(400).json({ error: "Debe enviar el PDF firmado en base64." });
+  }
+
+  try {
+    const cuentaResult = await pool.query(
+      `
+      SELECT
+        cc.id,
+        cc.public_id,
+        cc.created_by,
+        cc.fecha_correspondiente,
+        cc.created_at,
+        cc.datos_adjuntos,
+        u.nombre_usuario,
+        u.email
+      FROM cuenta_cobro cc
+      LEFT JOIN usuarios u ON u.id = cc.created_by
+      WHERE cc.public_id = $1
+      LIMIT 1
+      `,
+      [id]
+    );
+
+    const cuenta = cuentaResult.rows[0] || null;
+    if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
+    await assertCuentaCobroOwnerAccess(cuenta.created_by, req);
+    const cuentaInternalId = cuenta.id;
+
+    const pdfBuffer = parsePdfDataUrl(cuentaPdfBase64);
+    if (!isPdfBuffer(pdfBuffer)) {
+      return res.status(400).json({ error: "El archivo firmado debe ser un PDF válido." });
+    }
+
+    const defaultName = sanitizePdfFileName(
+      `CuentaCobroFirmada_${String(cuenta.public_id || cuenta.id || "cuenta")}.pdf`,
+      "CuentaCobroFirmada.pdf"
+    );
+    let uploadResult = null;
+    const uploadName = sanitizePdfFileName(cuentaPdfNombre || defaultName, defaultName);
+    try {
+      uploadResult = await uploadSignedPdfToOneDrive(
+        cuenta,
+        pdfBuffer,
+        uploadName
+      );
+    } catch (uploadErr) {
+      const delegatedGraphToken = String(req?.headers?.["x-graph-access-token"] || "").trim();
+      if (!delegatedGraphToken) throw uploadErr;
+      uploadResult = await uploadSignedPdfToOneDrive(
+        cuenta,
+        pdfBuffer,
+        uploadName,
+        { accessToken: delegatedGraphToken }
+      );
+    }
+
+    const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object"
+      ? cuenta.datos_adjuntos
+      : {};
+    const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object"
+      ? prevAdjuntos.firma
+      : {};
+    const prevSoportes = prevAdjuntos.soportes && typeof prevAdjuntos.soportes === "object"
+      ? prevAdjuntos.soportes
+      : {};
+    const nowIso = new Date().toISOString();
+
+    const documentoFirmado = {
+      ...uploadResult.archivo,
+      carpeta: uploadResult.carpeta,
+      origen: "manual_upload",
+      actualizado_en: nowIso
+    };
+    const documentosAdjuntosCorreo = buildCuentaCobroEmailAttachments({
+      cuenta,
+      signedPdf: {
+        buffer: pdfBuffer,
+        fileName: uploadName
+      }
+    });
+    const firma = {
+      ...prevFirma,
+      estado: "signed",
+      actualizado_en: nowIso,
+      ultimo_evento: "MANUAL_UPLOAD",
+      documento_firmado: documentoFirmado,
+      documento_firmado_error: null
+    };
+    if (documentoFirmado?.url) {
+      const prevNotificacionProveedores =
+        prevFirma.notificacion_proveedores && typeof prevFirma.notificacion_proveedores === "object"
+          ? prevFirma.notificacion_proveedores
+          : {};
+      const notificacion = await notifyCuentaCobroFirmadaToProveedores({
+        cuenta,
+        documentoFirmado,
+        attachments: documentosAdjuntosCorreo,
+        prevNotification: prevNotificacionProveedores,
+        nowIso,
+        graphContext: getGraphContext(req)
+      });
+      if (notificacion) {
+        firma.notificacion_proveedores = notificacion;
+      }
+    }
+    const adjuntos = {
+      ...prevAdjuntos,
+      firma,
+      soportes: {
+        ...prevSoportes,
+        carpeta: uploadResult.carpeta || prevSoportes.carpeta || "",
+        actualizado_en: nowIso,
+        cuenta_cobro_firmada: {
+          id: documentoFirmado.id || null,
+          nombre: documentoFirmado.nombre || defaultName,
+          url: documentoFirmado.url || ""
+        }
+      }
+    };
+
+    const estadoAprobado = await getCuentaCobroEstadoAprobado();
+    await pool.query(
+      `
+      UPDATE cuenta_cobro
+      SET datos_adjuntos = $1::jsonb,
+          estado = $2::tipo_estado_reporte,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3
+      `,
+      [JSON.stringify(adjuntos), estadoAprobado, cuenta.id]
+    );
+
+    return res.json({
+      ok: true,
+      cuenta_id: String(cuenta.public_id || cuenta.id || ""),
+      estado_cuenta: estadoAprobado,
+      documento_firmado_url: documentoFirmado.url || null
+    });
+  } catch (err) {
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Cuenta no encontrada" });
+    }
+    if (err?.code === "ACCESS_DENIED") {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+    if (err?.code === "GRAPH_TOKEN_ERROR") {
+      return res.status(502).json({
+        error: "No se pudo autenticar OneDrive (Microsoft Graph). Verifica credenciales y permisos."
+      });
+    }
+    const status = parseGraphErrorStatus(err?.message || "");
+    if (status === 401 || status === 403) {
+      return res.status(502).json({
+        error: "Servicio de almacenamiento no autorizado. Verifica permisos de Graph/OneDrive."
+      });
+    }
+    if (status === 404) {
+      return res.status(502).json({
+        error: "No se encontró el repositorio de OneDrive configurado."
+      });
+    }
+    console.error("Error adjuntando PDF firmado manual:", err);
+    return res.status(500).json({
+      error: "Error adjuntando PDF firmado",
+      codigo: err?.code || null,
+      detalle: err?.message || null
+    });
+  }
+}
+
+module.exports = { previewCuentaCobro, crearCuentaCobro, getHistorialCuentas, getSoportesCuentas, getDetalleCuenta, getCuentaPdf, uploadAdjuntosCuenta, iniciarFirmaCuenta, reconciliarFirmaCuenta, adjuntarFirmaCuenta };

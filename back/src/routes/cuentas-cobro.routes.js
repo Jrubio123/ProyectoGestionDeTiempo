@@ -8,7 +8,9 @@ const {
   getSoportesCuentas,
   getDetalleCuenta,
   getCuentaPdf,
-  uploadAdjuntosCuenta
+  uploadAdjuntosCuenta,
+  iniciarFirmaCuenta,
+  reconciliarFirmaCuenta
 } = require("../services/cuentas-cobro.service");
 
 const router = Router();
@@ -22,5 +24,8 @@ router.get("/soportes", requireAccess({ roles: ["Administrador", "Coordinador"] 
 router.get("/detalle/:cuentaId", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), getDetalleCuenta);
 router.get("/:id/pdf", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), getCuentaPdf);
 router.post("/:id/adjuntos", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), uploadAdjuntosCuenta);
+
+router.post("/:id/firma/iniciar", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), iniciarFirmaCuenta);
+router.post("/:id/firma/reconciliar", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), reconciliarFirmaCuenta);
 
 module.exports = router;

@@ -5,6 +5,87 @@ function getIndexHelpers() {
   return require("../index");
 }
 
+const DESTINOS_TH_FALLBACK =
+  process.env.CONTRATACIONES_DESTINO_TH ||
+  "catalina.loaiza@silverconsulting.com.co,ana.garcia@silverconsulting.com.co";
+
+function parseEmailList(value) {
+  return String(value || "")
+    .split(/[;,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function uniqueEmailList(input) {
+  return Array.from(new Set((Array.isArray(input) ? input : parseEmailList(input)).filter(Boolean)));
+}
+
+async function getDestinosTalentoHumano(client = pool) {
+  try {
+    const result = await client.query(
+      `
+      SELECT u.email
+      FROM usuarios u
+      JOIN roles r ON r.id = u.rol_usuario_id
+      WHERE u.activo = true
+        AND NULLIF(BTRIM(u.email), '') IS NOT NULL
+        AND LOWER(r.titulo) = LOWER('Talento Humano')
+      ORDER BY LOWER(BTRIM(u.email)) ASC
+      `
+    );
+    const roleRecipients = uniqueEmailList(result.rows.map((row) => row.email));
+    return roleRecipients.length ? roleRecipients : uniqueEmailList(DESTINOS_TH_FALLBACK);
+  } catch (err) {
+    console.error("No se pudieron resolver destinatarios TH:", err?.message || err);
+    return uniqueEmailList(DESTINOS_TH_FALLBACK);
+  }
+}
+
+async function notifyThIfZeroAnexos(client = pool, { usuario_id, numero_documento, exclude_item_id, nombre_persona, graphContext = null } = {}) {
+  const usuarioId = usuario_id || null;
+  const numeroDocumento = String(numero_documento || "").trim() || null;
+  if (!usuarioId && !numeroDocumento) return { sent: false, remainingCount: null, skipped: true };
+
+  const countRes = await client.query(
+    `
+    SELECT COUNT(*)::int AS total
+    FROM anexo_tecnico_items
+    WHERE estado = 'activo'
+      AND id != $1
+      AND (
+        ($2::text IS NOT NULL AND numero_documento = $2)
+        OR ($3::int IS NOT NULL AND usuario_id = $3)
+      )
+    `,
+    [exclude_item_id, numeroDocumento, usuarioId]
+  );
+  const total = countRes.rows[0]?.total || 0;
+  if (total !== 0) return { sent: false, remainingCount: total };
+
+  const { sendEmailSafe, buildEmailLayout } = getIndexHelpers();
+  const destinosTh = await getDestinosTalentoHumano(client);
+  const nombre = String(nombre_persona || "").trim() || "Persona sin nombre";
+  const documento = String(numeroDocumento || "").trim();
+  const blocks = [
+    { label: "Persona", value: nombre },
+    { label: "Documento", value: documento || "N/A" }
+  ];
+  const intro = "La persona se quedo sin anexos activos. Revisar proceso de retiro total segun politica interna.";
+  const result = await sendEmailSafe({
+    ...(graphContext || {}),
+    to: destinosTh.join(","),
+    subject: "Administrativos: Persona sin anexos activos",
+    text: `${intro}\n\n${blocks.map((item) => `${item.label}: ${item.value}`).join("\n")}`,
+    html: buildEmailLayout({
+      title: "Persona sin anexos activos",
+      intro,
+      blocks
+    })
+  });
+
+  return { sent: Boolean(result?.ok), remainingCount: total };
+}
+
 /**
  * Busca usuarios corporativos disponibles para anexo individual
  */
@@ -14,44 +95,78 @@ async function searchAnexoIndividualUsuarios(req, res) {
     const like = `%${q}%`;
     const result = await pool.query(
       `
-      SELECT
-        u.public_id AS id,
-        u.nombre_usuario AS nombre,
-        u.email,
-        COALESCE(p.numero_documento, u.cedula) AS cedula,
-        u.tipo_consultor,
-        EXISTS (
-          SELECT 1
-          FROM anexo_tecnico_items ati
-          WHERE ati.estado = 'activo'
-            AND (
-              ati.usuario_id = u.id
-              OR (
-                COALESCE(p.numero_documento, u.cedula) IS NOT NULL
-                AND ati.usuario_id IS NULL
-                AND ati.numero_documento = COALESCE(p.numero_documento, u.cedula)
+      SELECT *
+      FROM (
+        SELECT
+          u.id AS internal_id,
+          u.public_id AS id,
+          u.public_id,
+          u.nombre_usuario AS nombre,
+          u.nombre_usuario AS nombre_usuario,
+          u.email,
+          COALESCE(p.numero_documento, u.cedula) AS cedula,
+          u.tipo_consultor::text AS tipo_consultor,
+          EXISTS (
+            SELECT 1
+            FROM anexo_tecnico_items ati
+            WHERE ati.estado = 'activo'
+              AND (
+                ati.usuario_id = u.id
+                OR (
+                  COALESCE(p.numero_documento, u.cedula) IS NOT NULL
+                  AND ati.usuario_id IS NULL
+                  AND ati.numero_documento = COALESCE(p.numero_documento, u.cedula)
+                )
               )
-            )
-        ) AS tiene_items_activos,
-        EXISTS (
-          SELECT 1
-          FROM tokens_firma_anexo_individual t
-          WHERE t.usuario_id = u.id
-            AND t.estado = 'enviado'
-        ) AS envio_pendiente
-      FROM usuarios u
-      LEFT JOIN personas p ON u.persona_id = p.id
-      WHERE u.activo = true
-        AND LOWER(COALESCE(u.email, '')) LIKE '%@silverconsulting.com.co'
-        AND (
-          $1 = ''
-          OR u.nombre_usuario ILIKE $2
-          OR u.email ILIKE $2
-          OR COALESCE(p.numero_documento, u.cedula, '') ILIKE $2
-        )
+          ) AS tiene_items_activos,
+          EXISTS (
+            SELECT 1
+            FROM tokens_firma_anexo_individual t
+            WHERE t.usuario_id = u.id
+              AND t.estado = 'enviado'
+          ) AS envio_pendiente,
+          'usuario' AS source
+        FROM usuarios u
+        LEFT JOIN personas p ON u.persona_id = p.id
+        WHERE u.activo = true
+          AND LOWER(COALESCE(u.email, '')) LIKE '%@silverconsulting.com.co'
+          AND (
+            $1 = ''
+            OR u.nombre_usuario ILIKE $2
+            OR u.email ILIKE $2
+            OR COALESCE(p.numero_documento, u.cedula, '') ILIKE $2
+          )
+        UNION ALL
+        SELECT
+          p.id AS internal_id,
+          p.public_id AS id,
+          p.public_id,
+          TRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) AS nombre,
+          TRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) AS nombre_usuario,
+          p.correo_electronico AS email,
+          p.numero_documento AS cedula,
+          NULL::text AS tipo_consultor,
+          EXISTS (
+            SELECT 1
+            FROM anexo_tecnico_items ati
+            WHERE ati.estado = 'activo'
+              AND p.numero_documento IS NOT NULL
+              AND ati.numero_documento = p.numero_documento
+          ) AS tiene_items_activos,
+          false AS envio_pendiente,
+          'persona' AS source
+        FROM personas p
+        WHERE NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.persona_id = p.id)
+          AND (
+            $1 = ''
+            OR TRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) ILIKE $2
+            OR COALESCE(p.correo_electronico, '') ILIKE $2
+            OR COALESCE(p.numero_documento, '') ILIKE $2
+          )
+      ) AS combined
       ORDER BY
-        CASE WHEN u.nombre_usuario ILIKE $2 THEN 0 ELSE 1 END,
-        u.nombre_usuario ASC
+        CASE WHEN combined.nombre ILIKE $2 THEN 0 ELSE 1 END,
+        combined.nombre ASC
       LIMIT 20
       `,
       [q, like]
@@ -309,7 +424,8 @@ async function finalizarAnexoIndividualItem(req, res) {
   const {
     getAnexoIndividualItemByInput,
     getAnexoTecnicoItemByInternalId,
-    toAnexoApiRow
+    toAnexoApiRow,
+    getGraphContext
   } = getIndexHelpers();
 
   try {
@@ -326,6 +442,13 @@ async function finalizarAnexoIndividualItem(req, res) {
       `,
       [existingRow.id, req.user?.id || null]
     );
+    await notifyThIfZeroAnexos(pool, {
+      usuario_id: existingRow.usuario_id || null,
+      numero_documento: existingRow.numero_documento || null,
+      exclude_item_id: existingRow.id,
+      nombre_persona: existingRow.nombre_persona || null,
+      graphContext: typeof getGraphContext === "function" ? getGraphContext(req) : null
+    });
 
     const refreshed = await getAnexoTecnicoItemByInternalId(existingRow.id);
     res.json({ item: toAnexoApiRow(refreshed) });
@@ -748,6 +871,7 @@ module.exports = {
   createAnexoIndividualItem,
   updateAnexoIndividualItem,
   finalizarAnexoIndividualItem,
+  notifyThIfZeroAnexos,
   previewAnexoIndividualPdf,
   iniciarFirmaAnexoIndividual,
   cancelarFirmaAnexoIndividual

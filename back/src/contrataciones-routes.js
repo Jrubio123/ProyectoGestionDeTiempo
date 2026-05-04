@@ -41,6 +41,7 @@ module.exports = function registerContratacionesRoutes(deps) {
       sc.public_id,
       sc.tipo_solicitud,
       sc.estado,
+      sc.crear_usuario_sistema,
       sc.origen_flujo,
       sc.coordinador_solicitante_id,
       coord.public_id AS coordinador_public_id,
@@ -1182,7 +1183,7 @@ module.exports = function registerContratacionesRoutes(deps) {
 
   function requireOwnerIfCoordinator(req, row) {
     const role = normalizeValue(req.user?.rol);
-    if (role !== "coordinador") return true;
+    if (role !== "coordinador" && role !== "comercial") return true;
     return String(req.user?.id || "") === String(row?.coordinador_solicitante_id || "");
   }
 
@@ -1686,7 +1687,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         const values = [];
         let idx = 1;
 
-        if (role === "coordinador") {
+        if (role === "coordinador" || role === "comercial") {
           where.push(`sc.coordinador_solicitante_id = $${idx++}`);
           values.push(req.user?.id);
         }
@@ -2636,15 +2637,19 @@ module.exports = function registerContratacionesRoutes(deps) {
             error: `La solicitud debe estar en '${ESTADOS.pendienteRevisionTh}' o '${ESTADOS.pendienteCorreoSilver}' para ser revisada por TH`
           });
         }
+        const debeCrearUsuario = row.crear_usuario_sistema !== false;
         const correoSilver = String(row.correo_empresarial || "").trim().toLowerCase();
-        if (!correoSilver) {
-          await client.query("ROLLBACK");
-          return res.status(422).json({ error: "Se requiere el correo Silver antes de completar la revisión TH" });
+        if (debeCrearUsuario) {
+          if (!correoSilver) {
+            await client.query("ROLLBACK");
+            return res.status(422).json({ error: "Se requiere el correo Silver antes de completar la revisión TH" });
+          }
+          if (!isValidSilverEmail(correoSilver)) {
+            await client.query("ROLLBACK");
+            return res.status(422).json({ error: "El correo Silver debe pertenecer al dominio @silverconsulting.com.co" });
+          }
         }
-        if (!isValidSilverEmail(correoSilver)) {
-          await client.query("ROLLBACK");
-          return res.status(422).json({ error: "El correo Silver debe pertenecer al dominio @silverconsulting.com.co" });
-        }
+        const correoEmpresarialFinal = debeCrearUsuario ? correoSilver : toNullableString(row.correo_empresarial);
 
         const datosExtra = toObjectOrEmpty(row.datos_extra);
         const direccion = toNullableString(datosExtra.direccion);
@@ -2672,7 +2677,7 @@ module.exports = function registerContratacionesRoutes(deps) {
           });
         }
 
-        let personaUsuarioId = row.persona_usuario_id || null;
+        let personaUsuarioId = debeCrearUsuario ? row.persona_usuario_id || null : null;
         let usuarioCreado = null;
 
         // ── UPSERT en tabla personas (núcleo de datos personales) ─────────────
@@ -2750,7 +2755,8 @@ module.exports = function registerContratacionesRoutes(deps) {
         const personaIdContrat = personaResContrat.rows[0]?.id || null;
         // ────────────────────────────────────────────────────────────────────
 
-        if (!personaUsuarioId) {
+        if (debeCrearUsuario) {
+          if (!personaUsuarioId) {
           const dup = await client.query(`SELECT id FROM usuarios WHERE LOWER(email) = LOWER($1) LIMIT 1`, [correoSilver]);
           if (dup.rows.length > 0) {
             await client.query("ROLLBACK");
@@ -2804,6 +2810,7 @@ module.exports = function registerContratacionesRoutes(deps) {
               [personaIdContrat, personaUsuarioId]
             );
           }
+          }
         }
 
         const observaciones = toNullableString(req.body?.observaciones_th);
@@ -2821,7 +2828,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             updated_at            = NOW()
           WHERE id = $6
           `,
-          [ESTADOS.completado, personaUsuarioId, correoSilver, req.user?.id, observaciones, internalId]
+          [ESTADOS.completado, personaUsuarioId, correoEmpresarialFinal, req.user?.id, observaciones, internalId]
         );
 
         const updatedSolicitud = await getByInternalId(client, internalId);

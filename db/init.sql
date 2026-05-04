@@ -907,6 +907,7 @@ CREATE TABLE solicitudes_contratacion (
     datos_extra JSONB DEFAULT '{}'::jsonb,
 
     requiere_confirmacion_cliente BOOLEAN DEFAULT false,
+    crear_usuario_sistema BOOLEAN NOT NULL DEFAULT true,
     correo_enviado_mesa BOOLEAN DEFAULT false,
     correo_enviado_th BOOLEAN DEFAULT false,
     correo_confirmacion_coordinador BOOLEAN DEFAULT false,
@@ -971,6 +972,7 @@ CREATE TABLE preregistro_personas (
     tipo_cuenta VARCHAR(50),
     numero_cuenta VARCHAR(50),
     correo_silver VARCHAR(150) UNIQUE,
+    crear_usuario_sistema BOOLEAN NOT NULL DEFAULT true,
 
     estado VARCHAR(50) NOT NULL DEFAULT 'Pendiente Coordinador'
         CHECK (estado IN (

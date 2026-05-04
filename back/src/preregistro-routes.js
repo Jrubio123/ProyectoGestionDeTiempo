@@ -213,7 +213,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       p.vpn_corona, p.necesita_s_user, p.grupo_usuario, p.grupo_distribucion,
       p.observaciones, p.direccion, p.tipo_persona, p.banco_id,
       b.titulo AS banco_nombre,
-      p.tipo_cuenta, p.numero_cuenta, p.correo_silver, p.estado,
+      p.tipo_cuenta, p.numero_cuenta, p.correo_silver, p.estado, p.crear_usuario_sistema,
       p.creado_por, creador.public_id AS creado_por_public_id, creador.nombre_usuario AS creado_por_nombre,
       p.completado_coordinador_por, coordDone.public_id AS completado_coordinador_por_public_id, coordDone.nombre_usuario AS completado_coordinador_por_nombre,
       p.completado_th_por, thDone.public_id AS completado_th_por_public_id, thDone.nombre_usuario AS completado_th_por_nombre,
@@ -1183,31 +1183,44 @@ module.exports = function registerPreregistroRoutes(deps) {
         return res.status(422).json({ error: "El preregistro no esta en un estado aprobable" });
       }
 
-      const correoSilver = String(current.correo_silver || "").trim().toLowerCase();
-      if (!correoSilver) {
-        await client.query("ROLLBACK");
-        return res.status(422).json({ error: "Debe existir correo_silver para aprobar" });
-      }
-      if (!isValidSilverEmail(correoSilver)) {
-        await client.query("ROLLBACK");
-        return res.status(422).json({ error: "correo_silver debe pertenecer al dominio @silverconsulting.com.co" });
-      }
+      const debeCrearUsuario = current.crear_usuario_sistema !== false;
+      let correoSilver = null;
+      let rolId = null;
+      let tipoCuentaRes = null;
 
-      const dup = await client.query(`SELECT id FROM usuarios WHERE LOWER(email) = LOWER($1) LIMIT 1`, [correoSilver]);
-      if (dup.rows.length > 0) {
-        await client.query("ROLLBACK");
-        return res.status(409).json({ error: "Ya existe un usuario con ese correo_silver" });
-      }
+      if (debeCrearUsuario) {
+        correoSilver = String(current.correo_silver || "").trim().toLowerCase();
+        if (!correoSilver) {
+          await client.query("ROLLBACK");
+          return res.status(422).json({ error: "Debe existir correo_silver para aprobar" });
+        }
+        if (!isValidSilverEmail(correoSilver)) {
+          await client.query("ROLLBACK");
+          return res.status(422).json({ error: "correo_silver debe pertenecer al dominio @silverconsulting.com.co" });
+        }
 
-      const [rolRes, tipoCuentaRes] = await Promise.all([
-        client.query(`SELECT id FROM roles WHERE LOWER(titulo) = LOWER('Consultor') LIMIT 1`),
-        client.query(`SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) LIMIT 1`, [`${current.tipo_cuenta || ""}%`])
-      ]);
+        const dup = await client.query(`SELECT id FROM usuarios WHERE LOWER(email) = LOWER($1) LIMIT 1`, [correoSilver]);
+        if (dup.rows.length > 0) {
+          await client.query("ROLLBACK");
+          return res.status(409).json({ error: "Ya existe un usuario con ese correo_silver" });
+        }
 
-      const rolId = rolRes.rows[0]?.id || null;
-      if (!rolId) {
-        await client.query("ROLLBACK");
-        return res.status(500).json({ error: "No existe el rol Consultor" });
+        const [rolRes, tipoCuentaResult] = await Promise.all([
+          client.query(`SELECT id FROM roles WHERE LOWER(titulo) = LOWER('Consultor') LIMIT 1`),
+          client.query(`SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) LIMIT 1`, [`${current.tipo_cuenta || ""}%`])
+        ]);
+
+        tipoCuentaRes = tipoCuentaResult;
+        rolId = rolRes.rows[0]?.id || null;
+        if (!rolId) {
+          await client.query("ROLLBACK");
+          return res.status(500).json({ error: "No existe el rol Consultor" });
+        }
+      } else {
+        tipoCuentaRes = await client.query(
+          `SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) LIMIT 1`,
+          [`${current.tipo_cuenta || ""}%`]
+        );
       }
 
       // ── UPSERT en tabla personas (núcleo de datos personales) ──────────────
@@ -1298,6 +1311,47 @@ module.exports = function registerPreregistroRoutes(deps) {
       // ────────────────────────────────────────────────────────────────────────
 
       const nombreCompleto = `${current.nombre || ""} ${current.apellidos || ""}`.trim();
+      if (!debeCrearUsuario) {
+        await client.query(
+          `UPDATE preregistro_personas
+           SET estado = 'Completado', aprobado_por = $1, id_usuario_creado = NULL, fecha_aprobacion = NOW()
+           WHERE id = $2`,
+          [req.user?.id, id]
+        );
+        const updatedPreregistro = await getByInternalId(client, id);
+        const solicitudId = await syncSolicitudContratacionFromPreregistro(client, updatedPreregistro, {
+          estado: ESTADOS.completado,
+          personaUsuarioId: null
+        });
+        await client.query("COMMIT");
+
+        try {
+          await ensurePersistedAnexoFromProceso({
+            solicitudId: solicitudId || null,
+            preregistroId: id,
+            createdBy: req.user?.id || null,
+            strict: false
+          });
+        } catch (err) {
+          console.warn("No se pudo sincronizar anexo tecnico desde preregistro:", err?.message || err);
+        }
+
+        if (current.coordinador_email) {
+          sendEmailSafe({
+            ...getGraphContext(req),
+            to: current.coordinador_email,
+            subject: `Persona registrada para ${nombreCompleto}`,
+            text: `Se aprobó el preregistro y se creó la persona ${nombreCompleto} (${current.numero_documento || ""}) sin cuenta de sistema.`
+          }).catch((e) => console.error("Error enviando correo de aprobacion:", e?.message || e));
+        }
+
+        return res.json({
+          preregistro_id: current.public_id,
+          estado: "Completado",
+          persona_creada: { nombre: nombreCompleto, numero_documento: current.numero_documento }
+        });
+      }
+
       const usuarioRes = await client.query(
         `INSERT INTO usuarios
           (nombre_usuario, email, rol_usuario_id, activo, nro_cuenta_bancaria, banco_id, tipo_cuenta_id, tipo_documento_id, cedula, direccion, telefono, ciudad, tipo_persona, moneda_cobro, factura_en_colombia, persona_id, created_by, azure_oid)

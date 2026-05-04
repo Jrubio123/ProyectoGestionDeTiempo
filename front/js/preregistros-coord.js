@@ -864,6 +864,8 @@ window.preregistrosCoordApp = function () {
             const perfil = this.perfilFormularioActual();
             const moneda = String(this.form.moneda || "").trim().toUpperCase();
             const datosExtra = { ...(this.datosExtraBase || {}) };
+            const chkCrearUsuario = document.getElementById("crear_usuario_sistema");
+            const crearUsuarioSistema = chkCrearUsuario ? chkCrearUsuario.checked : true;
 
             if (moduloId) datosExtra.modulo_id = moduloId;
             else delete datosExtra.modulo_id;
@@ -874,6 +876,7 @@ window.preregistrosCoordApp = function () {
                 perfil,
                 moneda,
                 tipo_solicitud: this.tipoModal,
+                crear_usuario_sistema: crearUsuarioSistema,
                 enviar_correos: true,
                 datos_extra: datosExtra
             };

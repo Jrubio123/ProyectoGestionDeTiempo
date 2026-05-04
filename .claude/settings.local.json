@@ -1,5 +1,10 @@
 {
   "enabledPlugins": {
     "codex@openai-codex": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(node *)"
+    ]
   }
 }

@@ -810,7 +810,11 @@ window.onboardingThApp = function () {
                         ...(this.getAuthConfig() || {}),
                         params: { q }
                     });
-                    this.anexoResultados = Array.isArray(res?.data) ? res.data : [];
+                    const rows = Array.isArray(res?.data) ? res.data : [];
+                    this.anexoResultados = rows.map((user) => ({
+                        ...user,
+                        source: user?.source === "persona" ? "persona" : "usuario"
+                    }));
                 } catch (_) {
                     this.anexoResultados = [];
                 } finally {
@@ -820,7 +824,11 @@ window.onboardingThApp = function () {
         },
 
         async seleccionarUsuarioAnexo(usuario) {
-            this.usuarioAnexo = usuario || null;
+            if (!usuario || usuario.id === undefined || usuario.id === null || usuario.id === "") return;
+            this.usuarioAnexo = {
+                ...usuario,
+                source: usuario.source === "persona" ? "persona" : "usuario"
+            };
             this.anexoBusqueda = "";
             this.anexoResultados = [];
             this.anexoMostrarHistorial = false;

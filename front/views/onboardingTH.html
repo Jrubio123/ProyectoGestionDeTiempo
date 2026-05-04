@@ -123,7 +123,11 @@
                                             @click="seleccionarUsuarioAnexo(usuario)"
                                             class="flex items-center justify-between w-full gap-3 px-4 py-3 text-left transition border-b border-slate-100 last:border-b-0 hover:bg-slate-50">
                                             <div>
-                                                <div class="text-sm font-semibold text-slate-900" x-text="usuario.nombre"></div>
+                                                <div class="text-sm font-semibold text-slate-900">
+                                                    <span x-text="usuario.nombre"></span>
+                                                    <span x-show="usuario.source === 'persona'" class="badge bg-secondary ms-2">Persona</span>
+                                                    <span x-show="usuario.source !== 'persona'" class="badge bg-primary ms-2">Consultor</span>
+                                                </div>
                                                 <div class="text-xs text-slate-500" x-text="usuario.email"></div>
                                             </div>
                                             <div class="flex flex-col items-end gap-1">

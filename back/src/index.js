@@ -3059,31 +3059,61 @@ function mapAnexoIndividualTokenRow(row) {
 
 async function getUsuarioAnexoIndividualById(userInput) {
   const internalId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.usuarios, userInput);
-  if (!internalId) return null;
+  if (internalId) {
+    const r = await pool.query(
+      `
+      SELECT
+        u.id,
+        u.public_id,
+        u.nombre_usuario,
+        u.email,
+        COALESCE(p.numero_documento, u.cedula)       AS cedula,
+        COALESCE(p.numero_contacto, u.telefono)      AS telefono,
+        COALESCE(p.direccion_residencia, u.direccion) AS direccion,
+        COALESCE(p.ciudad_residencia, u.ciudad)       AS ciudad,
+        u.moneda_cobro,
+        u.tipo_consultor,
+        COALESCE(di_p.titulo, di_u.titulo) AS tipo_documento_titulo,
+        COALESCE(di_p.codigo, di_u.codigo) AS tipo_documento_codigo
+      FROM usuarios u
+      LEFT JOIN personas p               ON u.persona_id        = p.id
+      LEFT JOIN documento_identidad di_p ON di_p.id = p.tipo_documento_id
+      LEFT JOIN documento_identidad di_u ON di_u.id = u.tipo_documento_id
+      WHERE u.id = $1
+        AND u.activo = true
+      LIMIT 1
+      `,
+      [internalId]
+    );
+    return r.rows[0] || null;
+  }
+
+  const personaInternalId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.personas, userInput);
+  if (!personaInternalId) return null;
+
+  // id negativo cuando source==='persona' (no hay usuario asociado)
   const r = await pool.query(
     `
     SELECT
-      u.id,
-      u.public_id,
-      u.nombre_usuario,
-      u.email,
-      COALESCE(p.numero_documento, u.cedula)       AS cedula,
-      COALESCE(p.numero_contacto, u.telefono)      AS telefono,
-      COALESCE(p.direccion_residencia, u.direccion) AS direccion,
-      COALESCE(p.ciudad_residencia, u.ciudad)       AS ciudad,
-      u.moneda_cobro,
-      u.tipo_consultor,
-      COALESCE(di_p.titulo, di_u.titulo) AS tipo_documento_titulo,
-      COALESCE(di_p.codigo, di_u.codigo) AS tipo_documento_codigo
-    FROM usuarios u
-    LEFT JOIN personas p               ON u.persona_id        = p.id
-    LEFT JOIN documento_identidad di_p ON di_p.id = p.tipo_documento_id
-    LEFT JOIN documento_identidad di_u ON di_u.id = u.tipo_documento_id
-    WHERE u.id = $1
-      AND u.activo = true
+      -p.id AS id,
+      p.public_id,
+      TRIM(CONCAT(COALESCE(p.nombre, ''), ' ', COALESCE(p.apellidos, ''))) AS nombre_usuario,
+      p.correo_electronico AS email,
+      p.numero_documento AS cedula,
+      p.numero_contacto AS telefono,
+      p.direccion_residencia AS direccion,
+      p.ciudad_residencia AS ciudad,
+      NULL AS moneda_cobro,
+      NULL AS tipo_consultor,
+      di.titulo AS tipo_documento_titulo,
+      di.codigo AS tipo_documento_codigo,
+      'persona' AS source
+    FROM personas p
+    LEFT JOIN documento_identidad di ON di.id = p.tipo_documento_id
+    WHERE p.id = $1
     LIMIT 1
     `,
-    [internalId]
+    [personaInternalId]
   );
   return r.rows[0] || null;
 }
@@ -11759,13 +11789,22 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName) {
   await graphGet(`/v1.0/users/${encodedUser}/drive`, token);
 
   const fechaStr = new Date().toISOString().slice(0, 10);
+  const personaContext = await resolveContratoPersonaContext(proceso || {});
+  const empresa = resolveEmpresaContratoConfig(personaContext?.facturaEnColombia ?? null);
+  const nombrePersona =
+    toNullableTrimmedString(personaContext?.nombreCompleto) ||
+    toNullableTrimmedString(proceso?.nombre_persona) ||
+    "Contratista";
+  const documentoPersona = toNullableTrimmedString(personaContext?.numeroDocumento);
   const nombreCarpeta = sanitizePathSegment(
-    `${proceso.nombre_persona}_${fechaStr}`,
+    `${nombrePersona}${documentoPersona ? `_${documentoPersona}` : ""}_${fechaStr}`,
     `Contrato_${fechaStr}`
   );
 
   let targetPath = sanitizePathSegment(CONTRATOS_ONEDRIVE_FOLDER, "ContratosFirmados");
+  const empresaFolder = sanitizePathSegment(empresa.razonSocial, empresa.key === "capital" ? "CAPITALINK" : "SILVER");
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
+  targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, empresaFolder);
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, nombreCarpeta);
   let folderWebUrl = "";
   try {
@@ -11778,7 +11817,7 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName) {
     console.warn("No se pudo resolver URL de carpeta OneDrive para contrato:", folderErr?.message || folderErr);
   }
 
-  const safeName = sanitizePdfFileName(fileName || `Contrato_${proceso.nombre_persona}.pdf`, "Contrato.pdf");
+  const safeName = sanitizePdfFileName(fileName || `Contrato_${nombrePersona}.pdf`, "Contrato.pdf");
   const uploadPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${safeName}`)}:/content`;
   const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
 
@@ -11994,7 +12033,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
 
     if (requestId) {
       const r = await pool.query(
-        `SELECT id, nombre_persona, correo_personal, docs_firma
+        `SELECT id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id
          FROM tokens_firma_contrato
          WHERE docs_firma @> $1::jsonb AND estado = 'en_proceso'
          LIMIT 1`,
@@ -12009,7 +12048,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
 
     if (!proceso && contractId) {
       const r = await pool.query(
-        `SELECT id, nombre_persona, correo_personal, docs_firma
+        `SELECT id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id
          FROM tokens_firma_contrato
          WHERE docs_firma @> $1::jsonb AND estado = 'en_proceso'
          LIMIT 1`,
@@ -12054,7 +12093,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         setTimeout(async () => {
           try {
             const r = await pool.query(
-              `SELECT id, nombre_persona, correo_personal, docs_firma FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
+              `SELECT id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
               [proceso.id]
             );
             if (r.rows[0]) await reconcileContratoDocsForProcess(r.rows[0], { docIndex, reason: "webhook_retry" });
@@ -12071,7 +12110,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         setTimeout(async () => {
           try {
             const r = await pool.query(
-              `SELECT id, nombre_persona, correo_personal, docs_firma FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
+              `SELECT id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
               [proceso.id]
             );
             if (r.rows[0]) await reconcileContratoDocsForProcess(r.rows[0], { docIndex, reason: "webhook_retry" });

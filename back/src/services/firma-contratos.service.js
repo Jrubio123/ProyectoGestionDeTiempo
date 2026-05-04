@@ -71,6 +71,7 @@ async function listCandidatos(req, res) {
             AND (
               EXISTS (SELECT 1 FROM solicitudes_contratacion sc WHERE sc.id = tf.solicitud_id AND NULLIF(BTRIM(sc.numero_documento),'') = NULLIF(BTRIM(p.numero_documento),''))
               OR EXISTS (SELECT 1 FROM preregistro_personas pp WHERE pp.id = tf.preregistro_id AND NULLIF(BTRIM(pp.numero_documento),'') = NULLIF(BTRIM(p.numero_documento),''))
+              OR LOWER(NULLIF(BTRIM(tf.correo_personal),'')) = LOWER(NULLIF(BTRIM(p.correo_electronico),''))
             )
         ) AS tiene_proceso_activo
       FROM personas p
@@ -95,6 +96,7 @@ async function listCandidatos(req, res) {
             AND (
               EXISTS (SELECT 1 FROM solicitudes_contratacion sc WHERE sc.id = tf.solicitud_id AND NULLIF(BTRIM(sc.numero_documento),'') = NULLIF(BTRIM(x.numero_documento),''))
               OR EXISTS (SELECT 1 FROM preregistro_personas pp WHERE pp.id = tf.preregistro_id AND NULLIF(BTRIM(pp.numero_documento),'') = NULLIF(BTRIM(x.numero_documento),''))
+              OR LOWER(NULLIF(BTRIM(tf.correo_personal),'')) = LOWER(NULLIF(BTRIM(x.correo_personal),''))
             )
         ) AS tiene_proceso_activo
       FROM (
@@ -234,10 +236,17 @@ async function generarTokenFirma(req, res) {
            AND (
              EXISTS (SELECT 1 FROM solicitudes_contratacion sc WHERE sc.id = tf.solicitud_id AND NULLIF(BTRIM(sc.numero_documento),'') = $1)
              OR EXISTS (SELECT 1 FROM preregistro_personas pp WHERE pp.id = tf.preregistro_id AND NULLIF(BTRIM(pp.numero_documento),'') = $1)
+             OR ($2::text IS NOT NULL AND LOWER(NULLIF(BTRIM(tf.correo_personal),'')) = LOWER($2))
            )`,
-        [numDocFinal]
+        [numDocFinal, correoFinal || null]
       );
     } else {
+      if (correoFinal) {
+        await pool.query(
+          "UPDATE tokens_firma_contrato SET estado = 'expirado', updated_at = NOW() WHERE LOWER(correo_personal) = LOWER($1) AND estado IN ('pendiente', 'en_proceso')",
+          [correoFinal]
+        );
+      }
       if (solId) {
         await pool.query(
           "UPDATE tokens_firma_contrato SET estado = 'expirado', updated_at = NOW() WHERE solicitud_id = $1 AND estado IN ('pendiente', 'en_proceso')",

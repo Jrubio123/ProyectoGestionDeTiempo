@@ -394,7 +394,7 @@ window.solicitudesReclApp = function () {
             } finally {
                 this.generandoExcel = false;
             }
-        }
+        },
         formatFecha(fecha) {
             if (!fecha) return "-";
             const valor = String(fecha).trim();

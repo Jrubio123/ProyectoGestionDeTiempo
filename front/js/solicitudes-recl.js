@@ -67,6 +67,7 @@ window.solicitudesReclApp = function () {
         },
 
         async init() {
+            this.initFechasExcel();
             await this.cargarSolicitudes();
             await this.cargarPreregistros();
             this.hidratarSolicitudesConPreregistro();

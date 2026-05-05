@@ -35,7 +35,8 @@ function loadScript(src) {
     if (_scriptPromises.has(src)) return _scriptPromises.get(src);
     const promise = new Promise((resolve, reject) => {
         const script = document.createElement("script");
-        script.src = src;
+        const sep = src.includes("?") ? "&" : "?";
+        script.src = `${src}${sep}v=20260505-rrhh-fix`;
         script.onload = () => resolve();
         script.onerror = () => {
             _scriptPromises.delete(src); // permite reintento si falla

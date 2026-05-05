@@ -7,8 +7,10 @@ window.aprobacionApp = function () {
         filters: { cliente: "", tipo: "", search: "" },
         modalRechazo: { open: false, id: null, motivo: "" },
         modalDetalle: { open: false, reporte: null },
+        modalExport: { open: false, fecha_inicio: "", fecha_fin: "", loading: false, error: "" },
 
         async init() {
+            this.resetExportDates();
             await this.cargarDatos();
         },
 
@@ -94,15 +96,61 @@ window.aprobacionApp = function () {
         },
 
         exportarExcel() {
-            const csvContent =
-                "data:text/csv;charset=utf-8," +
-                ["Fecha,Consultor,Cliente,Total"].join(",") +
-                "\n" +
-                this.reportesFiltrados
-                    .map((r) => `${r.fecha_reporte},${r.nombre_consultor},${r.nombre_cliente},${r.total_cobrar}`)
-                    .join("\n");
-            const encodedUri = encodeURI(csvContent);
-            window.open(encodedUri);
+            this.abrirModalSolicitudes();
+        },
+
+        resetExportDates() {
+            const now = new Date();
+            const first = new Date(now.getFullYear(), now.getMonth(), 1);
+            const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            this.modalExport.fecha_inicio = this.toDateInput(first);
+            this.modalExport.fecha_fin = this.toDateInput(last);
+        },
+
+        abrirModalSolicitudes() {
+            if (!this.modalExport.fecha_inicio || !this.modalExport.fecha_fin) {
+                this.resetExportDates();
+            }
+            this.modalExport.error = "";
+            this.modalExport.open = true;
+        },
+
+        cerrarModalSolicitudes() {
+            this.modalExport.open = false;
+            this.modalExport.error = "";
+        },
+
+        async descargarSolicitudes(tipo) {
+            if (this.modalExport.loading) return;
+            this.modalExport.error = "";
+
+            const fechaInicio = this.modalExport.fecha_inicio;
+            const fechaFin = this.modalExport.fecha_fin;
+            if (!fechaInicio || !fechaFin) {
+                this.modalExport.error = "Selecciona fecha inicio y fecha fin.";
+                return;
+            }
+            if (fechaFin < fechaInicio) {
+                this.modalExport.error = "La fecha fin no puede ser menor a la fecha inicio.";
+                return;
+            }
+
+            this.modalExport.loading = true;
+            try {
+                const res = await axios.get(`${API}/aprobaciones/solicitudes`, {
+                    params: { fecha_inicio: fechaInicio, fecha_fin: fechaFin, tipo }
+                });
+                const rows = (res.data || []).map((r) => this.normalizarSolicitudExcel(r));
+                if (!rows.length) {
+                    this.modalExport.error = "No hay solicitudes para descargar en ese rango.";
+                    return;
+                }
+                this.generarExcel(rows, this.tipoExportLabel(tipo), this.nombreArchivoSolicitudes(tipo));
+            } catch (e) {
+                this.modalExport.error = e?.response?.data?.error || "Error descargando solicitudes.";
+            } finally {
+                this.modalExport.loading = false;
+            }
         },
 
         formatearDinero(val) {
@@ -115,6 +163,13 @@ window.aprobacionApp = function () {
 
         formatDate(d) {
             return d ? d.split("T")[0] : "";
+        },
+
+        toDateInput(date) {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, "0");
+            const d = String(date.getDate()).padStart(2, "0");
+            return `${y}-${m}-${d}`;
         },
 
         normalizeTipo(tipo) {
@@ -190,6 +245,124 @@ window.aprobacionApp = function () {
             const fin = this.formatDate(item?.asignacion_fecha_fin || "");
             if (inicio && fin) return `${inicio} a ${fin}`;
             return inicio || fin || "-";
+        },
+
+        normalizarSolicitudExcel(item) {
+            return {
+                id: this.codigoTicket(item),
+                estado: item?.estado || item?.estado_reporte || item?.estado_asignacion || "Abierto",
+                tipo: item?.nombre_tipo_asignacion || "",
+                modulo: item?.nombre_modulo || "",
+                empresa: item?.nombre_cliente || "",
+                persona: item?.nombre_consultor || "",
+                email: item?.email_consultor || "",
+                caso_cliente: this.casoCliente(item),
+                caso_interno: this.casoInterno(item),
+                fecha_inicio: this.formatDate(item?.fecha_inicio || item?.asignacion_fecha_inicio || item?.fecha_reporte || ""),
+                fecha_fin: this.formatDate(item?.fecha_fin || item?.asignacion_fecha_fin || item?.fecha_cierre_mesa_fab || ""),
+                horas: Number(item?.horas_reportadas || 0) || "",
+                dias: Number(item?.cantidad_dias_reportados || 0) || "",
+                total: Number(item?.total_cobrar || 0) || "",
+                observacion: item?.observacion_ticket || item?.asignacion_observacion || ""
+            };
+        },
+
+        columnasExcel() {
+            return [
+                { key: "id", label: "ID", width: 95 },
+                { key: "estado", label: "Estado", width: 95 },
+                { key: "tipo", label: "Tipo", width: 130 },
+                { key: "modulo", label: "Modulo", width: 130 },
+                { key: "empresa", label: "Empresa", width: 170 },
+                { key: "persona", label: "Persona", width: 170 },
+                { key: "email", label: "Email", width: 190 },
+                { key: "caso_cliente", label: "Caso cliente", width: 125 },
+                { key: "caso_interno", label: "Caso interno", width: 125 },
+                { key: "fecha_inicio", label: "Fecha inicio", width: 95 },
+                { key: "fecha_fin", label: "Fecha fin", width: 95 },
+                { key: "horas", label: "Horas", width: 70, type: "Number" },
+                { key: "dias", label: "Dias", width: 70, type: "Number" },
+                { key: "total", label: "Total", width: 95, type: "Number", money: true },
+                { key: "observacion", label: "Observacion", width: 240 }
+            ];
+        },
+
+        generarExcel(rows, sheetName, filename) {
+            const columnas = this.columnasExcel();
+            const safeSheet = this.escapeXml(String(sheetName || "Solicitudes").slice(0, 31));
+            const header = columnas
+                .map((c) => `<Cell ss:StyleID="header"><Data ss:Type="String">${this.escapeXml(c.label)}</Data></Cell>`)
+                .join("");
+            const body = rows.map((row) => {
+                const cells = columnas.map((col) => this.excelCell(row[col.key], col));
+                return `<Row>${cells.join("")}</Row>`;
+            }).join("");
+            const widths = columnas.map((c) => `<Column ss:Width="${c.width || 100}"/>`).join("");
+            const xml =
+                `<?xml version="1.0"?>` +
+                `<?mso-application progid="Excel.Sheet"?>` +
+                `<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" ` +
+                `xmlns:o="urn:schemas-microsoft-com:office:office" ` +
+                `xmlns:x="urn:schemas-microsoft-com:office:excel" ` +
+                `xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">` +
+                `<Styles>` +
+                `<Style ss:ID="header"><Font ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#16A34A" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center"/></Style>` +
+                `<Style ss:ID="money"><NumberFormat ss:Format="Currency"/></Style>` +
+                `</Styles>` +
+                `<Worksheet ss:Name="${safeSheet}"><Table>${widths}<Row>${header}</Row>${body}</Table></Worksheet>` +
+                `</Workbook>`;
+            this.descargarArchivo(xml, filename);
+        },
+
+        excelCell(value, col) {
+            if (value === null || value === undefined || value === "") {
+                return `<Cell><Data ss:Type="String"></Data></Cell>`;
+            }
+            if (col.type === "Number" && Number.isFinite(Number(value))) {
+                const style = col.money ? ` ss:StyleID="money"` : "";
+                return `<Cell${style}><Data ss:Type="Number">${Number(value)}</Data></Cell>`;
+            }
+            return `<Cell><Data ss:Type="String">${this.escapeXml(value)}</Data></Cell>`;
+        },
+
+        descargarArchivo(content, filename) {
+            const blob = new Blob([content], { type: "application/vnd.ms-excel;charset=utf-8;" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        },
+
+        nombreArchivoSolicitudes(tipo) {
+            const label = {
+                mesa: "Mesa_Servicio",
+                fabrica: "Fabrica",
+                general: "General"
+            }[tipo] || "General";
+            const meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+            const base = this.modalExport.fecha_inicio || this.toDateInput(new Date());
+            const [year, month] = base.split("-");
+            const mes = meses[Math.max(0, Math.min(11, Number(month || 1) - 1))];
+            return `Solicitudes_${label}_${mes}_${year}.xls`;
+        },
+
+        tipoExportLabel(tipo) {
+            if (tipo === "mesa") return "Mesa de Servicio";
+            if (tipo === "fabrica") return "Fabrica";
+            return "General";
+        },
+
+        escapeXml(value) {
+            return String(value ?? "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&apos;");
         },
 
         codigoTicket(item) {

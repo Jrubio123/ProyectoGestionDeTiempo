@@ -30,13 +30,14 @@ const viewScripts = {
 // Guardar la promesa (no solo el resultado) evita inyectar el mismo
 // archivo dos veces si llegan dos navegaciones rápidas antes del onload.
 const _scriptPromises = new Map();
+const APP_ASSET_VERSION = "20260505-reportes-coord";
 
 function loadScript(src) {
     if (_scriptPromises.has(src)) return _scriptPromises.get(src);
     const promise = new Promise((resolve, reject) => {
         const script = document.createElement("script");
         const sep = src.includes("?") ? "&" : "?";
-        script.src = `${src}${sep}v=20260505-rrhh-fix`;
+        script.src = `${src}${sep}v=${APP_ASSET_VERSION}`;
         script.onload = () => resolve();
         script.onerror = () => {
             _scriptPromises.delete(src); // permite reintento si falla
@@ -65,7 +66,7 @@ async function loadView(view) {
         // Cargamos script y HTML en paralelo para no perder tiempo.
         const [, res] = await Promise.all([
             scriptSrc ? loadScript(scriptSrc) : Promise.resolve(),
-            fetch(`/views/${view}.html`)
+            fetch(`/views/${view}.html?v=${APP_ASSET_VERSION}`)
         ]);
 
         if (!res.ok) throw new Error("Error HTTP: " + res.status);

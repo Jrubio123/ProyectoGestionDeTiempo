@@ -1,6 +1,13 @@
 const { pool } = require("../db");
 
 const normalizeValue = (value) => String(value || "").toLowerCase().trim();
+const normalizeDateOnlyInput = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const raw = String(value).trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  return `${match[1]}-${match[2]}-${match[3]}`;
+};
 
 function getIndexHelpers() {
   return require("../index");
@@ -427,6 +434,160 @@ async function listarAprobacionesPendientes(req, res) {
   }
 }
 
+// Solicitudes historicas para exportacion de coordinador/admin responsable
+async function listarSolicitudesAprobacion(req, res) {
+  const {
+    applyTicketCaseFields
+  } = getIndexHelpers();
+
+  try {
+    const userId = req.user?.id;
+    const isAdmin = normalizeValue(req.user?.rol) === "administrador";
+    const fechaInicio = normalizeDateOnlyInput(req.query?.fecha_inicio);
+    const fechaFin = normalizeDateOnlyInput(req.query?.fecha_fin);
+    const tipo = String(req.query?.tipo || "general").toLowerCase().trim();
+
+    if (!userId) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: "Fecha inicio y fecha fin son obligatorias" });
+    }
+    if (fechaFin < fechaInicio) {
+      return res.status(400).json({ error: "La fecha fin no puede ser menor a la fecha inicio" });
+    }
+
+    let tipoWhere = "";
+    if (tipo === "mesa") {
+      tipoWhere = `
+        AND (
+          LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mesa%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%service desk%'
+          OR LOWER(REPLACE(TRIM(COALESCE(ta.titulo, '')), ' ', '')) LIKE '%servicedesk%'
+        )
+      `;
+    } else if (tipo === "fabrica") {
+      tipoWhere = `
+        AND (
+          LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%fabrica%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%fábrica%'
+        )
+      `;
+    } else if (tipo !== "general") {
+      return res.status(400).json({ error: "Tipo de exportacion invalido" });
+    }
+
+    const result = await pool.query(`
+      SELECT *
+      FROM (
+        SELECT
+          rh.public_id AS id,
+          rh.estado_reporte::text AS estado,
+          rh.estado_reporte::text AS estado_reporte,
+          rh.created_at AS fecha_reporte,
+          COALESCE(ra.fecha_inicio, rh.created_at::date) AS fecha_inicio,
+          COALESCE(ra.fecha_fin, rh.fecha_cierre_mesa_fab) AS fecha_fin,
+          rh.fecha_cierre_mesa_fab,
+          rh.nro_caso_int_ext,
+          rh.tipo_servicio::text AS tipo_servicio,
+          rh.observacion_mesa_fabrica AS observacion_ticket,
+          rh.requerimiento,
+          rh.perfil_fabrica,
+          rh.wricef,
+          rh.id_registro_asignacion,
+          rh.total_cobrar,
+          rh.horas_reportadas,
+          rh.cantidad_dias_reportados,
+          c.titulo AS nombre_cliente,
+          u.nombre_usuario AS nombre_consultor,
+          u.email AS email_consultor,
+          m.titulo AS nombre_modulo,
+          ta.titulo AS nombre_tipo_asignacion,
+          ra.public_id AS asignacion_id,
+          ra.estado::text AS estado_asignacion,
+          ra.nro_caso_cliente AS asignacion_nro_caso_cliente,
+          ra.nro_caso_interno AS asignacion_nro_caso_interno,
+          ra.fecha_inicio AS asignacion_fecha_inicio,
+          ra.fecha_fin AS asignacion_fecha_fin,
+          ra.observacion AS asignacion_observacion
+        FROM reporte_horas rh
+          LEFT JOIN clientes c ON rh.cliente_id = c.id
+          LEFT JOIN usuarios u ON rh.consultor_responsable_id = u.id
+          LEFT JOIN modulo m ON rh.modulo_id = m.id
+          LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
+          LEFT JOIN registro_asignaciones ra ON rh.id_registro_asignacion = ra.id
+        WHERE ($4::boolean OR rh.coordinador_id = $1)
+          AND COALESCE(ra.fecha_inicio, rh.created_at::date) BETWEEN $2::date AND $3::date
+          ${tipoWhere}
+
+        UNION ALL
+
+        SELECT
+          ra.public_id AS id,
+          ra.estado::text AS estado,
+          NULL::text AS estado_reporte,
+          ra.created_at AS fecha_reporte,
+          COALESCE(ra.fecha_inicio, ra.created_at::date) AS fecha_inicio,
+          ra.fecha_fin AS fecha_fin,
+          ra.fecha_cierre_mesa_fab,
+          NULL::text AS nro_caso_int_ext,
+          ra.tipo_servicio::text AS tipo_servicio,
+          ra.observacion AS observacion_ticket,
+          NULL::text AS requerimiento,
+          NULL::varchar AS perfil_fabrica,
+          NULL::varchar AS wricef,
+          ra.id AS id_registro_asignacion,
+          ra.total_pagar AS total_cobrar,
+          ra.horas_asignadas AS horas_reportadas,
+          ra.cantidad_dias AS cantidad_dias_reportados,
+          c.titulo AS nombre_cliente,
+          u.nombre_usuario AS nombre_consultor,
+          u.email AS email_consultor,
+          m.titulo AS nombre_modulo,
+          ta.titulo AS nombre_tipo_asignacion,
+          ra.public_id AS asignacion_id,
+          ra.estado::text AS estado_asignacion,
+          ra.nro_caso_cliente AS asignacion_nro_caso_cliente,
+          ra.nro_caso_interno AS asignacion_nro_caso_interno,
+          ra.fecha_inicio AS asignacion_fecha_inicio,
+          ra.fecha_fin AS asignacion_fecha_fin,
+          ra.observacion AS asignacion_observacion
+        FROM registro_asignaciones ra
+          JOIN consultorias con ON ra.id_consultoria = con.id
+          LEFT JOIN clientes c ON con.id_cliente = c.id
+          LEFT JOIN usuarios u ON ra.consultor_responsable_id = u.id
+          LEFT JOIN modulo m ON ra.id_modulo = m.id
+          LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
+        WHERE ($4::boolean OR con.coordinador_responsable_id = $1)
+          AND COALESCE(ra.fecha_inicio, ra.created_at::date) BETWEEN $2::date AND $3::date
+          AND LOWER(ra.estado::text) IN ('abierto', 'proceso')
+          AND NOT EXISTS (
+            SELECT 1
+            FROM reporte_horas rh_existente
+            WHERE rh_existente.id_registro_asignacion = ra.id
+          )
+          ${tipoWhere}
+      ) solicitudes
+      ORDER BY fecha_inicio DESC NULLS LAST, fecha_reporte DESC NULLS LAST
+    `, [userId, fechaInicio, fechaFin, isAdmin]);
+
+    const rows = (result.rows || []).map((row) => {
+      const withCases = applyTicketCaseFields(row);
+      return {
+        ...withCases,
+        nro_caso_cliente:
+          withCases.nro_caso_cliente || row?.asignacion_nro_caso_cliente || null,
+        nro_caso_interno:
+          withCases.nro_caso_interno || row?.asignacion_nro_caso_interno || null
+      };
+    });
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener solicitudes" });
+  }
+}
+
 // Aprobar / Rechazar reporte
 /**
  * Registra la aprobación o rechazo de un reporte y notifica al consultor respectivo
@@ -646,4 +807,9 @@ async function actualizarAprobacion(req, res) {
   }
 }
 
-module.exports = { reportarHoras, listarAprobacionesPendientes, actualizarAprobacion };
+module.exports = {
+  reportarHoras,
+  listarAprobacionesPendientes,
+  listarSolicitudesAprobacion,
+  actualizarAprobacion
+};

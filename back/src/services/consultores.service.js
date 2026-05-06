@@ -1,6 +1,7 @@
 const { pool } = require("../db");
 
 const normalizeValue = (value) => String(value || "").toLowerCase().trim();
+const escapeLike = (value) => String(value || "").replace(/[\\%_]/g, "\\$&");
 
 /**
  * Lista consultores activos disponibles
@@ -46,6 +47,58 @@ async function listConsultoresPrincipales(req, res) {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al obtener consultores principales" });
+  }
+}
+
+/**
+ * Busca consultores principales y asociados
+ */
+async function buscarConsultores(req, res) {
+  const q = String(req.query.q || "").trim();
+  try {
+    if (q.length < 2) return res.json([]);
+
+    const result = await pool.query(
+      `
+      SELECT
+        u.public_id AS id,
+        u.nombre_usuario,
+        u.email,
+        CASE
+          WHEN LOWER(COALESCE(u.tipo_consultor::text, '')) = 'asociado'
+            OR u.id_consultor_principal IS NOT NULL
+          THEN 'asociado'
+          ELSE 'principal'
+        END AS tipo,
+        cp.public_id AS principal_id,
+        cp.nombre_usuario AS principal_nombre,
+        cp.email AS principal_email
+      FROM usuarios u
+      LEFT JOIN roles r ON u.rol_usuario_id = r.id
+      LEFT JOIN usuarios cp ON cp.id = u.id_consultor_principal
+      WHERE u.activo = true
+        AND (r.titulo IN ('Consultor', 'Consultor Principal', 'Mesa de Servicio') OR u.tipo_consultor IS NOT NULL)
+        AND (
+          u.nombre_usuario ILIKE $1 ESCAPE '\\'
+          OR u.email ILIKE $1 ESCAPE '\\'
+        )
+      ORDER BY
+        CASE
+          WHEN LOWER(COALESCE(u.tipo_consultor::text, '')) = 'asociado'
+            OR u.id_consultor_principal IS NOT NULL
+          THEN 1
+          ELSE 0
+        END,
+        u.nombre_usuario ASC
+      LIMIT 12
+      `,
+      [`%${escapeLike(q)}%`]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al buscar consultores" });
   }
 }
 
@@ -213,6 +266,7 @@ async function desvincularSubConsultor(req, res) {
 module.exports = {
   listConsultores,
   listConsultoresPrincipales,
+  buscarConsultores,
   listSubConsultoresPorPrincipal,
   listSubConsultoresDisponibles,
   asociarSubConsultor,

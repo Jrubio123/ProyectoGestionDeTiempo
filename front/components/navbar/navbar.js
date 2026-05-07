@@ -1,6 +1,6 @@
 function getRoleRoutes() {
     return {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin", "gestion-personas"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin", "gestion-personas", "gestion-consultores"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -12,7 +12,7 @@ function getRoleRoutes() {
             "solicitudesCoord",
             "preregistrosCoord",
             "soportes-cuentas-cobro",
-            "gestion-personas"
+            "gestion-consultores"
         ],
         consultor_principal: [
             "inicio",
@@ -28,9 +28,9 @@ function getRoleRoutes() {
             "registro-horas-consultor",
             "asignacion-fabrica-mesa-servicio"
         ],
-        comercial: ["inicio", "solicitudesCoord", "preregistrosCoord"],
+        comercial: ["inicio", "solicitudesCoord", "preregistrosCoord", "gestion-consultores"],
         reclutador: ["inicio", "solicitudesRecl"],
-        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin", "gestion-personas"]
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin", "gestion-personas", "gestion-consultores"]
     };
 }
 
@@ -54,6 +54,7 @@ function getAllSearchViews() {
         { label: "Catálogos Admin", hash: "#catalogos-admin" },
         { label: "Licencias de Acceso", hash: "#gestion-licencias-admin" },
         { label: "Gestion de Personas", hash: "#gestion-personas" },
+        { label: "Gestión de Consultores", hash: "#gestion-consultores" },
         { label: "Solicitudes RRHH", hash: "#solicitudesCoord" },
         { label: "Contrataciones", hash: "#preregistrosCoord" },
         { label: "Pool de Solicitudes", hash: "#solicitudesRecl" },

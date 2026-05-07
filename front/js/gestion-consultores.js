@@ -7,7 +7,7 @@ window.gestionPersonasApp = function () {
         puedeAgregar: false,
         cargando: false,
         cargandoFicha: false,
-        modalAddPersonaOpen: false,
+        modalAddConsultorOpen: false,
         guardandoAdd: false,
         addError: null,
         addForm: {
@@ -67,11 +67,11 @@ window.gestionPersonasApp = function () {
 
             const roleKey = window.auth?.getRoleKey?.() || "other";
             this.puedeEditar = roleKey === "admin" || roleKey === "talento_humano";
-            this.puedeAgregar = this.puedeEditar;
+            this.puedeAgregar = ["admin", "talento_humano", "coordinador", "comercial"].includes(roleKey);
 
             await Promise.all([
                 this.cargarPersonas(),
-                this.puedeEditar ? this.cargarCatalogos() : Promise.resolve()
+                this.puedeEditar ? this.cargarCatalogos() : this.puedeAgregar ? this.cargarTiposDocumento() : Promise.resolve()
             ]);
         },
 
@@ -83,7 +83,7 @@ window.gestionPersonasApp = function () {
         async cargarPersonas() {
             this.cargando = true;
             try {
-                const res = await axios.get(`${API}/admin/personas`, this.getAuthConfig());
+                const res = await axios.get(`${API}/admin/consultores`, this.getAuthConfig());
                 this.personas = res.data || [];
             } catch (e) {
                 this.personas = [];
@@ -105,25 +105,25 @@ window.gestionPersonasApp = function () {
 
         abrirModalAgregar() {
             this.resetAddForm();
-            this.modalAddPersonaOpen = true;
+            this.modalAddConsultorOpen = true;
         },
 
         cerrarModalAgregar() {
             if (this.guardandoAdd) return;
-            this.modalAddPersonaOpen = false;
+            this.modalAddConsultorOpen = false;
             this.addError = null;
         },
 
-        async crearPersona() {
+        async crearConsultor() {
             this.guardandoAdd = true;
             this.addError = null;
             try {
-                await axios.post(`${API}/admin/personas`, { ...this.addForm }, this.getAuthConfig());
-                this.modalAddPersonaOpen = false;
-                alert("Persona creada correctamente");
+                await axios.post(`${API}/admin/consultores`, { ...this.addForm }, this.getAuthConfig());
+                this.modalAddConsultorOpen = false;
+                alert("Consultor creado correctamente");
                 await this.cargarPersonas();
             } catch (err) {
-                this.addError = err?.response?.data?.error || "Error al crear persona";
+                this.addError = err?.response?.data?.error || "Error al crear consultor";
             } finally {
                 this.guardandoAdd = false;
             }
@@ -159,7 +159,7 @@ window.gestionPersonasApp = function () {
             this.cerrarTodosLosDrafts();
             this.cargandoFicha = true;
             try {
-                const res = await axios.get(`${API}/admin/personas/${persona.id}`, this.getAuthConfig());
+                const res = await axios.get(`${API}/admin/consultores/${persona.id}`, this.getAuthConfig());
                 this.ficha = res.data;
             } catch (e) {
                 this.ficha = null;
@@ -196,6 +196,15 @@ window.gestionPersonasApp = function () {
                 this.cat.tiposCuenta = [];
                 this.cat.tiposDocumento = [];
                 this.cat.principales = [];
+            }
+        },
+
+        async cargarTiposDocumento() {
+            try {
+                const resDocs = await axios.get(`${API}/documentos-identidad`, this.getAuthConfig());
+                this.cat.tiposDocumento = resDocs.data || [];
+            } catch (e) {
+                this.cat.tiposDocumento = [];
             }
         },
 
@@ -268,7 +277,7 @@ window.gestionPersonasApp = function () {
                     this.getAuthConfig()
                 );
 
-                const res = await axios.get(`${API}/admin/personas/${this.ficha.id}`, this.getAuthConfig());
+                const res = await axios.get(`${API}/admin/consultores/${this.ficha.id}`, this.getAuthConfig());
                 this.ficha = res.data;
 
                 const idx = this.personas.findIndex((p) => p.id === this.ficha.id);

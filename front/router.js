@@ -18,6 +18,7 @@ const viewScripts = {
     "catalogos-admin":                "/js/catalogos-admin.js",
     "gestion-licencias-admin":        "/js/gestion-licencias-admin.js",
     "gestion-personas":               "/js/gestion-personas.js",
+    "gestion-consultores":            "/js/gestion-consultores.js",
     "firma-contratos-admin":          "/js/firma-contratos-admin.js",
     solicitudesCoord:                 "/js/solicitudes-coord.js",
     preregistrosCoord:                "/js/preregistros-coord.js",
@@ -104,6 +105,7 @@ const routes = {
     "catalogos-admin": "catalogos-admin",
     "gestion-licencias-admin": "gestion-licencias-admin",
     "gestion-personas": "gestion-personas",
+    "gestion-consultores": "gestion-consultores",
     "firma-contratos-admin": "firma-contratos-admin",
     solicitudesCoord: "solicitudesCoord",
     preregistrosCoord: "preregistrosCoord",
@@ -122,7 +124,7 @@ function router() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador","asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin", "gestion-personas"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador","asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin", "gestion-personas", "gestion-consultores"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -134,7 +136,7 @@ function router() {
             "solicitudesCoord",
             "preregistrosCoord",
             "soportes-cuentas-cobro",
-            "gestion-personas"
+            "gestion-consultores"
         ],
         consultor_principal: [
             "inicio",
@@ -151,8 +153,8 @@ function router() {
             "asignacion-fabrica-mesa-servicio"
         ],
         reclutador: ["inicio", "solicitudesRecl"],
-        comercial: ["inicio", "solicitudesCoord", "preregistrosCoord"],
-        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin", "gestion-personas"]
+        comercial: ["inicio", "solicitudesCoord", "preregistrosCoord", "gestion-consultores"],
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin", "gestion-personas", "gestion-consultores"]
     };
     const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
     if (view && !allowed.has(view)) {

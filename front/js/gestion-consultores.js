@@ -1,5 +1,5 @@
-// js/gestion-personas.js
-window.gestionPersonasApp = function () {
+// js/gestion-consultores.js
+window.gestionConsultoresApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
 
     return {

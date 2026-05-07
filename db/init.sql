@@ -731,6 +731,8 @@ CREATE TABLE reporte_horas
     estado_reporte tipo_estado_reporte DEFAULT 'Pendiente',
     estado_mesa_servicio tipo_estado_mesa,
     estado_fabrica tipo_estado_fabrica,
+    aprobado_por INTEGER REFERENCES usuarios(id),
+    fecha_aprobacion TIMESTAMP,
 
     -- Observaciones
     motivo_rechazo TEXT,
@@ -745,6 +747,7 @@ CREATE TABLE reporte_horas
 CREATE INDEX idx_reporte_asignacion ON reporte_horas(id_registro_asignacion);
 CREATE INDEX idx_reporte_estado ON reporte_horas(estado_reporte);
 CREATE INDEX idx_reporte_consultor ON reporte_horas(consultor_responsable_id);
+CREATE INDEX idx_reporte_aprobado_por ON reporte_horas(aprobado_por);
 CREATE INDEX idx_reporte_cliente ON reporte_horas(cliente_id);
 CREATE INDEX idx_reporte_cuenta_cobro ON reporte_horas(id_cuenta_cobro);
 CREATE INDEX idx_reporte_fechas ON reporte_horas(created_at, fecha_cierre_mesa_fab);

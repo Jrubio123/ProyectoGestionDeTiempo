@@ -318,13 +318,40 @@ async function getHistorialCuentas(req, res) {
 
 // Soportes cargados de cuentas de cobro (solo admin/coordinador)
 /**
+ * Lista usuarios que pueden aprobar reportes de horas
+ */
+async function getAprobadoresCuentas(req, res) {
+  try {
+    const result = await pool.query(`
+      SELECT
+        u.public_id AS id,
+        u.nombre_usuario AS nombre,
+        r.titulo AS rol
+      FROM usuarios u
+      JOIN roles r ON r.id = u.rol_usuario_id
+      WHERE u.activo = true
+        AND r.titulo IN ('Administrador', 'Coordinador')
+      ORDER BY r.titulo ASC, u.nombre_usuario ASC
+    `);
+
+    res.json(result.rows || []);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener aprobadores" });
+  }
+}
+
+/**
  * Lista las cuentas de cobro que tienen archivos adjuntos cargados en el sistema
  */
 async function getSoportesCuentas(req, res) {
-  const { consultor_id } = req.query || {};
+  const { consultor_id, coordinador_id } = req.query || {};
   try {
     const result = await pool.query(
       `
+      WITH c_aprobador AS (
+        SELECT id FROM usuarios WHERE public_id = $2::uuid
+      )
       SELECT
         cc.public_id AS id,
         cc.created_at,
@@ -335,18 +362,37 @@ async function getSoportesCuentas(req, res) {
         u.public_id AS consultor_id,
         u.nombre_usuario AS consultor_nombre,
         u.email AS consultor_email,
+        aprobadores.coordinador_nombre,
         cc.datos_adjuntos
       FROM cuenta_cobro cc
         JOIN usuarios u ON u.id = cc.created_by
+        LEFT JOIN LATERAL (
+          SELECT
+            string_agg(DISTINCT aprobador.nombre_usuario, ', ' ORDER BY aprobador.nombre_usuario) AS coordinador_nombre
+          FROM reporte_horas rh
+          LEFT JOIN usuarios aprobador ON aprobador.id = COALESCE(rh.aprobado_por, rh.coordinador_id)
+          WHERE rh.id_cuenta_cobro = cc.id
+            AND rh.estado_reporte = 'Aprobado'
+        ) aprobadores ON true
       WHERE cc.datos_adjuntos IS NOT NULL
         AND (
           cc.datos_adjuntos ? 'soportes'
           OR cc.datos_adjuntos #> '{firma,documento_firmado}' IS NOT NULL
         )
         AND ($1::uuid IS NULL OR u.public_id = $1::uuid)
+        AND (
+          $2::uuid IS NULL
+          OR EXISTS (
+            SELECT 1
+            FROM reporte_horas rhf
+            WHERE rhf.id_cuenta_cobro = cc.id
+              AND rhf.estado_reporte = 'Aprobado'
+              AND COALESCE(rhf.aprobado_por, rhf.coordinador_id) = (SELECT id FROM c_aprobador)
+          )
+        )
       ORDER BY cc.id DESC
       `,
-      [consultor_id || null]
+      [consultor_id || null, coordinador_id || null]
     );
     res.json(result.rows || []);
   } catch (err) {
@@ -1324,4 +1370,4 @@ async function adjuntarFirmaCuenta(req, res) {
   }
 }
 
-module.exports = { previewCuentaCobro, crearCuentaCobro, getHistorialCuentas, getSoportesCuentas, getDetalleCuenta, getCuentaPdf, uploadAdjuntosCuenta, iniciarFirmaCuenta, reconciliarFirmaCuenta, adjuntarFirmaCuenta };
+module.exports = { previewCuentaCobro, crearCuentaCobro, getHistorialCuentas, getAprobadoresCuentas, getSoportesCuentas, getDetalleCuenta, getCuentaPdf, uploadAdjuntosCuenta, iniciarFirmaCuenta, reconciliarFirmaCuenta, adjuntarFirmaCuenta };

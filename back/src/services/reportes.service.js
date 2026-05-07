@@ -619,13 +619,15 @@ async function actualizarAprobacion(req, res) {
       return res.status(400).json({ error: "Falta estado" });
     }
 
+    const role = normalizeValue(req.user?.rol);
     const propiedad = await pool.query(
       `SELECT rh.id
        FROM reporte_horas rh
        JOIN registro_asignaciones ra ON ra.id = rh.id_registro_asignacion
        JOIN consultorias con ON con.id = ra.id_consultoria
-       WHERE rh.public_id = $1::uuid AND con.coordinador_responsable_id = $2::int`,
-      [id, req.user?.id || null]
+       WHERE rh.public_id = $1::uuid
+         AND ($3::boolean = true OR con.coordinador_responsable_id = $2::int)`,
+      [id, req.user?.id || null, role === "administrador"]
     );
 
     if (propiedad.rows.length === 0) {
@@ -637,10 +639,19 @@ async function actualizarAprobacion(req, res) {
        WITH c_reporte AS (SELECT id FROM reporte_horas WHERE public_id = $3::uuid)
        UPDATE reporte_horas
        SET estado_reporte = $1,
-           motivo_rechazo = $2
+           motivo_rechazo = $2,
+           aprobado_por = CASE
+             WHEN $1::tipo_estado_reporte = 'Aprobado'::tipo_estado_reporte THEN $4::int
+             ELSE NULL
+           END,
+           fecha_aprobacion = CASE
+             WHEN $1::tipo_estado_reporte = 'Aprobado'::tipo_estado_reporte THEN CURRENT_TIMESTAMP
+             ELSE NULL
+           END,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = (SELECT id FROM c_reporte)
        RETURNING *`,
-      [estado, motivo || null, id]
+      [estado, motivo || null, id, req.user?.id || null]
     );
 
     if (result.rows.length === 0) {

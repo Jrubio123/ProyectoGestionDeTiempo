@@ -5,6 +5,7 @@ const {
   previewCuentaCobro,
   crearCuentaCobro,
   getHistorialCuentas,
+  getAprobadoresCuentas,
   getSoportesCuentas,
   getDetalleCuenta,
   getCuentaPdf,
@@ -21,6 +22,7 @@ const ROLES_LECTURA_AMPLIA = ["Consultor", "Consultor Principal", "Mesa de Servi
 router.post("/preview", requireAccess({ roles: ROLES_ASOCIADOS, tipos: ["Asociado"] }), previewCuentaCobro);
 router.post("/", requireAccess({ roles: ROLES_ASOCIADOS, tipos: ["Asociado"] }), crearCuentaCobro);
 router.get("/historial/:userId", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), getHistorialCuentas);
+router.get("/aprobadores", requireAccess({ roles: ["Administrador", "Coordinador"] }), getAprobadoresCuentas);
 router.get("/soportes", requireAccess({ roles: ["Administrador", "Coordinador"] }), getSoportesCuentas);
 router.get("/detalle/:cuentaId", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), getDetalleCuenta);
 router.get("/:id/pdf", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), getCuentaPdf);

@@ -10,7 +10,7 @@ window.gestionPersonasApp = function () {
         modalAddPersonaOpen: false,
         guardandoAdd: false,
         buscando: false,
-        addError: null,
+        addError: "",
         tenantUsuarios: [],
         usuarioSeleccionado: "",
         addForm: {
@@ -106,7 +106,7 @@ window.gestionPersonasApp = function () {
                 numero_documento: ""
             };
             this.usuarioSeleccionado = "";
-            this.addError = null;
+            this.addError = "";
         },
 
         abrirModalAgregar() {
@@ -118,7 +118,7 @@ window.gestionPersonasApp = function () {
         cerrarModalAgregar() {
             if (this.guardandoAdd) return;
             this.modalAddPersonaOpen = false;
-            this.addError = null;
+            this.addError = "";
         },
 
         async cargarUsuariosTenant(q = "") {
@@ -154,7 +154,7 @@ window.gestionPersonasApp = function () {
             this.addForm.nombre = String(usuario.nombre || "").trim() || nombreFallback || this.addForm.nombre;
             this.addForm.apellidos = String(usuario.apellidos || "").trim() || apellidosFallback || this.addForm.apellidos;
             this.usuarioSeleccionado = `${usuario.nombre_usuario || ""} - ${usuario.email || ""}`;
-            this.addError = null;
+            this.addError = "";
         },
 
         async cargarUsuarioSeleccionado() {
@@ -195,7 +195,7 @@ window.gestionPersonasApp = function () {
 
         async crearPersona() {
             this.guardandoAdd = true;
-            this.addError = null;
+            this.addError = "";
             try {
                 const payload = { ...this.addForm };
                 delete payload.azure_oid;
@@ -360,7 +360,7 @@ window.gestionPersonasApp = function () {
                         email: this.ficha.email,
                         activo: this.ficha.activo,
                         rol: this.ficha.rol,
-                        ciudad: this.ficha.ciudad,
+                        ciudad: this.ficha.ciudad
                     };
                 }
 

@@ -7758,7 +7758,6 @@ function buildGestionConsultoresScopeCondition(actorParam) {
               AND sc.coordinador_solicitante_id = ${actorParam}::int
               AND COALESCE(sc.estado, '') <> 'Cancelado'
           )
-          OR u.created_by = ${actorParam}::text
         )`;
 }
 
@@ -7807,9 +7806,9 @@ app.get("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordina
         p.estado                                           AS persona_estado,
         p.nombre                                           AS persona_nombre,
         p.apellidos                                        AS persona_apellidos
-      FROM usuarios u
+      FROM personas p
+      INNER JOIN usuarios u ON p.id = u.persona_id
       LEFT JOIN roles r    ON r.id = u.rol_usuario_id
-      LEFT JOIN personas p ON p.id = u.persona_id
       WHERE u.activo = true
         AND (
           LOWER(COALESCE(r.titulo, '')) IN ('consultor', 'consultor principal', 'mesa de servicio')

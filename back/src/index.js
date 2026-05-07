@@ -7185,6 +7185,42 @@ app.get("/admin/licencias-disponibles", requireAccess({ roles: ["Administrador"]
 
 // ====Gestión de Personas ============================================================
 
+app.get("/admin/tenant/usuarios", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial", "Talento Humano"] }), async (req, res) => {
+  try {
+    const q = toNullableTrimmedString(req.query?.q);
+    const token = await getGraphAccessToken();
+    const select = "id,displayName,givenName,surname,mail,userPrincipalName,businessPhones,mobilePhone";
+    let path = `/v1.0/users?$select=${select}&$top=25`;
+
+    if (q && q.length >= 2) {
+      const escaped = q.replace(/'/g, "''");
+      const filter = [
+        `startswith(displayName,'${escaped}')`,
+        `startswith(mail,'${escaped}')`,
+        `startswith(userPrincipalName,'${escaped}')`
+      ].join(" or ");
+      path += `&$filter=${encodeURIComponent(filter)}`;
+    } else {
+      path += "&$orderby=displayName";
+    }
+
+    const usuarios = await graphGetAll(path, token, 3);
+    res.json((usuarios || [])
+      .map((u) => ({
+        azure_oid: u.id || "",
+        nombre_usuario: u.displayName || "",
+        nombre: u.givenName || "",
+        apellidos: u.surname || "",
+        email: u.mail || u.userPrincipalName || "",
+        telefono: Array.isArray(u.businessPhones) && u.businessPhones[0] ? u.businessPhones[0] : (u.mobilePhone || "")
+      }))
+      .filter((u) => u.email));
+  } catch (err) {
+    console.error("Error buscando usuarios del tenant:", err?.message || err);
+    res.status(502).json({ error: "No se pudieron buscar usuarios del tenant" });
+  }
+});
+
 function canEditGestionPersonas(req) {
   const role = normalizeValue(req?.user?.rol);
   return role === "administrador" || role === "talento humano";
@@ -7541,8 +7577,10 @@ app.post("/admin/personas", requireAccess({ roles: ["Administrador", "Talento Hu
     banco_id, tipo_cuenta_id, numero_cuenta,
     composicion_familiar, hijos, personas_a_cargo,
     eps, afp, arl, tipo_contrato, modalidad,
-    modulo_id, modulo_otro, cliente_id, cliente_otro
+    modulo_id, modulo_otro, cliente_id, cliente_otro,
+    azure_oid
   } = req.body || {};
+  void azure_oid;
 
   const nombreVal = toNullableTrimmedString(nombre);
   const apellidosVal = toNullableTrimmedString(apellidos);
@@ -7789,12 +7827,13 @@ app.get("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordina
 
 // POST /admin/consultores - crear persona y usuario consultor con acceso al sistema
 app.post("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial", "Talento Humano"] }), async (req, res) => {
-  const { nombre, apellidos, email, tipo_documento_id, numero_documento } = req.body || {};
+  const { nombre, apellidos, email, tipo_documento_id, numero_documento, azure_oid } = req.body || {};
   const nombreVal = toNullableTrimmedString(nombre);
   const apellidosVal = toNullableTrimmedString(apellidos);
   const emailVal = toNullableTrimmedString(email)?.toLowerCase() || null;
   const documentoVal = toNullableTrimmedString(numero_documento);
   const tipoDocumentoVal = toNullableTrimmedString(tipo_documento_id);
+  const azureOid = toNullableTrimmedString(azure_oid);
 
   if (!nombreVal || !apellidosVal || !emailVal || !tipoDocumentoVal || !documentoVal) {
     return res.status(400).json({ error: "Nombre, apellidos, email, tipo de documento y numero de documento son obligatorios" });
@@ -7856,10 +7895,11 @@ app.post("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordin
         tipo_documento_id,
         cedula,
         persona_id,
+        azure_oid,
         created_by
       )
-      VALUES ($1, $2, $3, true, $4, $5, $6, $7)
-      RETURNING public_id AS id, nombre_usuario, email, activo
+      VALUES ($1, $2, $3, true, $4, $5, $6, $7, $8)
+      RETURNING public_id AS id, nombre_usuario, email, activo, azure_oid
       `,
       [
         nombreUsuario,
@@ -7868,6 +7908,7 @@ app.post("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordin
         tipoDocumentoRef.id,
         documentoVal,
         persona.id,
+        azureOid,
         String(req.user?.id || "gestion_consultores")
       ]
     );

@@ -9,8 +9,12 @@ window.gestionPersonasApp = function () {
         cargandoFicha: false,
         modalAddPersonaOpen: false,
         guardandoAdd: false,
+        buscando: false,
         addError: null,
+        tenantUsuarios: [],
+        usuarioSeleccionado: "",
         addForm: {
+            azure_oid: "",
             nombre: "",
             apellidos: "",
             email: "",
@@ -94,18 +98,21 @@ window.gestionPersonasApp = function () {
 
         resetAddForm() {
             this.addForm = {
+                azure_oid: "",
                 nombre: "",
                 apellidos: "",
                 email: "",
                 tipo_documento_id: "",
                 numero_documento: ""
             };
+            this.usuarioSeleccionado = "";
             this.addError = null;
         },
 
         abrirModalAgregar() {
             this.resetAddForm();
             this.modalAddPersonaOpen = true;
+            this.cargarUsuariosTenant();
         },
 
         cerrarModalAgregar() {
@@ -114,11 +121,85 @@ window.gestionPersonasApp = function () {
             this.addError = null;
         },
 
+        async cargarUsuariosTenant(q = "") {
+            const query = String(q || "").trim();
+            this.buscando = true;
+            try {
+                const cfg = this.getAuthConfig() || {};
+                const res = await axios.get(`${API}/admin/tenant/usuarios`, {
+                    ...cfg,
+                    params: query.length >= 2 ? { q: query } : {}
+                });
+                this.tenantUsuarios = res.data || [];
+            } catch (e) {
+                this.tenantUsuarios = [];
+            } finally {
+                this.buscando = false;
+            }
+        },
+
+        async buscarUsuariosTenant() {
+            await this.cargarUsuariosTenant(this.usuarioSeleccionado || this.addForm.email);
+        },
+
+        aplicarUsuarioTenant(usuario) {
+            if (!usuario) return;
+            const nombreCompleto = String(usuario.nombre_usuario || "").trim();
+            const partes = nombreCompleto.split(/\s+/).filter(Boolean);
+            const nombreFallback = partes.shift() || "";
+            const apellidosFallback = partes.join(" ");
+
+            this.addForm.email = usuario.email || this.addForm.email;
+            this.addForm.azure_oid = usuario.azure_oid || "";
+            this.addForm.nombre = String(usuario.nombre || "").trim() || nombreFallback || this.addForm.nombre;
+            this.addForm.apellidos = String(usuario.apellidos || "").trim() || apellidosFallback || this.addForm.apellidos;
+            this.usuarioSeleccionado = `${usuario.nombre_usuario || ""} - ${usuario.email || ""}`;
+            this.addError = null;
+        },
+
+        async cargarUsuarioSeleccionado() {
+            const q = this.usuarioSeleccionado.trim().toLowerCase();
+            if (!q) return;
+
+            const usuario = this.tenantUsuarios.find((u) => {
+                const label = `${u.nombre_usuario || ""} - ${u.email || ""}`.toLowerCase();
+                const email = String(u.email || "").toLowerCase();
+                return label === q || email === q;
+            });
+
+            if (!usuario?.email) {
+                this.addError = "Selecciona un usuario valido de la lista";
+                return;
+            }
+
+            this.aplicarUsuarioTenant(usuario);
+        },
+
+        async cargarDesdeEmailTenant() {
+            const q = this.addForm.email.trim().toLowerCase();
+            if (!q) return;
+
+            let usuario = this.tenantUsuarios.find(
+                (u) => String(u.email || "").toLowerCase() === q
+            );
+            if (!usuario && q.length >= 2) {
+                await this.cargarUsuariosTenant(q);
+                usuario = this.tenantUsuarios.find(
+                    (u) => String(u.email || "").toLowerCase() === q
+                );
+            }
+            if (usuario) {
+                this.aplicarUsuarioTenant(usuario);
+            }
+        },
+
         async crearPersona() {
             this.guardandoAdd = true;
             this.addError = null;
             try {
-                await axios.post(`${API}/admin/personas`, { ...this.addForm }, this.getAuthConfig());
+                const payload = { ...this.addForm };
+                delete payload.azure_oid;
+                await axios.post(`${API}/admin/personas`, payload, this.getAuthConfig());
                 this.modalAddPersonaOpen = false;
                 alert("Persona creada correctamente");
                 await this.cargarPersonas();

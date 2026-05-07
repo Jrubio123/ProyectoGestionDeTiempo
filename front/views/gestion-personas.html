@@ -203,9 +203,44 @@
         <button type="button" @click="cerrarModalAgregar()" class="text-2xl leading-none text-gray-400 hover:text-gray-600">&times;</button>
       </div>
       <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div class="md:col-span-2">
+          <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Buscar usuario en Microsoft 365</label>
+          <input x-model="usuarioSeleccionado"
+                 @input.debounce.500ms="buscarUsuariosTenant()"
+                 @change="cargarUsuarioSeleccionado()"
+                 list="personasTenantUsuariosList"
+                 type="text"
+                 class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500"
+                 placeholder="Escribe nombre o correo del tenant">
+          <datalist id="personasTenantUsuariosList">
+            <template x-for="u in tenantUsuarios" :key="u.azure_oid || u.email">
+              <option :value="`${u.nombre_usuario || ''} - ${u.email || ''}`"></option>
+            </template>
+          </datalist>
+        </div>
         <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Nombre</label><input type="text" x-model="addForm.nombre" required class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
         <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Apellidos</label><input type="text" x-model="addForm.apellidos" required class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
-        <div class="md:col-span-2"><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Email</label><input type="email" x-model="addForm.email" required class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
+        <div class="md:col-span-2">
+          <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Email *</label>
+          <div class="flex gap-2">
+            <input x-model="addForm.email"
+                   @input.debounce.500ms="buscarUsuariosTenant()"
+                   @blur="cargarDesdeEmailTenant()"
+                   list="personasTenantEmailsList"
+                   type="email"
+                   required
+                   class="min-w-0 flex-1 px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500"
+                   placeholder="usuario@silverconsulting.com.co">
+            <button type="button" @click="cargarDesdeEmailTenant()" :disabled="buscando || !addForm.email.trim()" class="px-4 py-3 bg-slate-800 text-white rounded-xl text-sm font-semibold hover:bg-slate-900 disabled:opacity-50">
+              <span x-text="buscando ? 'Buscando...' : 'Buscar'"></span>
+            </button>
+          </div>
+          <datalist id="personasTenantEmailsList">
+            <template x-for="u in tenantUsuarios" :key="`mail-${u.azure_oid || u.email}`">
+              <option :value="u.email" x-text="u.nombre_usuario"></option>
+            </template>
+          </datalist>
+        </div>
         <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Tipo de Documento</label><select x-model="addForm.tipo_documento_id" required class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"><option value="">Selecciona</option><template x-for="d in cat.tiposDocumento" :key="d.id"><option :value="d.id" x-text="d.titulo"></option></template></select></div>
         <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Numero de Documento</label><input type="text" x-model="addForm.numero_documento" required class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
       </div>

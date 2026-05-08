@@ -1,5 +1,6 @@
 const { pool } = require("../db");
 const { getGraphAccessToken } = require("../email");
+const { FIRMA_CUENTA_TIMEOUT_HOURS, marcarCuentaCobroFirmaExpirada } = require("./firma-cuenta-timeout.service");
 const PDFDocument = require("pdfkit");
 
 const normalizeValue = (value) => String(value || "").toLowerCase().trim();
@@ -942,6 +943,7 @@ async function reconciliarFirmaCuenta(req, res) {
     const prevDocumentoFirmado = prevFirma.documento_firmado && typeof prevFirma.documento_firmado === "object"
       ? prevFirma.documento_firmado
       : null;
+    const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
 
     const requestId = String(req.body?.request_id || prevFirma.request_id || "").trim();
     const contractId = String(req.body?.contract_id || prevFirma.contract_id || `CC-${cuenta.public_id || cuenta.id}`).trim();
@@ -1028,6 +1030,34 @@ async function reconciliarFirmaCuenta(req, res) {
       }
     }
 
+    if (status === "pending" && !documentoFirmado?.url) {
+      const timeoutResult = await marcarCuentaCobroFirmaExpirada({
+        cuentaId: cuenta.id,
+        estadoEnFirma,
+        timeoutHours: FIRMA_CUENTA_TIMEOUT_HOURS,
+        origen: "reconciliacion"
+      });
+      if (timeoutResult.updated) {
+        const firmaExpirada = timeoutResult.firma || {};
+        return res.json({
+          ok: true,
+          cuenta_id: String(cuenta.public_id || cuenta.id || ""),
+          request_id: firmaExpirada.request_id || null,
+          contract_id: firmaExpirada.contract_id || null,
+          estado_firma: firmaExpirada.estado || null,
+          estado_cuenta: timeoutResult.estadoDestino || "Rechazado",
+          documento_firmado_url: null,
+          documento_firmado_error: firmaExpirada.documento_firmado_error || null,
+          origen_snapshot: "timeout",
+          origen_catalogo: catalogSource,
+          extras_subidos: []
+        });
+      }
+    }
+
+    const ultimoEvento = status === "pending" && String(prevFirma.ultimo_evento || "").trim().toUpperCase() === "START_SIGNATURE"
+      ? prevFirma.ultimo_evento
+      : rawStatus || status || "reconciliacion";
     const firma = {
       ...prevFirma,
       estado: status || prevFirma.estado || "pending",
@@ -1035,7 +1065,7 @@ async function reconciliarFirmaCuenta(req, res) {
       contract_id: contractId || prevFirma.contract_id || null,
       signature_id: effectiveSignatureId || prevFirma.signature_id || null,
       actualizado_en: nowIso,
-      ultimo_evento: rawStatus || status || "reconciliacion",
+      ultimo_evento: ultimoEvento,
       eventos: [...eventosPrev, eventoResumen]
     };
     if (documentoFirmado && documentoFirmado.url) {
@@ -1117,11 +1147,11 @@ async function reconciliarFirmaCuenta(req, res) {
       const estadoAprobado = await getCuentaCobroEstadoAprobado();
       estadoDestino = (documentoFirmado && documentoFirmado.url)
         ? estadoAprobado
-        : await getCuentaCobroEstadoEnFirma();
+        : estadoEnFirma;
     } else if (status === "rejected") {
       estadoDestino = "Rechazado";
     } else if (status === "pending") {
-      estadoDestino = await getCuentaCobroEstadoEnFirma();
+      estadoDestino = estadoEnFirma;
     }
 
     if (estadoDestino) {

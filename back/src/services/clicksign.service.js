@@ -122,7 +122,22 @@ async function processSignatureEvent(event) {
       "signature_status",
       "signature.status",
       "event.status",
-      "data.status"
+      "event.name",
+      "event.type",
+      "data.status",
+      "data.signature_status",
+      "data.signature.status",
+      "data.event.status",
+      "data.event.name",
+      "data.event.type",
+      "data.request",
+      "request",
+      "type",
+      "name",
+      "action",
+      "data.type",
+      "data.name",
+      "data.action"
     ]);
     const status = normalizeClickSignStatus(rawStatus);
     const publicIdFromEvent = extractPublicIdFromContract(contractId) || pickStringByPaths(event, [

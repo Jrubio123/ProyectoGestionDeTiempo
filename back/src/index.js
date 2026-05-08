@@ -27,6 +27,7 @@ try {
 const { NumerosALetras } = require("numero-a-letras");
 const { sendEmail, getGraphAccessToken } = require("./email");
 const { pool, getPoolStats, isTransientDbError } = require("./db");
+const { FIRMA_CUENTA_TIMEOUT_HOURS, marcarCuentaCobroFirmaExpirada } = require("./services/firma-cuenta-timeout.service");
 const { env } = require("./config/env");
 const { requireAccess, requireAuthenticated, hasAccess } = require("./middlewares/access");
 const registerPreregistroRoutes = require("./preregistro-routes");
@@ -1376,7 +1377,9 @@ function formatCurrencyForTemplate(value, moneda = "COP") {
 function normalizeDocStatus(value) {
   const raw = String(value || "").trim().toLowerCase();
   if (["signed", "firmado", "completado", "approved", "done"].includes(raw)) return "signed";
-  if (["rejected", "rechazado", "declined", "cancelled", "canceled"].includes(raw)) return "rejected";
+  if (["rejected", "rechazado", "declined", "cancelled", "canceled", "expired", "expirado", "expirada", "failed", "error"].includes(raw)) return "rejected";
+  if (raw.includes("signed") || raw.includes("completed")) return "signed";
+  if (raw.includes("rejected") || raw.includes("declined") || raw.includes("cancel") || raw.includes("expired") || raw.includes("failed") || raw.includes("error")) return "rejected";
   return "pending";
 }
 
@@ -6122,8 +6125,11 @@ function normalizeClickSignStatus(value) {
   const raw = String(value || "").trim().toLowerCase();
   if (!raw) return "";
   if (["signed", "completed", "done", "success", "firmado", "aprobado", "stamp_generated", "evidence_generated"].includes(raw)) return "signed";
-  if (["rejected", "declined", "failed", "error", "cancelled", "canceled", "rechazado", "cancelado"].includes(raw)) return "rejected";
+  if (["rejected", "declined", "failed", "error", "cancelled", "canceled", "expired", "expire", "timeout", "rechazado", "cancelado", "expirado", "expirada"].includes(raw)) return "rejected";
   if (["pending", "in_progress", "inprogress", "started", "sent", "created", "open", "en_firma", "start_signature", "start"].includes(raw)) return "pending";
+  if (raw.includes("signed") || raw.includes("completed")) return "signed";
+  if (raw.includes("rejected") || raw.includes("declined") || raw.includes("cancel") || raw.includes("expired") || raw.includes("failed") || raw.includes("error")) return "rejected";
+  if (raw.includes("start_signature") || raw.includes("pending") || raw.includes("progress") || raw.includes("started") || raw.includes("sent") || raw.includes("created") || raw.includes("open")) return "pending";
   return raw;
 }
 
@@ -6134,10 +6140,16 @@ async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = ""
     "signature.signature_status",
     "signature_status",
     "status",
+    "event.status",
+    "event.name",
+    "event.type",
     "data.signature.status",
     "data.signature.signature_status",
     "data.signature_status",
     "data.status",
+    "data.event.status",
+    "data.event.name",
+    "data.event.type",
     "signature.signatories.0.status",
     "data.signatories.0.status"
   ];
@@ -12687,11 +12699,27 @@ async function jobReconciliarCuentasEnFirma() {
           }
         }
 
+        if (status === "pending" && !documentoFirmado?.url) {
+          const timeoutResult = await marcarCuentaCobroFirmaExpirada({
+            cuentaId: cuenta.id,
+            estadoEnFirma,
+            timeoutHours: FIRMA_CUENTA_TIMEOUT_HOURS,
+            origen: "reconciliar-job"
+          });
+          if (timeoutResult.updated) {
+            console.log(`[reconciliar-job] ${cuenta.public_id} -> firma expirada por timeout (${FIRMA_CUENTA_TIMEOUT_HOURS}h).`);
+            continue;
+          }
+        }
+
+        const ultimoEvento = status === "pending" && String(prevFirma.ultimo_evento || "").trim().toUpperCase() === "START_SIGNATURE"
+          ? prevFirma.ultimo_evento
+          : rawStatus || status || "reconciliar-job";
         const firma = {
           ...prevFirma,
           estado: status || prevFirma.estado || "pending",
           actualizado_en: nowIso,
-          ultimo_evento: rawStatus || status || "reconciliar-job"
+          ultimo_evento: ultimoEvento
         };
         if (documentoFirmado?.url) firma.documento_firmado = documentoFirmado;
         if (documentoFirmadoError) firma.documento_firmado_error = documentoFirmadoError;

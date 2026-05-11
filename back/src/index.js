@@ -10417,14 +10417,18 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
   if (!Number.isInteger(idx) || idx < 1 || idx > 20) {
     return res.status(400).json({ error: "doc_index invalido" });
   }
+  const tokenId = toNullableInteger(req.tokenFirma?.token_id);
+  if (!tokenId) {
+    return res.status(401).json({ error: "Token de firma invalido" });
+  }
 
   try {
     const r = await pool.query(
       `SELECT id, nombre_persona, correo_personal, checks_completados, docs_firma, solicitud_id, preregistro_id
        FROM tokens_firma_contrato WHERE id = $1 AND estado = 'en_proceso'`,
-      [req.tokenFirma.token_id]
+      [tokenId]
     );
-    if (r.rowCount === 0) return res.status(400).json({ error: "Proceso no valido o ya completado" });
+    if (r.rowCount === 0) return res.status(404).json({ error: "Proceso no valido o ya completado" });
 
     const proceso = r.rows[0];
     const checks = proceso.checks_completados || {};
@@ -10445,14 +10449,43 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
     }
 
     const personaContext = await resolveContratoPersonaContext(proceso);
-    const docKey = docExistente.doc_key || LEGACY_DOC_INDEX_TO_KEY.get(idx) || null;
+    const docKeyFromFullPlan = docsActuales.length === CONTRATO_DOC_DEFINITIONS_FULL.length
+      ? CONTRATO_DOC_DEFINITIONS_FULL[idx - 1]?.doc_key
+      : null;
+    const docKey =
+      toNullableTrimmedString(docExistente.doc_key) ||
+      docKeyFromFullPlan ||
+      LEGACY_DOC_INDEX_TO_KEY.get(idx) ||
+      null;
+    if (!docKey) {
+      return res.status(422).json({
+        error: "El documento solicitado no tiene doc_key configurado para generar PDF",
+        doc_index: idx
+      });
+    }
     const docDefinition = resolveContratoDocDefinitionForFirma(docKey, {
       facturaEnColombia: personaContext?.facturaEnColombia ?? null,
       doc: docExistente
     });
     if (!docDefinition) {
-      return res.status(500).json({
+      return res.status(422).json({
         error: "No se encontro la CONFIGURACIÓN de plantilla para el documento solicitado",
+        doc_index: idx,
+        doc_key: docKey
+      });
+    }
+    if (!toNullableTrimmedString(docDefinition.template_file)) {
+      return res.status(422).json({
+        error: "El documento solicitado no tiene plantilla DOCX configurada",
+        doc_index: idx,
+        doc_key: docKey
+      });
+    }
+    const docDefinitionKey = toNullableTrimmedString(docDefinition.doc_key);
+    const docDefinitionTitulo = toNullableTrimmedString(docDefinition.titulo);
+    if (!docDefinitionKey || !docDefinitionTitulo) {
+      return res.status(422).json({
+        error: "La configuracion del documento de firma esta incompleta",
         doc_index: idx,
         doc_key: docKey
       });
@@ -10467,23 +10500,26 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
       personaContext,
       proceso
     });
-    const fileBaseName = `${personaSlug}_${docDefinition.doc_key}_${idx}`;
+    const fileBaseName = `${personaSlug}_${docDefinitionKey}_${idx}`;
     const docxBuffer = renderDocxTemplateToBuffer({
       templateFile: docDefinition.template_file,
       data: payload
     });
 
     const outputBuffer = await convertDocxBufferToPdfBuffer(docxBuffer, fileBaseName);
+    if (!Buffer.isBuffer(outputBuffer) || !outputBuffer.length) {
+      return res.status(502).json({ error: "El generador de PDF no devolvio un archivo valido" });
+    }
     const outputContentType = "application/pdf";
     const outputExtension = "pdf";
 
     const baseName = sanitizePathSegment(
-      `${docDefinition.titulo}_${personaSlug}`,
-      `Contrato_${docDefinition.doc_key || idx}`
+      `${docDefinitionTitulo}_${personaSlug}`,
+      `Contrato_${docDefinitionKey || idx}`
     );
     const fileName = sanitizeDownloadFileName(
       `${baseName}.${outputExtension}`,
-      `Contrato_${docDefinition.doc_key || idx}.${outputExtension}`
+      `Contrato_${docDefinitionKey || idx}.${outputExtension}`
     ).replace(/"/g, "");
 
     res.setHeader("Content-Type", outputContentType);
@@ -10494,6 +10530,12 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
     const errMessage = String(err?.message || "");
     if (Number(err?.status || 0) === 422) {
       return res.status(422).json({ error: errMessage || "No fue posible generar el documento solicitado" });
+    }
+    const lowerErrMessage = errMessage.toLowerCase();
+    if (lowerErrMessage.includes("plantilla de contrato no encontrada") || lowerErrMessage.includes("template_file no definido")) {
+      return res.status(422).json({
+        error: "No fue posible generar el documento porque la plantilla configurada no esta disponible. Contacta a Talento Humano."
+      });
     }
     if (isDocxTemplateFailureMessage(errMessage)) {
       return res.status(422).json({
@@ -10517,6 +10559,10 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
   if (!Number.isInteger(idx) || idx < 1 || idx > 20) {
     return res.status(400).json({ error: "doc_index invalido" });
   }
+  const tokenId = toNullableInteger(req.tokenFirma?.token_id);
+  if (!tokenId) {
+    return res.status(401).json({ error: "Token de firma invalido" });
+  }
 
   if (!isClickSignConfigured({ forContratos: true })) {
     return res.status(503).json({ error: "Click&Sign no está configurado en el servidor" });
@@ -10526,9 +10572,9 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
     const r = await pool.query(
       `SELECT id, nombre_persona, correo_personal, checks_completados, docs_firma, solicitud_id, preregistro_id
        FROM tokens_firma_contrato WHERE id = $1 AND estado = 'en_proceso'`,
-      [req.tokenFirma.token_id]
+      [tokenId]
     );
-    if (r.rowCount === 0) return res.status(400).json({ error: "Proceso no válido o ya completado" });
+    if (r.rowCount === 0) return res.status(404).json({ error: "Proceso no válido o ya completado" });
 
     const proceso = r.rows[0];
     const checks = proceso.checks_completados || {};
@@ -10566,14 +10612,43 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
     }
 
     const personaContext = await resolveContratoPersonaContext(proceso);
-    const docKey = docExistente.doc_key || LEGACY_DOC_INDEX_TO_KEY.get(idx) || null;
+    const docKeyFromFullPlan = docsActuales.length === CONTRATO_DOC_DEFINITIONS_FULL.length
+      ? CONTRATO_DOC_DEFINITIONS_FULL[idx - 1]?.doc_key
+      : null;
+    const docKey =
+      toNullableTrimmedString(docExistente.doc_key) ||
+      docKeyFromFullPlan ||
+      LEGACY_DOC_INDEX_TO_KEY.get(idx) ||
+      null;
+    if (!docKey) {
+      return res.status(422).json({
+        error: "El documento solicitado no tiene doc_key configurado para firmar",
+        doc_index: idx
+      });
+    }
     const docDefinition = resolveContratoDocDefinitionForFirma(docKey, {
       facturaEnColombia: personaContext?.facturaEnColombia ?? null,
       doc: docExistente
     });
     if (!docDefinition) {
-      return res.status(500).json({
+      return res.status(422).json({
         error: "No se encontró la CONFIGURACIÓN de plantilla para el documento solicitado",
+        doc_index: idx,
+        doc_key: docKey
+      });
+    }
+    if (!toNullableTrimmedString(docDefinition.template_file)) {
+      return res.status(422).json({
+        error: "El documento solicitado no tiene plantilla DOCX configurada",
+        doc_index: idx,
+        doc_key: docKey
+      });
+    }
+    const docDefinitionKey = toNullableTrimmedString(docDefinition.doc_key);
+    const docDefinitionTitulo = toNullableTrimmedString(docDefinition.titulo);
+    if (!docDefinitionKey || !docDefinitionTitulo) {
+      return res.status(422).json({
+        error: "La configuracion del documento de firma esta incompleta",
         doc_index: idx,
         doc_key: docKey
       });
@@ -10584,33 +10659,50 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
         url_firma: docExistente.url_firma,
         request_id: docExistente.request_id || null,
         doc_index: idx,
-        doc_key: docDefinition.doc_key,
+        doc_key: docDefinitionKey,
         ya_iniciado: true
       });
     }
 
+    const correoFirmante =
+      toNullableTrimmedString(personaContext?.correoPersonal) ||
+      toNullableTrimmedString(proceso.correo_personal);
+    if (!correoFirmante) {
+      return res.status(422).json({
+        error: "No hay correo personal disponible para iniciar la firma",
+        doc_index: idx,
+        doc_key: docDefinitionKey
+      });
+    }
+    const nombreFirmante =
+      toNullableTrimmedString(personaContext?.nombreCompleto) ||
+      toNullableTrimmedString(proceso.nombre_persona) ||
+      correoFirmante;
     const personaSlug = sanitizePathSegment(
-      (personaContext?.nombreCompleto || proceso.nombre_persona || "Contratista").replace(/\s+/g, "_"),
+      nombreFirmante.replace(/\s+/g, "_"),
       "Contratista"
     );
     const pdfBuffer = await generateContratoPdfFromTemplate({
       docDefinition,
       personaContext,
       proceso,
-      fileBaseName: `${personaSlug}_${docDefinition.doc_key}_${idx}`
+      fileBaseName: `${personaSlug}_${docDefinitionKey}_${idx}`
     });
+    if (!Buffer.isBuffer(pdfBuffer) || !pdfBuffer.length) {
+      return res.status(502).json({ error: "El generador de PDF no devolvio un archivo valido para firmar" });
+    }
 
     // Llamar a ClickSign API siguiendo el mismo flujo START_SIGNATURE de cuentas de cobro.
     const pdfBase64 = pdfBuffer.toString("base64");
-    const docTitulo = `${docDefinition.titulo}_${personaSlug}`;
+    const docTitulo = `${docDefinitionTitulo}_${personaSlug}`;
     const publicIdToken = req.tokenFirma.token_public_id;
-    const tokenRef = publicIdToken || String(req.tokenFirma.token_id || "token");
-    const requestId = `CF-${tokenRef}-${docDefinition.doc_key}-${Date.now()}`;
-    const contractId = `contrato_${tokenRef}_${docDefinition.doc_key}_${idx}`;
-    const signatoryExternalId = String(req.tokenFirma.token_id || req.tokenFirma.token_public_id || idx || Date.now());
+    const tokenRef = publicIdToken || String(tokenId || "token");
+    const requestId = `CF-${tokenRef}-${docDefinitionKey}-${Date.now()}`;
+    const contractId = `contrato_${tokenRef}_${docDefinitionKey}_${idx}`;
+    const signatoryExternalId = String(tokenId || req.tokenFirma.token_public_id || idx || Date.now());
     const fileName = sanitizePdfFileName(
       `${docTitulo}.pdf`,
-      `Contrato_${docDefinition.doc_key}_${idx}.pdf`
+      `Contrato_${docDefinitionKey}_${idx}.pdf`
     );
 
     const clicksignPayload = {
@@ -10627,8 +10719,8 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
             required_signatories_to_complete_level: 1,
             signatories: [
               {
-                email: proceso.correo_personal,
-                name: proceso.nombre_persona || proceso.correo_personal,
+                email: correoFirmante,
+                name: nombreFirmante,
                 external_id: signatoryExternalId
               }
             ]
@@ -10712,15 +10804,15 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
         detalle: clicksignBody,
         request_id: resolvedRequestId || null,
         doc_index: idx,
-        doc_key: docDefinition.doc_key
+        doc_key: docDefinitionKey
       });
     }
 
     const docEntry = {
       ...docExistente,
       doc_index: idx,
-      doc_key: docDefinition.doc_key,
-      titulo: docDefinition.titulo,
+      doc_key: docDefinitionKey,
+      titulo: docDefinitionTitulo,
       template_file: docDefinition.template_file,
       empresa_key: docDefinition.empresa_key || null,
       request_id: resolvedRequestId || null,
@@ -10736,7 +10828,7 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
     });
     await pool.query(
       `UPDATE tokens_firma_contrato SET docs_firma = $1::jsonb, updated_at = NOW() WHERE id = $2`,
-      [JSON.stringify(nuevaLista), req.tokenFirma.token_id]
+      [JSON.stringify(nuevaLista), tokenId]
     );
 
     res.json({
@@ -10744,13 +10836,19 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       request_id: resolvedRequestId || null,
       signature_id: signatureId || null,
       doc_index: idx,
-      doc_key: docDefinition.doc_key
+      doc_key: docDefinitionKey
     });
   } catch (err) {
     console.error("Error iniciando firma de contrato:", err);
     const errMessage = String(err?.message || "");
     if (Number(err?.status || 0) === 422) {
       return res.status(422).json({ error: errMessage || "No fue posible iniciar la firma del documento" });
+    }
+    const lowerErrMessage = errMessage.toLowerCase();
+    if (lowerErrMessage.includes("plantilla de contrato no encontrada") || lowerErrMessage.includes("template_file no definido")) {
+      return res.status(422).json({
+        error: "No fue posible iniciar la firma porque la plantilla configurada no esta disponible. Contacta a Talento Humano."
+      });
     }
     if (isDocxTemplateFailureMessage(errMessage)) {
       return res.status(422).json({
@@ -10763,7 +10861,7 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
         detalle: errMessage || "Sin detalle tecnico"
       });
     }
-    res.status(500).json({ error: "Error iniciando proceso de firma" });
+    return res.status(500).json({ error: "Error iniciando proceso de firma" });
   }
 });
 

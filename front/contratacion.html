@@ -454,7 +454,7 @@
                     <!-- Check habilitado (PDF no confirmado) -->
                     <div x-show="docActual?.tipo === 'pdf' && timerOk && !isChecked(docActual?.clave) && !pdfCargando" class="flex-1">
                         <label class="flex items-center gap-3 cursor-pointer bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5">
-                            <input type="checkbox" @change="confirmarLectura()"
+                            <input x-model="confirmoLectura" type="checkbox" @change="confirmarLectura()"
                                    class="w-4 h-4 accent-blue-600 flex-shrink-0">
                             <span class="text-sm text-blue-800 font-medium">
                                 Confirmo que leí <strong x-text="docActual?.label"></strong>
@@ -493,7 +493,7 @@
 
                     <!-- Botón siguiente / continuar a firma -->
                     <button @click="siguienteOFirmar()"
-                            :disabled="!puedeAvanzar"
+                            :disabled="!puedeAvanzar || (docActual?.tipo === 'pdf' && !confirmoLectura)"
                             class="px-5 py-2.5 rounded-xl font-bold text-sm transition-all flex-shrink-0 flex items-center gap-1.5"
                             :class="puedeAvanzar
                                 ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-200'

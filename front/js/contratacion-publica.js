@@ -40,6 +40,7 @@ window.contratacionApp = function () {
         pdfError: "",
         timerSeg: TIMER_PDF,
         timerOk: false,
+        confirmoLectura: false,
         _timer: null,
         _pdfCargadoParaIdx: null, // evita recargar el mismo PDF
 
@@ -227,7 +228,7 @@ window.contratacionApp = function () {
         },
 
         async siguienteOFirmar() {
-            if (!this.puedeAvanzar) return;
+            if (!this.puedeAvanzar || (this.docActual?.tipo === "pdf" && !this.confirmoLectura)) return;
             if (this.docActualIdx < this.allItems.length - 1) {
                 await this.siguiente();
             } else if (this.todosChecks) {
@@ -298,7 +299,9 @@ window.contratacionApp = function () {
         _reiniciarTimer() {
             clearInterval(this._timer);
             const clave = this.docActual?.clave;
-            this.timerOk = !!this.checksCompletados[clave];
+            const checkCompletado = !!this.checksCompletados[clave];
+            this.timerOk = checkCompletado;
+            this.confirmoLectura = checkCompletado;
             this.timerSeg = TIMER_PDF;
             if (!this.timerOk && this.docActual?.tipo === "pdf") {
                 this._timer = setInterval(() => {
@@ -358,7 +361,7 @@ window.contratacionApp = function () {
         // CONFIRMAR LECTURA DE PDF
         // ─────────────────────────────────────────────────────
         async confirmarLectura() {
-            if (!this.timerOk || !this.docActual || this.isChecked(this.docActual.clave)) return;
+            if (!this.confirmoLectura || !this.timerOk || !this.docActual || this.isChecked(this.docActual.clave)) return;
             await this._registrarCheck(this.docActual.clave);
             // Auto-descarga si el doc es una plantilla/formato que el usuario va a necesitar usar
             if (this.docActual.plantilla) {

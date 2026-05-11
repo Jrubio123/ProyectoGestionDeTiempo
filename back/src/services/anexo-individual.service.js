@@ -480,7 +480,7 @@ async function previewAnexoIndividualPdf(req, res) {
   }
 
   try {
-    const { userRow, items, correoFirmante: correoFinal } = await collectAnexoIndividualSignatureContext({
+    const { userRow, items, correoFirmante: correoFinal, facturaEnColombia } = await collectAnexoIndividualSignatureContext({
       userInput: usuarioInput,
       correoFirmante,
       requestedItemIds: req.body?.item_ids || []
@@ -488,7 +488,8 @@ async function previewAnexoIndividualPdf(req, res) {
     const generated = await generateAnexoIndividualPdfFromItems({
       userRow,
       items,
-      correoFirmante: correoFinal
+      correoFirmante: correoFinal,
+      facturaEnColombia
     });
     const fileName = sanitizeDownloadFileName(
       generated.fileName || "AnexoTecnico.pdf",
@@ -528,7 +529,7 @@ async function previewAnexoIndividualPdf(req, res) {
  */
 async function iniciarFirmaAnexoIndividual(req, res) {
   const {
-    isClickSignConfigured,
+    isAnexoTecnicoClickSignConfigured,
     getUsuarioAnexoIndividualById,
     mapAnexoIndividualTokenRow,
     collectAnexoIndividualSignatureContext,
@@ -544,16 +545,18 @@ async function iniciarFirmaAnexoIndividual(req, res) {
     buildAnexoIndividualInfraErrorPayload,
     isDocxTemplateFailureMessage,
     isDocxInfraFailureMessage,
+    getAnexoTecnicoClickSignConfigId,
     CLICKSIGN_USER,
-    CLICKSIGN_CONTRATOS_CONFIG_ID,
     CLICKSIGN_SIGNATURE_CB_URL,
     CLICKSIGN_SIGNATORY_CB_URL,
     CLICKSIGN_SIGNATORY_EMAIL_CB_URL,
     CLICKSIGN_WEBHOOK_TOKEN
   } = getIndexHelpers();
 
-  if (!isClickSignConfigured({ forContratos: true })) {
-    return res.status(503).json({ error: "Click&Sign no esta configurado en el servidor" });
+  if (!isAnexoTecnicoClickSignConfigured()) {
+    return res.status(503).json({
+      error: "Click&Sign no esta configurado para Anexo Tecnico. Configura CLICKSIGN_ANEXO_TECNICO_CONFIG_ID con una plantilla simple sin adjuntos."
+    });
   }
 
   const correoFirmante = String(req.body?.correo_firmante || "").trim();
@@ -591,7 +594,12 @@ async function iniciarFirmaAnexoIndividual(req, res) {
         });
       }
 
-      const { items, correoFirmante: correoFinal } = await collectAnexoIndividualSignatureContext({
+      const {
+        items,
+        correoFirmante: correoFinal,
+        facturaEnColombia,
+        clicksignDocumentType
+      } = await collectAnexoIndividualSignatureContext({
         userInput: userRow.id,
         correoFirmante,
         requestedItemIds: req.body?.item_ids || [],
@@ -602,19 +610,23 @@ async function iniciarFirmaAnexoIndividual(req, res) {
       const generated = await generateAnexoIndividualPdfFromItems({
         userRow,
         items,
-        correoFirmante: correoFinal
+        correoFirmante: correoFinal,
+        facturaEnColombia
       });
       const token = crypto.randomBytes(32).toString("hex");
       const requestId = `ANX-${token.slice(0, 12)}-${Date.now()}`;
       const contractId = `anexo_individual_${String(userRow.public_id || userRow.id || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 24)}_${Date.now()}`;
       const signatoryExternalId = String(userRow.id || Date.now());
+      const documentType = clicksignDocumentType || "AnexoTecnico";
+      const clicksignConfigId = getAnexoTecnicoClickSignConfigId();
       const clicksignPayload = {
         request: "START_SIGNATURE",
         request_id: requestId,
         user: CLICKSIGN_USER,
         signature: {
-          config_id: CLICKSIGN_CONTRATOS_CONFIG_ID,
+          config_id: clicksignConfigId,
           contract_id: contractId,
+          document_type: documentType,
           title: `Anexo Tecnico - ${userRow.nombre_usuario || "Persona"}`,
           level: [
             {
@@ -632,6 +644,7 @@ async function iniciarFirmaAnexoIndividual(req, res) {
           file: [
             {
               filename: generated.fileName,
+              document_type: documentType,
               content: generated.pdfBuffer.toString("base64"),
               sign_on_landing: "Y",
               signature_position: [

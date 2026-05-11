@@ -1,6 +1,23 @@
 const { pool } = require("../db");
 
 const normalizeValue = (value) => String(value || "").toLowerCase().trim();
+const normalizeModalidadTarifaKey = (value) => String(value || "")
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .toLowerCase()
+  .replace(/\s+/g, " ")
+  .trim();
+const isModalidadHorasConTarifa = (value) => {
+  const norm = normalizeModalidadTarifaKey(value);
+  const compact = norm.replace(/[\s_-]+/g, "");
+  if (!norm || norm.includes("capacitacion") || norm.includes("training")) return false;
+  return (
+    norm.includes("hora") ||
+    norm.includes("demanda") ||
+    ["horas", "porhoras", "horaspordemanda", "hourly"].includes(compact)
+  );
+};
+const roundCurrency = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 const normalizeDateOnlyInput = (value) => {
   if (value === null || value === undefined || value === "") return null;
   const raw = String(value).trim();
@@ -608,6 +625,7 @@ async function actualizarAprobacion(req, res) {
     sendEmailSafe,
     getGraphContext,
     buildEmailLayout,
+    isGuid,
     withPublicId
   } = getIndexHelpers();
 
@@ -618,53 +636,122 @@ async function actualizarAprobacion(req, res) {
     if (!estado) {
       return res.status(400).json({ error: "Falta estado" });
     }
+    if (!isGuid(id)) {
+      return res.status(400).json({ error: "Reporte inválido" });
+    }
 
     const role = normalizeValue(req.user?.rol);
-    const propiedad = await pool.query(
-      `SELECT rh.id
-       FROM reporte_horas rh
-       JOIN registro_asignaciones ra ON ra.id = rh.id_registro_asignacion
-       JOIN consultorias con ON con.id = ra.id_consultoria
-       WHERE rh.public_id = $1::uuid
-         AND ($3::boolean = true OR con.coordinador_responsable_id = $2::int)`,
-      [id, req.user?.id || null, role === "administrador"]
-    );
+    const esAprobacion = String(estado || "").trim() === "Aprobado";
+    const client = await pool.connect();
+    let txStarted = false;
+    let result;
+    let reporteId = null;
+    let registroId = null;
 
-    if (propiedad.rows.length === 0) {
-      return res.status(404).json({ error: "Reporte no encontrado" });
-    }
+    try {
+      await client.query("BEGIN");
+      txStarted = true;
 
-    const result = await pool.query(
-      `
-       WITH c_reporte AS (SELECT id FROM reporte_horas WHERE public_id = $3::uuid)
-       UPDATE reporte_horas
-       SET estado_reporte = $1,
-           motivo_rechazo = $2,
-           aprobado_por = CASE
-             WHEN $1::tipo_estado_reporte = 'Aprobado'::tipo_estado_reporte THEN $4::int
-             ELSE NULL
-           END,
-           fecha_aprobacion = CASE
-             WHEN $1::tipo_estado_reporte = 'Aprobado'::tipo_estado_reporte THEN CURRENT_TIMESTAMP
-             ELSE NULL
-           END,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = (SELECT id FROM c_reporte)
-       RETURNING *`,
-      [estado, motivo || null, id, req.user?.id || null]
-    );
+      const propiedad = await client.query(
+        `SELECT rh.id
+         FROM reporte_horas rh
+         JOIN registro_asignaciones ra ON ra.id = rh.id_registro_asignacion
+         JOIN consultorias con ON con.id = ra.id_consultoria
+         WHERE rh.public_id = $1::uuid
+           AND ($3::boolean = true OR con.coordinador_responsable_id = $2::int)`,
+        [id, req.user?.id || null, role === "administrador"]
+      );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Reporte no encontrado" });
-    }
+      if (propiedad.rows.length === 0) {
+        await client.query("ROLLBACK");
+        txStarted = false;
+        return res.status(404).json({ error: "Reporte no encontrado" });
+      }
 
-    const reporteId = result.rows[0]?.id || null;
-    const registroId = result.rows[0]?.id_registro_asignacion || null;
-    if (registroId) {
-      try {
+      let totalCobrarAprobado = null;
+      if (esAprobacion) {
+        const tarifaMeta = await client.query(
+          `SELECT
+             rh.id,
+             rh.horas_reportadas,
+             rh.consultor_responsable_id,
+             con.id_cliente,
+             con.id_tipo_asignacion,
+             ra.id_modulo,
+             ta.titulo AS tipo_asignacion_titulo,
+             tarifa.valor_tarifa AS tarifa_consultor
+           FROM reporte_horas rh
+             JOIN registro_asignaciones ra ON ra.id = rh.id_registro_asignacion
+             JOIN consultorias con ON con.id = ra.id_consultoria
+             LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
+             LEFT JOIN LATERAL (
+               SELECT tc.valor_tarifa
+               FROM tarifa_consultor tc
+               WHERE tc.consultor_id = rh.consultor_responsable_id
+                 AND tc.id_cliente = con.id_cliente
+                 AND (ra.id_modulo IS NULL OR tc.modulo_id = ra.id_modulo)
+                 AND (con.id_tipo_asignacion IS NULL OR tc.id_tipo_asignacion = con.id_tipo_asignacion)
+                 AND tc.activo = true
+                 AND (tc.vigencia_hasta IS NULL OR tc.vigencia_hasta >= CURRENT_DATE)
+               ORDER BY tc.vigencia_desde DESC NULLS LAST, tc.id DESC
+               LIMIT 1
+             ) tarifa ON true
+           WHERE rh.public_id = $1::uuid`,
+          [id]
+        );
+        const tarifaInfo = tarifaMeta.rows[0];
+        const requiereTarifaHoras =
+          tarifaInfo &&
+          isModalidadHorasConTarifa(tarifaInfo.tipo_asignacion_titulo) &&
+          !isTipoAsignacionMesaOFabrica(tarifaInfo.tipo_asignacion_titulo);
+
+        if (requiereTarifaHoras) {
+          const tarifa = toNullableNumber(tarifaInfo.tarifa_consultor);
+          if (!(tarifa > 0)) {
+            await client.query("ROLLBACK");
+            txStarted = false;
+            return res.status(400).json({ error: "No se puede aprobar: tarifa del consultor ausente o inválida" });
+          }
+          const horas = toNullableNumber(tarifaInfo.horas_reportadas);
+          if (horas !== null) {
+            totalCobrarAprobado = roundCurrency(Number(tarifa) * Number(horas));
+          }
+        }
+      }
+
+      result = await client.query(
+        `
+         WITH c_reporte AS (SELECT id FROM reporte_horas WHERE public_id = $3::uuid)
+         UPDATE reporte_horas
+         SET estado_reporte = $1,
+             motivo_rechazo = $2,
+             total_cobrar = COALESCE($5::numeric, total_cobrar),
+             aprobado_por = CASE
+               WHEN $1::tipo_estado_reporte = 'Aprobado'::tipo_estado_reporte THEN $4::int
+               ELSE NULL
+             END,
+             fecha_aprobacion = CASE
+               WHEN $1::tipo_estado_reporte = 'Aprobado'::tipo_estado_reporte THEN CURRENT_TIMESTAMP
+               ELSE NULL
+             END,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = (SELECT id FROM c_reporte)
+         RETURNING *`,
+        [estado, motivo || null, id, req.user?.id || null, totalCobrarAprobado]
+      );
+
+      if (result.rows.length === 0) {
+        await client.query("ROLLBACK");
+        txStarted = false;
+        return res.status(404).json({ error: "Reporte no encontrado" });
+      }
+
+      reporteId = result.rows[0]?.id || null;
+      registroId = result.rows[0]?.id_registro_asignacion || null;
+      if (registroId) {
         const estados = await getEstadoAsignacionValues();
         let estadoAprobadoDestino = estados.proceso;
-        const asignacionMeta = await pool.query(
+        const asignacionMeta = await client.query(
           `SELECT
            con.id_tipo_asignacion,
             ta.titulo AS tipo_asignacion_titulo,
@@ -695,7 +782,7 @@ async function actualizarAprobacion(req, res) {
               // del mismo bloque antes de pasar a cuenta de cobro.
               estadoAprobadoDestino = estados.cerrado || estados.proceso;
             } else {
-              const uso = await pool.query(
+              const uso = await client.query(
                 `
                 SELECT
                   COALESCE(SUM(CASE WHEN estado_reporte = 'Aprobado' THEN horas_reportadas ELSE 0 END), 0) AS horas_aprobadas,
@@ -722,7 +809,7 @@ async function actualizarAprobacion(req, res) {
           }
         }
         // Actualizar aprobación y estado en la asignación asociada
-        await pool.query(
+        await client.query(
           `UPDATE registro_asignaciones
            SET aprobar_coordinador = $1::tipo_aprobacion,
                estado = CASE
@@ -733,9 +820,17 @@ async function actualizarAprobacion(req, res) {
            WHERE id = $2`,
           [estado, registroId, estadoAprobadoDestino, estados.abierto]
         );
-      } catch (innerErr) {
-        console.error("Error actualizando registro_asignaciones:", innerErr);
       }
+
+      await client.query("COMMIT");
+      txStarted = false;
+    } catch (txErr) {
+      if (txStarted) {
+        await client.query("ROLLBACK");
+      }
+      throw txErr;
+    } finally {
+      client.release();
     }
 
     // Email al consultor con resultado de aprobación

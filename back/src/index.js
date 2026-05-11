@@ -739,7 +739,13 @@ const ONEDRIVE_ENABLED = String(process.env.ONEDRIVE_ENABLED || "true").toLowerC
 const ONEDRIVE_TARGET_USER = process.env.ONEDRIVE_TARGET_USER || "admin.apps@silverconsulting.com.co";
 const ONEDRIVE_ROOT_FOLDER = process.env.ONEDRIVE_ROOT_FOLDER || "AdjuntosCuentasCobro";
 const CONTRATOS_ONEDRIVE_FOLDER = process.env.CONTRATOS_ONEDRIVE_FOLDER || "ContratosFirmados";
+const CONTRATOS_ONEDRIVE_FOLDER_ID = String(process.env.ONEDRIVE_CONTRATOS || "").trim();
 const ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER = "AnexoTecnicoIndividual";
+const ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID = String(process.env.ONEDRIVE_ANEXO_TECNICO || "").trim();
+const ANEXO_TECNICO_CLICKSIGN_DOCUMENT_TYPES = Object.freeze({
+  silver: "AnexoTecnico",
+  capital: "anexotecnicoCapital"
+});
 const CONTRATOS_TOKEN_EXPIRY_HOURS = Math.max(1, Number(process.env.CONTRATOS_TOKEN_EXPIRY_HOURS || 72));
 const CONTRATOS_BASE_URL = String(env.CONTRATOS_BASE_URL || "").trim().replace(/\/+$/, "");
 const CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO = String(process.env.CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO || "").trim();
@@ -754,7 +760,17 @@ const CLICKSIGN_API_BASE = String(process.env.CLICKSIGN_API_BASE || "https://api
 const CLICKSIGN_API_KEY = String(process.env.CLICKSIGN_API_KEY || "").trim();
 const CLICKSIGN_USER = String(process.env.CLICKSIGN_USER || "").trim();
 const CLICKSIGN_CONFIG_ID = Number(process.env.CLICKSIGN_CONFIG_ID || 0);
-const CLICKSIGN_CONTRATOS_CONFIG_ID = Number(process.env.CLICKSIGN_CONTRATOS_CONFIG_ID || 0) || CLICKSIGN_CONFIG_ID;
+const CLICKSIGN_CONTRATOS_CONFIG_ID_RAW = Number(process.env.CLICKSIGN_CONTRATOS_CONFIG_ID || 0);
+const CLICKSIGN_CONTRATOS_CONFIG_ID = CLICKSIGN_CONTRATOS_CONFIG_ID_RAW || CLICKSIGN_CONFIG_ID;
+const CLICKSIGN_ANEXO_TECNICO_CONFIG_ID_RAW = Number(process.env.CLICKSIGN_ANEXO_TECNICO_CONFIG_ID || 0);
+const CLICKSIGN_ANEXO_TECNICO_CONFIG_ID =
+  CLICKSIGN_ANEXO_TECNICO_CONFIG_ID_RAW ||
+  (
+    CLICKSIGN_CONTRATOS_CONFIG_ID_RAW &&
+      CLICKSIGN_CONTRATOS_CONFIG_ID_RAW !== CLICKSIGN_CONFIG_ID
+      ? CLICKSIGN_CONTRATOS_CONFIG_ID_RAW
+      : 0
+  );
 const CLICKSIGN_SIGNATURE_CB_URL = String(process.env.CLICKSIGN_SIGNATURE_CB_URL || "").trim();
 const CLICKSIGN_SIGNATORY_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_CB_URL || "").trim();
 const CLICKSIGN_SIGNATORY_EMAIL_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_EMAIL_CB_URL || "").trim();
@@ -866,6 +882,23 @@ const CONTRATO_DOC_DEFINITIONS_BY_KEY = new Map(
 const LEGACY_DOC_INDEX_TO_KEY = new Map([
   [1, "contrato_prestacion_servicios"],
   [2, "anexo_tecnico"]
+]);
+const CONTRATO_BASE_ONEDRIVE_DOC_KEYS = new Set([
+  "contrato_prestacion_servicios",
+  "acuerdo_confidencialidad",
+  "politica_garantia",
+  "autorizacion_datos_personales"
+]);
+const CONTRATO_BASE_ONEDRIVE_TEXT_KEYS = new Set([
+  ...[...CONTRATO_BASE_ONEDRIVE_DOC_KEYS].map(normalizeTextKey),
+  "contratoprestaciondeservicios",
+  "contratoprestacionserviciocapital",
+  "acuerdodeconfidencialidad",
+  "acuerdoconfidencialdiadcapital",
+  "politicadegarantia",
+  "politicagarantiacapital",
+  "autorizaciondetratamientodedatospersonales",
+  "autorizaciontratamientodatoscapital"
 ]);
 const ANEXO_TIPO_LABELS = Object.freeze({
   full_time: "Full time",
@@ -1435,6 +1468,20 @@ function getContratoEmpresaKey(facturaEnColombia) {
   return resolveEmpresaContratoConfig(facturaEnColombia).key;
 }
 
+function getAnexoTecnicoClickSignDocumentType(facturaEnColombia) {
+  return facturaEnColombia === false
+    ? ANEXO_TECNICO_CLICKSIGN_DOCUMENT_TYPES.capital
+    : ANEXO_TECNICO_CLICKSIGN_DOCUMENT_TYPES.silver;
+}
+
+function getAnexoTecnicoClickSignConfigId() {
+  return CLICKSIGN_ANEXO_TECNICO_CONFIG_ID;
+}
+
+function isAnexoTecnicoClickSignConfigured() {
+  return Boolean(CLICKSIGN_API_KEY && CLICKSIGN_USER && CLICKSIGN_ANEXO_TECNICO_CONFIG_ID > 0);
+}
+
 function hydrateContratoDocDefinitionForEmpresa(def, facturaEnColombia = null) {
   if (!def) return null;
   const empresaKey = getContratoEmpresaKey(facturaEnColombia);
@@ -1515,6 +1562,15 @@ function buildDocsFirmaPlan({ hasContratoBase = false, facturaEnColombia = null 
   }));
 }
 
+function getContratoDocKeyByIndex(docIndex, totalDocs = null) {
+  const numericIndex = Number(docIndex);
+  if (!Number.isInteger(numericIndex) || numericIndex < 1) return null;
+  if (Number(totalDocs) === CONTRATO_DOC_DEFINITIONS_FULL.length) {
+    return CONTRATO_DOC_DEFINITIONS_FULL[numericIndex - 1]?.doc_key || null;
+  }
+  return LEGACY_DOC_INDEX_TO_KEY.get(numericIndex) || null;
+}
+
 function normalizeDocsFirmaList(docsRaw, options = {}) {
   const hasFacturaContext = Object.prototype.hasOwnProperty.call(options || {}, "facturaEnColombia");
   const facturaEnColombia = hasFacturaContext ? options.facturaEnColombia : null;
@@ -1524,7 +1580,7 @@ function normalizeDocsFirmaList(docsRaw, options = {}) {
       if (!doc || typeof doc !== "object") return null;
       const rawIndex = Number(doc.doc_index);
       const docIndex = Number.isInteger(rawIndex) && rawIndex > 0 ? rawIndex : index + 1;
-      const legacyDocKey = LEGACY_DOC_INDEX_TO_KEY.get(docIndex) || null;
+      const legacyDocKey = getContratoDocKeyByIndex(docIndex, docs.length);
       const docKey = toNullableTrimmedString(doc.doc_key) || legacyDocKey;
       const def = resolveContratoDocDefinitionForFirma(docKey, { facturaEnColombia, doc });
       const locked = isDocFirmaDefinitionLocked(doc);
@@ -1578,8 +1634,9 @@ function normalizeDocsFirmaListCompat(docsRaw, options = {}) {
 }
 
 function refreshDocsFirmaDefinitionsForContext(docsRaw, { facturaEnColombia = null } = {}) {
-  return normalizeDocsFirmaListCompat(docsRaw, { facturaEnColombia }).map((doc) => {
-    const docKey = toNullableTrimmedString(doc.doc_key) || LEGACY_DOC_INDEX_TO_KEY.get(Number(doc.doc_index)) || null;
+  const docs = normalizeDocsFirmaListCompat(docsRaw, { facturaEnColombia });
+  return docs.map((doc) => {
+    const docKey = toNullableTrimmedString(doc.doc_key) || getContratoDocKeyByIndex(Number(doc.doc_index), docs.length);
     const def = getContratoDocDefinition(docKey, facturaEnColombia);
     if (!def) return doc;
     if (isDocFirmaDefinitionLocked(doc)) {
@@ -3075,6 +3132,7 @@ async function getUsuarioAnexoIndividualById(userInput) {
         COALESCE(p.direccion_residencia, u.direccion) AS direccion,
         COALESCE(p.ciudad_residencia, u.ciudad)       AS ciudad,
         u.moneda_cobro,
+        COALESCE(p.factura_en_colombia, u.factura_en_colombia) AS factura_en_colombia,
         u.tipo_consultor,
         COALESCE(di_p.titulo, di_u.titulo) AS tipo_documento_titulo,
         COALESCE(di_p.codigo, di_u.codigo) AS tipo_documento_codigo
@@ -3106,6 +3164,7 @@ async function getUsuarioAnexoIndividualById(userInput) {
       p.numero_contacto AS telefono,
       p.direccion_residencia AS direccion,
       p.ciudad_residencia AS ciudad,
+      p.factura_en_colombia,
       NULL AS moneda_cobro,
       NULL AS tipo_consultor,
       di.titulo AS tipo_documento_titulo,
@@ -3510,6 +3569,36 @@ async function uploadAnexoIndividualFirmadoToOneDrive(proceso, pdfBuffer, fileNa
     `AnexoTecnico_${fechaStr}_${shortPublicId}`
   );
 
+  const safeName = sanitizePdfFileName(
+    fileName || `AnexoTecnico_${proceso?.nombre_persona || "Persona"}_${fechaStr}.pdf`,
+    "AnexoTecnico.pdf"
+  );
+
+  if (ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID) {
+    await graphGet(
+      `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID)}`,
+      token
+    );
+    const folderMeta = await ensureGraphChildFolderById(
+      token,
+      ONEDRIVE_TARGET_USER,
+      ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID,
+      folderName
+    );
+    const uploadPath = `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(folderMeta.id)}:/${encodeURIComponent(safeName)}:/content`;
+    const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
+
+    return {
+      carpeta: folderMeta.name || folderName,
+      carpeta_url: folderMeta.webUrl || null,
+      archivo: {
+        id: uploaded.id || "",
+        nombre: uploaded.name || safeName,
+        url: uploaded.webUrl || ""
+      }
+    };
+  }
+
   let targetPath = sanitizePathSegment(ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER, "AnexoTecnicoIndividual");
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, folderName);
@@ -3525,10 +3614,6 @@ async function uploadAnexoIndividualFirmadoToOneDrive(proceso, pdfBuffer, fileNa
     console.warn("No se pudo resolver URL de carpeta OneDrive para anexo individual:", folderErr?.message || folderErr);
   }
 
-  const safeName = sanitizePdfFileName(
-    fileName || `AnexoTecnico_${proceso?.nombre_persona || "Persona"}_${fechaStr}.pdf`,
-    "AnexoTecnico.pdf"
-  );
   const uploadPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${safeName}`)}:/content`;
   const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
 
@@ -3651,9 +3736,123 @@ async function notifyAnexoIndividualFirmaCompletada(tokenId) {
   }
 }
 
-async function handleClickSignAnexoIndividualWebhook({ event, requestId, contractId, status, rawStatus }) {
+async function resolveAnexoIndividualSignedPdfUpload({ proceso, event = {}, requestId = "", contractId = "", signatureId = "" }) {
+  const effectiveSignatureId = String(signatureId || extractClickSignSignatureId(event) || proceso?.signature_id || "").trim();
+  const artifacts = await resolveClickSignArtifacts({
+    event,
+    requestId: requestId || proceso?.request_id || "",
+    contractId: contractId || proceso?.contract_id || "",
+    publicId: String(proceso?.public_id || ""),
+    signatureId: effectiveSignatureId
+  });
+  const resolvedPdf = artifacts?.signedPdf || null;
+  if (!resolvedPdf || !isPdfBuffer(resolvedPdf.buffer)) {
+    return { signatureId: effectiveSignatureId, oneDriveInfo: null };
+  }
+
+  const oneDriveInfo = await uploadAnexoIndividualFirmadoToOneDrive(
+    proceso,
+    resolvedPdf.buffer,
+    resolvedPdf.fileName || `AnexoTecnico_${sanitizePathSegment(proceso?.nombre_persona, "Persona")}.pdf`
+  );
+
+  return { signatureId: effectiveSignatureId, oneDriveInfo };
+}
+
+async function markAnexoIndividualSignedWithOneDrive(proceso, oneDriveInfo, signatureId) {
+  if (!proceso?.id || !oneDriveInfo?.archivo?.url) return false;
+
+  await pool.query(
+    `
+    UPDATE tokens_firma_anexo_individual
+    SET estado = 'firmado',
+        firmado_at = COALESCE(firmado_at, NOW()),
+        signature_id = COALESCE($2, signature_id),
+        onedrive_url = $3,
+        onedrive_carpeta = COALESCE($4, onedrive_carpeta),
+        onedrive_carpeta_url = COALESCE($5, onedrive_carpeta_url),
+        updated_at = NOW()
+    WHERE id = $1
+    `,
+    [
+      proceso.id,
+      signatureId || null,
+      oneDriveInfo.archivo.url,
+      oneDriveInfo.carpeta || null,
+      oneDriveInfo.carpeta_url || null
+    ]
+  );
+
+  await pool.query(
+    `
+    UPDATE anexo_tecnico_items
+    SET estado_firma = 'firmado',
+        updated_at = NOW()
+    WHERE id = ANY($1::int[])
+    `,
+    [proceso.anexo_item_ids || []]
+  );
+
+  try {
+    await notifyAnexoIndividualFirmaCompletada(proceso.id);
+  } catch (notifyErr) {
+    console.error("Error notificando firma de anexo individual:", notifyErr?.message || notifyErr);
+  }
+
+  return true;
+}
+
+function scheduleAnexoIndividualSignedUploadRetry(tokenId) {
+  const numericTokenId = Number(tokenId || 0);
+  if (!Number.isInteger(numericTokenId) || numericTokenId <= 0) return;
+  const timer = setTimeout(() => {
+    reintentarAnexoIndividualFirma(numericTokenId).catch((err) => {
+      console.error("Error reintentando firmado de anexo individual:", err?.message || err);
+    });
+  }, 30000);
+  if (typeof timer.unref === "function") timer.unref();
+}
+
+async function reintentarAnexoIndividualFirma(tokenId) {
+  const result = await pool.query(
+    `
+    SELECT *
+    FROM tokens_firma_anexo_individual
+    WHERE id = $1
+      AND (
+        estado = 'enviado'
+        OR (estado = 'firmado' AND COALESCE(onedrive_url, '') = '')
+      )
+    LIMIT 1
+    `,
+    [tokenId]
+  );
+  const proceso = result.rows[0] || null;
+  if (!proceso || String(proceso.onedrive_url || "").trim()) return false;
+
+  const { signatureId, oneDriveInfo } = await resolveAnexoIndividualSignedPdfUpload({
+    proceso,
+    requestId: proceso.request_id || "",
+    contractId: proceso.contract_id || "",
+    signatureId: proceso.signature_id || ""
+  });
+  if (!oneDriveInfo?.archivo?.url) {
+    console.warn("Reintento anexo individual: PDF firmado aun no disponible", {
+      tokenId,
+      requestId: proceso.request_id || null,
+      contractId: proceso.contract_id || null
+    });
+    return false;
+  }
+
+  await markAnexoIndividualSignedWithOneDrive(proceso, oneDriveInfo, signatureId);
+  return true;
+}
+
+async function handleClickSignAnexoIndividualWebhook({ event, requestId, contractId, signatureId = "", status, rawStatus }) {
   if (status !== "signed" && status !== "rejected") return false;
 
+  const incomingSignatureId = String(signatureId || extractClickSignSignatureId(event) || "").trim();
   let proceso = null;
   if (requestId) {
     const byRequest = await pool.query(
@@ -3661,7 +3860,10 @@ async function handleClickSignAnexoIndividualWebhook({ event, requestId, contrac
       SELECT *
       FROM tokens_firma_anexo_individual
       WHERE request_id = $1
-        AND estado = 'enviado'
+        AND (
+          estado = 'enviado'
+          OR (estado = 'firmado' AND COALESCE(onedrive_url, '') = '')
+        )
       ORDER BY created_at DESC
       LIMIT 1
       `,
@@ -3676,13 +3878,34 @@ async function handleClickSignAnexoIndividualWebhook({ event, requestId, contrac
       SELECT *
       FROM tokens_firma_anexo_individual
       WHERE contract_id = $1
-        AND estado = 'enviado'
+        AND (
+          estado = 'enviado'
+          OR (estado = 'firmado' AND COALESCE(onedrive_url, '') = '')
+        )
       ORDER BY created_at DESC
       LIMIT 1
       `,
       [contractId]
     );
     proceso = byContract.rows[0] || null;
+  }
+
+  if (!proceso && incomingSignatureId) {
+    const bySignature = await pool.query(
+      `
+      SELECT *
+      FROM tokens_firma_anexo_individual
+      WHERE signature_id = $1
+        AND (
+          estado = 'enviado'
+          OR (estado = 'firmado' AND COALESCE(onedrive_url, '') = '')
+        )
+      ORDER BY created_at DESC
+      LIMIT 1
+      `,
+      [incomingSignatureId]
+    );
+    proceso = bySignature.rows[0] || null;
   }
 
   if (!proceso) return false;
@@ -3693,10 +3916,11 @@ async function handleClickSignAnexoIndividualWebhook({ event, requestId, contrac
         `
         UPDATE tokens_firma_anexo_individual
         SET estado = 'rechazado',
+            signature_id = COALESCE($2, signature_id),
             updated_at = NOW()
         WHERE id = $1
         `,
-        [proceso.id]
+        [proceso.id, incomingSignatureId || null]
       );
       await pool.query(
         `
@@ -3710,66 +3934,35 @@ async function handleClickSignAnexoIndividualWebhook({ event, requestId, contrac
       return true;
     }
 
-    const signatureId = String(extractClickSignSignatureId(event) || proceso.signature_id || "").trim();
-    let oneDriveInfo = null;
-
+    let signedUpload = null;
     try {
-      const artifacts = await resolveClickSignArtifacts({
+      signedUpload = await resolveAnexoIndividualSignedPdfUpload({
+        proceso,
         event,
         requestId,
         contractId,
-        publicId: String(proceso.public_id || ""),
-        signatureId
+        signatureId: incomingSignatureId || proceso.signature_id || ""
       });
-      const resolvedPdf = artifacts?.signedPdf || null;
-      if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
-        oneDriveInfo = await uploadAnexoIndividualFirmadoToOneDrive(
-          proceso,
-          resolvedPdf.buffer,
-          resolvedPdf.fileName || `AnexoTecnico_${sanitizePathSegment(proceso.nombre_persona, "Persona")}.pdf`
-        );
-      }
     } catch (artifactErr) {
       console.error("Error resolviendo firmado de anexo individual:", artifactErr?.message || artifactErr);
     }
 
-    await pool.query(
-      `
-      UPDATE tokens_firma_anexo_individual
-      SET estado = 'firmado',
-          firmado_at = COALESCE(firmado_at, NOW()),
-          signature_id = COALESCE($2, signature_id),
-          onedrive_url = COALESCE($3, onedrive_url),
-          onedrive_carpeta = COALESCE($4, onedrive_carpeta),
-          onedrive_carpeta_url = COALESCE($5, onedrive_carpeta_url),
-          updated_at = NOW()
-      WHERE id = $1
-      `,
-      [
-        proceso.id,
-        signatureId || null,
-        oneDriveInfo?.archivo?.url || null,
-        oneDriveInfo?.carpeta || null,
-        oneDriveInfo?.carpeta_url || null
-      ]
-    );
-
-    await pool.query(
-      `
-      UPDATE anexo_tecnico_items
-      SET estado_firma = 'firmado',
-          updated_at = NOW()
-      WHERE id = ANY($1::int[])
-      `,
-      [proceso.anexo_item_ids || []]
-    );
-
-    try {
-      await notifyAnexoIndividualFirmaCompletada(proceso.id);
-    } catch (notifyErr) {
-      console.error("Error notificando firma de anexo individual:", notifyErr?.message || notifyErr);
+    const finalSignatureId = signedUpload?.signatureId || incomingSignatureId || String(proceso.signature_id || "").trim();
+    if (!signedUpload?.oneDriveInfo?.archivo?.url) {
+      await pool.query(
+        `
+        UPDATE tokens_firma_anexo_individual
+        SET signature_id = COALESCE($2, signature_id),
+            updated_at = NOW()
+        WHERE id = $1
+        `,
+        [proceso.id, finalSignatureId || null]
+      );
+      scheduleAnexoIndividualSignedUploadRetry(proceso.id);
+      return true;
     }
 
+    await markAnexoIndividualSignedWithOneDrive(proceso, signedUpload.oneDriveInfo, finalSignatureId);
     return true;
   } catch (err) {
     console.error("Error procesando webhook de anexo individual:", err?.message || err);
@@ -4295,30 +4488,55 @@ function buildContratistaFirmaPayload(personaContext) {
   };
 }
 
+function safeFmtDate(val, locale = "es-CO", opts = {}) {
+  if (val === null || val === undefined) return "";
+  if (typeof val === "string" && val.trim() === "") return "";
+
+  const date = new Date(val);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const formatOpts = opts && typeof opts === "object" ? opts : {};
+  const needsTimeFormat = ["hour", "minute", "second", "fractionalSecondDigits", "timeStyle"]
+    .some((key) => Object.prototype.hasOwnProperty.call(formatOpts, key));
+
+  try {
+    return needsTimeFormat
+      ? date.toLocaleString(locale, formatOpts)
+      : date.toLocaleDateString(locale, formatOpts);
+  } catch (_) {
+    return "";
+  }
+}
+
 function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correoOverride = null } = {}) {
   const now = new Date();
-  const diaMes = new Intl.DateTimeFormat("es-CO", {
+  const diaMes = safeFmtDate(now, "es-CO", {
     day: "2-digit",
     timeZone: "America/Bogota"
-  }).format(now);
-  const anio = new Intl.DateTimeFormat("es-CO", {
+  });
+  const anio = safeFmtDate(now, "es-CO", {
     year: "numeric",
     timeZone: "America/Bogota"
-  }).format(now);
-  const mesTexto = formatMonthNameEs(now.toISOString().slice(0, 10));
+  });
+  const mesTexto = safeFmtDate(now, "es-CO", {
+    month: "long",
+    timeZone: "America/Bogota"
+  }).toLowerCase();
 
   // Fecha de inicio del contrato: fecha_inicio de la solicitud → fecha de generación
   const fechaInicioRaw =
     personaContext?.fecha_inicio ||
     personaContext?.fecha_extension_desde ||
     null;
-  const fechaInicioDate = fechaInicioRaw
-    ? new Date(`${String(fechaInicioRaw).slice(0, 10)}T12:00:00.000Z`)
+  const fechaInicioValue = fechaInicioRaw
+    ? `${String(fechaInicioRaw).slice(0, 10)}T12:00:00.000Z`
     : now;
-  const fechaInicioDia = new Intl.DateTimeFormat("es-CO", { day: "2-digit", timeZone: "America/Bogota" }).format(fechaInicioDate);
-  const fechaInicioAnio = new Intl.DateTimeFormat("es-CO", { year: "numeric", timeZone: "America/Bogota" }).format(fechaInicioDate);
-  const fechaInicioMesTexto = formatMonthNameEs(fechaInicioDate.toISOString().slice(0, 10));
-  const fechaInicioContrato = `${Number(fechaInicioDia)} de ${fechaInicioMesTexto} de ${fechaInicioAnio}`;
+  const fechaInicioDia = safeFmtDate(fechaInicioValue, "es-CO", { day: "2-digit", timeZone: "America/Bogota" });
+  const fechaInicioAnio = safeFmtDate(fechaInicioValue, "es-CO", { year: "numeric", timeZone: "America/Bogota" });
+  const fechaInicioMesTexto = safeFmtDate(fechaInicioValue, "es-CO", { month: "long", timeZone: "America/Bogota" }).toLowerCase();
+  const fechaInicioContrato = fechaInicioDia && fechaInicioMesTexto && fechaInicioAnio
+    ? `${Number(fechaInicioDia)} de ${fechaInicioMesTexto} de ${fechaInicioAnio}`
+    : "";
 
   const empresa = resolveEmpresaContratoConfig(personaContext?.facturaEnColombia ?? null);
   const contratistaFirma = buildContratistaFirmaPayload(personaContext);
@@ -4377,8 +4595,9 @@ async function generateContratoPdfFromTemplate({ docDefinition, personaContext, 
   return convertDocxBufferToPdfBuffer(docxBuffer, fileBaseName);
 }
 
-async function generateAnexoIndividualPdfFromItems({ userRow, items, correoFirmante }) {
-  const docDefinition = getContratoDocDefinition("anexo_tecnico");
+async function generateAnexoIndividualPdfFromItems({ userRow, items, correoFirmante, facturaEnColombia = null }) {
+  const facturaContext = normalizeNullableBooleanInput(facturaEnColombia ?? userRow?.factura_en_colombia);
+  const docDefinition = getContratoDocDefinition("anexo_tecnico", facturaContext);
   if (!docDefinition) {
     throw new Error("No se encontro la configuracion del anexo tecnico");
   }
@@ -4390,7 +4609,8 @@ async function generateAnexoIndividualPdfFromItems({ userRow, items, correoFirma
     telefono: userRow?.telefono || "",
     correoPersonal: correoFirmante || userRow?.email || "",
     ciudad: userRow?.ciudad || CONTRATOS_CIUDAD_SILVER,
-    direccion: userRow?.direccion || ""
+    direccion: userRow?.direccion || "",
+    facturaEnColombia: facturaContext
   };
   const payload = buildContratoBaseTemplatePayload({
     personaContext,
@@ -4446,6 +4666,8 @@ async function collectAnexoIndividualSignatureContext({
     SELECT
       ati.id,
       ati.public_id,
+      ati.solicitud_contratacion_id,
+      ati.preregistro_id,
       ati.nombre_persona,
       ati.numero_documento,
       ati.correo_personal,
@@ -4459,8 +4681,19 @@ async function collectAnexoIndividualSignatureContext({
       ati.origen,
       ati.estado,
       ati.estado_firma,
+      COALESCE(
+        CASE
+          WHEN LOWER(BTRIM(sc.datos_extra->>'factura_en_colombia')) IN ('true', 't', '1', 'yes', 'y', 'on', 'si') THEN true
+          WHEN LOWER(BTRIM(sc.datos_extra->>'factura_en_colombia')) IN ('false', 'f', '0', 'no', 'n', 'off') THEN false
+          ELSE NULL
+        END,
+        pp.factura_en_colombia,
+        $4::boolean
+      ) AS factura_en_colombia,
       m.titulo AS modulo_titulo
     FROM anexo_tecnico_items ati
+    LEFT JOIN solicitudes_contratacion sc ON sc.id = ati.solicitud_contratacion_id
+    LEFT JOIN preregistro_personas pp ON pp.id = ati.preregistro_id
     LEFT JOIN modulo m ON m.id = ati.modulo_id
     WHERE ati.estado = 'activo'
       AND (
@@ -4476,7 +4709,8 @@ async function collectAnexoIndividualSignatureContext({
     ORDER BY ati.fecha_inicio DESC NULLS LAST, ati.created_at DESC
     ${lockRows ? "FOR UPDATE OF ati" : ""}
   `;
-  const itemsResult = await client.query(itemsSql, [userRow.id, numeroDocumento, correoPersonalFallback]);
+  const userFacturaEnColombia = normalizeNullableBooleanInput(userRow.factura_en_colombia);
+  const itemsResult = await client.query(itemsSql, [userRow.id, numeroDocumento, correoPersonalFallback, userFacturaEnColombia]);
   const items = itemsResult.rows || [];
   if (!items.length) {
     const err = new Error("La persona no tiene items activos para firmar");
@@ -4506,11 +4740,26 @@ async function collectAnexoIndividualSignatureContext({
     correoPersonalFallback ||
     toNullableTrimmedString(userRow.email) ||
     "";
+  const facturaValues = items
+    .map((item) => normalizeNullableBooleanInput(item.factura_en_colombia))
+    .filter((value) => value !== null);
+  if (!facturaValues.length && userFacturaEnColombia !== null) {
+    facturaValues.push(userFacturaEnColombia);
+  }
+  const facturaUnica = Array.from(new Set(facturaValues.map((value) => String(value))));
+  if (facturaUnica.length > 1) {
+    const err = new Error("Los items activos mezclan facturacion Silver y Capital; separa el envio de firma.");
+    err.status = 409;
+    throw err;
+  }
+  const facturaEnColombia = facturaValues.length ? facturaValues[0] : true;
 
   return {
     userRow,
     items,
-    correoFirmante: correoSugerido
+    correoFirmante: correoSugerido,
+    facturaEnColombia,
+    clicksignDocumentType: getAnexoTecnicoClickSignDocumentType(facturaEnColombia)
   };
 }
 
@@ -4801,6 +5050,68 @@ async function ensureGraphFolder(accessToken, userEmail, parentPath, folderName)
   }
 
   return parentPath ? `${parentPath}/${safeFolderName}` : safeFolderName;
+}
+
+async function findGraphChildFolderByName(accessToken, userEmail, parentItemId, folderName) {
+  const encodedUser = encodeURIComponent(userEmail);
+  const encodedParentId = encodeURIComponent(String(parentItemId || "").trim());
+  const safeFolderName = sanitizePathSegment(folderName, "carpeta");
+  if (!encodedParentId) return null;
+  const response = await graphGet(
+    `/v1.0/users/${encodedUser}/drive/items/${encodedParentId}/children?$select=id,name,webUrl,folder&$top=200`,
+    accessToken
+  );
+  const children = Array.isArray(response?.value) ? response.value : [];
+  return children.find((item) => item?.folder && item.name === safeFolderName) || null;
+}
+
+async function ensureGraphChildFolderById(accessToken, userEmail, parentItemId, folderName) {
+  const encodedUser = encodeURIComponent(userEmail);
+  const encodedParentId = encodeURIComponent(String(parentItemId || "").trim());
+  const safeFolderName = sanitizePathSegment(folderName, "carpeta");
+  if (!encodedParentId) {
+    throw new Error("ONEDRIVE_PARENT_FOLDER_ID_REQUIRED");
+  }
+  const requestPath = `/v1.0/users/${encodedUser}/drive/items/${encodedParentId}/children`;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const created = await graphPost(requestPath, accessToken, {
+        name: safeFolderName,
+        folder: {},
+        "@microsoft.graph.conflictBehavior": "fail"
+      });
+      if (created?.id) return created;
+      break;
+    } catch (err) {
+      const errorText = String(err.message || "");
+      const alreadyExists =
+        errorText.includes("nameAlreadyExists") ||
+        errorText.includes("itemAlreadyExists");
+      const resourceModified = errorText.includes("resourceModified");
+      if (alreadyExists) {
+        const existing = await findGraphChildFolderByName(accessToken, userEmail, parentItemId, safeFolderName);
+        if (existing?.id) return existing;
+        break;
+      }
+      if (resourceModified && attempt < 2) {
+        await sleepMs(300 * (attempt + 1));
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  const existing = await findGraphChildFolderByName(accessToken, userEmail, parentItemId, safeFolderName);
+  if (existing?.id) return existing;
+  throw new Error(`No se pudo crear o resolver carpeta OneDrive: ${safeFolderName}`);
+}
+
+async function getOrCreateGraphSubfolder(accessToken, userEmail, parentItemId, folderName) {
+  const safeFolderName = sanitizePathSegment(folderName, "carpeta");
+  const existing = await findGraphChildFolderByName(accessToken, userEmail, parentItemId, safeFolderName);
+  if (existing?.id) return existing;
+  return ensureGraphChildFolderById(accessToken, userEmail, parentItemId, safeFolderName);
 }
 
 async function graphPutBinaryWithRetry(path, accessToken, buffer, contentType = "application/octet-stream", retryCount = 1) {
@@ -6133,6 +6444,95 @@ function normalizeClickSignStatus(value) {
   return raw;
 }
 
+function normalizeClickSignBoolean(value) {
+  if (value === true) return true;
+  if (value === false) return false;
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return null;
+  if (["true", "1", "yes", "y", "si", "signed", "firmado", "completed", "done"].includes(raw)) return true;
+  if (["false", "0", "no", "n", "pending", "open", "started", "sent"].includes(raw)) return false;
+  return null;
+}
+
+function pickBooleanByPaths(source, paths = []) {
+  for (const pathName of paths) {
+    const value = getByPath(source, pathName);
+    if (value === undefined || value === null || value === "") continue;
+    const parsed = normalizeClickSignBoolean(value);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+function extractClickSignDocumentStatus(source) {
+  const rawStatus = pickStringByPaths(source, [
+    "document_status",
+    "documentStatus",
+    "document.status",
+    "document.status.name",
+    "signature.document_status",
+    "signature.documentStatus",
+    "signature.document.status",
+    "signature.status",
+    "signature.signature_status",
+    "signature_status",
+    "status",
+    "event.status",
+    "event.name",
+    "event.type",
+    "data.document_status",
+    "data.documentStatus",
+    "data.document.status",
+    "data.signature.document_status",
+    "data.signature.documentStatus",
+    "data.signature.document.status",
+    "data.signature.status",
+    "data.signature.signature_status",
+    "data.signature_status",
+    "data.status",
+    "data.event.status",
+    "data.event.name",
+    "data.event.type",
+    "result.document_status",
+    "result.documentStatus",
+    "result.document.status",
+    "result.signature.document_status",
+    "result.signature.status",
+    "result.status",
+    "signature.signatories.0.status",
+    "data.signatories.0.status"
+  ]);
+  const normalized = normalizeClickSignStatus(rawStatus);
+  if (["signed", "rejected", "pending"].includes(normalized)) {
+    return { rawStatus, status: normalized };
+  }
+
+  const signed = pickBooleanByPaths(source, [
+    "signed",
+    "is_signed",
+    "document_signed",
+    "signature.signed",
+    "signature.is_signed",
+    "signature.document_signed",
+    "signature.document.signed",
+    "data.signed",
+    "data.is_signed",
+    "data.document_signed",
+    "data.signature.signed",
+    "data.signature.is_signed",
+    "data.signature.document_signed",
+    "data.signature.document.signed",
+    "result.signed",
+    "result.is_signed",
+    "result.document_signed",
+    "result.signature.signed"
+  ]);
+  if (signed === true) return { rawStatus: rawStatus || "signed", status: "signed" };
+  if (signed === false) return { rawStatus: rawStatus || "pending", status: "pending" };
+
+  return { rawStatus, status: normalized || "" };
+}
+
 async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = "", signatureId = "" } = {}) {
   const lookupRequests = buildClickSignLookupRequests({ requestId, contractId, signatureId });
   const statusPaths = [
@@ -6858,7 +7258,7 @@ function buildContratoEmailHtml({ nombre, token, link }) {
           </p>
           <div style="text-align:center;margin:0 0 28px;">
             <a href="${link}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:14px 36px;border-radius:8px;font-size:15px;font-weight:700;letter-spacing:.02em;">
-              Revisar y firmar documentos ?
+              Revisar y firmar documentos →
             </a>
           </div>
           <p style="font-size:12px;color:#94a3b8;text-align:center;margin:0;">
@@ -9345,7 +9745,7 @@ app.post("/contratacion/validar", async (req, res) => {
 app.get("/contratacion/estado", requireTokenFirma, async (req, res) => {
   try {
     const r = await pool.query(
-      `SELECT id, nombre_persona, correo_personal, estado, checks_completados, docs_firma, expires_at, solicitud_id, preregistro_id
+      `SELECT id, public_id, nombre_persona, correo_personal, estado, checks_completados, docs_firma, expires_at, solicitud_id, preregistro_id, created_at
        FROM tokens_firma_contrato WHERE id = $1`,
       [req.tokenFirma.token_id]
     );
@@ -9383,7 +9783,7 @@ app.post("/contratacion/firma/reconciliar", requireTokenFirma, async (req, res) 
 
   try {
     const r = await pool.query(
-      `SELECT id, nombre_persona, correo_personal, estado, checks_completados, docs_firma, expires_at, solicitud_id, preregistro_id
+      `SELECT id, public_id, nombre_persona, correo_personal, estado, checks_completados, docs_firma, expires_at, solicitud_id, preregistro_id, created_at
        FROM tokens_firma_contrato WHERE id = $1`,
       [req.tokenFirma.token_id]
     );
@@ -10166,14 +10566,18 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
   if (!Number.isInteger(idx) || idx < 1 || idx > 20) {
     return res.status(400).json({ error: "doc_index invalido" });
   }
+  const tokenId = toNullableInteger(req.tokenFirma?.token_id);
+  if (!tokenId) {
+    return res.status(401).json({ error: "Token de firma invalido" });
+  }
 
   try {
     const r = await pool.query(
-      `SELECT id, nombre_persona, correo_personal, checks_completados, docs_firma, solicitud_id, preregistro_id
+      `SELECT id, public_id, nombre_persona, correo_personal, checks_completados, docs_firma, solicitud_id, preregistro_id, created_at
        FROM tokens_firma_contrato WHERE id = $1 AND estado = 'en_proceso'`,
-      [req.tokenFirma.token_id]
+      [tokenId]
     );
-    if (r.rowCount === 0) return res.status(400).json({ error: "Proceso no valido o ya completado" });
+    if (r.rowCount === 0) return res.status(404).json({ error: "Proceso no valido o ya completado" });
 
     const proceso = r.rows[0];
     const checks = proceso.checks_completados || {};
@@ -10194,14 +10598,43 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
     }
 
     const personaContext = await resolveContratoPersonaContext(proceso);
-    const docKey = docExistente.doc_key || LEGACY_DOC_INDEX_TO_KEY.get(idx) || null;
+    const docKeyFromFullPlan = docsActuales.length === CONTRATO_DOC_DEFINITIONS_FULL.length
+      ? CONTRATO_DOC_DEFINITIONS_FULL[idx - 1]?.doc_key
+      : null;
+    const docKey =
+      toNullableTrimmedString(docExistente.doc_key) ||
+      docKeyFromFullPlan ||
+      LEGACY_DOC_INDEX_TO_KEY.get(idx) ||
+      null;
+    if (!docKey) {
+      return res.status(422).json({
+        error: "El documento solicitado no tiene doc_key configurado para generar PDF",
+        doc_index: idx
+      });
+    }
     const docDefinition = resolveContratoDocDefinitionForFirma(docKey, {
       facturaEnColombia: personaContext?.facturaEnColombia ?? null,
       doc: docExistente
     });
     if (!docDefinition) {
-      return res.status(500).json({
+      return res.status(422).json({
         error: "No se encontro la CONFIGURACIÓN de plantilla para el documento solicitado",
+        doc_index: idx,
+        doc_key: docKey
+      });
+    }
+    if (!toNullableTrimmedString(docDefinition.template_file)) {
+      return res.status(422).json({
+        error: "El documento solicitado no tiene plantilla DOCX configurada",
+        doc_index: idx,
+        doc_key: docKey
+      });
+    }
+    const docDefinitionKey = toNullableTrimmedString(docDefinition.doc_key);
+    const docDefinitionTitulo = toNullableTrimmedString(docDefinition.titulo);
+    if (!docDefinitionKey || !docDefinitionTitulo) {
+      return res.status(422).json({
+        error: "La configuracion del documento de firma esta incompleta",
         doc_index: idx,
         doc_key: docKey
       });
@@ -10216,23 +10649,26 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
       personaContext,
       proceso
     });
-    const fileBaseName = `${personaSlug}_${docDefinition.doc_key}_${idx}`;
+    const fileBaseName = `${personaSlug}_${docDefinitionKey}_${idx}`;
     const docxBuffer = renderDocxTemplateToBuffer({
       templateFile: docDefinition.template_file,
       data: payload
     });
 
     const outputBuffer = await convertDocxBufferToPdfBuffer(docxBuffer, fileBaseName);
+    if (!Buffer.isBuffer(outputBuffer) || !outputBuffer.length) {
+      return res.status(502).json({ error: "El generador de PDF no devolvio un archivo valido" });
+    }
     const outputContentType = "application/pdf";
     const outputExtension = "pdf";
 
     const baseName = sanitizePathSegment(
-      `${docDefinition.titulo}_${personaSlug}`,
-      `Contrato_${docDefinition.doc_key || idx}`
+      `${docDefinitionTitulo}_${personaSlug}`,
+      `Contrato_${docDefinitionKey || idx}`
     );
     const fileName = sanitizeDownloadFileName(
       `${baseName}.${outputExtension}`,
-      `Contrato_${docDefinition.doc_key || idx}.${outputExtension}`
+      `Contrato_${docDefinitionKey || idx}.${outputExtension}`
     ).replace(/"/g, "");
 
     res.setHeader("Content-Type", outputContentType);
@@ -10243,6 +10679,12 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
     const errMessage = String(err?.message || "");
     if (Number(err?.status || 0) === 422) {
       return res.status(422).json({ error: errMessage || "No fue posible generar el documento solicitado" });
+    }
+    const lowerErrMessage = errMessage.toLowerCase();
+    if (lowerErrMessage.includes("plantilla de contrato no encontrada") || lowerErrMessage.includes("template_file no definido")) {
+      return res.status(422).json({
+        error: "No fue posible generar el documento porque la plantilla configurada no esta disponible. Contacta a Talento Humano."
+      });
     }
     if (isDocxTemplateFailureMessage(errMessage)) {
       return res.status(422).json({
@@ -10266,6 +10708,10 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
   if (!Number.isInteger(idx) || idx < 1 || idx > 20) {
     return res.status(400).json({ error: "doc_index invalido" });
   }
+  const tokenId = toNullableInteger(req.tokenFirma?.token_id);
+  if (!tokenId) {
+    return res.status(401).json({ error: "Token de firma invalido" });
+  }
 
   if (!isClickSignConfigured({ forContratos: true })) {
     return res.status(503).json({ error: "Click&Sign no está configurado en el servidor" });
@@ -10273,11 +10719,11 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
 
   try {
     const r = await pool.query(
-      `SELECT id, nombre_persona, correo_personal, checks_completados, docs_firma, solicitud_id, preregistro_id
+      `SELECT id, public_id, nombre_persona, correo_personal, checks_completados, docs_firma, solicitud_id, preregistro_id, created_at
        FROM tokens_firma_contrato WHERE id = $1 AND estado = 'en_proceso'`,
-      [req.tokenFirma.token_id]
+      [tokenId]
     );
-    if (r.rowCount === 0) return res.status(400).json({ error: "Proceso no válido o ya completado" });
+    if (r.rowCount === 0) return res.status(404).json({ error: "Proceso no válido o ya completado" });
 
     const proceso = r.rows[0];
     const checks = proceso.checks_completados || {};
@@ -10315,14 +10761,43 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
     }
 
     const personaContext = await resolveContratoPersonaContext(proceso);
-    const docKey = docExistente.doc_key || LEGACY_DOC_INDEX_TO_KEY.get(idx) || null;
+    const docKeyFromFullPlan = docsActuales.length === CONTRATO_DOC_DEFINITIONS_FULL.length
+      ? CONTRATO_DOC_DEFINITIONS_FULL[idx - 1]?.doc_key
+      : null;
+    const docKey =
+      toNullableTrimmedString(docExistente.doc_key) ||
+      docKeyFromFullPlan ||
+      LEGACY_DOC_INDEX_TO_KEY.get(idx) ||
+      null;
+    if (!docKey) {
+      return res.status(422).json({
+        error: "El documento solicitado no tiene doc_key configurado para firmar",
+        doc_index: idx
+      });
+    }
     const docDefinition = resolveContratoDocDefinitionForFirma(docKey, {
       facturaEnColombia: personaContext?.facturaEnColombia ?? null,
       doc: docExistente
     });
     if (!docDefinition) {
-      return res.status(500).json({
+      return res.status(422).json({
         error: "No se encontró la CONFIGURACIÓN de plantilla para el documento solicitado",
+        doc_index: idx,
+        doc_key: docKey
+      });
+    }
+    if (!toNullableTrimmedString(docDefinition.template_file)) {
+      return res.status(422).json({
+        error: "El documento solicitado no tiene plantilla DOCX configurada",
+        doc_index: idx,
+        doc_key: docKey
+      });
+    }
+    const docDefinitionKey = toNullableTrimmedString(docDefinition.doc_key);
+    const docDefinitionTitulo = toNullableTrimmedString(docDefinition.titulo);
+    if (!docDefinitionKey || !docDefinitionTitulo) {
+      return res.status(422).json({
+        error: "La configuracion del documento de firma esta incompleta",
         doc_index: idx,
         doc_key: docKey
       });
@@ -10333,33 +10808,50 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
         url_firma: docExistente.url_firma,
         request_id: docExistente.request_id || null,
         doc_index: idx,
-        doc_key: docDefinition.doc_key,
+        doc_key: docDefinitionKey,
         ya_iniciado: true
       });
     }
 
+    const correoFirmante =
+      toNullableTrimmedString(personaContext?.correoPersonal) ||
+      toNullableTrimmedString(proceso.correo_personal);
+    if (!correoFirmante) {
+      return res.status(422).json({
+        error: "No hay correo personal disponible para iniciar la firma",
+        doc_index: idx,
+        doc_key: docDefinitionKey
+      });
+    }
+    const nombreFirmante =
+      toNullableTrimmedString(personaContext?.nombreCompleto) ||
+      toNullableTrimmedString(proceso.nombre_persona) ||
+      correoFirmante;
     const personaSlug = sanitizePathSegment(
-      (personaContext?.nombreCompleto || proceso.nombre_persona || "Contratista").replace(/\s+/g, "_"),
+      nombreFirmante.replace(/\s+/g, "_"),
       "Contratista"
     );
     const pdfBuffer = await generateContratoPdfFromTemplate({
       docDefinition,
       personaContext,
       proceso,
-      fileBaseName: `${personaSlug}_${docDefinition.doc_key}_${idx}`
+      fileBaseName: `${personaSlug}_${docDefinitionKey}_${idx}`
     });
+    if (!Buffer.isBuffer(pdfBuffer) || !pdfBuffer.length) {
+      return res.status(502).json({ error: "El generador de PDF no devolvio un archivo valido para firmar" });
+    }
 
     // Llamar a ClickSign API siguiendo el mismo flujo START_SIGNATURE de cuentas de cobro.
     const pdfBase64 = pdfBuffer.toString("base64");
-    const docTitulo = `${docDefinition.titulo}_${personaSlug}`;
+    const docTitulo = `${docDefinitionTitulo}_${personaSlug}`;
     const publicIdToken = req.tokenFirma.token_public_id;
-    const tokenRef = publicIdToken || String(req.tokenFirma.token_id || "token");
-    const requestId = `CF-${tokenRef}-${docDefinition.doc_key}-${Date.now()}`;
-    const contractId = `contrato_${tokenRef}_${docDefinition.doc_key}_${idx}`;
-    const signatoryExternalId = String(req.tokenFirma.token_id || req.tokenFirma.token_public_id || idx || Date.now());
+    const tokenRef = publicIdToken || String(tokenId || "token");
+    const requestId = `CF-${tokenRef}-${docDefinitionKey}-${Date.now()}`;
+    const contractId = `contrato_${tokenRef}_${docDefinitionKey}_${idx}`;
+    const signatoryExternalId = String(tokenId || req.tokenFirma.token_public_id || idx || Date.now());
     const fileName = sanitizePdfFileName(
       `${docTitulo}.pdf`,
-      `Contrato_${docDefinition.doc_key}_${idx}.pdf`
+      `Contrato_${docDefinitionKey}_${idx}.pdf`
     );
 
     const clicksignPayload = {
@@ -10376,8 +10868,8 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
             required_signatories_to_complete_level: 1,
             signatories: [
               {
-                email: proceso.correo_personal,
-                name: proceso.nombre_persona || proceso.correo_personal,
+                email: correoFirmante,
+                name: nombreFirmante,
                 external_id: signatoryExternalId
               }
             ]
@@ -10461,15 +10953,15 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
         detalle: clicksignBody,
         request_id: resolvedRequestId || null,
         doc_index: idx,
-        doc_key: docDefinition.doc_key
+        doc_key: docDefinitionKey
       });
     }
 
     const docEntry = {
       ...docExistente,
       doc_index: idx,
-      doc_key: docDefinition.doc_key,
-      titulo: docDefinition.titulo,
+      doc_key: docDefinitionKey,
+      titulo: docDefinitionTitulo,
       template_file: docDefinition.template_file,
       empresa_key: docDefinition.empresa_key || null,
       request_id: resolvedRequestId || null,
@@ -10485,7 +10977,7 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
     });
     await pool.query(
       `UPDATE tokens_firma_contrato SET docs_firma = $1::jsonb, updated_at = NOW() WHERE id = $2`,
-      [JSON.stringify(nuevaLista), req.tokenFirma.token_id]
+      [JSON.stringify(nuevaLista), tokenId]
     );
 
     res.json({
@@ -10493,13 +10985,19 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       request_id: resolvedRequestId || null,
       signature_id: signatureId || null,
       doc_index: idx,
-      doc_key: docDefinition.doc_key
+      doc_key: docDefinitionKey
     });
   } catch (err) {
     console.error("Error iniciando firma de contrato:", err);
     const errMessage = String(err?.message || "");
     if (Number(err?.status || 0) === 422) {
       return res.status(422).json({ error: errMessage || "No fue posible iniciar la firma del documento" });
+    }
+    const lowerErrMessage = errMessage.toLowerCase();
+    if (lowerErrMessage.includes("plantilla de contrato no encontrada") || lowerErrMessage.includes("template_file no definido")) {
+      return res.status(422).json({
+        error: "No fue posible iniciar la firma porque la plantilla configurada no esta disponible. Contacta a Talento Humano."
+      });
     }
     if (isDocxTemplateFailureMessage(errMessage)) {
       return res.status(422).json({
@@ -10512,7 +11010,7 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
         detalle: errMessage || "Sin detalle tecnico"
       });
     }
-    res.status(500).json({ error: "Error iniciando proceso de firma" });
+    return res.status(500).json({ error: "Error iniciando proceso de firma" });
   }
 });
 
@@ -12115,6 +12613,9 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
 app.get("/horas-por-cobrar/:consultorId", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
   const { consultorId } = req.params;
   try {
+    if (!isGuid(consultorId)) {
+      return res.status(400).json({ error: "Consultor inválido" });
+    }
     const role = normalizeValue(req.user?.rol);
     const result = await pool.query(
       `
@@ -12129,10 +12630,38 @@ app.get("/horas-por-cobrar/:consultorId", requireAccess({ roles: ["Consultor", "
         rh.requerimiento,
         c.titulo AS cliente,
         ta.titulo AS tipo_asignacion,
+        CASE
+          WHEN NOT (
+              LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%capacitacion%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%training%'
+            )
+            AND (
+              LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%hora%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%demanda%'
+              OR LOWER(REPLACE(REPLACE(TRIM(COALESCE(ta.titulo, '')), ' ', ''), '_', '')) IN ('horas', 'porhoras', 'horaspordemanda', 'hourly')
+            )
+            AND NOT (COALESCE(tarifa.valor_tarifa, 0) > 0)
+          THEN true
+          ELSE false
+        END AS error_tarifa,
         (SELECT id FROM c_consultor) AS _consultor_id
       FROM reporte_horas rh
-        LEFT JOIN clientes c ON rh.cliente_id = c.id
-        LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
+        LEFT JOIN registro_asignaciones ra ON ra.id = rh.id_registro_asignacion
+        LEFT JOIN consultorias con ON con.id = ra.id_consultoria
+        LEFT JOIN clientes c ON c.id = COALESCE(rh.cliente_id, con.id_cliente)
+        LEFT JOIN tipo_asignacion ta ON ta.id = COALESCE(rh.tipo_asignacion_id, con.id_tipo_asignacion)
+        LEFT JOIN LATERAL (
+          SELECT tc.valor_tarifa
+          FROM tarifa_consultor tc
+          WHERE tc.consultor_id = rh.consultor_responsable_id
+            AND tc.id_cliente = COALESCE(rh.cliente_id, con.id_cliente)
+            AND (COALESCE(rh.modulo_id, ra.id_modulo) IS NULL OR tc.modulo_id = COALESCE(rh.modulo_id, ra.id_modulo))
+            AND (COALESCE(rh.tipo_asignacion_id, con.id_tipo_asignacion) IS NULL OR tc.id_tipo_asignacion = COALESCE(rh.tipo_asignacion_id, con.id_tipo_asignacion))
+            AND tc.activo = true
+            AND (tc.vigencia_hasta IS NULL OR tc.vigencia_hasta >= CURRENT_DATE)
+          ORDER BY tc.vigencia_desde DESC NULLS LAST, tc.id DESC
+          LIMIT 1
+        ) tarifa ON true
       WHERE rh.estado_reporte = 'Aprobado'
         AND rh.id_cuenta_cobro IS NULL
         AND (
@@ -12170,28 +12699,130 @@ app.get("/horas-por-cobrar/:consultorId", requireAccess({ roles: ["Consultor", "
   }
 });
 
-async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName) {
+function getContratoProcessDate(proceso, personaContext) {
+  return (
+    normalizeDateOnlyInput(proceso?.created_at) ||
+    normalizeDateOnlyInput(personaContext?.created_at) ||
+    new Date().toISOString().slice(0, 10)
+  );
+}
+
+function isContratoBaseOneDriveDoc(doc = {}) {
+  const docKey = toNullableTrimmedString(doc?.doc_key || doc?.docKey);
+  if (docKey && CONTRATO_BASE_ONEDRIVE_DOC_KEYS.has(docKey)) return true;
+
+  const identityValues = [
+    doc?.document_type,
+    doc?.documentType,
+    doc?.tipo_documento,
+    doc?.template_file,
+    doc?.titulo,
+    doc?.title,
+    doc?.nombre,
+    doc?.name,
+    doc?.nombre_archivo
+  ].map(normalizeTextKey).filter(Boolean);
+
+  if (identityValues.some((value) => CONTRATO_BASE_ONEDRIVE_TEXT_KEYS.has(value))) {
+    return true;
+  }
+
+  const docIndex = Number(doc?.doc_index || doc?.docIndex || 0);
+  return Number.isInteger(docIndex) && docIndex >= 1 && docIndex <= 4;
+}
+
+function isAnexoTecnicoContratoDoc(doc = {}) {
+  const docKey = normalizeTextKey(doc?.doc_key || doc?.docKey);
+  const isAnexoKey = (value) => Boolean(value) && (
+    value === "anexotecnico" ||
+    value === "anexotecnicocapital" ||
+    value.includes("anexotecnico")
+  );
+  if (isAnexoKey(docKey)) return true;
+
+  const identityValues = [
+    doc?.document_type,
+    doc?.documentType,
+    doc?.tipo_documento,
+    doc?.template_file,
+    doc?.titulo,
+    doc?.title,
+    doc?.nombre,
+    doc?.name
+  ].map(normalizeTextKey).filter(Boolean);
+  const fileNameKey = normalizeTextKey(doc?.nombre_archivo);
+
+  if ([...identityValues, fileNameKey].some(isAnexoKey)) {
+    return true;
+  }
+
+  const docIndex = Number(doc?.doc_index || doc?.docIndex || 0);
+  const hasExplicitIdentity = Boolean(docKey || identityValues.length);
+  // Filtro explicito: solo tratar indices como Anexo Tecnico cuando no hay doc_key/nombre mas confiable.
+  return !hasExplicitIdentity && (docIndex === 5 || LEGACY_DOC_INDEX_TO_KEY.get(docIndex) === "anexo_tecnico");
+}
+
+async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, options = {}) {
+  const docContext = {
+    ...(options?.doc && typeof options.doc === "object" ? options.doc : {}),
+    nombre_archivo: fileName
+  };
+  // Filtro explicito: Anexo Tecnico sigue LOTE 8; los 4 docs base usan subcarpeta en ONEDRIVE_CONTRATOS.
+  if (isAnexoTecnicoContratoDoc(docContext)) {
+    // El Anexo Tecnico conserva el destino ONEDRIVE_ANEXO_TECNICO del flujo LOTE 8.
+    return uploadAnexoIndividualFirmadoToOneDrive(proceso, pdfBuffer, fileName);
+  }
+  if (!isContratoBaseOneDriveDoc(docContext)) {
+    console.warn("Contrato firmado sin tipo base reconocido; se sube a subcarpeta dinamica por no ser Anexo Tecnico.", {
+      doc_index: docContext?.doc_index || docContext?.docIndex || null,
+      doc_key: docContext?.doc_key || docContext?.docKey || null,
+      document_type: docContext?.document_type || docContext?.documentType || null
+    });
+  }
+
   const token = await getGraphAccessToken();
   const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
   await graphGet(`/v1.0/users/${encodedUser}/drive`, token);
 
-  const fechaStr = new Date().toISOString().slice(0, 10);
   const personaContext = await resolveContratoPersonaContext(proceso || {});
-  const empresa = resolveEmpresaContratoConfig(personaContext?.facturaEnColombia ?? null);
+  const fechaStr = getContratoProcessDate(proceso, personaContext);
   const nombrePersona =
     toNullableTrimmedString(personaContext?.nombreCompleto) ||
     toNullableTrimmedString(proceso?.nombre_persona) ||
     "Contratista";
-  const documentoPersona = toNullableTrimmedString(personaContext?.numeroDocumento);
   const nombreCarpeta = sanitizePathSegment(
-    `${nombrePersona}${documentoPersona ? `_${documentoPersona}` : ""}_${fechaStr}`,
+    `${nombrePersona}_${fechaStr}`,
     `Contrato_${fechaStr}`
   );
+  const safeName = sanitizePdfFileName(fileName || `Contrato_${nombrePersona}.pdf`, "Contrato.pdf");
+
+  if (CONTRATOS_ONEDRIVE_FOLDER_ID) {
+    await graphGet(
+      `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(CONTRATOS_ONEDRIVE_FOLDER_ID)}`,
+      token
+    );
+    const folderMeta = await getOrCreateGraphSubfolder(
+      token,
+      ONEDRIVE_TARGET_USER,
+      CONTRATOS_ONEDRIVE_FOLDER_ID,
+      nombreCarpeta
+    );
+    const uploadPath = `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(folderMeta.id)}:/${encodeURIComponent(safeName)}:/content`;
+    const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
+
+    return {
+      carpeta: folderMeta.name || nombreCarpeta,
+      carpeta_url: folderMeta.webUrl || null,
+      archivo: {
+        id: uploaded.id || "",
+        nombre: uploaded.name || safeName,
+        url: uploaded.webUrl || ""
+      }
+    };
+  }
 
   let targetPath = sanitizePathSegment(CONTRATOS_ONEDRIVE_FOLDER, "ContratosFirmados");
-  const empresaFolder = sanitizePathSegment(empresa.razonSocial, empresa.key === "capital" ? "CAPITALINK" : "SILVER");
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
-  targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, empresaFolder);
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, nombreCarpeta);
   let folderWebUrl = "";
   try {
@@ -12204,7 +12835,6 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName) {
     console.warn("No se pudo resolver URL de carpeta OneDrive para contrato:", folderErr?.message || folderErr);
   }
 
-  const safeName = sanitizePdfFileName(fileName || `Contrato_${nombrePersona}.pdf`, "Contrato.pdf");
   const uploadPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${safeName}`)}:/content`;
   const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
 
@@ -12281,8 +12911,9 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
       const event = snapshot?.event && typeof snapshot.event === "object" ? snapshot.event : {};
       const snapshotSignatureId = String(extractClickSignSignatureId(event) || "").trim();
       const previousStatus = normalizeDocStatus(doc?.estado);
-      const rawStatus = String(snapshot?.rawStatus || snapshot?.status || doc?.ultimo_evento || doc?.estado || "pending").trim();
-      let nextStatus = normalizeClickSignStatus(rawStatus);
+      const statusInfo = extractClickSignDocumentStatus(event);
+      const rawStatus = String(statusInfo.rawStatus || snapshot?.rawStatus || snapshot?.status || doc?.ultimo_evento || doc?.estado || "pending").trim();
+      let nextStatus = statusInfo.status || normalizeClickSignStatus(rawStatus);
       let oneDriveInfo = null;
       let signedPdfSource = "";
       let uploadCompleted = Boolean(String(doc?.onedrive_url || "").trim());
@@ -12305,7 +12936,7 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
           signedPdfSource = resolvedPdf.source || "";
           if (!String(doc?.onedrive_url || "").trim()) {
             try {
-              oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName);
+              oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName, { doc });
               uploadCompleted = Boolean(oneDriveInfo?.archivo?.url);
             } catch (uploadErr) {
               console.error("Error subiendo contrato reconciliado a OneDrive:", uploadErr?.message || uploadErr);
@@ -12410,6 +13041,13 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
 }
 
 async function handleClickSignContratoWebhook({ event, requestId, contractId, status, rawStatus }) {
+  const eventStatusInfo = extractClickSignDocumentStatus(event);
+  const resolvedStatus = ["signed", "rejected"].includes(status)
+    ? status
+    : eventStatusInfo.status;
+  const resolvedRawStatus = rawStatus || eventStatusInfo.rawStatus || resolvedStatus || "";
+  status = resolvedStatus;
+  rawStatus = resolvedRawStatus;
   if (status !== "signed" && status !== "rejected") return;
 
   try {
@@ -12420,7 +13058,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
 
     if (requestId) {
       const r = await pool.query(
-        `SELECT id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id
+        `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at
          FROM tokens_firma_contrato
          WHERE docs_firma @> $1::jsonb AND estado = 'en_proceso'
          LIMIT 1`,
@@ -12435,7 +13073,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
 
     if (!proceso && contractId) {
       const r = await pool.query(
-        `SELECT id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id
+        `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at
          FROM tokens_firma_contrato
          WHERE docs_firma @> $1::jsonb AND estado = 'en_proceso'
          LIMIT 1`,
@@ -12465,7 +13103,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
       matchedDoc?.signature_id ||
       ""
     ).trim();
-    if (status === "signed") {
+    if (status === "signed" && !String(matchedDoc?.onedrive_url || "").trim()) {
       const artifacts = await resolveClickSignArtifacts({
         event,
         requestId,
@@ -12480,7 +13118,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         setTimeout(async () => {
           try {
             const r = await pool.query(
-              `SELECT id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
+              `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
               [proceso.id]
             );
             if (r.rows[0]) await reconcileContratoDocsForProcess(r.rows[0], { docIndex, reason: "webhook_retry" });
@@ -12491,13 +13129,18 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         return;
       }
       try {
-        oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName);
+        const docsActualesParaUpload = normalizeDocsFirmaListCompat(proceso.docs_firma);
+        const docParaUpload =
+          matchedDoc ||
+          docsActualesParaUpload.find((d) => Number(d?.doc_index || 0) === Number(docIndex || 0)) ||
+          (docIndex ? { doc_index: Number(docIndex) } : {});
+        oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName, { doc: docParaUpload });
       } catch (upErr) {
         console.error("Error subiendo contrato firmado a OneDrive:", upErr.message);
         setTimeout(async () => {
           try {
             const r = await pool.query(
-              `SELECT id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
+              `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
               [proceso.id]
             );
             if (r.rows[0]) await reconcileContratoDocsForProcess(r.rows[0], { docIndex, reason: "webhook_retry" });
@@ -12526,7 +13169,9 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
           ultimo_evento: rawStatus || d.ultimo_evento || null,
           onedrive_url: oneDriveInfo?.archivo?.url || d.onedrive_url || null,
           onedrive_carpeta: oneDriveInfo?.carpeta || d.onedrive_carpeta || null,
-          onedrive_carpeta_url: oneDriveInfo?.carpeta_url || d.onedrive_carpeta_url || null
+          onedrive_carpeta_url: oneDriveInfo?.carpeta_url || d.onedrive_carpeta_url || null,
+          onedrive_id: oneDriveInfo?.archivo?.id || d.onedrive_id || null,
+          onedrive_nombre: oneDriveInfo?.archivo?.nombre || d.onedrive_nombre || null
         };
       }
       return d;
@@ -12534,7 +13179,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
 
     let finalDocs = nuevaLista;
     if (!docMatched && docIndex) {
-      const fallbackKey = LEGACY_DOC_INDEX_TO_KEY.get(Number(docIndex)) || null;
+      const fallbackKey = getContratoDocKeyByIndex(Number(docIndex), finalDocs.length) || null;
       const fallbackDef = getContratoDocDefinition(fallbackKey);
       const fallbackStatus =
         status === "rejected"
@@ -12554,7 +13199,9 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         ultimo_evento: rawStatus || null,
         onedrive_url: oneDriveInfo?.archivo?.url || null,
         onedrive_carpeta: oneDriveInfo?.carpeta || null,
-        onedrive_carpeta_url: oneDriveInfo?.carpeta_url || null
+        onedrive_carpeta_url: oneDriveInfo?.carpeta_url || null,
+        onedrive_id: oneDriveInfo?.archivo?.id || null,
+        onedrive_nombre: oneDriveInfo?.archivo?.nombre || null
       });
     }
 
@@ -12881,6 +13528,7 @@ module.exports = {
   encodeGraphPath,
   sanitizePathSegment,
   sanitizePdfFileName,
+  getOrCreateGraphSubfolder,
   parsePdfDataUrl,
   ensureGraphFolder,
   parseGraphErrorStatus,
@@ -12899,6 +13547,9 @@ module.exports = {
   buildAnexoIndividualDashboardPayload,
   collectAnexoIndividualSignatureContext,
   generateAnexoIndividualPdfFromItems,
+  getAnexoTecnicoClickSignConfigId,
+  getAnexoTecnicoClickSignDocumentType,
+  isAnexoTecnicoClickSignConfigured,
   mapAnexoIndividualTokenRow,
   toAnexoApiRow,
   getAnexoTecnicoItemByInternalId,
@@ -12926,6 +13577,8 @@ module.exports = {
   uploadSignedPdfToOneDrive,
   resolveClickSignArtifacts,
   uploadClickSignExtraFilesToOneDrive,
+  isContratoBaseOneDriveDoc,
+  isAnexoTecnicoContratoDoc,
   getCuentaCobroEstadoEnFirma,
   getCuentaCobroEstadoAprobado,
   normalizeClickSignStatus,

@@ -996,7 +996,7 @@ window.preregistrosCoordApp = function () {
             const ownerId = String(item?.coordinador?.id || "").trim();
             const sameOwner = currentUserId && ownerId && currentUserId === ownerId;
             const canActByRole =
-                roleKey === "administrador" ||
+                roleKey === "admin" ||
                 roleKey === responsibleRole ||
                 (responsibleRole === "coordinador" && roleKey === "coordinador" && sameOwner);
             return (

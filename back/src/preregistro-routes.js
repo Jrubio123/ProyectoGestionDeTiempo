@@ -453,7 +453,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     return solicitudId;
   }
 
-  app.post("/api/solicitudes-rrhh/:public_id/contratar", requireAccess({ roles: ["Reclutador"] }), async (req, res) => {
+  app.post("/api/solicitudes-rrhh/:public_id/contratar", requireAccess({ roles: ["Reclutador", "Administrador"] }), async (req, res) => {
     const { nombre, apellidos, tipo_documento, numero_documento, telefono, correo_personal, pais_ubicacion, ciudad,
             moneda, tarifa_mes, tarifa_hora } = req.body || {};
     const docType = String(tipo_documento || "").trim();
@@ -877,7 +877,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     }
   });
 
-  app.patch("/api/preregistros/:public_id/seccion-2", requireAccess({ roles: ["Coordinador", "Comercial"] }), async (req, res) => {
+  app.patch("/api/preregistros/:public_id/seccion-2", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial"] }), async (req, res) => {
     const {
       fecha_fin, moneda, pais_pago,
       tarifa_hora, tarifa_mes, tarifa_medio_tiempo, tarifa_capacitacion,
@@ -916,7 +916,8 @@ module.exports = function registerPreregistroRoutes(deps) {
       if (!estadosPermitidosSeccion2.includes(current.estado)) {
         return res.status(422).json({ error: "La seccion 2 solo puede completarse en Pendiente Coordinador o Pendiente Comercial" });
       }
-      if (String(current.solicitud_coordinador_id) !== String(req.user?.id || "")) {
+      const isAdmin = normalizeValue(req.user?.rol) === "administrador";
+      if (!isAdmin && String(current.solicitud_coordinador_id) !== String(req.user?.id || "")) {
         return res.status(403).json({ error: "No eres el coordinador dueno de esta solicitud" });
       }
       const grupoUsuarioNorm = normalizeGrupoUsuarioInput(grupo_usuario);
@@ -993,7 +994,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     }
   });
 
-  app.patch("/api/preregistros/:public_id/seccion-2/editar", requireAccess({ roles: ["Coordinador"] }), async (req, res) => {
+  app.patch("/api/preregistros/:public_id/seccion-2/editar", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
     const editable = [
       "fecha_fin", "moneda", "pais_pago", "tarifa_hora", "tarifa_mes",
       "tarifa_medio_tiempo", "tarifa_capacitacion", "vpn_corona", "necesita_s_user", "grupo_usuario",
@@ -1008,7 +1009,8 @@ module.exports = function registerPreregistroRoutes(deps) {
       if (current.estado !== ESTADOS.pendienteRevisionTh) {
         return res.status(422).json({ error: "Solo se puede editar seccion 2 en Pendiente Revision TH" });
       }
-      if (String(current.solicitud_coordinador_id) !== String(req.user?.id || "")) {
+      const isAdmin = normalizeValue(req.user?.rol) === "administrador";
+      if (!isAdmin && String(current.solicitud_coordinador_id) !== String(req.user?.id || "")) {
         return res.status(403).json({ error: "No eres el coordinador dueno de esta solicitud" });
       }
 

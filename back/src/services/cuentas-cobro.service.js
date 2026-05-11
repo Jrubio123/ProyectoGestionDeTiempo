@@ -4,6 +4,18 @@ const { FIRMA_CUENTA_TIMEOUT_HOURS, marcarCuentaCobroFirmaExpirada } = require("
 const PDFDocument = require("pdfkit");
 
 const normalizeValue = (value) => String(value || "").toLowerCase().trim();
+const SQL_ERROR_TARIFA_HORAS = `
+  NOT (
+    LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%capacitacion%'
+    OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%training%'
+  )
+  AND (
+    LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%hora%'
+    OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%demanda%'
+    OR LOWER(REPLACE(REPLACE(TRIM(COALESCE(ta.titulo, '')), ' ', ''), '_', '')) IN ('horas', 'porhoras', 'horaspordemanda', 'hourly')
+  )
+  AND NOT (COALESCE(tarifa.valor_tarifa, 0) > 0)
+`;
 
 function getIndexHelpers() {
   return require("../index");
@@ -14,11 +26,14 @@ function getIndexHelpers() {
  * Previsualiza el total a cobrar y su valor convertido a letras
  */
 async function previewCuentaCobro(req, res) {
-  const { buildTotalLetras } = getIndexHelpers();
+  const { buildTotalLetras, isGuid } = getIndexHelpers();
   const { consultor_id, ids_reportes } = req.body;
 
   if (!consultor_id || !Array.isArray(ids_reportes) || ids_reportes.length === 0) {
     return res.status(400).json({ error: "Faltan datos para previsualizar" });
+  }
+  if (!isGuid(consultor_id) || ids_reportes.some((id) => !isGuid(id))) {
+    return res.status(400).json({ error: "Consultor o reportes inválidos para previsualizar" });
   }
 
   try {
@@ -36,9 +51,25 @@ async function previewCuentaCobro(req, res) {
         COALESCE(SUM(rh.total_cobrar), 0) AS total,
         MIN(rh.created_at)::date AS min_fecha,
         MAX(rh.created_at)::date AS max_fecha,
+        COUNT(*) FILTER (WHERE ${SQL_ERROR_TARIFA_HORAS})::int AS tarifas_invalidas,
         (SELECT id FROM c_consultor) AS _consultor_id,
         COALESCE((SELECT moneda_cobro FROM c_consultor), 'COP') AS moneda
       FROM reporte_horas rh
+        LEFT JOIN registro_asignaciones ra ON ra.id = rh.id_registro_asignacion
+        LEFT JOIN consultorias con ON con.id = ra.id_consultoria
+        LEFT JOIN tipo_asignacion ta ON ta.id = COALESCE(rh.tipo_asignacion_id, con.id_tipo_asignacion)
+        LEFT JOIN LATERAL (
+          SELECT tc.valor_tarifa
+          FROM tarifa_consultor tc
+          WHERE tc.consultor_id = rh.consultor_responsable_id
+            AND tc.id_cliente = COALESCE(rh.cliente_id, con.id_cliente)
+            AND (COALESCE(rh.modulo_id, ra.id_modulo) IS NULL OR tc.modulo_id = COALESCE(rh.modulo_id, ra.id_modulo))
+            AND (COALESCE(rh.tipo_asignacion_id, con.id_tipo_asignacion) IS NULL OR tc.id_tipo_asignacion = COALESCE(rh.tipo_asignacion_id, con.id_tipo_asignacion))
+            AND tc.activo = true
+            AND (tc.vigencia_hasta IS NULL OR tc.vigencia_hasta >= CURRENT_DATE)
+          ORDER BY tc.vigencia_desde DESC NULLS LAST, tc.id DESC
+          LIMIT 1
+        ) tarifa ON true
       WHERE rh.id IN (SELECT id FROM c_reportes)
         AND rh.estado_reporte = 'Aprobado'
         AND rh.id_cuenta_cobro IS NULL
@@ -72,6 +103,11 @@ async function previewCuentaCobro(req, res) {
         error: "Algunos registros no son válidos para cobro"
       });
     }
+    if (Number(info.tarifas_invalidas || 0) > 0) {
+      return res.status(400).json({
+        error: "No se puede previsualizar: hay reportes con tarifa ausente o inválida"
+      });
+    }
 
     // 4. Convertir a letras
     const total = Number(info.total || 0);
@@ -100,10 +136,13 @@ async function previewCuentaCobro(req, res) {
  * Genera una nueva cuenta de cobro y asocia los reportes de horas correspondientes
  */
 async function crearCuentaCobro(req, res) {
-  const { buildTotalLetras, getEstadoAsignacionValues, sendEmailSafe, getGraphContext } = getIndexHelpers();
+  const { buildTotalLetras, getEstadoAsignacionValues, sendEmailSafe, getGraphContext, isGuid } = getIndexHelpers();
   const { consultor_id, fecha_inicio, fecha_fin, total_letras, ciudad_cobro, total_numeros, ids_reportes } = req.body;
   if (!consultor_id || !fecha_inicio || !fecha_fin || !total_letras || !ciudad_cobro || !Array.isArray(ids_reportes) || ids_reportes.length === 0) {
     return res.status(400).json({ error: "Faltan datos para generar la cuenta" });
+  }
+  if (!isGuid(consultor_id) || ids_reportes.some((id) => !isGuid(id))) {
+    return res.status(400).json({ error: "Consultor o reportes inválidos para crear la cuenta" });
   }
 
   const client = await pool.connect();
@@ -120,15 +159,34 @@ async function crearCuentaCobro(req, res) {
       WITH
         c_consultor AS (SELECT id, moneda_cobro FROM usuarios WHERE public_id = $1),
         c_reportes AS (
-          SELECT id, total_cobrar, created_at
-          FROM reporte_horas
-          WHERE public_id = ANY($2::uuid[])
-            AND estado_reporte = 'Aprobado'
-            AND id_cuenta_cobro IS NULL
+          SELECT
+            rh.id,
+            rh.total_cobrar,
+            rh.created_at,
+            (${SQL_ERROR_TARIFA_HORAS}) AS error_tarifa
+          FROM reporte_horas rh
+            LEFT JOIN registro_asignaciones ra ON ra.id = rh.id_registro_asignacion
+            LEFT JOIN consultorias con ON con.id = ra.id_consultoria
+            LEFT JOIN tipo_asignacion ta ON ta.id = COALESCE(rh.tipo_asignacion_id, con.id_tipo_asignacion)
+            LEFT JOIN LATERAL (
+              SELECT tc.valor_tarifa
+              FROM tarifa_consultor tc
+              WHERE tc.consultor_id = rh.consultor_responsable_id
+                AND tc.id_cliente = COALESCE(rh.cliente_id, con.id_cliente)
+                AND (COALESCE(rh.modulo_id, ra.id_modulo) IS NULL OR tc.modulo_id = COALESCE(rh.modulo_id, ra.id_modulo))
+                AND (COALESCE(rh.tipo_asignacion_id, con.id_tipo_asignacion) IS NULL OR tc.id_tipo_asignacion = COALESCE(rh.tipo_asignacion_id, con.id_tipo_asignacion))
+                AND tc.activo = true
+                AND (tc.vigencia_hasta IS NULL OR tc.vigencia_hasta >= CURRENT_DATE)
+              ORDER BY tc.vigencia_desde DESC NULLS LAST, tc.id DESC
+              LIMIT 1
+            ) tarifa ON true
+          WHERE rh.public_id = ANY($2::uuid[])
+            AND rh.estado_reporte = 'Aprobado'
+            AND rh.id_cuenta_cobro IS NULL
             AND (
-              consultor_responsable_id = (SELECT id FROM c_consultor)
-              OR consultor_principal_id = (SELECT id FROM c_consultor)
-              OR consultor_responsable_id IN (
+              rh.consultor_responsable_id = (SELECT id FROM c_consultor)
+              OR rh.consultor_principal_id = (SELECT id FROM c_consultor)
+              OR rh.consultor_responsable_id IN (
                 SELECT u.id
                 FROM usuarios u
                 WHERE u.activo = true
@@ -142,6 +200,7 @@ async function crearCuentaCobro(req, res) {
         MIN(created_at)::date AS min_fecha,
         MAX(created_at)::date AS max_fecha,
         COALESCE((SELECT moneda_cobro FROM c_consultor), 'COP') AS moneda,
+        COUNT(*) FILTER (WHERE error_tarifa)::int AS tarifas_invalidas,
         ARRAY_AGG(id) AS used_ids,
         (SELECT id FROM c_consultor) AS _consultor_id
       FROM c_reportes
@@ -161,6 +220,10 @@ async function crearCuentaCobro(req, res) {
     if (Number(info.count) !== ids_reportes.length) {
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "Algunos registros no son válidos para cobro" });
+    }
+    if (Number(info.tarifas_invalidas || 0) > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "No se puede generar cuenta de cobro: hay reportes con tarifa ausente o inválida" });
     }
 
     if (total_numeros !== undefined && Number(total_numeros) !== Number(info.total || 0)) {
@@ -408,8 +471,10 @@ async function getSoportesCuentas(req, res) {
  * Retorna la lista detallada de reportes de horas asociados a una cuenta
  */
 async function getDetalleCuenta(req, res) {
+  const { isGuid } = getIndexHelpers();
   const { cuentaId } = req.params;
   try {
+    if (!isGuid(cuentaId)) return res.status(400).json({ error: "Cuenta inválida" });
     const role = normalizeValue(req.user?.rol);
     const meta = await pool.query("SELECT id, created_by FROM cuenta_cobro WHERE public_id = $1", [cuentaId]);
     if (!meta.rows.length) return res.status(404).json({ error: "Cuenta no encontrada" });
@@ -431,12 +496,27 @@ async function getDetalleCuenta(req, res) {
           rh.nro_caso_int_ext,
           rh.horas_reportadas,
           rh.cantidad_dias_reportados,
-          rh.total_cobrar
+          rh.total_cobrar,
+          CASE WHEN ${SQL_ERROR_TARIFA_HORAS} THEN true ELSE false END AS error_tarifa
         FROM reporte_horas rh
           LEFT JOIN clientes c ON rh.cliente_id = c.id
           LEFT JOIN modulo m ON rh.modulo_id = m.id
-          LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
           LEFT JOIN usuarios u ON rh.consultor_responsable_id = u.id
+          LEFT JOIN registro_asignaciones ra ON ra.id = rh.id_registro_asignacion
+          LEFT JOIN consultorias con ON con.id = ra.id_consultoria
+          LEFT JOIN tipo_asignacion ta ON ta.id = COALESCE(rh.tipo_asignacion_id, con.id_tipo_asignacion)
+          LEFT JOIN LATERAL (
+            SELECT tc.valor_tarifa
+            FROM tarifa_consultor tc
+            WHERE tc.consultor_id = rh.consultor_responsable_id
+              AND tc.id_cliente = COALESCE(rh.cliente_id, con.id_cliente)
+              AND (COALESCE(rh.modulo_id, ra.id_modulo) IS NULL OR tc.modulo_id = COALESCE(rh.modulo_id, ra.id_modulo))
+              AND (COALESCE(rh.tipo_asignacion_id, con.id_tipo_asignacion) IS NULL OR tc.id_tipo_asignacion = COALESCE(rh.tipo_asignacion_id, con.id_tipo_asignacion))
+              AND tc.activo = true
+              AND (tc.vigencia_hasta IS NULL OR tc.vigencia_hasta >= CURRENT_DATE)
+            ORDER BY tc.vigencia_desde DESC NULLS LAST, tc.id DESC
+            LIMIT 1
+          ) tarifa ON true
       WHERE rh.id_cuenta_cobro = $1
       ORDER BY rh.id DESC
       `,

@@ -185,23 +185,26 @@ async function processSignatureEvent(event) {
 
     const cuenta = cuentaResult?.rows?.[0] || null;
 
-    if (!cuenta && (requestId || contractId)) {
+    if (!cuenta && (requestId || contractId || signatureId)) {
       const handledAnexoIndividual = await handleClickSignAnexoIndividualWebhook({
         event,
         requestId,
         contractId,
+        signatureId,
         status,
         rawStatus
       });
       if (handledAnexoIndividual) {
         return;
       }
-      await handleClickSignContratoWebhook({ event, requestId, contractId, status, rawStatus });
-      return;
+      if (requestId || contractId) {
+        await handleClickSignContratoWebhook({ event, requestId, contractId, status, rawStatus });
+        return;
+      }
     }
 
     if (!cuenta) {
-      console.warn("Webhook Click&Sign sin cuenta asociada:", { requestId, contractId, rawStatus });
+      console.warn("Webhook Click&Sign sin cuenta asociada:", { requestId, contractId, signatureId, rawStatus });
       return;
     }
 

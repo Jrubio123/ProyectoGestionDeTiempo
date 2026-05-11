@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(node *)",
-      "Skill(codex:rescue)"
+      "Skill(codex:rescue)",
+      "PowerShell(Stop-Process *)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'fix\\(firmas\\): resuelve bucle de click&sign y colision en modales alpine' -m ' *)",
+      "Bash(git commit *)",
+      "Bash(Get-Content *)",
+      "Read(//mnt/c/Users/JUANPA~1/AppData/Local/Temp/claude/C--Users-JuanPabloRubioMej-a-Downloads-ProyectosDesarrollo-ProyectoGestionDeTiempo/7d86c0ea-bead-48dc-8df1-30e9b866ae4d/tasks/**)",
+      "Read(//c/Users/JuanPabloRubioMejía/AppData/Local/Temp/claude/C--Users-JuanPabloRubioMej-a-Downloads-ProyectosDesarrollo-ProyectoGestionDeTiempo/7d86c0ea-bead-48dc-8df1-30e9b866ae4d/tasks/**)"
     ]
   },
   "enabledPlugins": {

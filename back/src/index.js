@@ -740,6 +740,11 @@ const ONEDRIVE_TARGET_USER = process.env.ONEDRIVE_TARGET_USER || "admin.apps@sil
 const ONEDRIVE_ROOT_FOLDER = process.env.ONEDRIVE_ROOT_FOLDER || "AdjuntosCuentasCobro";
 const CONTRATOS_ONEDRIVE_FOLDER = process.env.CONTRATOS_ONEDRIVE_FOLDER || "ContratosFirmados";
 const ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER = "AnexoTecnicoIndividual";
+const ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID = String(process.env.ONEDRIVE_ANEXO_TECNICO || "").trim();
+const ANEXO_TECNICO_CLICKSIGN_DOCUMENT_TYPES = Object.freeze({
+  silver: "AnexoTecnico",
+  capital: "anexotecnicoCapital"
+});
 const CONTRATOS_TOKEN_EXPIRY_HOURS = Math.max(1, Number(process.env.CONTRATOS_TOKEN_EXPIRY_HOURS || 72));
 const CONTRATOS_BASE_URL = String(env.CONTRATOS_BASE_URL || "").trim().replace(/\/+$/, "");
 const CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO = String(process.env.CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO || "").trim();
@@ -754,7 +759,17 @@ const CLICKSIGN_API_BASE = String(process.env.CLICKSIGN_API_BASE || "https://api
 const CLICKSIGN_API_KEY = String(process.env.CLICKSIGN_API_KEY || "").trim();
 const CLICKSIGN_USER = String(process.env.CLICKSIGN_USER || "").trim();
 const CLICKSIGN_CONFIG_ID = Number(process.env.CLICKSIGN_CONFIG_ID || 0);
-const CLICKSIGN_CONTRATOS_CONFIG_ID = Number(process.env.CLICKSIGN_CONTRATOS_CONFIG_ID || 0) || CLICKSIGN_CONFIG_ID;
+const CLICKSIGN_CONTRATOS_CONFIG_ID_RAW = Number(process.env.CLICKSIGN_CONTRATOS_CONFIG_ID || 0);
+const CLICKSIGN_CONTRATOS_CONFIG_ID = CLICKSIGN_CONTRATOS_CONFIG_ID_RAW || CLICKSIGN_CONFIG_ID;
+const CLICKSIGN_ANEXO_TECNICO_CONFIG_ID_RAW = Number(process.env.CLICKSIGN_ANEXO_TECNICO_CONFIG_ID || 0);
+const CLICKSIGN_ANEXO_TECNICO_CONFIG_ID =
+  CLICKSIGN_ANEXO_TECNICO_CONFIG_ID_RAW ||
+  (
+    CLICKSIGN_CONTRATOS_CONFIG_ID_RAW &&
+      CLICKSIGN_CONTRATOS_CONFIG_ID_RAW !== CLICKSIGN_CONFIG_ID
+      ? CLICKSIGN_CONTRATOS_CONFIG_ID_RAW
+      : 0
+  );
 const CLICKSIGN_SIGNATURE_CB_URL = String(process.env.CLICKSIGN_SIGNATURE_CB_URL || "").trim();
 const CLICKSIGN_SIGNATORY_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_CB_URL || "").trim();
 const CLICKSIGN_SIGNATORY_EMAIL_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_EMAIL_CB_URL || "").trim();
@@ -1433,6 +1448,20 @@ function createDocxtemplaterParser(tag) {
 
 function getContratoEmpresaKey(facturaEnColombia) {
   return resolveEmpresaContratoConfig(facturaEnColombia).key;
+}
+
+function getAnexoTecnicoClickSignDocumentType(facturaEnColombia) {
+  return facturaEnColombia === false
+    ? ANEXO_TECNICO_CLICKSIGN_DOCUMENT_TYPES.capital
+    : ANEXO_TECNICO_CLICKSIGN_DOCUMENT_TYPES.silver;
+}
+
+function getAnexoTecnicoClickSignConfigId() {
+  return CLICKSIGN_ANEXO_TECNICO_CONFIG_ID;
+}
+
+function isAnexoTecnicoClickSignConfigured() {
+  return Boolean(CLICKSIGN_API_KEY && CLICKSIGN_USER && CLICKSIGN_ANEXO_TECNICO_CONFIG_ID > 0);
 }
 
 function hydrateContratoDocDefinitionForEmpresa(def, facturaEnColombia = null) {
@@ -3075,6 +3104,7 @@ async function getUsuarioAnexoIndividualById(userInput) {
         COALESCE(p.direccion_residencia, u.direccion) AS direccion,
         COALESCE(p.ciudad_residencia, u.ciudad)       AS ciudad,
         u.moneda_cobro,
+        COALESCE(p.factura_en_colombia, u.factura_en_colombia) AS factura_en_colombia,
         u.tipo_consultor,
         COALESCE(di_p.titulo, di_u.titulo) AS tipo_documento_titulo,
         COALESCE(di_p.codigo, di_u.codigo) AS tipo_documento_codigo
@@ -3106,6 +3136,7 @@ async function getUsuarioAnexoIndividualById(userInput) {
       p.numero_contacto AS telefono,
       p.direccion_residencia AS direccion,
       p.ciudad_residencia AS ciudad,
+      p.factura_en_colombia,
       NULL AS moneda_cobro,
       NULL AS tipo_consultor,
       di.titulo AS tipo_documento_titulo,
@@ -3510,6 +3541,36 @@ async function uploadAnexoIndividualFirmadoToOneDrive(proceso, pdfBuffer, fileNa
     `AnexoTecnico_${fechaStr}_${shortPublicId}`
   );
 
+  const safeName = sanitizePdfFileName(
+    fileName || `AnexoTecnico_${proceso?.nombre_persona || "Persona"}_${fechaStr}.pdf`,
+    "AnexoTecnico.pdf"
+  );
+
+  if (ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID) {
+    await graphGet(
+      `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID)}`,
+      token
+    );
+    const folderMeta = await ensureGraphChildFolderById(
+      token,
+      ONEDRIVE_TARGET_USER,
+      ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID,
+      folderName
+    );
+    const uploadPath = `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(folderMeta.id)}:/${encodeURIComponent(safeName)}:/content`;
+    const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
+
+    return {
+      carpeta: folderMeta.name || folderName,
+      carpeta_url: folderMeta.webUrl || null,
+      archivo: {
+        id: uploaded.id || "",
+        nombre: uploaded.name || safeName,
+        url: uploaded.webUrl || ""
+      }
+    };
+  }
+
   let targetPath = sanitizePathSegment(ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER, "AnexoTecnicoIndividual");
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, folderName);
@@ -3525,10 +3586,6 @@ async function uploadAnexoIndividualFirmadoToOneDrive(proceso, pdfBuffer, fileNa
     console.warn("No se pudo resolver URL de carpeta OneDrive para anexo individual:", folderErr?.message || folderErr);
   }
 
-  const safeName = sanitizePdfFileName(
-    fileName || `AnexoTecnico_${proceso?.nombre_persona || "Persona"}_${fechaStr}.pdf`,
-    "AnexoTecnico.pdf"
-  );
   const uploadPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${safeName}`)}:/content`;
   const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
 
@@ -3651,9 +3708,123 @@ async function notifyAnexoIndividualFirmaCompletada(tokenId) {
   }
 }
 
-async function handleClickSignAnexoIndividualWebhook({ event, requestId, contractId, status, rawStatus }) {
+async function resolveAnexoIndividualSignedPdfUpload({ proceso, event = {}, requestId = "", contractId = "", signatureId = "" }) {
+  const effectiveSignatureId = String(signatureId || extractClickSignSignatureId(event) || proceso?.signature_id || "").trim();
+  const artifacts = await resolveClickSignArtifacts({
+    event,
+    requestId: requestId || proceso?.request_id || "",
+    contractId: contractId || proceso?.contract_id || "",
+    publicId: String(proceso?.public_id || ""),
+    signatureId: effectiveSignatureId
+  });
+  const resolvedPdf = artifacts?.signedPdf || null;
+  if (!resolvedPdf || !isPdfBuffer(resolvedPdf.buffer)) {
+    return { signatureId: effectiveSignatureId, oneDriveInfo: null };
+  }
+
+  const oneDriveInfo = await uploadAnexoIndividualFirmadoToOneDrive(
+    proceso,
+    resolvedPdf.buffer,
+    resolvedPdf.fileName || `AnexoTecnico_${sanitizePathSegment(proceso?.nombre_persona, "Persona")}.pdf`
+  );
+
+  return { signatureId: effectiveSignatureId, oneDriveInfo };
+}
+
+async function markAnexoIndividualSignedWithOneDrive(proceso, oneDriveInfo, signatureId) {
+  if (!proceso?.id || !oneDriveInfo?.archivo?.url) return false;
+
+  await pool.query(
+    `
+    UPDATE tokens_firma_anexo_individual
+    SET estado = 'firmado',
+        firmado_at = COALESCE(firmado_at, NOW()),
+        signature_id = COALESCE($2, signature_id),
+        onedrive_url = $3,
+        onedrive_carpeta = COALESCE($4, onedrive_carpeta),
+        onedrive_carpeta_url = COALESCE($5, onedrive_carpeta_url),
+        updated_at = NOW()
+    WHERE id = $1
+    `,
+    [
+      proceso.id,
+      signatureId || null,
+      oneDriveInfo.archivo.url,
+      oneDriveInfo.carpeta || null,
+      oneDriveInfo.carpeta_url || null
+    ]
+  );
+
+  await pool.query(
+    `
+    UPDATE anexo_tecnico_items
+    SET estado_firma = 'firmado',
+        updated_at = NOW()
+    WHERE id = ANY($1::int[])
+    `,
+    [proceso.anexo_item_ids || []]
+  );
+
+  try {
+    await notifyAnexoIndividualFirmaCompletada(proceso.id);
+  } catch (notifyErr) {
+    console.error("Error notificando firma de anexo individual:", notifyErr?.message || notifyErr);
+  }
+
+  return true;
+}
+
+function scheduleAnexoIndividualSignedUploadRetry(tokenId) {
+  const numericTokenId = Number(tokenId || 0);
+  if (!Number.isInteger(numericTokenId) || numericTokenId <= 0) return;
+  const timer = setTimeout(() => {
+    reintentarAnexoIndividualFirma(numericTokenId).catch((err) => {
+      console.error("Error reintentando firmado de anexo individual:", err?.message || err);
+    });
+  }, 30000);
+  if (typeof timer.unref === "function") timer.unref();
+}
+
+async function reintentarAnexoIndividualFirma(tokenId) {
+  const result = await pool.query(
+    `
+    SELECT *
+    FROM tokens_firma_anexo_individual
+    WHERE id = $1
+      AND (
+        estado = 'enviado'
+        OR (estado = 'firmado' AND COALESCE(onedrive_url, '') = '')
+      )
+    LIMIT 1
+    `,
+    [tokenId]
+  );
+  const proceso = result.rows[0] || null;
+  if (!proceso || String(proceso.onedrive_url || "").trim()) return false;
+
+  const { signatureId, oneDriveInfo } = await resolveAnexoIndividualSignedPdfUpload({
+    proceso,
+    requestId: proceso.request_id || "",
+    contractId: proceso.contract_id || "",
+    signatureId: proceso.signature_id || ""
+  });
+  if (!oneDriveInfo?.archivo?.url) {
+    console.warn("Reintento anexo individual: PDF firmado aun no disponible", {
+      tokenId,
+      requestId: proceso.request_id || null,
+      contractId: proceso.contract_id || null
+    });
+    return false;
+  }
+
+  await markAnexoIndividualSignedWithOneDrive(proceso, oneDriveInfo, signatureId);
+  return true;
+}
+
+async function handleClickSignAnexoIndividualWebhook({ event, requestId, contractId, signatureId = "", status, rawStatus }) {
   if (status !== "signed" && status !== "rejected") return false;
 
+  const incomingSignatureId = String(signatureId || extractClickSignSignatureId(event) || "").trim();
   let proceso = null;
   if (requestId) {
     const byRequest = await pool.query(
@@ -3661,7 +3832,10 @@ async function handleClickSignAnexoIndividualWebhook({ event, requestId, contrac
       SELECT *
       FROM tokens_firma_anexo_individual
       WHERE request_id = $1
-        AND estado = 'enviado'
+        AND (
+          estado = 'enviado'
+          OR (estado = 'firmado' AND COALESCE(onedrive_url, '') = '')
+        )
       ORDER BY created_at DESC
       LIMIT 1
       `,
@@ -3676,13 +3850,34 @@ async function handleClickSignAnexoIndividualWebhook({ event, requestId, contrac
       SELECT *
       FROM tokens_firma_anexo_individual
       WHERE contract_id = $1
-        AND estado = 'enviado'
+        AND (
+          estado = 'enviado'
+          OR (estado = 'firmado' AND COALESCE(onedrive_url, '') = '')
+        )
       ORDER BY created_at DESC
       LIMIT 1
       `,
       [contractId]
     );
     proceso = byContract.rows[0] || null;
+  }
+
+  if (!proceso && incomingSignatureId) {
+    const bySignature = await pool.query(
+      `
+      SELECT *
+      FROM tokens_firma_anexo_individual
+      WHERE signature_id = $1
+        AND (
+          estado = 'enviado'
+          OR (estado = 'firmado' AND COALESCE(onedrive_url, '') = '')
+        )
+      ORDER BY created_at DESC
+      LIMIT 1
+      `,
+      [incomingSignatureId]
+    );
+    proceso = bySignature.rows[0] || null;
   }
 
   if (!proceso) return false;
@@ -3693,10 +3888,11 @@ async function handleClickSignAnexoIndividualWebhook({ event, requestId, contrac
         `
         UPDATE tokens_firma_anexo_individual
         SET estado = 'rechazado',
+            signature_id = COALESCE($2, signature_id),
             updated_at = NOW()
         WHERE id = $1
         `,
-        [proceso.id]
+        [proceso.id, incomingSignatureId || null]
       );
       await pool.query(
         `
@@ -3710,66 +3906,35 @@ async function handleClickSignAnexoIndividualWebhook({ event, requestId, contrac
       return true;
     }
 
-    const signatureId = String(extractClickSignSignatureId(event) || proceso.signature_id || "").trim();
-    let oneDriveInfo = null;
-
+    let signedUpload = null;
     try {
-      const artifacts = await resolveClickSignArtifacts({
+      signedUpload = await resolveAnexoIndividualSignedPdfUpload({
+        proceso,
         event,
         requestId,
         contractId,
-        publicId: String(proceso.public_id || ""),
-        signatureId
+        signatureId: incomingSignatureId || proceso.signature_id || ""
       });
-      const resolvedPdf = artifacts?.signedPdf || null;
-      if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
-        oneDriveInfo = await uploadAnexoIndividualFirmadoToOneDrive(
-          proceso,
-          resolvedPdf.buffer,
-          resolvedPdf.fileName || `AnexoTecnico_${sanitizePathSegment(proceso.nombre_persona, "Persona")}.pdf`
-        );
-      }
     } catch (artifactErr) {
       console.error("Error resolviendo firmado de anexo individual:", artifactErr?.message || artifactErr);
     }
 
-    await pool.query(
-      `
-      UPDATE tokens_firma_anexo_individual
-      SET estado = 'firmado',
-          firmado_at = COALESCE(firmado_at, NOW()),
-          signature_id = COALESCE($2, signature_id),
-          onedrive_url = COALESCE($3, onedrive_url),
-          onedrive_carpeta = COALESCE($4, onedrive_carpeta),
-          onedrive_carpeta_url = COALESCE($5, onedrive_carpeta_url),
-          updated_at = NOW()
-      WHERE id = $1
-      `,
-      [
-        proceso.id,
-        signatureId || null,
-        oneDriveInfo?.archivo?.url || null,
-        oneDriveInfo?.carpeta || null,
-        oneDriveInfo?.carpeta_url || null
-      ]
-    );
-
-    await pool.query(
-      `
-      UPDATE anexo_tecnico_items
-      SET estado_firma = 'firmado',
-          updated_at = NOW()
-      WHERE id = ANY($1::int[])
-      `,
-      [proceso.anexo_item_ids || []]
-    );
-
-    try {
-      await notifyAnexoIndividualFirmaCompletada(proceso.id);
-    } catch (notifyErr) {
-      console.error("Error notificando firma de anexo individual:", notifyErr?.message || notifyErr);
+    const finalSignatureId = signedUpload?.signatureId || incomingSignatureId || String(proceso.signature_id || "").trim();
+    if (!signedUpload?.oneDriveInfo?.archivo?.url) {
+      await pool.query(
+        `
+        UPDATE tokens_firma_anexo_individual
+        SET signature_id = COALESCE($2, signature_id),
+            updated_at = NOW()
+        WHERE id = $1
+        `,
+        [proceso.id, finalSignatureId || null]
+      );
+      scheduleAnexoIndividualSignedUploadRetry(proceso.id);
+      return true;
     }
 
+    await markAnexoIndividualSignedWithOneDrive(proceso, signedUpload.oneDriveInfo, finalSignatureId);
     return true;
   } catch (err) {
     console.error("Error procesando webhook de anexo individual:", err?.message || err);
@@ -4377,8 +4542,9 @@ async function generateContratoPdfFromTemplate({ docDefinition, personaContext, 
   return convertDocxBufferToPdfBuffer(docxBuffer, fileBaseName);
 }
 
-async function generateAnexoIndividualPdfFromItems({ userRow, items, correoFirmante }) {
-  const docDefinition = getContratoDocDefinition("anexo_tecnico");
+async function generateAnexoIndividualPdfFromItems({ userRow, items, correoFirmante, facturaEnColombia = null }) {
+  const facturaContext = normalizeNullableBooleanInput(facturaEnColombia ?? userRow?.factura_en_colombia);
+  const docDefinition = getContratoDocDefinition("anexo_tecnico", facturaContext);
   if (!docDefinition) {
     throw new Error("No se encontro la configuracion del anexo tecnico");
   }
@@ -4390,7 +4556,8 @@ async function generateAnexoIndividualPdfFromItems({ userRow, items, correoFirma
     telefono: userRow?.telefono || "",
     correoPersonal: correoFirmante || userRow?.email || "",
     ciudad: userRow?.ciudad || CONTRATOS_CIUDAD_SILVER,
-    direccion: userRow?.direccion || ""
+    direccion: userRow?.direccion || "",
+    facturaEnColombia: facturaContext
   };
   const payload = buildContratoBaseTemplatePayload({
     personaContext,
@@ -4446,6 +4613,8 @@ async function collectAnexoIndividualSignatureContext({
     SELECT
       ati.id,
       ati.public_id,
+      ati.solicitud_contratacion_id,
+      ati.preregistro_id,
       ati.nombre_persona,
       ati.numero_documento,
       ati.correo_personal,
@@ -4459,8 +4628,19 @@ async function collectAnexoIndividualSignatureContext({
       ati.origen,
       ati.estado,
       ati.estado_firma,
+      COALESCE(
+        CASE
+          WHEN LOWER(BTRIM(sc.datos_extra->>'factura_en_colombia')) IN ('true', 't', '1', 'yes', 'y', 'on', 'si') THEN true
+          WHEN LOWER(BTRIM(sc.datos_extra->>'factura_en_colombia')) IN ('false', 'f', '0', 'no', 'n', 'off') THEN false
+          ELSE NULL
+        END,
+        pp.factura_en_colombia,
+        $4::boolean
+      ) AS factura_en_colombia,
       m.titulo AS modulo_titulo
     FROM anexo_tecnico_items ati
+    LEFT JOIN solicitudes_contratacion sc ON sc.id = ati.solicitud_contratacion_id
+    LEFT JOIN preregistro_personas pp ON pp.id = ati.preregistro_id
     LEFT JOIN modulo m ON m.id = ati.modulo_id
     WHERE ati.estado = 'activo'
       AND (
@@ -4476,7 +4656,8 @@ async function collectAnexoIndividualSignatureContext({
     ORDER BY ati.fecha_inicio DESC NULLS LAST, ati.created_at DESC
     ${lockRows ? "FOR UPDATE OF ati" : ""}
   `;
-  const itemsResult = await client.query(itemsSql, [userRow.id, numeroDocumento, correoPersonalFallback]);
+  const userFacturaEnColombia = normalizeNullableBooleanInput(userRow.factura_en_colombia);
+  const itemsResult = await client.query(itemsSql, [userRow.id, numeroDocumento, correoPersonalFallback, userFacturaEnColombia]);
   const items = itemsResult.rows || [];
   if (!items.length) {
     const err = new Error("La persona no tiene items activos para firmar");
@@ -4506,11 +4687,26 @@ async function collectAnexoIndividualSignatureContext({
     correoPersonalFallback ||
     toNullableTrimmedString(userRow.email) ||
     "";
+  const facturaValues = items
+    .map((item) => normalizeNullableBooleanInput(item.factura_en_colombia))
+    .filter((value) => value !== null);
+  if (!facturaValues.length && userFacturaEnColombia !== null) {
+    facturaValues.push(userFacturaEnColombia);
+  }
+  const facturaUnica = Array.from(new Set(facturaValues.map((value) => String(value))));
+  if (facturaUnica.length > 1) {
+    const err = new Error("Los items activos mezclan facturacion Silver y Capital; separa el envio de firma.");
+    err.status = 409;
+    throw err;
+  }
+  const facturaEnColombia = facturaValues.length ? facturaValues[0] : true;
 
   return {
     userRow,
     items,
-    correoFirmante: correoSugerido
+    correoFirmante: correoSugerido,
+    facturaEnColombia,
+    clicksignDocumentType: getAnexoTecnicoClickSignDocumentType(facturaEnColombia)
   };
 }
 
@@ -4801,6 +4997,61 @@ async function ensureGraphFolder(accessToken, userEmail, parentPath, folderName)
   }
 
   return parentPath ? `${parentPath}/${safeFolderName}` : safeFolderName;
+}
+
+async function findGraphChildFolderByName(accessToken, userEmail, parentItemId, folderName) {
+  const encodedUser = encodeURIComponent(userEmail);
+  const encodedParentId = encodeURIComponent(String(parentItemId || "").trim());
+  const safeFolderName = sanitizePathSegment(folderName, "carpeta");
+  if (!encodedParentId) return null;
+  const response = await graphGet(
+    `/v1.0/users/${encodedUser}/drive/items/${encodedParentId}/children?$select=id,name,webUrl,folder&$top=200`,
+    accessToken
+  );
+  const children = Array.isArray(response?.value) ? response.value : [];
+  return children.find((item) => item?.folder && item.name === safeFolderName) || null;
+}
+
+async function ensureGraphChildFolderById(accessToken, userEmail, parentItemId, folderName) {
+  const encodedUser = encodeURIComponent(userEmail);
+  const encodedParentId = encodeURIComponent(String(parentItemId || "").trim());
+  const safeFolderName = sanitizePathSegment(folderName, "carpeta");
+  if (!encodedParentId) {
+    throw new Error("ONEDRIVE_PARENT_FOLDER_ID_REQUIRED");
+  }
+  const requestPath = `/v1.0/users/${encodedUser}/drive/items/${encodedParentId}/children`;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const created = await graphPost(requestPath, accessToken, {
+        name: safeFolderName,
+        folder: {},
+        "@microsoft.graph.conflictBehavior": "fail"
+      });
+      if (created?.id) return created;
+      break;
+    } catch (err) {
+      const errorText = String(err.message || "");
+      const alreadyExists =
+        errorText.includes("nameAlreadyExists") ||
+        errorText.includes("itemAlreadyExists");
+      const resourceModified = errorText.includes("resourceModified");
+      if (alreadyExists) {
+        const existing = await findGraphChildFolderByName(accessToken, userEmail, parentItemId, safeFolderName);
+        if (existing?.id) return existing;
+        break;
+      }
+      if (resourceModified && attempt < 2) {
+        await sleepMs(300 * (attempt + 1));
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  const existing = await findGraphChildFolderByName(accessToken, userEmail, parentItemId, safeFolderName);
+  if (existing?.id) return existing;
+  throw new Error(`No se pudo crear o resolver carpeta OneDrive: ${safeFolderName}`);
 }
 
 async function graphPutBinaryWithRetry(path, accessToken, buffer, contentType = "application/octet-stream", retryCount = 1) {
@@ -12899,6 +13150,9 @@ module.exports = {
   buildAnexoIndividualDashboardPayload,
   collectAnexoIndividualSignatureContext,
   generateAnexoIndividualPdfFromItems,
+  getAnexoTecnicoClickSignConfigId,
+  getAnexoTecnicoClickSignDocumentType,
+  isAnexoTecnicoClickSignConfigured,
   mapAnexoIndividualTokenRow,
   toAnexoApiRow,
   getAnexoTecnicoItemByInternalId,

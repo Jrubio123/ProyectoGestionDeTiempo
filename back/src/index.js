@@ -12366,6 +12366,9 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
 app.get("/horas-por-cobrar/:consultorId", requireAccess({ roles: ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"], tipos: ["Asociado"] }), async (req, res) => {
   const { consultorId } = req.params;
   try {
+    if (!isGuid(consultorId)) {
+      return res.status(400).json({ error: "Consultor inválido" });
+    }
     const role = normalizeValue(req.user?.rol);
     const result = await pool.query(
       `
@@ -12380,10 +12383,38 @@ app.get("/horas-por-cobrar/:consultorId", requireAccess({ roles: ["Consultor", "
         rh.requerimiento,
         c.titulo AS cliente,
         ta.titulo AS tipo_asignacion,
+        CASE
+          WHEN NOT (
+              LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%capacitacion%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%training%'
+            )
+            AND (
+              LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%hora%'
+              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%demanda%'
+              OR LOWER(REPLACE(REPLACE(TRIM(COALESCE(ta.titulo, '')), ' ', ''), '_', '')) IN ('horas', 'porhoras', 'horaspordemanda', 'hourly')
+            )
+            AND NOT (COALESCE(tarifa.valor_tarifa, 0) > 0)
+          THEN true
+          ELSE false
+        END AS error_tarifa,
         (SELECT id FROM c_consultor) AS _consultor_id
       FROM reporte_horas rh
-        LEFT JOIN clientes c ON rh.cliente_id = c.id
-        LEFT JOIN tipo_asignacion ta ON rh.tipo_asignacion_id = ta.id
+        LEFT JOIN registro_asignaciones ra ON ra.id = rh.id_registro_asignacion
+        LEFT JOIN consultorias con ON con.id = ra.id_consultoria
+        LEFT JOIN clientes c ON c.id = COALESCE(rh.cliente_id, con.id_cliente)
+        LEFT JOIN tipo_asignacion ta ON ta.id = COALESCE(rh.tipo_asignacion_id, con.id_tipo_asignacion)
+        LEFT JOIN LATERAL (
+          SELECT tc.valor_tarifa
+          FROM tarifa_consultor tc
+          WHERE tc.consultor_id = rh.consultor_responsable_id
+            AND tc.id_cliente = COALESCE(rh.cliente_id, con.id_cliente)
+            AND (COALESCE(rh.modulo_id, ra.id_modulo) IS NULL OR tc.modulo_id = COALESCE(rh.modulo_id, ra.id_modulo))
+            AND (COALESCE(rh.tipo_asignacion_id, con.id_tipo_asignacion) IS NULL OR tc.id_tipo_asignacion = COALESCE(rh.tipo_asignacion_id, con.id_tipo_asignacion))
+            AND tc.activo = true
+            AND (tc.vigencia_hasta IS NULL OR tc.vigencia_hasta >= CURRENT_DATE)
+          ORDER BY tc.vigencia_desde DESC NULLS LAST, tc.id DESC
+          LIMIT 1
+        ) tarifa ON true
       WHERE rh.estado_reporte = 'Aprobado'
         AND rh.id_cuenta_cobro IS NULL
         AND (

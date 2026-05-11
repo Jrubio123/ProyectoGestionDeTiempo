@@ -1,6 +1,7 @@
 const { pool } = require("../db");
 
 const normalizeValue = (value) => String(value || "").toLowerCase().trim();
+const ERROR_TARIFA_HORAS = "No se puede asignar: El consultor no tiene una tarifa registrada en el sistema";
 
 function getIndexHelpers() {
   return require("../index");
@@ -20,6 +21,7 @@ async function actualizarRegistroAsignacion(req, res) {
     toNullableNumber,
     toBooleanInput,
     withPublicId,
+    isGuid,
     ID_TABLES
   } = getIndexHelpers();
 
@@ -43,6 +45,13 @@ async function actualizarRegistroAsignacion(req, res) {
   } = req.body;
 
   try {
+    if (!isGuid(id)) {
+      return res.status(400).json({ error: "Id de asignación inválido" });
+    }
+    if (consultor_responsable_id && !isGuid(consultor_responsable_id)) {
+      return res.status(400).json({ error: "Consultor inválido" });
+    }
+
     const cantidadDiasNum = toNullableInteger(cantidad_dias);
     const horasAsignadasNum = toNullableNumber(horas_asignadas);
     const valorHoraNum = toNullableNumber(valor_hora);
@@ -89,6 +98,10 @@ async function actualizarRegistroAsignacion(req, res) {
         
         c_meta AS (
           SELECT
+            con.id_cliente,
+            con.id_tipo_asignacion,
+            (SELECT id FROM c_consultor) AS id_consultor,
+            (SELECT id FROM c_modulo) AS id_modulo,
             ta.titulo AS tipo_asignacion_titulo,
             REPLACE(
               REPLACE(
@@ -115,20 +128,56 @@ async function actualizarRegistroAsignacion(req, res) {
           JOIN consultorias con ON con.id = a.id_consultoria
           LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
         ),
+
+        c_tarifa AS (
+          SELECT
+            CASE
+              WHEN NOT (
+                  m.n_tipo LIKE '%capacitacion%'
+                  OR m.n_tipo LIKE '%training%'
+                )
+                AND (
+                  m.n_tipo LIKE '%hora%'
+                  OR m.n_tipo LIKE '%demanda%'
+                  OR REPLACE(REPLACE(m.n_tipo, ' ', ''), '_', '') IN ('horas', 'porhoras', 'horaspordemanda', 'hourly')
+                ) THEN true
+              ELSE false
+            END AS es_modalidad_horas,
+            COALESCE(
+              (
+                SELECT tc.valor_tarifa
+                FROM tarifa_consultor tc
+                WHERE tc.consultor_id = m.id_consultor
+                  AND tc.id_cliente = m.id_cliente
+                  AND (m.id_modulo IS NULL OR tc.modulo_id = m.id_modulo)
+                  AND (m.id_tipo_asignacion IS NULL OR tc.id_tipo_asignacion = m.id_tipo_asignacion)
+                  AND tc.activo = true
+                  AND (tc.vigencia_hasta IS NULL OR tc.vigencia_hasta >= CURRENT_DATE)
+                ORDER BY tc.vigencia_desde DESC NULLS LAST, tc.id DESC
+                LIMIT 1
+              ),
+              0
+            ) AS tarifa_calculada
+          FROM c_meta m
+        ),
         
         c_calc AS (
           SELECT
-            CASE WHEN m.n_tipo LIKE '%tiempo y costo fijo%' OR m.n_tipo LIKE '%costo fijo%' THEN true ELSE false END AS es_t_c_fijo
+            CASE WHEN m.n_tipo LIKE '%tiempo y costo fijo%' OR m.n_tipo LIKE '%costo fijo%' THEN true ELSE false END AS es_t_c_fijo,
+            (SELECT es_modalidad_horas FROM c_tarifa) AS es_modalidad_horas,
+            (SELECT tarifa_calculada FROM c_tarifa) AS tarifa_calculada
           FROM c_meta m
         ),
         
         c_valores AS (
           SELECT
             c.es_t_c_fijo,
+            c.es_modalidad_horas,
+            c.tarifa_calculada,
             -- Aplicamos regla de costo total; horas también se nullifican en modo costo total TCF
             CASE WHEN c.es_t_c_fijo AND $13::boolean THEN null ELSE $16::numeric END AS out_horas,
             CASE WHEN c.es_t_c_fijo AND $13::boolean THEN null ELSE $4::int END AS out_dias,
-            CASE WHEN c.es_t_c_fijo AND $13::boolean THEN null ELSE $5::numeric END AS out_v_hora,
+            CASE WHEN c.es_modalidad_horas THEN c.tarifa_calculada WHEN c.es_t_c_fijo AND $13::boolean THEN null ELSE $5::numeric END AS out_v_hora,
             CASE WHEN c.es_t_c_fijo AND $13::boolean THEN null ELSE $6::numeric END AS out_v_dia
           FROM c_calc c
         ),
@@ -152,6 +201,7 @@ async function actualizarRegistroAsignacion(req, res) {
               es_costo_total = (SELECT es_t_c_fijo FROM c_valores) AND $13::boolean
           WHERE id = (SELECT id FROM c_asignacion)
             AND (NOT ((SELECT es_t_c_fijo FROM c_valores) AND $13::boolean) OR $15::numeric > 0)
+            AND (NOT (SELECT es_modalidad_horas FROM c_valores) OR (SELECT tarifa_calculada FROM c_valores) > 0)
             AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM c_consultor))
             AND ($3::text IS NULL OR EXISTS (SELECT 1 FROM c_modulo))
           RETURNING ra.*
@@ -164,11 +214,19 @@ async function actualizarRegistroAsignacion(req, res) {
         (SELECT id FROM c_asignacion) AS diag_asignacion,
         (SELECT id FROM c_consultor) AS diag_consultor,
         (SELECT id FROM c_modulo) AS diag_modulo,
-        (SELECT es_t_c_fijo FROM c_calc) AS diag_es_tcf
+        (SELECT es_t_c_fijo FROM c_calc) AS diag_es_tcf,
+        (SELECT es_modalidad_horas FROM c_tarifa) AS diag_es_modalidad_horas,
+        (SELECT tarifa_calculada FROM c_tarifa) AS diag_tarifa_calc
       FROM upd u RIGHT JOIN c_asignacion ON true
     `;
 
-    const result = await pool.query(cteQuery, [
+    const client = await pool.connect();
+    let txStarted = false;
+    let result;
+    try {
+      await client.query("BEGIN");
+      txStarted = true;
+      result = await client.query(cteQuery, [
       id,                               // $1
       consultor_responsable_id || null, // $2
       moduloInternalId || null,         // $3
@@ -185,7 +243,15 @@ async function actualizarRegistroAsignacion(req, res) {
       observacion || null,              // $14
       totalPagarNum,                    // $15
       horasAsignadasNum                 // $16
-    ]);
+      ]);
+      await client.query("COMMIT");
+      txStarted = false;
+    } catch (txErr) {
+      if (txStarted) await client.query("ROLLBACK");
+      throw txErr;
+    } finally {
+      client.release();
+    }
 
     const row = result.rows[0];
 
@@ -196,6 +262,9 @@ async function actualizarRegistroAsignacion(req, res) {
       if (consultor_responsable_id && !row.diag_consultor) return res.status(404).json({ error: "Consultor no encontrado" });
       if (id_modulo && !row.diag_modulo) return res.status(404).json({ error: "Módulo no encontrado" });
 
+      if (row.diag_es_modalidad_horas && !(Number(row.diag_tarifa_calc) > 0)) {
+        return res.status(400).json({ error: ERROR_TARIFA_HORAS });
+      }
       if (row.diag_es_tcf && esCostoTotalInput && !(Number(totalPagarNum) > 0)) {
         return res.status(400).json({ error: "Debes indicar un presupuesto total mayor a 0 para costo total." });
       }
@@ -206,6 +275,8 @@ async function actualizarRegistroAsignacion(req, res) {
     delete row.diag_consultor;
     delete row.diag_modulo;
     delete row.diag_es_tcf;
+    delete row.diag_es_modalidad_horas;
+    delete row.diag_tarifa_calc;
 
     res.json(withPublicId(row));
   } catch (err) {
@@ -294,6 +365,7 @@ async function crearRegistroAsignacion(req, res) {
     buildPortalUrl,
     getGraphContext,
     buildEmailLayout,
+    isGuid,
     ID_TABLES
   } = getIndexHelpers();
 
@@ -313,6 +385,10 @@ async function crearRegistroAsignacion(req, res) {
   } = req.body;
 
   try {
+    if (!isGuid(id_consultoria) || !isGuid(consultor_responsable_id)) {
+      return res.status(400).json({ error: "Consultoría o consultor inválido" });
+    }
+
     const cantidadDiasNum = toNullableInteger(cantidad_dias);
     const horasAsignadasNum = toNullableNumber(horas_asignadas);
     const valorHoraInput = toNullableNumber(valor_hora);
@@ -456,6 +532,18 @@ async function crearRegistroAsignacion(req, res) {
               WHEN m.n_tipo LIKE '%horas por demanda%' OR m.n_tipo LIKE '%horaspordemanda%' OR m.n_tipo LIKE '%demanda%' THEN true
               ELSE false
             END AS es_h_demanda,
+            CASE
+              WHEN NOT (
+                  m.n_tipo LIKE '%capacitacion%'
+                  OR m.n_tipo LIKE '%training%'
+                )
+                AND (
+                  m.n_tipo LIKE '%hora%'
+                  OR m.n_tipo LIKE '%demanda%'
+                  OR REPLACE(REPLACE(m.n_tipo, ' ', ''), '_', '') IN ('horas', 'porhoras', 'horaspordemanda', 'hourly')
+                ) THEN true
+              ELSE false
+            END AS es_modalidad_horas,
             COALESCE(
               (
                 SELECT tc.valor_tarifa
@@ -481,6 +569,7 @@ async function crearRegistroAsignacion(req, res) {
             t.es_mensual,
             t.es_t_c_fijo,
             t.es_h_demanda,
+            t.es_modalidad_horas,
             t.tarifa_calculada,
             
             -- Lógica estricta de variables adaptada a postgres
@@ -496,7 +585,7 @@ async function crearRegistroAsignacion(req, res) {
             END AS out_dias,
             
             CASE 
-              WHEN t.es_mesa_fabrica THEN t.tarifa_calculada
+              WHEN t.es_mesa_fabrica OR t.es_modalidad_horas THEN t.tarifa_calculada
               WHEN t.es_t_c_fijo AND $12::boolean THEN null
               ELSE $8::numeric -- valor_hora
             END AS out_v_hora,
@@ -544,6 +633,7 @@ async function crearRegistroAsignacion(req, res) {
             AND NOT EXISTS (SELECT 1 FROM c_dup)
             -- Validaciones que bloquearían el insert:
             AND (NOT v.es_mesa_fabrica OR v.tarifa_calculada > 0)
+            AND (NOT v.es_modalidad_horas OR v.tarifa_calculada > 0)
             AND (NOT (v.es_t_c_fijo AND $12::boolean) OR $10::numeric > 0)
           RETURNING public_id AS id, 
                     id_consultoria,
@@ -579,11 +669,18 @@ async function crearRegistroAsignacion(req, res) {
         (SELECT id FROM c_dup) AS diag_dup,
         (SELECT tarifa_calculada FROM c_tarifa) AS diag_tarifa_calc,
         (SELECT es_mesa_fabrica FROM c_tarifa) AS diag_es_mf,
-        (SELECT es_t_c_fijo FROM c_tarifa) AS diag_es_tcf
+        (SELECT es_t_c_fijo FROM c_tarifa) AS diag_es_tcf,
+        (SELECT es_modalidad_horas FROM c_tarifa) AS diag_es_modalidad_horas
       FROM insertar i RIGHT JOIN c_consultoria ON true
     `;
 
-    const result = await pool.query(cteQuery, [
+    const client = await pool.connect();
+    let txStarted = false;
+    let result;
+    try {
+      await client.query("BEGIN");
+      txStarted = true;
+      result = await client.query(cteQuery, [
       id_consultoria,          // $1
       consultor_responsable_id,// $2
       moduloInternalId,        // $3
@@ -598,7 +695,15 @@ async function crearRegistroAsignacion(req, res) {
       esCostoTotalInput,       // $12
       fecha_inicio || null,    // $13
       fecha_fin || null        // $14
-    ]);
+      ]);
+      await client.query("COMMIT");
+      txStarted = false;
+    } catch (txErr) {
+      if (txStarted) await client.query("ROLLBACK");
+      throw txErr;
+    } finally {
+      client.release();
+    }
 
     const row = result.rows[0];
 
@@ -615,6 +720,9 @@ async function crearRegistroAsignacion(req, res) {
         });
       }
 
+      if (row.diag_es_modalidad_horas && !(Number(row.diag_tarifa_calc) > 0)) {
+        return res.status(400).json({ error: ERROR_TARIFA_HORAS });
+      }
       if (row.diag_es_mf && !(Number(row.diag_tarifa_calc) > 0)) {
         return res.status(400).json({ error: "No existe una tarifa vigente para este consultor, cliente, módulo y tipo de asignación." });
       }
@@ -674,6 +782,7 @@ async function crearRegistroAsignacion(req, res) {
     delete created.diag_tarifa_calc;
     delete created.diag_es_mf;
     delete created.diag_es_tcf;
+    delete created.diag_es_modalidad_horas;
 
     res.json(created);
   } catch (err) {

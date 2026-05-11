@@ -739,6 +739,7 @@ const ONEDRIVE_ENABLED = String(process.env.ONEDRIVE_ENABLED || "true").toLowerC
 const ONEDRIVE_TARGET_USER = process.env.ONEDRIVE_TARGET_USER || "admin.apps@silverconsulting.com.co";
 const ONEDRIVE_ROOT_FOLDER = process.env.ONEDRIVE_ROOT_FOLDER || "AdjuntosCuentasCobro";
 const CONTRATOS_ONEDRIVE_FOLDER = process.env.CONTRATOS_ONEDRIVE_FOLDER || "ContratosFirmados";
+const CONTRATOS_ONEDRIVE_FOLDER_ID = String(process.env.ONEDRIVE_CONTRATOS || "").trim();
 const ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER = "AnexoTecnicoIndividual";
 const ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID = String(process.env.ONEDRIVE_ANEXO_TECNICO || "").trim();
 const ANEXO_TECNICO_CLICKSIGN_DOCUMENT_TYPES = Object.freeze({
@@ -5079,6 +5080,13 @@ async function ensureGraphChildFolderById(accessToken, userEmail, parentItemId, 
   throw new Error(`No se pudo crear o resolver carpeta OneDrive: ${safeFolderName}`);
 }
 
+async function getOrCreateGraphSubfolder(accessToken, userEmail, parentItemId, folderName) {
+  const safeFolderName = sanitizePathSegment(folderName, "carpeta");
+  const existing = await findGraphChildFolderByName(accessToken, userEmail, parentItemId, safeFolderName);
+  if (existing?.id) return existing;
+  return ensureGraphChildFolderById(accessToken, userEmail, parentItemId, safeFolderName);
+}
+
 async function graphPutBinaryWithRetry(path, accessToken, buffer, contentType = "application/octet-stream", retryCount = 1) {
   let lastError = null;
   for (let attempt = 0; attempt <= retryCount; attempt += 1) {
@@ -6407,6 +6415,95 @@ function normalizeClickSignStatus(value) {
   if (raw.includes("rejected") || raw.includes("declined") || raw.includes("cancel") || raw.includes("expired") || raw.includes("failed") || raw.includes("error")) return "rejected";
   if (raw.includes("start_signature") || raw.includes("pending") || raw.includes("progress") || raw.includes("started") || raw.includes("sent") || raw.includes("created") || raw.includes("open")) return "pending";
   return raw;
+}
+
+function normalizeClickSignBoolean(value) {
+  if (value === true) return true;
+  if (value === false) return false;
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return null;
+  if (["true", "1", "yes", "y", "si", "signed", "firmado", "completed", "done"].includes(raw)) return true;
+  if (["false", "0", "no", "n", "pending", "open", "started", "sent"].includes(raw)) return false;
+  return null;
+}
+
+function pickBooleanByPaths(source, paths = []) {
+  for (const pathName of paths) {
+    const value = getByPath(source, pathName);
+    if (value === undefined || value === null || value === "") continue;
+    const parsed = normalizeClickSignBoolean(value);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+function extractClickSignDocumentStatus(source) {
+  const rawStatus = pickStringByPaths(source, [
+    "document_status",
+    "documentStatus",
+    "document.status",
+    "document.status.name",
+    "signature.document_status",
+    "signature.documentStatus",
+    "signature.document.status",
+    "signature.status",
+    "signature.signature_status",
+    "signature_status",
+    "status",
+    "event.status",
+    "event.name",
+    "event.type",
+    "data.document_status",
+    "data.documentStatus",
+    "data.document.status",
+    "data.signature.document_status",
+    "data.signature.documentStatus",
+    "data.signature.document.status",
+    "data.signature.status",
+    "data.signature.signature_status",
+    "data.signature_status",
+    "data.status",
+    "data.event.status",
+    "data.event.name",
+    "data.event.type",
+    "result.document_status",
+    "result.documentStatus",
+    "result.document.status",
+    "result.signature.document_status",
+    "result.signature.status",
+    "result.status",
+    "signature.signatories.0.status",
+    "data.signatories.0.status"
+  ]);
+  const normalized = normalizeClickSignStatus(rawStatus);
+  if (["signed", "rejected", "pending"].includes(normalized)) {
+    return { rawStatus, status: normalized };
+  }
+
+  const signed = pickBooleanByPaths(source, [
+    "signed",
+    "is_signed",
+    "document_signed",
+    "signature.signed",
+    "signature.is_signed",
+    "signature.document_signed",
+    "signature.document.signed",
+    "data.signed",
+    "data.is_signed",
+    "data.document_signed",
+    "data.signature.signed",
+    "data.signature.is_signed",
+    "data.signature.document_signed",
+    "data.signature.document.signed",
+    "result.signed",
+    "result.is_signed",
+    "result.document_signed",
+    "result.signature.signed"
+  ]);
+  if (signed === true) return { rawStatus: rawStatus || "signed", status: "signed" };
+  if (signed === false) return { rawStatus: rawStatus || "pending", status: "pending" };
+
+  return { rawStatus, status: normalized || "" };
 }
 
 async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = "", signatureId = "" } = {}) {
@@ -9621,7 +9718,7 @@ app.post("/contratacion/validar", async (req, res) => {
 app.get("/contratacion/estado", requireTokenFirma, async (req, res) => {
   try {
     const r = await pool.query(
-      `SELECT id, nombre_persona, correo_personal, estado, checks_completados, docs_firma, expires_at, solicitud_id, preregistro_id
+      `SELECT id, public_id, nombre_persona, correo_personal, estado, checks_completados, docs_firma, expires_at, solicitud_id, preregistro_id, created_at
        FROM tokens_firma_contrato WHERE id = $1`,
       [req.tokenFirma.token_id]
     );
@@ -9659,7 +9756,7 @@ app.post("/contratacion/firma/reconciliar", requireTokenFirma, async (req, res) 
 
   try {
     const r = await pool.query(
-      `SELECT id, nombre_persona, correo_personal, estado, checks_completados, docs_firma, expires_at, solicitud_id, preregistro_id
+      `SELECT id, public_id, nombre_persona, correo_personal, estado, checks_completados, docs_firma, expires_at, solicitud_id, preregistro_id, created_at
        FROM tokens_firma_contrato WHERE id = $1`,
       [req.tokenFirma.token_id]
     );
@@ -10449,7 +10546,7 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
 
   try {
     const r = await pool.query(
-      `SELECT id, nombre_persona, correo_personal, checks_completados, docs_firma, solicitud_id, preregistro_id
+      `SELECT id, public_id, nombre_persona, correo_personal, checks_completados, docs_firma, solicitud_id, preregistro_id, created_at
        FROM tokens_firma_contrato WHERE id = $1 AND estado = 'en_proceso'`,
       [tokenId]
     );
@@ -10595,7 +10692,7 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
 
   try {
     const r = await pool.query(
-      `SELECT id, nombre_persona, correo_personal, checks_completados, docs_firma, solicitud_id, preregistro_id
+      `SELECT id, public_id, nombre_persona, correo_personal, checks_completados, docs_firma, solicitud_id, preregistro_id, created_at
        FROM tokens_firma_contrato WHERE id = $1 AND estado = 'en_proceso'`,
       [tokenId]
     );
@@ -12575,28 +12672,93 @@ app.get("/horas-por-cobrar/:consultorId", requireAccess({ roles: ["Consultor", "
   }
 });
 
-async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName) {
+function getContratoProcessDate(proceso, personaContext) {
+  return (
+    normalizeDateOnlyInput(proceso?.created_at) ||
+    normalizeDateOnlyInput(personaContext?.created_at) ||
+    new Date().toISOString().slice(0, 10)
+  );
+}
+
+function isAnexoTecnicoContratoDoc(doc = {}) {
+  const docKey = normalizeTextKey(doc?.doc_key || doc?.docKey);
+  if (docKey === "anexotecnico") return true;
+
+  const identityValues = [
+    doc?.document_type,
+    doc?.documentType,
+    doc?.tipo_documento,
+    doc?.template_file,
+    doc?.titulo,
+    doc?.title,
+    doc?.nombre,
+    doc?.name,
+    doc?.nombre_archivo
+  ].map(normalizeTextKey).filter(Boolean);
+
+  if (identityValues.some((value) => value === "anexotecnico" || value === "anexotecnicocapital")) {
+    return true;
+  }
+
+  const docIndex = Number(doc?.doc_index || doc?.docIndex || 0);
+  const hasExplicitIdentity = Boolean(docKey || identityValues.length);
+  // Filtro explicito: solo tratar indices como Anexo Tecnico cuando no hay doc_key/nombre mas confiable.
+  return !hasExplicitIdentity && (docIndex === 5 || LEGACY_DOC_INDEX_TO_KEY.get(docIndex) === "anexo_tecnico");
+}
+
+async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, options = {}) {
+  const docContext = {
+    ...(options?.doc && typeof options.doc === "object" ? options.doc : {}),
+    nombre_archivo: fileName
+  };
+  if (isAnexoTecnicoContratoDoc(docContext)) {
+    // El Anexo Tecnico conserva el destino ONEDRIVE_ANEXO_TECNICO del flujo LOTE 8.
+    return uploadAnexoIndividualFirmadoToOneDrive(proceso, pdfBuffer, fileName);
+  }
+
   const token = await getGraphAccessToken();
   const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
   await graphGet(`/v1.0/users/${encodedUser}/drive`, token);
 
-  const fechaStr = new Date().toISOString().slice(0, 10);
   const personaContext = await resolveContratoPersonaContext(proceso || {});
-  const empresa = resolveEmpresaContratoConfig(personaContext?.facturaEnColombia ?? null);
+  const fechaStr = getContratoProcessDate(proceso, personaContext);
   const nombrePersona =
     toNullableTrimmedString(personaContext?.nombreCompleto) ||
     toNullableTrimmedString(proceso?.nombre_persona) ||
     "Contratista";
-  const documentoPersona = toNullableTrimmedString(personaContext?.numeroDocumento);
   const nombreCarpeta = sanitizePathSegment(
-    `${nombrePersona}${documentoPersona ? `_${documentoPersona}` : ""}_${fechaStr}`,
+    `${nombrePersona}_${fechaStr}`,
     `Contrato_${fechaStr}`
   );
+  const safeName = sanitizePdfFileName(fileName || `Contrato_${nombrePersona}.pdf`, "Contrato.pdf");
+
+  if (CONTRATOS_ONEDRIVE_FOLDER_ID) {
+    await graphGet(
+      `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(CONTRATOS_ONEDRIVE_FOLDER_ID)}`,
+      token
+    );
+    const folderMeta = await getOrCreateGraphSubfolder(
+      token,
+      ONEDRIVE_TARGET_USER,
+      CONTRATOS_ONEDRIVE_FOLDER_ID,
+      nombreCarpeta
+    );
+    const uploadPath = `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(folderMeta.id)}:/${encodeURIComponent(safeName)}:/content`;
+    const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
+
+    return {
+      carpeta: folderMeta.name || nombreCarpeta,
+      carpeta_url: folderMeta.webUrl || null,
+      archivo: {
+        id: uploaded.id || "",
+        nombre: uploaded.name || safeName,
+        url: uploaded.webUrl || ""
+      }
+    };
+  }
 
   let targetPath = sanitizePathSegment(CONTRATOS_ONEDRIVE_FOLDER, "ContratosFirmados");
-  const empresaFolder = sanitizePathSegment(empresa.razonSocial, empresa.key === "capital" ? "CAPITALINK" : "SILVER");
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
-  targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, empresaFolder);
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, nombreCarpeta);
   let folderWebUrl = "";
   try {
@@ -12609,7 +12771,6 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName) {
     console.warn("No se pudo resolver URL de carpeta OneDrive para contrato:", folderErr?.message || folderErr);
   }
 
-  const safeName = sanitizePdfFileName(fileName || `Contrato_${nombrePersona}.pdf`, "Contrato.pdf");
   const uploadPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${safeName}`)}:/content`;
   const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
 
@@ -12686,8 +12847,9 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
       const event = snapshot?.event && typeof snapshot.event === "object" ? snapshot.event : {};
       const snapshotSignatureId = String(extractClickSignSignatureId(event) || "").trim();
       const previousStatus = normalizeDocStatus(doc?.estado);
-      const rawStatus = String(snapshot?.rawStatus || snapshot?.status || doc?.ultimo_evento || doc?.estado || "pending").trim();
-      let nextStatus = normalizeClickSignStatus(rawStatus);
+      const statusInfo = extractClickSignDocumentStatus(event);
+      const rawStatus = String(statusInfo.rawStatus || snapshot?.rawStatus || snapshot?.status || doc?.ultimo_evento || doc?.estado || "pending").trim();
+      let nextStatus = statusInfo.status || normalizeClickSignStatus(rawStatus);
       let oneDriveInfo = null;
       let signedPdfSource = "";
       let uploadCompleted = Boolean(String(doc?.onedrive_url || "").trim());
@@ -12710,7 +12872,7 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
           signedPdfSource = resolvedPdf.source || "";
           if (!String(doc?.onedrive_url || "").trim()) {
             try {
-              oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName);
+              oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName, { doc });
               uploadCompleted = Boolean(oneDriveInfo?.archivo?.url);
             } catch (uploadErr) {
               console.error("Error subiendo contrato reconciliado a OneDrive:", uploadErr?.message || uploadErr);
@@ -12815,6 +12977,13 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
 }
 
 async function handleClickSignContratoWebhook({ event, requestId, contractId, status, rawStatus }) {
+  const eventStatusInfo = extractClickSignDocumentStatus(event);
+  const resolvedStatus = ["signed", "rejected"].includes(status)
+    ? status
+    : eventStatusInfo.status;
+  const resolvedRawStatus = rawStatus || eventStatusInfo.rawStatus || resolvedStatus || "";
+  status = resolvedStatus;
+  rawStatus = resolvedRawStatus;
   if (status !== "signed" && status !== "rejected") return;
 
   try {
@@ -12870,7 +13039,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
       matchedDoc?.signature_id ||
       ""
     ).trim();
-    if (status === "signed") {
+    if (status === "signed" && !String(matchedDoc?.onedrive_url || "").trim()) {
       const artifacts = await resolveClickSignArtifacts({
         event,
         requestId,
@@ -12896,7 +13065,12 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         return;
       }
       try {
-        oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName);
+        const docsActualesParaUpload = normalizeDocsFirmaListCompat(proceso.docs_firma);
+        const docParaUpload =
+          matchedDoc ||
+          docsActualesParaUpload.find((d) => Number(d?.doc_index || 0) === Number(docIndex || 0)) ||
+          (docIndex ? { doc_index: Number(docIndex) } : {});
+        oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName, { doc: docParaUpload });
       } catch (upErr) {
         console.error("Error subiendo contrato firmado a OneDrive:", upErr.message);
         setTimeout(async () => {
@@ -12931,7 +13105,9 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
           ultimo_evento: rawStatus || d.ultimo_evento || null,
           onedrive_url: oneDriveInfo?.archivo?.url || d.onedrive_url || null,
           onedrive_carpeta: oneDriveInfo?.carpeta || d.onedrive_carpeta || null,
-          onedrive_carpeta_url: oneDriveInfo?.carpeta_url || d.onedrive_carpeta_url || null
+          onedrive_carpeta_url: oneDriveInfo?.carpeta_url || d.onedrive_carpeta_url || null,
+          onedrive_id: oneDriveInfo?.archivo?.id || d.onedrive_id || null,
+          onedrive_nombre: oneDriveInfo?.archivo?.nombre || d.onedrive_nombre || null
         };
       }
       return d;
@@ -12959,7 +13135,9 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         ultimo_evento: rawStatus || null,
         onedrive_url: oneDriveInfo?.archivo?.url || null,
         onedrive_carpeta: oneDriveInfo?.carpeta || null,
-        onedrive_carpeta_url: oneDriveInfo?.carpeta_url || null
+        onedrive_carpeta_url: oneDriveInfo?.carpeta_url || null,
+        onedrive_id: oneDriveInfo?.archivo?.id || null,
+        onedrive_nombre: oneDriveInfo?.archivo?.nombre || null
       });
     }
 

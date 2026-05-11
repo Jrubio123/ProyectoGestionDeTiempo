@@ -1,5 +1,7 @@
 window.contratacionApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
+    const FIRMA_POLLING_INTERVAL_MS = 10000;
+    const FIRMA_POLLING_MAX_ATTEMPTS = 30;
     const TIMER_PDF = 20; // segundos mínimos de lectura por PDF
 
     return {
@@ -50,6 +52,8 @@ window.contratacionApp = function () {
         firmaError: "",
         descargaDocIndex: null,
         pollingInterval: null,
+        pollingIntentos: 0,
+        _pollingEnCurso: false,
 
         // ── Init
         init() {
@@ -81,6 +85,7 @@ window.contratacionApp = function () {
 
                 if (this.todosChecks) {
                     this.pantalla = "firma";
+                    this.iniciarPolling();
                 } else {
                     // Posicionar en el primer doc pendiente
                     this.docActualIdx = this._primerPendiente();
@@ -233,6 +238,7 @@ window.contratacionApp = function () {
                 await this.siguiente();
             } else if (this.todosChecks) {
                 this.pantalla = "firma";
+                this.iniciarPolling();
             } else {
                 // Ir al primer pendiente
                 this.docActualIdx = this._primerPendiente();
@@ -548,6 +554,7 @@ window.contratacionApp = function () {
                 if (urlFirma) {
                     window.open(urlFirma, "_blank", "noopener");
                     await this.refrescarEstado({ reconciliar: false });
+                    this.iniciarPolling();
                 } else {
                     this.firmaError = "No se recibió enlace de firma. Contacta a Talento Humano.";
                 }
@@ -596,19 +603,22 @@ window.contratacionApp = function () {
             }
         },
 
-        async refrescarEstado({ reconciliar = false } = {}) {
+        async refrescarEstado({ reconciliar = false, docIndex = null } = {}) {
             try {
                 let data = null;
                 if (reconciliar && this.requiereReconciliacionFirma()) {
                     try {
                         const reconcileRes = await axios.post(
                             `${API}/contratacion/firma/reconciliar`,
-                            {},
+                            docIndex ? { doc_index: docIndex } : {},
                             { headers: { Authorization: `Bearer ${this.jwt}` } }
                         );
                         data = reconcileRes?.data || null;
-                    } catch {
+                    } catch (e) {
+                        this.detenerPollingFirma();
+                        this.firmaError = e?.response?.data?.error || "No se pudo actualizar el estado de firma.";
                         data = null;
+                        return false;
                     }
                 }
                 // Solo Authorization: Cache-Control/Pragma disparan preflight y el back
@@ -624,32 +634,71 @@ window.contratacionApp = function () {
                 this.checksCompletados = data?.checks_completados || {};
                 if (data?.estado === "completado" && !this.requiereReconciliacionFirma()) {
                     this.pantalla = "completado";
-                    clearInterval(this.pollingInterval);
+                    this.detenerPollingFirma();
                 }
-            } catch {
-                // silencioso
+                return true;
+            } catch (e) {
+                this.detenerPollingFirma();
+                if (reconciliar) {
+                    this.firmaError = e?.response?.data?.error || "No se pudo actualizar el estado de firma.";
+                }
+                return false;
             }
         },
 
-        iniciarPolling() {
-            clearInterval(this.pollingInterval);
-            this.pollingInterval = setInterval(() => {
-                if (this.pantalla === "firma" && (!this.todosFirmados || this.requiereReconciliacionFirma())) {
-                    this.refrescarEstado({ reconciliar: true });
-                } else {
-                    clearInterval(this.pollingInterval);
-                }
-            }, 8000);
+        detenerPollingFirma() {
+            if (this.pollingInterval) {
+                clearInterval(this.pollingInterval);
+                this.pollingInterval = null;
+            }
+            this._pollingEnCurso = false;
         },
 
-        async yaFirme() {
-            await this.refrescarEstado({ reconciliar: true });
-            if (this.todosFirmados && !this.requiereReconciliacionFirma()) this.pantalla = "completado";
+        iniciarPolling() {
+            this.detenerPollingFirma();
+            this.pollingIntentos = 0;
+
+            const debeSeguir = () =>
+                this.pantalla === "firma" &&
+                (!this.todosFirmados || this.requiereReconciliacionFirma()) &&
+                this.pollingIntentos < FIRMA_POLLING_MAX_ATTEMPTS;
+
+            if (!debeSeguir()) return;
+
+            const tick = async () => {
+                if (this._pollingEnCurso) return;
+                if (!debeSeguir()) {
+                    this.detenerPollingFirma();
+                    return;
+                }
+
+                this.pollingIntentos += 1;
+                this._pollingEnCurso = true;
+                const ok = await this.refrescarEstado({ reconciliar: true });
+                this._pollingEnCurso = false;
+
+                if (!ok || !debeSeguir()) {
+                    this.detenerPollingFirma();
+                }
+            };
+
+            tick();
+            this.pollingInterval = setInterval(tick, FIRMA_POLLING_INTERVAL_MS);
+        },
+
+        async yaFirme(docIndex) {
+            const ok = await this.refrescarEstado({ reconciliar: true, docIndex });
+            if (!ok) return;
+            if (this.todosFirmados && !this.requiereReconciliacionFirma()) {
+                this.pantalla = "completado";
+                this.detenerPollingFirma();
+            }
+            else this.iniciarPolling();
         },
 
         destroy() {
             clearInterval(this._timer);
-            clearInterval(this.pollingInterval);
+            this.detenerPollingFirma();
             if (this.pdfBlobUrl) URL.revokeObjectURL(this.pdfBlobUrl);
         }
     };

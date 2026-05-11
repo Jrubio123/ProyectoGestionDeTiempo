@@ -4460,30 +4460,55 @@ function buildContratistaFirmaPayload(personaContext) {
   };
 }
 
+function safeFmtDate(val, locale = "es-CO", opts = {}) {
+  if (val === null || val === undefined) return "";
+  if (typeof val === "string" && val.trim() === "") return "";
+
+  const date = new Date(val);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const formatOpts = opts && typeof opts === "object" ? opts : {};
+  const needsTimeFormat = ["hour", "minute", "second", "fractionalSecondDigits", "timeStyle"]
+    .some((key) => Object.prototype.hasOwnProperty.call(formatOpts, key));
+
+  try {
+    return needsTimeFormat
+      ? date.toLocaleString(locale, formatOpts)
+      : date.toLocaleDateString(locale, formatOpts);
+  } catch (_) {
+    return "";
+  }
+}
+
 function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correoOverride = null } = {}) {
   const now = new Date();
-  const diaMes = new Intl.DateTimeFormat("es-CO", {
+  const diaMes = safeFmtDate(now, "es-CO", {
     day: "2-digit",
     timeZone: "America/Bogota"
-  }).format(now);
-  const anio = new Intl.DateTimeFormat("es-CO", {
+  });
+  const anio = safeFmtDate(now, "es-CO", {
     year: "numeric",
     timeZone: "America/Bogota"
-  }).format(now);
-  const mesTexto = formatMonthNameEs(now.toISOString().slice(0, 10));
+  });
+  const mesTexto = safeFmtDate(now, "es-CO", {
+    month: "long",
+    timeZone: "America/Bogota"
+  }).toLowerCase();
 
   // Fecha de inicio del contrato: fecha_inicio de la solicitud → fecha de generación
   const fechaInicioRaw =
     personaContext?.fecha_inicio ||
     personaContext?.fecha_extension_desde ||
     null;
-  const fechaInicioDate = fechaInicioRaw
-    ? new Date(`${String(fechaInicioRaw).slice(0, 10)}T12:00:00.000Z`)
+  const fechaInicioValue = fechaInicioRaw
+    ? `${String(fechaInicioRaw).slice(0, 10)}T12:00:00.000Z`
     : now;
-  const fechaInicioDia = new Intl.DateTimeFormat("es-CO", { day: "2-digit", timeZone: "America/Bogota" }).format(fechaInicioDate);
-  const fechaInicioAnio = new Intl.DateTimeFormat("es-CO", { year: "numeric", timeZone: "America/Bogota" }).format(fechaInicioDate);
-  const fechaInicioMesTexto = formatMonthNameEs(fechaInicioDate.toISOString().slice(0, 10));
-  const fechaInicioContrato = `${Number(fechaInicioDia)} de ${fechaInicioMesTexto} de ${fechaInicioAnio}`;
+  const fechaInicioDia = safeFmtDate(fechaInicioValue, "es-CO", { day: "2-digit", timeZone: "America/Bogota" });
+  const fechaInicioAnio = safeFmtDate(fechaInicioValue, "es-CO", { year: "numeric", timeZone: "America/Bogota" });
+  const fechaInicioMesTexto = safeFmtDate(fechaInicioValue, "es-CO", { month: "long", timeZone: "America/Bogota" }).toLowerCase();
+  const fechaInicioContrato = fechaInicioDia && fechaInicioMesTexto && fechaInicioAnio
+    ? `${Number(fechaInicioDia)} de ${fechaInicioMesTexto} de ${fechaInicioAnio}`
+    : "";
 
   const empresa = resolveEmpresaContratoConfig(personaContext?.facturaEnColombia ?? null);
   const contratistaFirma = buildContratistaFirmaPayload(personaContext);

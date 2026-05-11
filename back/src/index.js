@@ -883,6 +883,23 @@ const LEGACY_DOC_INDEX_TO_KEY = new Map([
   [1, "contrato_prestacion_servicios"],
   [2, "anexo_tecnico"]
 ]);
+const CONTRATO_BASE_ONEDRIVE_DOC_KEYS = new Set([
+  "contrato_prestacion_servicios",
+  "acuerdo_confidencialidad",
+  "politica_garantia",
+  "autorizacion_datos_personales"
+]);
+const CONTRATO_BASE_ONEDRIVE_TEXT_KEYS = new Set([
+  ...[...CONTRATO_BASE_ONEDRIVE_DOC_KEYS].map(normalizeTextKey),
+  "contratoprestaciondeservicios",
+  "contratoprestacionserviciocapital",
+  "acuerdodeconfidencialidad",
+  "acuerdoconfidencialdiadcapital",
+  "politicadegarantia",
+  "politicagarantiacapital",
+  "autorizaciondetratamientodedatospersonales",
+  "autorizaciontratamientodatoscapital"
+]);
 const ANEXO_TIPO_LABELS = Object.freeze({
   full_time: "Full time",
   medio_tiempo: "Medio tiempo",
@@ -1545,6 +1562,15 @@ function buildDocsFirmaPlan({ hasContratoBase = false, facturaEnColombia = null 
   }));
 }
 
+function getContratoDocKeyByIndex(docIndex, totalDocs = null) {
+  const numericIndex = Number(docIndex);
+  if (!Number.isInteger(numericIndex) || numericIndex < 1) return null;
+  if (Number(totalDocs) === CONTRATO_DOC_DEFINITIONS_FULL.length) {
+    return CONTRATO_DOC_DEFINITIONS_FULL[numericIndex - 1]?.doc_key || null;
+  }
+  return LEGACY_DOC_INDEX_TO_KEY.get(numericIndex) || null;
+}
+
 function normalizeDocsFirmaList(docsRaw, options = {}) {
   const hasFacturaContext = Object.prototype.hasOwnProperty.call(options || {}, "facturaEnColombia");
   const facturaEnColombia = hasFacturaContext ? options.facturaEnColombia : null;
@@ -1554,7 +1580,7 @@ function normalizeDocsFirmaList(docsRaw, options = {}) {
       if (!doc || typeof doc !== "object") return null;
       const rawIndex = Number(doc.doc_index);
       const docIndex = Number.isInteger(rawIndex) && rawIndex > 0 ? rawIndex : index + 1;
-      const legacyDocKey = LEGACY_DOC_INDEX_TO_KEY.get(docIndex) || null;
+      const legacyDocKey = getContratoDocKeyByIndex(docIndex, docs.length);
       const docKey = toNullableTrimmedString(doc.doc_key) || legacyDocKey;
       const def = resolveContratoDocDefinitionForFirma(docKey, { facturaEnColombia, doc });
       const locked = isDocFirmaDefinitionLocked(doc);
@@ -1608,8 +1634,9 @@ function normalizeDocsFirmaListCompat(docsRaw, options = {}) {
 }
 
 function refreshDocsFirmaDefinitionsForContext(docsRaw, { facturaEnColombia = null } = {}) {
-  return normalizeDocsFirmaListCompat(docsRaw, { facturaEnColombia }).map((doc) => {
-    const docKey = toNullableTrimmedString(doc.doc_key) || LEGACY_DOC_INDEX_TO_KEY.get(Number(doc.doc_index)) || null;
+  const docs = normalizeDocsFirmaListCompat(docsRaw, { facturaEnColombia });
+  return docs.map((doc) => {
+    const docKey = toNullableTrimmedString(doc.doc_key) || getContratoDocKeyByIndex(Number(doc.doc_index), docs.length);
     const def = getContratoDocDefinition(docKey, facturaEnColombia);
     if (!def) return doc;
     if (isDocFirmaDefinitionLocked(doc)) {
@@ -7231,7 +7258,7 @@ function buildContratoEmailHtml({ nombre, token, link }) {
           </p>
           <div style="text-align:center;margin:0 0 28px;">
             <a href="${link}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:14px 36px;border-radius:8px;font-size:15px;font-weight:700;letter-spacing:.02em;">
-              Revisar y firmar documentos ?
+              Revisar y firmar documentos →
             </a>
           </div>
           <p style="font-size:12px;color:#94a3b8;text-align:center;margin:0;">
@@ -12680,9 +12707,9 @@ function getContratoProcessDate(proceso, personaContext) {
   );
 }
 
-function isAnexoTecnicoContratoDoc(doc = {}) {
-  const docKey = normalizeTextKey(doc?.doc_key || doc?.docKey);
-  if (docKey === "anexotecnico") return true;
+function isContratoBaseOneDriveDoc(doc = {}) {
+  const docKey = toNullableTrimmedString(doc?.doc_key || doc?.docKey);
+  if (docKey && CONTRATO_BASE_ONEDRIVE_DOC_KEYS.has(docKey)) return true;
 
   const identityValues = [
     doc?.document_type,
@@ -12696,7 +12723,36 @@ function isAnexoTecnicoContratoDoc(doc = {}) {
     doc?.nombre_archivo
   ].map(normalizeTextKey).filter(Boolean);
 
-  if (identityValues.some((value) => value === "anexotecnico" || value === "anexotecnicocapital")) {
+  if (identityValues.some((value) => CONTRATO_BASE_ONEDRIVE_TEXT_KEYS.has(value))) {
+    return true;
+  }
+
+  const docIndex = Number(doc?.doc_index || doc?.docIndex || 0);
+  return Number.isInteger(docIndex) && docIndex >= 1 && docIndex <= 4;
+}
+
+function isAnexoTecnicoContratoDoc(doc = {}) {
+  const docKey = normalizeTextKey(doc?.doc_key || doc?.docKey);
+  const isAnexoKey = (value) => Boolean(value) && (
+    value === "anexotecnico" ||
+    value === "anexotecnicocapital" ||
+    value.includes("anexotecnico")
+  );
+  if (isAnexoKey(docKey)) return true;
+
+  const identityValues = [
+    doc?.document_type,
+    doc?.documentType,
+    doc?.tipo_documento,
+    doc?.template_file,
+    doc?.titulo,
+    doc?.title,
+    doc?.nombre,
+    doc?.name
+  ].map(normalizeTextKey).filter(Boolean);
+  const fileNameKey = normalizeTextKey(doc?.nombre_archivo);
+
+  if ([...identityValues, fileNameKey].some(isAnexoKey)) {
     return true;
   }
 
@@ -12711,9 +12767,17 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, opt
     ...(options?.doc && typeof options.doc === "object" ? options.doc : {}),
     nombre_archivo: fileName
   };
+  // Filtro explicito: Anexo Tecnico sigue LOTE 8; los 4 docs base usan subcarpeta en ONEDRIVE_CONTRATOS.
   if (isAnexoTecnicoContratoDoc(docContext)) {
     // El Anexo Tecnico conserva el destino ONEDRIVE_ANEXO_TECNICO del flujo LOTE 8.
     return uploadAnexoIndividualFirmadoToOneDrive(proceso, pdfBuffer, fileName);
+  }
+  if (!isContratoBaseOneDriveDoc(docContext)) {
+    console.warn("Contrato firmado sin tipo base reconocido; se sube a subcarpeta dinamica por no ser Anexo Tecnico.", {
+      doc_index: docContext?.doc_index || docContext?.docIndex || null,
+      doc_key: docContext?.doc_key || docContext?.docKey || null,
+      document_type: docContext?.document_type || docContext?.documentType || null
+    });
   }
 
   const token = await getGraphAccessToken();
@@ -12994,7 +13058,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
 
     if (requestId) {
       const r = await pool.query(
-        `SELECT id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id
+        `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at
          FROM tokens_firma_contrato
          WHERE docs_firma @> $1::jsonb AND estado = 'en_proceso'
          LIMIT 1`,
@@ -13009,7 +13073,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
 
     if (!proceso && contractId) {
       const r = await pool.query(
-        `SELECT id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id
+        `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at
          FROM tokens_firma_contrato
          WHERE docs_firma @> $1::jsonb AND estado = 'en_proceso'
          LIMIT 1`,
@@ -13054,7 +13118,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         setTimeout(async () => {
           try {
             const r = await pool.query(
-              `SELECT id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
+              `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
               [proceso.id]
             );
             if (r.rows[0]) await reconcileContratoDocsForProcess(r.rows[0], { docIndex, reason: "webhook_retry" });
@@ -13076,7 +13140,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         setTimeout(async () => {
           try {
             const r = await pool.query(
-              `SELECT id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
+              `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
               [proceso.id]
             );
             if (r.rows[0]) await reconcileContratoDocsForProcess(r.rows[0], { docIndex, reason: "webhook_retry" });
@@ -13115,7 +13179,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
 
     let finalDocs = nuevaLista;
     if (!docMatched && docIndex) {
-      const fallbackKey = LEGACY_DOC_INDEX_TO_KEY.get(Number(docIndex)) || null;
+      const fallbackKey = getContratoDocKeyByIndex(Number(docIndex), finalDocs.length) || null;
       const fallbackDef = getContratoDocDefinition(fallbackKey);
       const fallbackStatus =
         status === "rejected"
@@ -13464,6 +13528,7 @@ module.exports = {
   encodeGraphPath,
   sanitizePathSegment,
   sanitizePdfFileName,
+  getOrCreateGraphSubfolder,
   parsePdfDataUrl,
   ensureGraphFolder,
   parseGraphErrorStatus,
@@ -13512,6 +13577,8 @@ module.exports = {
   uploadSignedPdfToOneDrive,
   resolveClickSignArtifacts,
   uploadClickSignExtraFilesToOneDrive,
+  isContratoBaseOneDriveDoc,
+  isAnexoTecnicoContratoDoc,
   getCuentaCobroEstadoEnFirma,
   getCuentaCobroEstadoAprobado,
   normalizeClickSignStatus,

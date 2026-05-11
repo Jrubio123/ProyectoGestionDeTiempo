@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(node *)",
-      "Skill(codex:rescue)"
+      "Skill(codex:rescue)",
+      "PowerShell(Stop-Process *)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'fix\\(firmas\\): resuelve bucle de click&sign y colision en modales alpine' -m ' *)",
+      "Bash(git commit *)"
     ]
   },
   "enabledPlugins": {

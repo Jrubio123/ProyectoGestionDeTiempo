@@ -9722,10 +9722,31 @@ app.post("/contratacion/firma/reconciliar", requireTokenFirma, async (req, res) 
 
     const row = r.rows[0];
     const docsFirma = await ensureTokenDocsFirmaPlan(row);
+    const docObjetivo = idx
+      ? normalizeDocsFirmaListCompat(docsFirma).find((doc) => Number(doc?.doc_index) === idx)
+      : null;
+    console.log("[contratacion-reconciliar] solicitud manual", {
+      proceso: row.public_id || row.id,
+      doc_index: idx || null,
+      doc_key: docObjetivo?.doc_key || null,
+      estado: docObjetivo?.estado || null,
+      tiene_url_firma: Boolean(docObjetivo?.url_firma),
+      request_id: docObjetivo?.request_id || null,
+      contract_id: docObjetivo?.contract_id || null,
+      signature_id: docObjetivo?.signature_id || null
+    });
+
     const reconciled = await reconcileContratoDocsForProcess(
       { ...row, docs_firma: docsFirma },
       { docIndex: idx, reason: "endpoint" }
     );
+    console.log("[contratacion-reconciliar] resultado", {
+      proceso: row.public_id || row.id,
+      doc_index: idx || null,
+      estado: reconciled.estado,
+      changed: reconciled.changed,
+      reconciled: reconciled.reconciled
+    });
 
     res.json({
       ok: true,

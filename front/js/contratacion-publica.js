@@ -619,7 +619,7 @@ window.contratacionApp = function () {
         async refrescarEstado({ reconciliar = false, docIndex = null } = {}) {
             try {
                 let data = null;
-                if (reconciliar && this.requiereReconciliacionFirma({ docIndex })) {
+                if (reconciliar) {
                     try {
                         const reconcileRes = await axios.post(
                             `${API}/contratacion/firma/reconciliar`,

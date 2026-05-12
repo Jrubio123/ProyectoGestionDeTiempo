@@ -10979,7 +10979,17 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       signature_id: signatureId || null,
       estado: "sent",
       url_firma: urlFirma || null,
-      iniciado_en: new Date().toISOString()
+      iniciado_en: new Date().toISOString(),
+      firmado_en: null,
+      ultimo_evento: null,
+      reconciliado_en: null,
+      reconciliado_origen: null,
+      clicksign_origen: null,
+      onedrive_url: null,
+      onedrive_carpeta: null,
+      onedrive_carpeta_url: null,
+      onedrive_id: null,
+      onedrive_nombre: null
     };
 
     const nuevaLista = upsertDocFirmaEntry(docsActuales, docEntry, {

@@ -12890,6 +12890,12 @@ function contratoDocNeedsReconciliation(doc = {}) {
   return true;
 }
 
+function contratoDocSyncCompleted(doc = {}) {
+  if (normalizeDocStatus(doc?.estado) !== "signed") return false;
+  if (!ONEDRIVE_ENABLED) return true;
+  return Boolean(String(doc?.onedrive_url || "").trim());
+}
+
 async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reason = "manual" } = {}) {
   const targetIndex = Number(docIndex);
   const filterByIndex = Number.isInteger(targetIndex) && targetIndex > 0;
@@ -12987,9 +12993,6 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
           } else {
             nextStatus = "en_proceso";
           }
-        } else if (nextStatus === "signed" && previousStatus !== "signed") {
-          // Mantener el doc en curso hasta que el PDF firmado pueda descargarse y subirse a OneDrive.
-          nextStatus = "en_proceso";
         }
       }
 
@@ -13049,7 +13052,7 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
   }
 
   const nextEstado =
-    nextDocs.length > 0 && nextDocs.every((item) => normalizeDocStatus(item?.estado) === "signed")
+    nextDocs.length > 0 && nextDocs.every((item) => contratoDocSyncCompleted(item))
       ? "completado"
       : (proceso?.estado === "expirado" ? "expirado" : "en_proceso");
 
@@ -13227,7 +13230,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
         const finalStatus =
           status === "rejected"
             ? "rejected"
-            : (String(oneDriveInfo?.archivo?.url || d.onedrive_url || "").trim() ? "signed" : "en_proceso");
+            : "signed";
         docMatched = true;
         return {
           ...d,
@@ -13252,7 +13255,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
       const fallbackStatus =
         status === "rejected"
           ? "rejected"
-          : (String(oneDriveInfo?.archivo?.url || "").trim() ? "signed" : "en_proceso");
+          : "signed";
       finalDocs = upsertDocFirmaEntry(finalDocs, {
         doc_index: Number(docIndex),
         doc_key: fallbackDef?.doc_key || fallbackKey,
@@ -13273,7 +13276,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
       });
     }
 
-    const todosFirmados = finalDocs.length > 0 && finalDocs.every((d) => normalizeDocStatus(d.estado) === "signed");
+    const todosFirmados = finalDocs.length > 0 && finalDocs.every((d) => contratoDocSyncCompleted(d));
 
     await pool.query(
       `UPDATE tokens_firma_contrato

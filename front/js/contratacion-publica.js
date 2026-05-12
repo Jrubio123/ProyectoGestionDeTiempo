@@ -507,7 +507,9 @@ window.contratacionApp = function () {
 
         estadoDocFirma(doc) {
             const raw = String(doc?.estado || "").trim().toLowerCase();
+            const ultimoEvento = String(doc?.ultimo_evento || "").trim().toLowerCase();
             if (["signed", "firmado", "completado", "approved", "done"].includes(raw)) return "signed";
+            if (["signed", "firmado", "completado", "approved", "done"].includes(ultimoEvento)) return "signed";
             if (["rejected", "rechazado", "declined", "cancelled", "canceled"].includes(raw)) return "rejected";
             return "pending";
         },

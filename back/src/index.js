@@ -12697,7 +12697,6 @@ function isAnexoTecnicoContratoDoc(doc = {}) {
 
 function buildContratoOneDriveFolderNames(proceso, personaContext) {
   const fechaStr = getContratoProcessDate(proceso, personaContext);
-  const nombreCliente = toNullableTrimmedString(personaContext?.clienteNombre) || "Sin Cliente";
   const nombrePersona =
     toNullableTrimmedString(personaContext?.nombreCompleto) ||
     toNullableTrimmedString(proceso?.nombre_persona) ||
@@ -12706,7 +12705,6 @@ function buildContratoOneDriveFolderNames(proceso, personaContext) {
 
   return {
     fechaStr,
-    nombreClienteCarpeta: sanitizePathSegment(nombreCliente, "SinCliente"),
     nombrePersonaCarpeta: sanitizePathSegment(
       shortPublicId
         ? `${nombrePersona}_${fechaStr}_${shortPublicId}`
@@ -12741,7 +12739,6 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, opt
 
   const personaContext = await resolveContratoPersonaContext(proceso || {});
   const {
-    nombreClienteCarpeta,
     nombrePersonaCarpeta,
     nombrePersona
   } = buildContratoOneDriveFolderNames(proceso, personaContext);
@@ -12753,23 +12750,17 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, opt
         `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(CONTRATOS_ONEDRIVE_FOLDER_ID)}`,
         token
       );
-      const clienteFolderMeta = await getOrCreateGraphSubfolder(
-        token,
-        ONEDRIVE_TARGET_USER,
-        CONTRATOS_ONEDRIVE_FOLDER_ID,
-        nombreClienteCarpeta
-      );
       const personaFolderMeta = await getOrCreateGraphSubfolder(
         token,
         ONEDRIVE_TARGET_USER,
-        clienteFolderMeta.id,
+        CONTRATOS_ONEDRIVE_FOLDER_ID,
         nombrePersonaCarpeta
       );
       const uploadPath = `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(personaFolderMeta.id)}:/${encodeURIComponent(safeName)}:/content`;
       const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
 
       return {
-        carpeta: `${clienteFolderMeta.name || nombreClienteCarpeta}/${personaFolderMeta.name || nombrePersonaCarpeta}`,
+        carpeta: personaFolderMeta.name || nombrePersonaCarpeta,
         carpeta_url: personaFolderMeta.webUrl || null,
         archivo: {
           id: uploaded.id || "",
@@ -12787,7 +12778,6 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, opt
 
   let targetPath = sanitizePathSegment(CONTRATOS_ONEDRIVE_FOLDER, "ContratosFirmados");
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
-  targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, nombreClienteCarpeta);
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, nombrePersonaCarpeta);
   let folderWebUrl = "";
   try {

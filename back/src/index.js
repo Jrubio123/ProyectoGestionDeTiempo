@@ -3582,28 +3582,35 @@ async function uploadAnexoIndividualFirmadoToOneDrive(proceso, pdfBuffer, fileNa
   );
 
   if (ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID) {
-    await graphGet(
-      `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID)}`,
-      token
-    );
-    const folderMeta = await ensureGraphChildFolderById(
-      token,
-      ONEDRIVE_TARGET_USER,
-      ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID,
-      folderName
-    );
-    const uploadPath = `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(folderMeta.id)}:/${encodeURIComponent(safeName)}:/content`;
-    const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
+    try {
+      await graphGet(
+        `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID)}`,
+        token
+      );
+      const folderMeta = await ensureGraphChildFolderById(
+        token,
+        ONEDRIVE_TARGET_USER,
+        ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID,
+        folderName
+      );
+      const uploadPath = `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(folderMeta.id)}:/${encodeURIComponent(safeName)}:/content`;
+      const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
 
-    return {
-      carpeta: folderMeta.name || folderName,
-      carpeta_url: folderMeta.webUrl || null,
-      archivo: {
-        id: uploaded.id || "",
-        nombre: uploaded.name || safeName,
-        url: uploaded.webUrl || ""
-      }
-    };
+      return {
+        carpeta: folderMeta.name || folderName,
+        carpeta_url: folderMeta.webUrl || null,
+        archivo: {
+          id: uploaded.id || "",
+          nombre: uploaded.name || safeName,
+          url: uploaded.webUrl || ""
+        }
+      };
+    } catch (err) {
+      if (!isGraphItemNotFoundError(err)) throw err;
+      console.warn("ONEDRIVE_ANEXO_TECNICO no existe como item ID; se usara ruta por nombre.", {
+        folder_id: ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID
+      });
+    }
   }
 
   let targetPath = sanitizePathSegment(ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER, "AnexoTecnicoIndividual");
@@ -5190,6 +5197,11 @@ function parseGraphErrorPayload(message) {
       null,
     date: payload?.error?.innerError?.date || null
   };
+}
+
+function isGraphItemNotFoundError(err) {
+  const parsed = parseGraphErrorPayload(err?.message || "");
+  return parsed.status === 404 && String(parsed.code || "").toLowerCase() === "itemnotfound";
 }
 
 function buildGraphErrorDetails(err, fallbackMessage = "Error desconocido") {
@@ -12736,34 +12748,41 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, opt
   const safeName = sanitizePdfFileName(fileName || `Contrato_${nombrePersona}.pdf`, "Contrato.pdf");
 
   if (CONTRATOS_ONEDRIVE_FOLDER_ID) {
-    await graphGet(
-      `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(CONTRATOS_ONEDRIVE_FOLDER_ID)}`,
-      token
-    );
-    const clienteFolderMeta = await getOrCreateGraphSubfolder(
-      token,
-      ONEDRIVE_TARGET_USER,
-      CONTRATOS_ONEDRIVE_FOLDER_ID,
-      nombreClienteCarpeta
-    );
-    const personaFolderMeta = await getOrCreateGraphSubfolder(
-      token,
-      ONEDRIVE_TARGET_USER,
-      clienteFolderMeta.id,
-      nombrePersonaCarpeta
-    );
-    const uploadPath = `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(personaFolderMeta.id)}:/${encodeURIComponent(safeName)}:/content`;
-    const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
+    try {
+      await graphGet(
+        `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(CONTRATOS_ONEDRIVE_FOLDER_ID)}`,
+        token
+      );
+      const clienteFolderMeta = await getOrCreateGraphSubfolder(
+        token,
+        ONEDRIVE_TARGET_USER,
+        CONTRATOS_ONEDRIVE_FOLDER_ID,
+        nombreClienteCarpeta
+      );
+      const personaFolderMeta = await getOrCreateGraphSubfolder(
+        token,
+        ONEDRIVE_TARGET_USER,
+        clienteFolderMeta.id,
+        nombrePersonaCarpeta
+      );
+      const uploadPath = `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(personaFolderMeta.id)}:/${encodeURIComponent(safeName)}:/content`;
+      const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
 
-    return {
-      carpeta: `${clienteFolderMeta.name || nombreClienteCarpeta}/${personaFolderMeta.name || nombrePersonaCarpeta}`,
-      carpeta_url: personaFolderMeta.webUrl || null,
-      archivo: {
-        id: uploaded.id || "",
-        nombre: uploaded.name || safeName,
-        url: uploaded.webUrl || ""
-      }
-    };
+      return {
+        carpeta: `${clienteFolderMeta.name || nombreClienteCarpeta}/${personaFolderMeta.name || nombrePersonaCarpeta}`,
+        carpeta_url: personaFolderMeta.webUrl || null,
+        archivo: {
+          id: uploaded.id || "",
+          nombre: uploaded.name || safeName,
+          url: uploaded.webUrl || ""
+        }
+      };
+    } catch (err) {
+      if (!isGraphItemNotFoundError(err)) throw err;
+      console.warn("ONEDRIVE_CONTRATOS no existe como item ID; se usara ruta por nombre.", {
+        folder_id: CONTRATOS_ONEDRIVE_FOLDER_ID
+      });
+    }
   }
 
   let targetPath = sanitizePathSegment(CONTRATOS_ONEDRIVE_FOLDER, "ContratosFirmados");

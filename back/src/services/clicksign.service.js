@@ -5,6 +5,32 @@ function getIndexHelpers() {
   return require("../index");
 }
 
+function esIdentificadorContratoClickSign(valor) {
+  const texto = String(valor || "").trim();
+  return texto.startsWith("CF-") || texto.startsWith("contrato_");
+}
+
+function esWebhookDeContrato({ requestId = "", contractId = "" } = {}) {
+  return esIdentificadorContratoClickSign(requestId) || esIdentificadorContratoClickSign(contractId);
+}
+
+function esIdentificadorCuentaCobroClickSign(valor) {
+  return String(valor || "").trim().startsWith("CC-");
+}
+
+function esWebhookDeCuentaCobro({ requestId = "", contractId = "" } = {}) {
+  return esIdentificadorCuentaCobroClickSign(requestId) || esIdentificadorCuentaCobroClickSign(contractId);
+}
+
+function esIdentificadorAnexoIndividualClickSign(valor) {
+  const texto = String(valor || "").trim();
+  return texto.startsWith("ANX-") || texto.startsWith("anexo_individual_");
+}
+
+function esWebhookDeAnexoIndividual({ requestId = "", contractId = "" } = {}) {
+  return esIdentificadorAnexoIndividualClickSign(requestId) || esIdentificadorAnexoIndividualClickSign(contractId);
+}
+
 /**
  * Reintenta procesar una cuenta de cobro firmada
  */
@@ -140,6 +166,35 @@ async function processSignatureEvent(event) {
       "data.action"
     ]);
     const status = normalizeClickSignStatus(rawStatus);
+    const esContrato = esWebhookDeContrato({ requestId, contractId });
+    const esCuentaCobro = esWebhookDeCuentaCobro({ requestId, contractId });
+    const esAnexoIndividual = esWebhookDeAnexoIndividual({ requestId, contractId });
+
+    if (esContrato) {
+      await handleClickSignContratoWebhook({ event, requestId, contractId, status, rawStatus });
+      return;
+    }
+
+    if (esAnexoIndividual) {
+      const handledAnexoIndividual = await handleClickSignAnexoIndividualWebhook({
+        event,
+        requestId,
+        contractId,
+        signatureId,
+        status,
+        rawStatus
+      });
+      if (!handledAnexoIndividual) {
+        console.warn("Webhook Click&Sign de anexo individual sin proceso asociado:", {
+          requestId,
+          contractId,
+          signatureId,
+          rawStatus
+        });
+      }
+      return;
+    }
+
     const publicIdFromEvent = extractPublicIdFromContract(contractId) || pickStringByPaths(event, [
       "public_id",
       "cuenta_public_id",
@@ -197,8 +252,13 @@ async function processSignatureEvent(event) {
       if (handledAnexoIndividual) {
         return;
       }
-      if (requestId || contractId) {
-        await handleClickSignContratoWebhook({ event, requestId, contractId, status, rawStatus });
+      if (esCuentaCobro) {
+        console.warn("Webhook Click&Sign de cuenta de cobro sin cuenta asociada:", {
+          requestId,
+          contractId,
+          signatureId,
+          rawStatus
+        });
         return;
       }
     }

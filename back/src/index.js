@@ -12762,6 +12762,28 @@ function isAnexoTecnicoContratoDoc(doc = {}) {
   return !hasExplicitIdentity && (docIndex === 5 || LEGACY_DOC_INDEX_TO_KEY.get(docIndex) === "anexo_tecnico");
 }
 
+function buildContratoOneDriveFolderNames(proceso, personaContext) {
+  const fechaStr = getContratoProcessDate(proceso, personaContext);
+  const nombreCliente = toNullableTrimmedString(personaContext?.clienteNombre) || "Sin Cliente";
+  const nombrePersona =
+    toNullableTrimmedString(personaContext?.nombreCompleto) ||
+    toNullableTrimmedString(proceso?.nombre_persona) ||
+    "Contratista";
+  const shortPublicId = String(proceso?.public_id || "").replace(/-/g, "").slice(0, 8) || "";
+
+  return {
+    fechaStr,
+    nombreClienteCarpeta: sanitizePathSegment(nombreCliente, "SinCliente"),
+    nombrePersonaCarpeta: sanitizePathSegment(
+      shortPublicId
+        ? `${nombrePersona}_${fechaStr}_${shortPublicId}`
+        : `${nombrePersona}_${fechaStr}`,
+      `Contrato_${fechaStr}`
+    ),
+    nombrePersona
+  };
+}
+
 async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, options = {}) {
   const docContext = {
     ...(options?.doc && typeof options.doc === "object" ? options.doc : {}),
@@ -12785,15 +12807,11 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, opt
   await graphGet(`/v1.0/users/${encodedUser}/drive`, token);
 
   const personaContext = await resolveContratoPersonaContext(proceso || {});
-  const fechaStr = getContratoProcessDate(proceso, personaContext);
-  const nombrePersona =
-    toNullableTrimmedString(personaContext?.nombreCompleto) ||
-    toNullableTrimmedString(proceso?.nombre_persona) ||
-    "Contratista";
-  const nombreCarpeta = sanitizePathSegment(
-    `${nombrePersona}_${fechaStr}`,
-    `Contrato_${fechaStr}`
-  );
+  const {
+    nombreClienteCarpeta,
+    nombrePersonaCarpeta,
+    nombrePersona
+  } = buildContratoOneDriveFolderNames(proceso, personaContext);
   const safeName = sanitizePdfFileName(fileName || `Contrato_${nombrePersona}.pdf`, "Contrato.pdf");
 
   if (CONTRATOS_ONEDRIVE_FOLDER_ID) {
@@ -12801,18 +12819,24 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, opt
       `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(CONTRATOS_ONEDRIVE_FOLDER_ID)}`,
       token
     );
-    const folderMeta = await getOrCreateGraphSubfolder(
+    const clienteFolderMeta = await getOrCreateGraphSubfolder(
       token,
       ONEDRIVE_TARGET_USER,
       CONTRATOS_ONEDRIVE_FOLDER_ID,
-      nombreCarpeta
+      nombreClienteCarpeta
     );
-    const uploadPath = `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(folderMeta.id)}:/${encodeURIComponent(safeName)}:/content`;
+    const personaFolderMeta = await getOrCreateGraphSubfolder(
+      token,
+      ONEDRIVE_TARGET_USER,
+      clienteFolderMeta.id,
+      nombrePersonaCarpeta
+    );
+    const uploadPath = `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(personaFolderMeta.id)}:/${encodeURIComponent(safeName)}:/content`;
     const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
 
     return {
-      carpeta: folderMeta.name || nombreCarpeta,
-      carpeta_url: folderMeta.webUrl || null,
+      carpeta: `${clienteFolderMeta.name || nombreClienteCarpeta}/${personaFolderMeta.name || nombrePersonaCarpeta}`,
+      carpeta_url: personaFolderMeta.webUrl || null,
       archivo: {
         id: uploaded.id || "",
         nombre: uploaded.name || safeName,
@@ -12823,7 +12847,8 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, opt
 
   let targetPath = sanitizePathSegment(CONTRATOS_ONEDRIVE_FOLDER, "ContratosFirmados");
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
-  targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, nombreCarpeta);
+  targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, nombreClienteCarpeta);
+  targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, nombrePersonaCarpeta);
   let folderWebUrl = "";
   try {
     const folderMeta = await graphGet(
@@ -13261,6 +13286,9 @@ const server = app.listen(port, "0.0.0.0", () => {
 const RECONCILIACION_JOB_INTERVAL_MS = 10 * 60 * 1000; // cada 10 minutos
 const RECONCILIACION_MIN_EDAD_MIN = 20; // solo cuentas con más de 20 min sin actualizar
 const RECONCILIACION_BATCH = 10; // máximo por ciclo
+const RECONCILIACION_CONTRATOS_INTERVAL_MS = 10 * 60 * 1000; // cada 10 minutos
+const RECONCILIACION_CONTRATOS_MIN_EDAD_MIN = 20; // solo procesos con más de 20 min sin actualizar
+const RECONCILIACION_CONTRATOS_BATCH = 10; // máximo por ciclo
 
 async function jobReconciliarCuentasEnFirma() {
   if (isShuttingDown) return;
@@ -13478,12 +13506,105 @@ async function jobReconciliarCuentasEnFirma() {
   }
 }
 
+async function jobReconciliarContratosEnFirma() {
+  if (isShuttingDown) return;
+  try {
+    const result = await pool.query(
+      `SELECT tf.id, tf.public_id, tf.nombre_persona, tf.correo_personal, tf.docs_firma,
+              tf.solicitud_id, tf.preregistro_id, tf.created_at, tf.updated_at
+       FROM tokens_firma_contrato tf
+       WHERE tf.estado = 'en_proceso'
+         AND tf.updated_at < NOW() - ($1 || ' minutes')::INTERVAL
+         AND EXISTS (
+           SELECT 1
+           FROM jsonb_array_elements(
+             CASE
+               WHEN jsonb_typeof(COALESCE(tf.docs_firma, '[]'::jsonb)) = 'array'
+                 THEN COALESCE(tf.docs_firma, '[]'::jsonb)
+               ELSE '[]'::jsonb
+             END
+           ) AS doc(item)
+           WHERE (
+             NULLIF(BTRIM(doc.item->>'request_id'), '') IS NOT NULL
+             OR NULLIF(BTRIM(doc.item->>'contract_id'), '') IS NOT NULL
+             OR NULLIF(BTRIM(doc.item->>'signature_id'), '') IS NOT NULL
+           )
+             AND LOWER(COALESCE(NULLIF(BTRIM(doc.item->>'estado'), ''), 'pending')) <> 'rejected'
+             AND (
+               LOWER(COALESCE(NULLIF(BTRIM(doc.item->>'estado'), ''), 'pending')) <> 'signed'
+               OR NULLIF(BTRIM(doc.item->>'onedrive_url'), '') IS NULL
+             )
+         )
+       ORDER BY tf.updated_at ASC
+       LIMIT $2`,
+      [String(RECONCILIACION_CONTRATOS_MIN_EDAD_MIN), RECONCILIACION_CONTRATOS_BATCH]
+    );
+
+    const procesos = result.rows || [];
+    if (procesos.length === 0) return;
+
+    console.log(`[reconciliar-contratos] ${procesos.length} proceso(s) con firmas pendientes.`);
+
+    for (const proceso of procesos) {
+      if (isShuttingDown) break;
+      try {
+        const actualResult = await pool.query(
+          `SELECT id, public_id, nombre_persona, correo_personal, estado, checks_completados, docs_firma,
+                  solicitud_id, preregistro_id, created_at, updated_at
+           FROM tokens_firma_contrato
+           WHERE id = $1 AND estado = 'en_proceso'
+           LIMIT 1`,
+          [proceso.id]
+        );
+        const procesoActual = actualResult.rows?.[0] || null;
+        if (!procesoActual) {
+          continue;
+        }
+
+        const docsFirmaActuales = await ensureTokenDocsFirmaPlan(procesoActual);
+        const pendientesAntes = normalizeDocsFirmaListCompat(docsFirmaActuales)
+          .filter((doc) => contratoDocNeedsReconciliation(doc))
+          .length;
+        if (pendientesAntes === 0) {
+          continue;
+        }
+
+        const reconciled = await reconcileContratoDocsForProcess({
+          ...procesoActual,
+          docs_firma: docsFirmaActuales
+        }, {
+          reason: "jobReconciliarContratosEnFirma"
+        });
+        const pendientesDespues = normalizeDocsFirmaListCompat(reconciled.docs_firma)
+          .filter((doc) => contratoDocNeedsReconciliation(doc))
+          .length;
+        console.log(
+          `[reconciliar-contratos] ${procesoActual.public_id || procesoActual.id} -> estado ${reconciled.estado || "en_proceso"}; pendientes ${pendientesAntes} -> ${pendientesDespues}`
+        );
+      } catch (procesoErr) {
+        console.error(
+          `[reconciliar-contratos] Error procesando ${proceso.public_id || proceso.id}:`,
+          procesoErr?.message || procesoErr
+        );
+      }
+    }
+  } catch (err) {
+    console.error("[reconciliar-contratos] Error en ciclo:", err?.message || err);
+  }
+}
+
 // Primer ciclo a los 2 min del arranque para no sobrecargar el inicio
 let reconciliarJobInterval = null;
+let reconciliarContratosJobInterval = null;
 setTimeout(() => {
   if (isShuttingDown) return;
   void jobReconciliarCuentasEnFirma();
   reconciliarJobInterval = setInterval(() => { void jobReconciliarCuentasEnFirma(); }, RECONCILIACION_JOB_INTERVAL_MS);
+}, 2 * 60 * 1000);
+setTimeout(() => {
+  if (isShuttingDown) return;
+  void jobReconciliarContratosEnFirma();
+  reconciliarContratosJobInterval = setInterval(() => { void jobReconciliarContratosEnFirma(); }, RECONCILIACION_CONTRATOS_INTERVAL_MS);
 }, 2 * 60 * 1000);
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -13492,6 +13613,7 @@ async function gracefulShutdown(signal) {
   if (isShuttingDown) return;
   isShuttingDown = true;
   if (reconciliarJobInterval) clearInterval(reconciliarJobInterval);
+  if (reconciliarContratosJobInterval) clearInterval(reconciliarContratosJobInterval);
   console.log(`[shutdown] Se?al recibida: ${signal}. Cerrando API...`);
 
   const forceExitTimeout = setTimeout(() => {
@@ -13583,6 +13705,7 @@ module.exports = {
   getCuentaCobroEstadoAprobado,
   normalizeClickSignStatus,
   handleClickSignContratoWebhook,
+  jobReconciliarContratosEnFirma,
   isPdfBuffer,
   toBooleanInput,
   withPublicId,

@@ -11217,7 +11217,7 @@ app.get("/coordinadores", requireAccess({ roles: ["Administrador"] }), async (re
 });
 
 // Tarifa vigente de un consultor
-app.get("/tarifa-consultor", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+app.get("/tarifa-consultor", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial"] }), async (req, res) => {
   const { consultor_id, cliente_id, modulo_id, tipo_asignacion_id } = req.query;
   try {
     if (!consultor_id || !cliente_id) {
@@ -11300,7 +11300,7 @@ app.get("/tarifa-consultor", requireAccess({ roles: ["Administrador", "Coordinad
 =============================== */
 
 // Obtener tarifas
-app.get("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+app.get("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial"] }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT 
@@ -11332,7 +11332,7 @@ app.get("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador"] }), 
 });
 
 // Crear tarifa
-app.post("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+app.post("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial"] }), async (req, res) => {
   const { cliente_id, consultor_id, modulo_id, tipo_asignacion_id, valor } = req.body;
 
   try {
@@ -11425,7 +11425,7 @@ app.post("/tarifas", requireAccess({ roles: ["Administrador", "Coordinador"] }),
 });
 
 // Actualizar tarifa
-app.put("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+app.put("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial"] }), async (req, res) => {
   const { id } = req.params;
   const { cliente_id, consultor_id, modulo_id, tipo_asignacion_id, valor } = req.body;
 
@@ -11554,7 +11554,7 @@ app.put("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador"] 
 });
 
 // Eliminar tarifa (soft delete)
-app.delete("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+app.delete("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial"] }), async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -11582,7 +11582,7 @@ app.delete("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador
 =============================== */
 
 // Listar asignaciones activas para coordinador
-app.get("/mis-asignaciones-coordinador", requireAccess({ roles: ["Coordinador"] }), async (req, res) => {
+app.get("/mis-asignaciones-coordinador", requireAccess({ roles: ["Coordinador", "Comercial"] }), async (req, res) => {
   try {
     const userId = req.user?.id || null;
 

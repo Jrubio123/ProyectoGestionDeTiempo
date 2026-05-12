@@ -380,7 +380,7 @@ async function getHistorialCuentas(req, res) {
   }
 }
 
-// Soportes cargados de cuentas de cobro (solo admin/coordinador)
+// Soportes cargados de cuentas de cobro (solo admin/coordinador/comercial)
 /**
  * Lista usuarios que pueden aprobar reportes de horas
  */
@@ -394,7 +394,7 @@ async function getAprobadoresCuentas(req, res) {
       FROM usuarios u
       JOIN roles r ON r.id = u.rol_usuario_id
       WHERE u.activo = true
-        AND r.titulo IN ('Administrador', 'Coordinador')
+        AND r.titulo IN ('Administrador', 'Coordinador', 'Comercial')
       ORDER BY r.titulo ASC, u.nombre_usuario ASC
     `);
 
@@ -786,7 +786,9 @@ async function iniciarFirmaCuenta(req, res) {
     const meta = await pool.query("SELECT id, created_by FROM cuenta_cobro WHERE public_id = $1", [id]);
     if (!meta.rows.length) return res.status(404).json({ error: "Cuenta no encontrada" });
     const cuentaInternalId = meta.rows[0].id;
-    await assertCuentaCobroOwnerAccess(meta.rows[0].created_by, req);
+    if (normalizeValue(req.user?.rol) !== "comercial") {
+      await assertCuentaCobroOwnerAccess(meta.rows[0].created_by, req);
+    }
 
     const { cuenta, detalles } = await getCuentaCobroPdfContext(cuentaInternalId);
     if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });

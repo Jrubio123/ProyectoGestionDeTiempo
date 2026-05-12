@@ -8,7 +8,7 @@ const {
   eliminarConsultoria
 } = require("../services/consultorias.service");
 
-router.get("/", requireAccess({ roles: ["Administrador", "Coordinador"] }), listConsultorias);
+router.get("/", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial"] }), listConsultorias);
 router.post("/", requireAccess({ roles: ["Administrador"] }), crearConsultoria);
 router.put("/:id", requireAccess({ roles: ["Administrador"] }), actualizarConsultoria);
 router.delete("/:id", requireAccess({ roles: ["Administrador"] }), eliminarConsultoria);

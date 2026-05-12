@@ -994,7 +994,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     }
   });
 
-  app.patch("/api/preregistros/:public_id/seccion-2/editar", requireAccess({ roles: ["Administrador", "Coordinador"] }), async (req, res) => {
+  app.patch("/api/preregistros/:public_id/seccion-2/editar", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial"] }), async (req, res) => {
     const editable = [
       "fecha_fin", "moneda", "pais_pago", "tarifa_hora", "tarifa_mes",
       "tarifa_medio_tiempo", "tarifa_capacitacion", "vpn_corona", "necesita_s_user", "grupo_usuario",
@@ -1525,7 +1525,7 @@ module.exports = function registerPreregistroRoutes(deps) {
         where.push(`p.creado_por = $${idx++}`);
         vals.push(req.user?.id);
       }
-      if (role === "coordinador") {
+      if (["coordinador", "comercial"].includes(role)) {
         where.push(`s.coordinador_id = $${idx++}`);
         vals.push(req.user?.id);
       }
@@ -1561,7 +1561,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       if (role === "reclutador" && String(row.creado_por) !== String(req.user?.id || "")) {
         return res.status(403).json({ error: "No puedes ver preregistros creados por otro reclutador" });
       }
-      if (role === "coordinador" && String(row.solicitud_coordinador_id) !== String(req.user?.id || "")) {
+      if (["coordinador", "comercial"].includes(role) && String(row.solicitud_coordinador_id) !== String(req.user?.id || "")) {
         return res.status(403).json({ error: "No puedes ver preregistros de otro coordinador" });
       }
 

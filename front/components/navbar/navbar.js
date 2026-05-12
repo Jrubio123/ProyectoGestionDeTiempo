@@ -28,7 +28,19 @@ function getRoleRoutes() {
             "registro-horas-consultor",
             "asignacion-fabrica-mesa-servicio"
         ],
-        comercial: ["inicio", "solicitudesCoord", "preregistrosCoord", "gestion-consultores"],
+        comercial: [
+            "inicio",
+            "asignacion-consultor",
+            "cliente",
+            "aprobar-rechazar-coordinador",
+            "mis-asignaciones-coordinador",
+            "asociar-subconsultores",
+            "tarifas",
+            "solicitudesCoord",
+            "preregistrosCoord",
+            "soportes-cuentas-cobro",
+            "gestion-consultores"
+        ],
         reclutador: ["inicio", "solicitudesRecl"],
         talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin", "gestion-personas", "gestion-consultores"]
     };

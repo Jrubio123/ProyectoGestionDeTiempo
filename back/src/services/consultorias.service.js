@@ -17,7 +17,7 @@ async function listConsultorias(req, res) {
     const role = normalizeValue(req.user?.rol);
     let filtroCoordId = null;
 
-    if (role === "coordinador") {
+    if (["coordinador", "comercial"].includes(role)) {
       // Forzar siempre al ID del coordinador autenticado
       filtroCoordId = req.user?.id || null;
     } else {

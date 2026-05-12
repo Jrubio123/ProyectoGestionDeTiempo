@@ -78,7 +78,7 @@ async function actualizarRegistroAsignacion(req, res) {
     }
 
     // Coordinadores solo pueden editar asignaciones de sus propias consultorías
-    if (normalizeValue(req.user?.rol) === "coordinador") {
+    if (["coordinador", "comercial"].includes(normalizeValue(req.user?.rol))) {
       const own = await pool.query(
         `SELECT 1 FROM registro_asignaciones ra
          JOIN consultorias con ON con.id = ra.id_consultoria
@@ -319,7 +319,7 @@ async function eliminarRegistroAsignacion(req, res) {
       return res.status(404).json({ error: "Asignación no encontrada" });
     }
     const info = meta.rows[0];
-    if (role === "coordinador" && String(info.coordinador_responsable_id || "") !== String(req.user?.id || "")) {
+    if (["coordinador", "comercial"].includes(role) && String(info.coordinador_responsable_id || "") !== String(req.user?.id || "")) {
       return res.status(404).json({ error: "Asignación no encontrada o sin permisos para cerrarla" });
     }
     const scope = getMesaFabricaScope(info.id_tipo_asignacion, info.tipo_asignacion_titulo);
@@ -412,7 +412,7 @@ async function crearRegistroAsignacion(req, res) {
     }
 
     // Coordinadores solo pueden asignar en sus propias consultorías
-    if (normalizeValue(req.user?.rol) === "coordinador") {
+    if (["coordinador", "comercial"].includes(normalizeValue(req.user?.rol))) {
       const own = await pool.query(
         `SELECT 1 FROM consultorias WHERE public_id = $1 AND coordinador_responsable_id = $2 AND activo = true`,
         [id_consultoria, req.user?.id]

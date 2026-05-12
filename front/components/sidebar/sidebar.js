@@ -106,7 +106,19 @@ function initSidebar() {
             "asignacion-fabrica-mesa-servicio"
         ],
         reclutador: ["inicio", "solicitudesRecl"],
-        comercial: ["inicio", "solicitudesCoord", "preregistrosCoord", "gestion-consultores"],
+        comercial: [
+            "inicio",
+            "asignacion-consultor",
+            "cliente",
+            "aprobar-rechazar-coordinador",
+            "mis-asignaciones-coordinador",
+            "asociar-subconsultores",
+            "tarifas",
+            "solicitudesCoord",
+            "preregistrosCoord",
+            "soportes-cuentas-cobro",
+            "gestion-consultores"
+        ],
         talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin", "gestion-personas", "gestion-consultores"]
     };
 

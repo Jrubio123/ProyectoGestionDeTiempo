@@ -171,7 +171,7 @@ async function processSignatureEvent(event) {
     const esAnexoIndividual = esWebhookDeAnexoIndividual({ requestId, contractId });
 
     if (esContrato) {
-      await handleClickSignContratoWebhook({ event, requestId, contractId, status, rawStatus });
+      await handleClickSignContratoWebhook({ event, requestId, contractId, signatureId, status, rawStatus });
       return;
     }
 
@@ -259,6 +259,18 @@ async function processSignatureEvent(event) {
           signatureId,
           rawStatus
         });
+        return;
+      }
+
+      const handledContrato = await handleClickSignContratoWebhook({
+        event,
+        requestId,
+        contractId,
+        signatureId,
+        status,
+        rawStatus
+      });
+      if (handledContrato) {
         return;
       }
     }

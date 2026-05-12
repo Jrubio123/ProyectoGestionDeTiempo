@@ -12965,7 +12965,7 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
         nextStatus = "signed";
       }
 
-      if (nextStatus === "signed" || nextStatus === "pending" || !nextStatus) {
+      if (nextStatus === "signed" || nextStatus === "pending" || nextStatus === "en_proceso" || nextStatus === "sent" || !nextStatus) {
         const artifacts = await resolveClickSignArtifacts({
           event,
           requestId,
@@ -13082,7 +13082,7 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
   };
 }
 
-async function handleClickSignContratoWebhook({ event, requestId, contractId, status, rawStatus }) {
+async function handleClickSignContratoWebhook({ event, requestId, contractId, signatureId = "", status, rawStatus }) {
   const eventStatusInfo = extractClickSignDocumentStatus(event);
   const resolvedStatus = ["signed", "rejected"].includes(status)
     ? status
@@ -13090,10 +13090,11 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
   const resolvedRawStatus = rawStatus || eventStatusInfo.rawStatus || resolvedStatus || "";
   status = resolvedStatus;
   rawStatus = resolvedRawStatus;
-  if (status !== "signed" && status !== "rejected") return;
+  if (status !== "signed" && status !== "rejected") return false;
 
   try {
-    // Buscar el proceso por request_id o contract_id en docs_firma
+    // Buscar el proceso por request_id, contract_id o signature_id en docs_firma.
+    const incomingSignatureId = String(signatureId || extractClickSignSignatureId(event) || "").trim();
     let proceso = null;
     let docIndex = null;
     let matchedDoc = null;
@@ -13109,6 +13110,22 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
       if (r.rowCount > 0) {
         proceso = r.rows[0];
         matchedDoc = normalizeDocsFirmaListCompat(proceso.docs_firma).find((d) => d.request_id === requestId) || null;
+        docIndex = matchedDoc?.doc_index || null;
+      }
+    }
+
+    if (!proceso && incomingSignatureId) {
+      const r = await pool.query(
+        `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at
+         FROM tokens_firma_contrato
+         WHERE docs_firma @> $1::jsonb AND estado = 'en_proceso'
+         LIMIT 1`,
+        [JSON.stringify([{ signature_id: incomingSignatureId }])]
+      );
+      if (r.rowCount > 0) {
+        proceso = r.rows[0];
+        matchedDoc = normalizeDocsFirmaListCompat(proceso.docs_firma)
+          .find((d) => String(d.signature_id || "").trim() === incomingSignatureId) || null;
         docIndex = matchedDoc?.doc_index || null;
       }
     }
@@ -13129,9 +13146,10 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
     }
 
     if (!proceso) {
-      console.warn("Webhook contrato: no se encontró proceso para", { requestId, contractId });
-      return;
+      console.warn("Webhook contrato: no se encontro proceso para", { requestId, contractId, signatureId: incomingSignatureId });
+      return false;
     }
+
     if (!docIndex && contractId) {
       const match = String(contractId || "").match(/_(\d+)$/);
       if (match?.[1]) {
@@ -13140,8 +13158,8 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
     }
 
     let oneDriveInfo = null;
-    const signatureId = String(
-      extractClickSignSignatureId(event) ||
+    const effectiveSignatureId = String(
+      incomingSignatureId ||
       matchedDoc?.signature_id ||
       ""
     ).trim();
@@ -13151,7 +13169,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         requestId,
         contractId,
         publicId: "",
-        signatureId
+        signatureId: effectiveSignatureId
       });
       const resolvedPdf = artifacts?.signedPdf || null;
 
@@ -13168,7 +13186,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
             console.error("Error en reconcile diferido de contrato:", retryErr?.message || retryErr);
           }
         }, 30000);
-        return;
+        return true;
       }
       try {
         const docsActualesParaUpload = normalizeDocsFirmaListCompat(proceso.docs_firma);
@@ -13197,7 +13215,11 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
     const docsActuales = normalizeDocsFirmaListCompat(proceso.docs_firma);
     let docMatched = false;
     const nuevaLista = docsActuales.map((d) => {
-      if (d.request_id === requestId || d.contract_id === contractId) {
+      const isMatched =
+        (requestId && String(d.request_id || "").trim() === requestId) ||
+        (contractId && String(d.contract_id || "").trim() === contractId) ||
+        (effectiveSignatureId && String(d.signature_id || "").trim() === effectiveSignatureId);
+      if (isMatched) {
         const finalStatus =
           status === "rejected"
             ? "rejected"
@@ -13205,7 +13227,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         docMatched = true;
         return {
           ...d,
-          signature_id: signatureId || d.signature_id || null,
+          signature_id: effectiveSignatureId || d.signature_id || null,
           estado: finalStatus,
           firmado_en: finalStatus === "signed" ? (d.firmado_en || nowIso) : d.firmado_en || null,
           ultimo_evento: rawStatus || d.ultimo_evento || null,
@@ -13235,7 +13257,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         empresa_key: fallbackDef?.empresa_key || null,
         request_id: requestId || null,
         contract_id: contractId || null,
-        signature_id: signatureId || null,
+        signature_id: effectiveSignatureId || null,
         estado: fallbackStatus,
         firmado_en: fallbackStatus === "signed" ? nowIso : null,
         ultimo_evento: rawStatus || null,
@@ -13267,8 +13289,10 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
     }
 
     console.log(`Contrato doc${docIndex || "?"} estado ${status} para proceso ${proceso.id}. Completado: ${todosFirmados}`);
+    return true;
   } catch (err) {
     console.error("Error procesando webhook de contrato:", err.message);
+    return false;
   }
 }
 

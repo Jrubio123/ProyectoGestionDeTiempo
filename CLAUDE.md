@@ -117,7 +117,7 @@ db/
 Siempre que el usuario te pida ejecutar un "LOTE", usar el comando `/codex`, o delegar una tarea de código, DEBES invocar el skill de Codex usando OBLIGATORIAMENTE el modelo avanzado y la máxima capacidad de razonamiento. Inyecta siempre de forma automática estos parámetros en tu invocación:
 
 ```
---model gpt-5.4 -c model_reasoning_effort=xhigh -c model_reasoning_summary=detailed
+--model gpt-5.5 -c model_reasoning_effort=xhigh -c model_reasoning_summary=detailed
 ```
 
 Aplica a: `/codex`, `/codex:rescue`, cualquier "LOTE", y cualquier delegación de código a Codex (análisis, refactor, diagnóstico, revisión, edición automática). No degradar el modelo ni el esfuerzo de razonamiento aunque la tarea parezca pequeña, salvo que el usuario lo pida explícitamente en ese turno.

@@ -28,6 +28,11 @@ router.post("/clicksign/signature", async (req, res) => {
     }
 
     const event = req.body && typeof req.body === "object" ? req.body : {};
+    console.log("[clicksign-webhook] recibido", {
+      contentType: req.headers["content-type"] || "",
+      keys: Object.keys(event),
+      body: JSON.stringify(event).slice(0, 4000)
+    });
     res.status(200).json({ ok: true });
 
     setImmediate(() => {

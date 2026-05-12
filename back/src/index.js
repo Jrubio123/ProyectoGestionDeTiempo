@@ -12905,6 +12905,9 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
       let nextStatus = statusInfo.status || normalizeClickSignStatus(rawStatus);
       let oneDriveInfo = null;
       let signedPdfSource = "";
+      let artifactsSource = "";
+      let uploadError = "";
+      let pdfDisponible = false;
       let uploadCompleted = Boolean(String(doc?.onedrive_url || "").trim());
 
       if (!nextStatus) nextStatus = previousStatus || "pending";
@@ -12923,14 +12926,17 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
           publicId: "",
           signatureId: signatureId || snapshotSignatureId
         });
+        artifactsSource = artifacts?.catalogSource || "";
         const resolvedPdf = artifacts?.signedPdf || null;
         if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
+          pdfDisponible = true;
           signedPdfSource = resolvedPdf.source || "";
           if (!String(doc?.onedrive_url || "").trim()) {
             try {
               oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName, { doc });
               uploadCompleted = Boolean(oneDriveInfo?.archivo?.url);
             } catch (uploadErr) {
+              uploadError = uploadErr?.message || String(uploadErr);
               console.error("Error subiendo contrato reconciliado a OneDrive:", uploadErr?.message || uploadErr);
             }
           }
@@ -12976,7 +12982,11 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
         contract_id: contractId || null,
         estado: nextDoc.estado || null,
         onedrive_url: nextDoc.onedrive_url || null,
-        source: snapshot?.source || signedPdfSource || null
+        ultimo_evento: rawStatus || null,
+        pdf_disponible: pdfDisponible,
+        catalog_source: artifactsSource || null,
+        upload_error: uploadError || null,
+        source: signedPdfSource || snapshot?.source || null
       });
     } catch (err) {
       console.error("Error reconciliando documento de contrato:", {

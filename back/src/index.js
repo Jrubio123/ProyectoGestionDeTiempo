@@ -10807,7 +10807,12 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       });
     }
 
-    if (docExistente?.request_id && docExistente?.url_firma && ["pending", "sent", "en_proceso"].includes(estadoActualDoc)) {
+    if (
+      docExistente?.request_id &&
+      docExistente?.url_firma &&
+      ["pending", "sent", "en_proceso"].includes(estadoActualDoc) &&
+      !isClickSignInvalidSignatureReference(docExistente)
+    ) {
       return res.json({
         url_firma: docExistente.url_firma,
         request_id: docExistente.request_id || null,
@@ -12879,6 +12884,8 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, opt
 
 function contratoDocNeedsReconciliation(doc = {}) {
   const status = normalizeDocStatus(doc?.estado);
+  const ultimoEvento = String(doc?.ultimo_evento || "").trim().toLowerCase();
+  if (ultimoEvento.includes("invalid id in signature_id")) return false;
   const hasIdentifiers = Boolean(
     String(doc?.request_id || "").trim() ||
     String(doc?.contract_id || "").trim() ||
@@ -12894,6 +12901,10 @@ function contratoDocSyncCompleted(doc = {}) {
   if (normalizeDocStatus(doc?.estado) !== "signed") return false;
   if (!ONEDRIVE_ENABLED) return true;
   return Boolean(String(doc?.onedrive_url || "").trim());
+}
+
+function isClickSignInvalidSignatureReference(doc = {}) {
+  return String(doc?.ultimo_evento || "").trim().toLowerCase().includes("invalid id in signature_id");
 }
 
 async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reason = "manual" } = {}) {

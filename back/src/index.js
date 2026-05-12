@@ -13246,6 +13246,10 @@ const RECONCILIACION_BATCH = 10; // máximo por ciclo
 const RECONCILIACION_CONTRATOS_INTERVAL_MS = 10 * 60 * 1000; // cada 10 minutos
 const RECONCILIACION_CONTRATOS_MIN_EDAD_MIN = 20; // solo procesos con más de 20 min sin actualizar
 const RECONCILIACION_CONTRATOS_BATCH = 10; // máximo por ciclo
+const RECONCILIACION_CONTRATOS_EXPIRAR_HORAS = Math.max(
+  1,
+  Number(process.env.RECONCILIACION_CONTRATOS_EXPIRAR_HORAS || 24)
+);
 
 async function jobReconciliarCuentasEnFirma() {
   if (isShuttingDown) return;
@@ -13466,6 +13470,21 @@ async function jobReconciliarCuentasEnFirma() {
 async function jobReconciliarContratosEnFirma() {
   if (isShuttingDown) return;
   try {
+    const expirados = await pool.query(
+      `UPDATE tokens_firma_contrato
+       SET estado = 'expirado',
+           updated_at = NOW()
+       WHERE estado = 'en_proceso'
+         AND created_at < NOW() - ($1 || ' hours')::INTERVAL
+       RETURNING public_id, nombre_persona`,
+      [String(RECONCILIACION_CONTRATOS_EXPIRAR_HORAS)]
+    );
+    if (expirados.rowCount > 0) {
+      console.log(
+        `[reconciliar-contratos] ${expirados.rowCount} proceso(s) expirado(s) automaticamente por antiguedad (${RECONCILIACION_CONTRATOS_EXPIRAR_HORAS}h).`
+      );
+    }
+
     const result = await pool.query(
       `SELECT tf.id, tf.public_id, tf.nombre_persona, tf.correo_personal, tf.docs_firma,
               tf.solicitud_id, tf.preregistro_id, tf.created_at, tf.updated_at

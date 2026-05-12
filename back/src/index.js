@@ -5785,113 +5785,20 @@ async function resolveSignedPdfFromSource(source, preferredName = "CuentaCobroFi
 
 function buildClickSignLookupRequests({ requestId = "", contractId = "", signatureId = "" } = {}) {
   const requests = [];
-  const rid = String(requestId || "").trim();
-  const cid = String(contractId || "").trim();
   const sidRaw = String(signatureId || "").trim();
   const sid = /^\d+$/.test(sidRaw) ? sidRaw : "";
   const buildApiRequestId = (prefix) => `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
 
-  if (rid) {
-    requests.push(
-      { method: "GET", path: `get_signature?request_id=${encodeURIComponent(rid)}` },
-      { method: "GET", path: `signature_status?request_id=${encodeURIComponent(rid)}` },
-      { method: "GET", path: `get_signature_status?request_id=${encodeURIComponent(rid)}` },
-      { method: "GET", path: `get_signature/${encodeURIComponent(rid)}` },
-      { method: "GET", path: `signature_status/${encodeURIComponent(rid)}` },
-      {
-        method: "POST",
-        path: "get_signature",
-        body: { request: "GET_SIGNATURE", request_id: buildApiRequestId("get-signature"), user: CLICKSIGN_USER, request_id_search: rid }
-      },
-      {
-        method: "POST",
-        path: "get_signature",
-        body: { request: "GET_SIGNATURE", request_id: buildApiRequestId("get-signature"), user: CLICKSIGN_USER, signature: { request_id: rid } }
-      },
-      {
-        method: "POST",
-        path: "get_signature",
-        body: { request: "GET_SIGNATURE", request_id: rid, user: CLICKSIGN_USER }
-      },
-      {
-        method: "POST",
-        path: "signature_status",
-        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("signature-status"), user: CLICKSIGN_USER, request_id_search: rid }
-      },
-      {
-        method: "POST",
-        path: "signature_status",
-        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("signature-status"), user: CLICKSIGN_USER, signature: { request_id: rid } }
-      },
-      {
-        method: "POST",
-        path: "signature_status",
-        body: { request: "GET_SIGNATURE_STATUS", request_id: rid, user: CLICKSIGN_USER }
-      },
-      {
-        method: "POST",
-        path: "get_signature_status",
-        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("get-signature-status"), user: CLICKSIGN_USER, request_id_search: rid }
-      }
-    );
-  }
-
-  if (cid) {
-    requests.push(
-      { method: "GET", path: `get_signature?contract_id=${encodeURIComponent(cid)}` },
-      { method: "GET", path: `signature_status?contract_id=${encodeURIComponent(cid)}` },
-      { method: "GET", path: `get_signature_status?contract_id=${encodeURIComponent(cid)}` },
-      {
-        method: "POST",
-        path: "get_signature",
-        body: { request: "GET_SIGNATURE", request_id: buildApiRequestId("get-signature"), contract_id: cid, user: CLICKSIGN_USER }
-      },
-      {
-        method: "POST",
-        path: "get_signature",
-        body: { request: "GET_SIGNATURE", request_id: buildApiRequestId("get-signature"), user: CLICKSIGN_USER, signature: { contract_id: cid } }
-      },
-      {
-        method: "POST",
-        path: "signature_status",
-        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("signature-status"), user: CLICKSIGN_USER, contract_id: cid }
-      },
-      {
-        method: "POST",
-        path: "signature_status",
-        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("signature-status"), user: CLICKSIGN_USER, signature: { contract_id: cid } }
-      },
-      {
-        method: "POST",
-        path: "get_signature_status",
-        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("get-signature-status"), user: CLICKSIGN_USER, contract_id: cid }
-      }
-    );
-  }
-
   if (sid) {
     requests.push(
-      { method: "GET", path: `get_signature?signature_id=${encodeURIComponent(sid)}` },
-      { method: "GET", path: `signature_status?signature_id=${encodeURIComponent(sid)}` },
-      { method: "GET", path: `get_signature_status?signature_id=${encodeURIComponent(sid)}` },
       {
         method: "POST",
-        path: "get_signature",
-        body: { request: "GET_SIGNATURE", request_id: buildApiRequestId("get-signature"), user: CLICKSIGN_USER, signature_id: sid }
-      },
-      {
-        method: "POST",
-        path: "get_signature",
-        body: { request: "GET_SIGNATURE", request_id: buildApiRequestId("get-signature"), user: CLICKSIGN_USER, signature: { signature_id: sid } }
-      },
-      {
-        method: "POST",
-        path: "signature_status",
+        path: "get_signature_status",
         body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("signature-status"), user: CLICKSIGN_USER, signature_id: sid }
       },
       {
         method: "POST",
-        path: "signature_status",
+        path: "get_signature_status",
         body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("signature-status"), user: CLICKSIGN_USER, signature: { signature_id: sid } }
       }
     );
@@ -6453,7 +6360,7 @@ function normalizeClickSignStatus(value) {
   if (normalizedRaw.includes("progress") || normalizedRaw.includes("en_proceso") || normalizedRaw.includes("en_firma")) return "en_proceso";
   if (normalizedRaw.includes("start_signature") || normalizedRaw.includes("started") || normalizedRaw.includes("sent") || normalizedRaw.includes("created") || normalizedRaw.includes("open")) return "sent";
   if (normalizedRaw.includes("pending")) return "pending";
-  return raw;
+  return "";
 }
 
 function normalizeClickSignBoolean(value) {

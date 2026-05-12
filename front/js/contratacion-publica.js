@@ -523,9 +523,10 @@ window.contratacionApp = function () {
 
         puedeReconciliarDoc(doc) {
             const estado = this.estadoDocFirmaReconciliacion(doc);
-            if (estado === "pending") return false;
-            if (!["sent", "en_proceso"].includes(estado)) return false;
-            return Boolean(doc?.request_id || doc?.contract_id || doc?.signature_id);
+            const tieneIdsFirma = Boolean(doc?.request_id || doc?.contract_id || doc?.signature_id);
+            if (!tieneIdsFirma) return false;
+            if (["sent", "en_proceso"].includes(estado)) return true;
+            return estado === "pending" && Boolean(doc?.url_firma);
         },
 
         docFirmado(idx) {

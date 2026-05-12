@@ -3757,7 +3757,8 @@ async function resolveAnexoIndividualSignedPdfUpload({ proceso, event = {}, requ
     requestId: requestId || proceso?.request_id || "",
     contractId: contractId || proceso?.contract_id || "",
     publicId: String(proceso?.public_id || ""),
-    signatureId: effectiveSignatureId
+    signatureId: effectiveSignatureId,
+    allowCatalogFallback: true
   });
   const resolvedPdf = artifacts?.signedPdf || null;
   if (!resolvedPdf || !isPdfBuffer(resolvedPdf.buffer)) {
@@ -5986,10 +5987,35 @@ function normalizeClickSignFileEntries(source) {
         "DocumentoClickSign.pdf"
       );
       if (!fileId) continue;
-      entries.push({ fileId, fileType, fileName });
+      entries.push({ fileId, fileType, rawFileType, fileName });
     }
   }
   return entries;
+}
+
+function isClickSignSignedFileEntry(entry = {}) {
+  const fileType = String(entry.fileType || "").toLowerCase();
+  const fileName = String(entry.fileName || "").toLowerCase();
+  return [
+    "signed_contract",
+    "signed_file",
+    "signed_files",
+    "signed_pdf",
+    "signed_document",
+    "signed_documents",
+    "contract_signed",
+    "document_signed",
+    "pdf_signed",
+    "completed_contract",
+    "signed_once",
+    "signature_stamp",
+    "signatory_stamp"
+  ].includes(fileType) || /signed|firmado|completado/.test(`${fileType} ${fileName}`);
+}
+
+function isClickSignSecondaryFileEntry(entry = {}) {
+  const text = `${entry.fileType || ""} ${entry.fileName || ""}`.toLowerCase();
+  return /evidence|evidencia|attachment|adjunto|uploaded|original|certificate|certificado/.test(text);
 }
 
 async function fetchClickSignFileListEntries({ requestId, contractId, signatureId }) {
@@ -6131,7 +6157,7 @@ async function fetchClickSignFileBuffer(fileId) {
   return null;
 }
 
-async function resolveClickSignArtifacts({ event, requestId, contractId, publicId, signatureId }) {
+async function resolveClickSignArtifacts({ event, requestId, contractId, publicId, signatureId, allowCatalogFallback = false }) {
   const catalog = await fetchClickSignFilesCatalog({ event, requestId, contractId, signatureId });
   const byType = new Map();
   for (const entry of catalog.entries) {
@@ -6142,29 +6168,37 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
   const hasCatalogEntries = Array.isArray(catalog.entries) && catalog.entries.length > 0;
   let signedPdf = null;
   let signedFileId = "";
-  const signedEntry =
-    byType.get("signed_contract")?.[0] ||
-    byType.get("signed")?.[0] ||
-    byType.get("contract_signed")?.[0] ||
-    byType.get("signed_once")?.[0] ||
-    byType.get("signature_stamp")?.[0] ||
-    byType.get("signatory_stamp")?.[0] ||
-    null;
+  const signedCandidates = catalog.entries.filter(isClickSignSignedFileEntry);
 
-  if (signedEntry) {
-    signedFileId = String(signedEntry.fileId || "").trim();
+  for (const signedEntry of signedCandidates) {
     const buffer = await fetchClickSignFileBuffer(signedEntry.fileId);
-    if (isPdfBuffer(buffer)) {
+    if (!isPdfBuffer(buffer)) continue;
+    signedFileId = String(signedEntry.fileId || "").trim();
+    signedPdf = {
+      buffer,
+      fileName: sanitizePdfFileName(signedEntry.fileName || `CuentaCobroFirmada_${publicId || "documento"}.pdf`, "CuentaCobroFirmada.pdf"),
+      source: "get_file_signed_contract"
+    };
+    break;
+  }
+
+  if (!signedPdf && hasCatalogEntries && allowCatalogFallback) {
+    const fallbackCandidates = catalog.entries.filter((entry) => !isClickSignSecondaryFileEntry(entry));
+    for (const entry of fallbackCandidates) {
+      const buffer = await fetchClickSignFileBuffer(entry.fileId);
+      if (!isPdfBuffer(buffer)) continue;
+      signedFileId = String(entry.fileId || "").trim();
       signedPdf = {
         buffer,
-        fileName: sanitizePdfFileName(signedEntry.fileName || `CuentaCobroFirmada_${publicId || "documento"}.pdf`, "CuentaCobroFirmada.pdf"),
-        source: "get_file_signed_contract"
+        fileName: sanitizePdfFileName(entry.fileName || `CuentaCobroFirmada_${publicId || "documento"}.pdf`, "CuentaCobroFirmada.pdf"),
+        source: "get_file_catalog_fallback"
       };
+      break;
     }
   }
 
   // Solo usa fallback legacy cuando no hay catálogo, para evitar confundir START_FILES/show_landing con firmado.
-  if (!signedPdf && !hasCatalogEntries) {
+  if (!signedPdf && (!hasCatalogEntries || allowCatalogFallback)) {
     signedPdf = await resolveSignedPdfFromClickSign({ event, requestId, contractId, publicId, signatureId });
   }
 
@@ -6218,7 +6252,12 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
   return {
     signedPdf,
     extraFiles,
-    catalogSource: catalog.source || null
+    catalogSource: catalog.source || null,
+    catalogEntries: catalog.entries.map((entry) => ({
+      file_type: entry.rawFileType || entry.fileType || "",
+      file_name: entry.fileName || "",
+      file_id_tail: String(entry.fileId || "").slice(-8)
+    }))
   };
 }
 
@@ -12906,6 +12945,7 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
       let oneDriveInfo = null;
       let signedPdfSource = "";
       let artifactsSource = "";
+      let catalogEntries = [];
       let uploadError = "";
       let pdfDisponible = false;
       let uploadCompleted = Boolean(String(doc?.onedrive_url || "").trim());
@@ -12924,9 +12964,11 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
           requestId,
           contractId,
           publicId: "",
-          signatureId: signatureId || snapshotSignatureId
+          signatureId: signatureId || snapshotSignatureId,
+          allowCatalogFallback: nextStatus === "signed"
         });
         artifactsSource = artifacts?.catalogSource || "";
+        catalogEntries = Array.isArray(artifacts?.catalogEntries) ? artifacts.catalogEntries : [];
         const resolvedPdf = artifacts?.signedPdf || null;
         if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
           pdfDisponible = true;
@@ -12985,6 +13027,7 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
         ultimo_evento: rawStatus || null,
         pdf_disponible: pdfDisponible,
         catalog_source: artifactsSource || null,
+        catalog_entries: catalogEntries,
         upload_error: uploadError || null,
         source: signedPdfSource || snapshot?.source || null
       });
@@ -13129,7 +13172,8 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
         requestId,
         contractId,
         publicId: "",
-        signatureId: effectiveSignatureId
+        signatureId: effectiveSignatureId,
+        allowCatalogFallback: true
       });
       const resolvedPdf = artifacts?.signedPdf || null;
 
@@ -13350,7 +13394,8 @@ async function jobReconciliarCuentasEnFirma() {
             requestId,
             contractId,
             publicId: String(cuenta.public_id || ""),
-            signatureId: signatureId || extractClickSignSignatureId(event) || ""
+            signatureId: signatureId || extractClickSignSignatureId(event) || "",
+            allowCatalogFallback: status === "signed"
           });
           const resolvedPdf = artifacts?.signedPdf || null;
           if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {

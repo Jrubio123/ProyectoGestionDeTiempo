@@ -63,7 +63,14 @@ async function reintentarCuentaCobroFirma(cuentaId) {
     const contractId = String(prevFirma.contract_id || `CC-${cuenta.public_id || cuenta.id}`).trim();
     const signatureId = String(prevFirma.signature_id || "").trim();
 
-    const artifacts = await resolveClickSignArtifacts({ event: {}, requestId, contractId, publicId: String(cuenta.public_id || ""), signatureId });
+    const artifacts = await resolveClickSignArtifacts({
+      event: {},
+      requestId,
+      contractId,
+      publicId: String(cuenta.public_id || ""),
+      signatureId,
+      allowCatalogFallback: true
+    });
     const resolvedPdf = artifacts?.signedPdf || null;
     if (!resolvedPdf || !isPdfBuffer(resolvedPdf.buffer)) {
       console.warn("Reintento cuenta cobro: PDF aún no disponible", { cuentaId, requestId, contractId });
@@ -310,7 +317,8 @@ async function processSignatureEvent(event) {
         requestId,
         contractId,
         publicId: String(cuenta.public_id || ""),
-        signatureId: signatureId || prevFirma.signature_id || ""
+        signatureId: signatureId || prevFirma.signature_id || "",
+        allowCatalogFallback: true
       });
       const resolvedPdf = artifacts?.signedPdf || null;
 

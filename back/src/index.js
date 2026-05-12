@@ -9736,6 +9736,19 @@ app.post("/contratacion/firma/reconciliar", requireTokenFirma, async (req, res) 
       signature_id: docObjetivo?.signature_id || null
     });
 
+    if (!idx) {
+      return res.json({
+        ok: true,
+        skipped: "doc_index_required",
+        nombre_persona: row.nombre_persona,
+        estado: row.estado,
+        checks_completados: row.checks_completados,
+        docs_firma: normalizeDocsFirmaListCompat(docsFirma),
+        expires_at: row.expires_at,
+        reconciled: []
+      });
+    }
+
     const reconciled = await reconcileContratoDocsForProcess(
       { ...row, docs_firma: docsFirma },
       { docIndex: idx, reason: "endpoint" }

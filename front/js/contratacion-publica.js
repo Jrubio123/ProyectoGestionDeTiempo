@@ -1,7 +1,7 @@
 window.contratacionApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
-    const FIRMA_POLLING_INTERVAL_MS = 10000;
-    const FIRMA_POLLING_MAX_ATTEMPTS = 30;
+    const FIRMA_POLLING_INTERVAL_MS = 30000;
+    const FIRMA_POLLING_MAX_ATTEMPTS = 20;
     const TIMER_PDF = 20; // segundos mínimos de lectura por PDF
 
     return {
@@ -685,9 +685,11 @@ window.contratacionApp = function () {
                     return;
                 }
 
+                if (document.hidden) return;
+
                 this.pollingIntentos += 1;
                 this._pollingEnCurso = true;
-                const ok = await this.refrescarEstado({ reconciliar: true });
+                const ok = await this.refrescarEstado({ reconciliar: false });
                 this._pollingEnCurso = false;
 
                 if (!ok || !debeSeguir()) {
@@ -695,7 +697,6 @@ window.contratacionApp = function () {
                 }
             };
 
-            tick();
             this.pollingInterval = setInterval(tick, FIRMA_POLLING_INTERVAL_MS);
         },
 

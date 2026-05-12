@@ -1409,10 +1409,17 @@ function formatCurrencyForTemplate(value, moneda = "COP") {
 
 function normalizeDocStatus(value) {
   const raw = String(value || "").trim().toLowerCase();
-  if (["signed", "firmado", "completado", "approved", "done"].includes(raw)) return "signed";
-  if (["rejected", "rechazado", "declined", "cancelled", "canceled", "expired", "expirado", "expirada", "failed", "error"].includes(raw)) return "rejected";
-  if (raw.includes("signed") || raw.includes("completed")) return "signed";
-  if (raw.includes("rejected") || raw.includes("declined") || raw.includes("cancel") || raw.includes("expired") || raw.includes("failed") || raw.includes("error")) return "rejected";
+  const normalizedRaw = raw.replace(/\s+/g, "_");
+  if (["signed", "firmado", "completado", "approved", "done"].includes(normalizedRaw)) return "signed";
+  if (["rejected", "rechazado", "declined", "cancelled", "canceled", "expired", "expirado", "expirada", "failed", "error"].includes(normalizedRaw)) return "rejected";
+  if (["pending"].includes(normalizedRaw)) return "pending";
+  if (["sent", "started", "created", "open", "start_signature"].includes(normalizedRaw)) return "sent";
+  if (["en_proceso", "in_progress", "inprogress", "en_firma"].includes(normalizedRaw)) return "en_proceso";
+  if (normalizedRaw.includes("signed") || normalizedRaw.includes("completed")) return "signed";
+  if (normalizedRaw.includes("rejected") || normalizedRaw.includes("declined") || normalizedRaw.includes("cancel") || normalizedRaw.includes("expired") || normalizedRaw.includes("failed") || normalizedRaw.includes("error")) return "rejected";
+  if (normalizedRaw.includes("progress") || normalizedRaw.includes("en_proceso") || normalizedRaw.includes("en_firma")) return "en_proceso";
+  if (normalizedRaw.includes("start_signature") || normalizedRaw.includes("started") || normalizedRaw.includes("sent") || normalizedRaw.includes("created") || normalizedRaw.includes("open")) return "sent";
+  if (normalizedRaw.includes("pending")) return "pending";
   return "pending";
 }
 
@@ -6434,13 +6441,18 @@ async function getCuentaCobroEstadoAprobado() {
 
 function normalizeClickSignStatus(value) {
   const raw = String(value || "").trim().toLowerCase();
+  const normalizedRaw = raw.replace(/\s+/g, "_");
   if (!raw) return "";
-  if (["signed", "completed", "done", "success", "firmado", "aprobado", "stamp_generated", "evidence_generated"].includes(raw)) return "signed";
-  if (["rejected", "declined", "failed", "error", "cancelled", "canceled", "expired", "expire", "timeout", "rechazado", "cancelado", "expirado", "expirada"].includes(raw)) return "rejected";
-  if (["pending", "in_progress", "inprogress", "started", "sent", "created", "open", "en_firma", "start_signature", "start"].includes(raw)) return "pending";
-  if (raw.includes("signed") || raw.includes("completed")) return "signed";
-  if (raw.includes("rejected") || raw.includes("declined") || raw.includes("cancel") || raw.includes("expired") || raw.includes("failed") || raw.includes("error")) return "rejected";
-  if (raw.includes("start_signature") || raw.includes("pending") || raw.includes("progress") || raw.includes("started") || raw.includes("sent") || raw.includes("created") || raw.includes("open")) return "pending";
+  if (["signed", "completed", "done", "success", "firmado", "aprobado", "stamp_generated", "evidence_generated"].includes(normalizedRaw)) return "signed";
+  if (["rejected", "declined", "failed", "error", "cancelled", "canceled", "expired", "expire", "timeout", "rechazado", "cancelado", "expirado", "expirada"].includes(normalizedRaw)) return "rejected";
+  if (["pending"].includes(normalizedRaw)) return "pending";
+  if (["sent", "started", "created", "open", "start_signature", "start"].includes(normalizedRaw)) return "sent";
+  if (["en_proceso", "in_progress", "inprogress", "en_firma"].includes(normalizedRaw)) return "en_proceso";
+  if (normalizedRaw.includes("signed") || normalizedRaw.includes("completed")) return "signed";
+  if (normalizedRaw.includes("rejected") || normalizedRaw.includes("declined") || normalizedRaw.includes("cancel") || normalizedRaw.includes("expired") || normalizedRaw.includes("failed") || normalizedRaw.includes("error")) return "rejected";
+  if (normalizedRaw.includes("progress") || normalizedRaw.includes("en_proceso") || normalizedRaw.includes("en_firma")) return "en_proceso";
+  if (normalizedRaw.includes("start_signature") || normalizedRaw.includes("started") || normalizedRaw.includes("sent") || normalizedRaw.includes("created") || normalizedRaw.includes("open")) return "sent";
+  if (normalizedRaw.includes("pending")) return "pending";
   return raw;
 }
 
@@ -6503,7 +6515,7 @@ function extractClickSignDocumentStatus(source) {
     "data.signatories.0.status"
   ]);
   const normalized = normalizeClickSignStatus(rawStatus);
-  if (["signed", "rejected", "pending"].includes(normalized)) {
+  if (["signed", "rejected", "pending", "sent", "en_proceso"].includes(normalized)) {
     return { rawStatus, status: normalized };
   }
 
@@ -6599,7 +6611,7 @@ async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = ""
         };
       }
 
-      if (!pendingCandidate && status === "pending") {
+      if (!pendingCandidate && ["pending", "sent", "en_proceso"].includes(status)) {
         pendingCandidate = {
           event,
           rawStatus,
@@ -10803,10 +10815,11 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       });
     }
 
-    if (docExistente?.request_id && docExistente?.url_firma && estadoActualDoc === "pending") {
+    if (docExistente?.request_id && docExistente?.url_firma && ["pending", "sent", "en_proceso"].includes(estadoActualDoc)) {
       return res.json({
         url_firma: docExistente.url_firma,
         request_id: docExistente.request_id || null,
+        contract_id: docExistente.contract_id || null,
         doc_index: idx,
         doc_key: docDefinitionKey,
         ya_iniciado: true
@@ -10967,7 +10980,7 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       request_id: resolvedRequestId || null,
       contract_id: contractId,
       signature_id: signatureId || null,
-      estado: "pending",
+      estado: "sent",
       url_firma: urlFirma || null,
       iniciado_en: new Date().toISOString()
     };
@@ -10983,6 +10996,7 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
     res.json({
       url_firma: urlFirma || null,
       request_id: resolvedRequestId || null,
+      contract_id: contractId,
       signature_id: signatureId || null,
       doc_index: idx,
       doc_key: docDefinitionKey
@@ -12944,6 +12958,9 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
       let uploadCompleted = Boolean(String(doc?.onedrive_url || "").trim());
 
       if (!nextStatus) nextStatus = previousStatus || "pending";
+      if (["sent", "en_proceso"].includes(previousStatus) && nextStatus === "pending") {
+        nextStatus = previousStatus;
+      }
       if (previousStatus === "signed" && nextStatus !== "rejected") {
         nextStatus = "signed";
       }
@@ -12970,11 +12987,11 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
           if (uploadCompleted || previousStatus === "signed") {
             nextStatus = "signed";
           } else {
-            nextStatus = "pending";
+            nextStatus = "en_proceso";
           }
         } else if (nextStatus === "signed" && previousStatus !== "signed") {
-          // Mantener pendiente hasta que el PDF firmado pueda descargarse y subirse a OneDrive.
-          nextStatus = "pending";
+          // Mantener el doc en curso hasta que el PDF firmado pueda descargarse y subirse a OneDrive.
+          nextStatus = "en_proceso";
         }
       }
 
@@ -13184,7 +13201,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
         const finalStatus =
           status === "rejected"
             ? "rejected"
-            : (String(oneDriveInfo?.archivo?.url || d.onedrive_url || "").trim() ? "signed" : "pending");
+            : (String(oneDriveInfo?.archivo?.url || d.onedrive_url || "").trim() ? "signed" : "en_proceso");
         docMatched = true;
         return {
           ...d,
@@ -13209,7 +13226,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, st
       const fallbackStatus =
         status === "rejected"
           ? "rejected"
-          : (String(oneDriveInfo?.archivo?.url || "").trim() ? "signed" : "pending");
+          : (String(oneDriveInfo?.archivo?.url || "").trim() ? "signed" : "en_proceso");
       finalDocs = upsertDocFirmaEntry(finalDocs, {
         doc_index: Number(docIndex),
         doc_key: fallbackDef?.doc_key || fallbackKey,

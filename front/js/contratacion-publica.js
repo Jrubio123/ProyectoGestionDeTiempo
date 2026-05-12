@@ -512,6 +512,22 @@ window.contratacionApp = function () {
             return "pending";
         },
 
+        estadoDocFirmaReconciliacion(doc) {
+            const raw = String(doc?.estado || "").trim().toLowerCase().replace(/\s+/g, "_");
+            if (["signed", "firmado", "completado", "approved", "done"].includes(raw)) return "signed";
+            if (["rejected", "rechazado", "declined", "cancelled", "canceled", "expired", "expirado", "expirada", "failed", "error"].includes(raw)) return "rejected";
+            if (["en_proceso", "in_progress", "inprogress", "en_firma"].includes(raw) || raw.includes("progress")) return "en_proceso";
+            if (["sent", "started", "created", "open", "start_signature", "start"].includes(raw)) return "sent";
+            return "pending";
+        },
+
+        puedeReconciliarDoc(doc) {
+            const estado = this.estadoDocFirmaReconciliacion(doc);
+            if (estado === "pending") return false;
+            if (!["sent", "en_proceso"].includes(estado)) return false;
+            return Boolean(doc?.request_id || doc?.contract_id || doc?.signature_id);
+        },
+
         docFirmado(idx) {
             return this.estadoDocFirma(this.docFirmaInfo(idx)) === "signed";
         },
@@ -531,14 +547,11 @@ window.contratacionApp = function () {
             return this.totalDocsFirma > 0 && this.totalDocsFirmados === this.totalDocsFirma;
         },
 
-        requiereReconciliacionFirma() {
-            return this.docsFirmaOrdenados.some((doc) => {
-                const estado = this.estadoDocFirma(doc);
-                const hasRefs = Boolean(doc?.request_id || doc?.contract_id || doc?.signature_id);
-                if (!hasRefs) return false;
-                if (estado === "pending") return true;
-                return estado === "signed" && !doc?.onedrive_url;
-            });
+        requiereReconciliacionFirma({ docIndex = null } = {}) {
+            const docs = docIndex
+                ? this.docsFirmaOrdenados.filter((doc) => Number(doc?.doc_index) === Number(docIndex))
+                : this.docsFirmaOrdenados;
+            return docs.some((doc) => this.puedeReconciliarDoc(doc));
         },
 
         async iniciarFirma(docIndex) {
@@ -606,7 +619,7 @@ window.contratacionApp = function () {
         async refrescarEstado({ reconciliar = false, docIndex = null } = {}) {
             try {
                 let data = null;
-                if (reconciliar && this.requiereReconciliacionFirma()) {
+                if (reconciliar && this.requiereReconciliacionFirma({ docIndex })) {
                     try {
                         const reconcileRes = await axios.post(
                             `${API}/contratacion/firma/reconciliar`,

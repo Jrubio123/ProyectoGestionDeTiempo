@@ -53,6 +53,7 @@ window.contratacionApp = function () {
         descargaDocIndex: null,
         pollingInterval: null,
         pollingIntentos: 0,
+        _pollCycle: 0,
         _pollingEnCurso: false,
 
         // ── Init
@@ -661,6 +662,34 @@ window.contratacionApp = function () {
             }
         },
 
+        async _reconciliarFirmaSilenciosa() {
+            const docs = this.docsFirmaOrdenados.filter((doc) =>
+                ["pending", "sent", "en_proceso"].includes(this.estadoDocFirmaReconciliacion(doc))
+            );
+            if (!docs.length || !this.jwt) return false;
+
+            let reconciliado = false;
+            for (const doc of docs) {
+                const docIndex = Number(doc?.doc_index || 0);
+                if (!docIndex) continue;
+                try {
+                    await axios.post(
+                        `${API}/contratacion/firma/reconciliar`,
+                        { doc_index: docIndex },
+                        { headers: { Authorization: `Bearer ${this.jwt}` } }
+                    );
+                    reconciliado = true;
+                } catch {
+                    // Reconciliacion silenciosa: no bloquear ni mostrar errores en UI.
+                }
+            }
+
+            if (reconciliado) {
+                await this.refrescarEstado({ reconciliar: false });
+            }
+            return reconciliado;
+        },
+
         detenerPollingFirma() {
             if (this.pollingInterval) {
                 clearInterval(this.pollingInterval);
@@ -672,6 +701,7 @@ window.contratacionApp = function () {
         iniciarPolling() {
             this.detenerPollingFirma();
             this.pollingIntentos = 0;
+            this._pollCycle = 0;
 
             const debeSeguir = () =>
                 this.pantalla === "firma" &&
@@ -690,9 +720,17 @@ window.contratacionApp = function () {
                 if (document.hidden) return;
 
                 this.pollingIntentos += 1;
+                this._pollCycle = (this._pollCycle || 0) + 1;
                 this._pollingEnCurso = true;
-                const ok = await this.refrescarEstado({ reconciliar: false });
-                this._pollingEnCurso = false;
+                let ok = false;
+                try {
+                    ok = await this.refrescarEstado({ reconciliar: false });
+                    if (ok && this._pollCycle % 3 === 0) {
+                        await this._reconciliarFirmaSilenciosa();
+                    }
+                } finally {
+                    this._pollingEnCurso = false;
+                }
 
                 if (!ok || !debeSeguir()) {
                     this.detenerPollingFirma();

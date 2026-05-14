@@ -737,16 +737,14 @@ const FRONT_PORTAL_BASE =
 const readEnvSecret = (value) => String(value || "").trim().replace(/^['"]+|['"]+$/g, "");
 const ONEDRIVE_ENABLED = String(process.env.ONEDRIVE_ENABLED || "true").toLowerCase() === "true";
 const ONEDRIVE_TARGET_USER = process.env.ONEDRIVE_TARGET_USER || "admin.apps@silverconsulting.com.co";
-const ONEDRIVE_ROOT_FOLDER = process.env.ONEDRIVE_ROOT_FOLDER || "AdjuntosCuentasCobro";
-const CONTRATOS_ONEDRIVE_FOLDER = process.env.CONTRATOS_ONEDRIVE_FOLDER || "ContratosFirmados";
-const CONTRATOS_ONEDRIVE_FOLDER_ID = String(process.env.ONEDRIVE_CONTRATOS || "").trim();
-const ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER = "AnexoTecnicoIndividual";
-const ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID = String(process.env.ONEDRIVE_ANEXO_TECNICO || "").trim();
+const ONEDRIVE_ROOT_FOLDER = process.env.ONEDRIVE_ROOT_FOLDER || 'AdjuntosCuentasCobro';
+const folderContratos = process.env.ONEDRIVE_CONTRATOS || 'Contratos';
+const folderAnexo = process.env.ONEDRIVE_ANEXO_TECNICO || 'AnexoTecnico';
 const ANEXO_TECNICO_CLICKSIGN_DOCUMENT_TYPES = Object.freeze({
   silver: "AnexoTecnico",
   capital: "anexotecnicoCapital"
 });
-const CONTRATOS_TOKEN_EXPIRY_HOURS = Math.max(1, Number(process.env.CONTRATOS_TOKEN_EXPIRY_HOURS || 72));
+const CONTRATOS_TOKEN_EXPIRY_HOURS = parseInt(process.env.CONTRATOS_TOKEN_EXPIRY_HOURS) || 72;
 const CONTRATOS_BASE_URL = String(env.CONTRATOS_BASE_URL || "").trim().replace(/\/+$/, "");
 const CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO = String(process.env.CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO || "").trim();
 const CONTRATOS_FIRMA_COMPLETADA_FALLBACK_NOTIFY = "ana.garcia@silverconsulting.com.co";
@@ -3581,39 +3579,7 @@ async function uploadAnexoIndividualFirmadoToOneDrive(proceso, pdfBuffer, fileNa
     "AnexoTecnico.pdf"
   );
 
-  if (ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID) {
-    try {
-      await graphGet(
-        `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID)}`,
-        token
-      );
-      const folderMeta = await ensureGraphChildFolderById(
-        token,
-        ONEDRIVE_TARGET_USER,
-        ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID,
-        folderName
-      );
-      const uploadPath = `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(folderMeta.id)}:/${encodeURIComponent(safeName)}:/content`;
-      const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
-
-      return {
-        carpeta: folderMeta.name || folderName,
-        carpeta_url: folderMeta.webUrl || null,
-        archivo: {
-          id: uploaded.id || "",
-          nombre: uploaded.name || safeName,
-          url: uploaded.webUrl || ""
-        }
-      };
-    } catch (err) {
-      if (!isGraphItemNotFoundError(err)) throw err;
-      console.warn("ONEDRIVE_ANEXO_TECNICO no existe como item ID; se usara ruta por nombre.", {
-        folder_id: ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER_ID
-      });
-    }
-  }
-
-  let targetPath = sanitizePathSegment(ANEXO_INDIVIDUAL_ONEDRIVE_FOLDER, "AnexoTecnicoIndividual");
+  let targetPath = sanitizePathSegment(folderAnexo, "AnexoTecnico");
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, folderName);
 
@@ -12825,46 +12791,17 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, opt
   const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
   await graphGet(`/v1.0/users/${encodedUser}/drive`, token);
 
-  const personaContext = await resolveContratoPersonaContext(proceso || {});
+  const personaContext =
+    options?.personaContext && typeof options.personaContext === "object"
+      ? options.personaContext
+      : await resolveContratoPersonaContext(proceso || {});
   const {
     nombrePersonaCarpeta,
     nombrePersona
   } = buildContratoOneDriveFolderNames(proceso, personaContext);
   const safeName = sanitizePdfFileName(fileName || `Contrato_${nombrePersona}.pdf`, "Contrato.pdf");
 
-  if (CONTRATOS_ONEDRIVE_FOLDER_ID) {
-    try {
-      await graphGet(
-        `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(CONTRATOS_ONEDRIVE_FOLDER_ID)}`,
-        token
-      );
-      const personaFolderMeta = await getOrCreateGraphSubfolder(
-        token,
-        ONEDRIVE_TARGET_USER,
-        CONTRATOS_ONEDRIVE_FOLDER_ID,
-        nombrePersonaCarpeta
-      );
-      const uploadPath = `/v1.0/users/${encodedUser}/drive/items/${encodeURIComponent(personaFolderMeta.id)}:/${encodeURIComponent(safeName)}:/content`;
-      const uploaded = await graphPutBinaryWithRetry(uploadPath, token, pdfBuffer, "application/pdf");
-
-      return {
-        carpeta: personaFolderMeta.name || nombrePersonaCarpeta,
-        carpeta_url: personaFolderMeta.webUrl || null,
-        archivo: {
-          id: uploaded.id || "",
-          nombre: uploaded.name || safeName,
-          url: uploaded.webUrl || ""
-        }
-      };
-    } catch (err) {
-      if (!isGraphItemNotFoundError(err)) throw err;
-      console.warn("ONEDRIVE_CONTRATOS no existe como item ID; se usara ruta por nombre.", {
-        folder_id: CONTRATOS_ONEDRIVE_FOLDER_ID
-      });
-    }
-  }
-
-  let targetPath = sanitizePathSegment(CONTRATOS_ONEDRIVE_FOLDER, "ContratosFirmados");
+  let targetPath = sanitizePathSegment(folderContratos, "Contratos");
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, nombrePersonaCarpeta);
   let folderWebUrl = "";
@@ -13109,6 +13046,21 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
   };
 }
 
+function scheduleContratoWebhookRetry(procesoId, docIndex) {
+  if (!procesoId) return;
+  setTimeout(async () => {
+    try {
+      const r = await pool.query(
+        `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
+        [procesoId]
+      );
+      if (r.rows[0]) await reconcileContratoDocsForProcess(r.rows[0], { docIndex, reason: "webhook_retry" });
+    } catch (retryErr) {
+      console.error("Error en reconcile diferido de contrato:", retryErr?.message || retryErr);
+    }
+  }, 30000);
+}
+
 async function handleClickSignContratoWebhook({ event, requestId, contractId, signatureId = "", status, rawStatus }) {
   const eventStatusInfo = extractClickSignDocumentStatus(event);
   const resolvedStatus = ["signed", "rejected"].includes(status)
@@ -13119,7 +13071,18 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
   rawStatus = resolvedRawStatus;
   if (status !== "signed" && status !== "rejected") return false;
 
+  const client = await pool.connect();
+  let transactionOpen = false;
+  const rollbackIfOpen = async () => {
+    if (!transactionOpen) return;
+    await client.query("ROLLBACK");
+    transactionOpen = false;
+  };
+
   try {
+    await client.query("BEGIN");
+    transactionOpen = true;
+
     // Buscar el proceso por request_id, contract_id o signature_id en docs_firma.
     const incomingSignatureId = String(signatureId || extractClickSignSignatureId(event) || "").trim();
     let proceso = null;
@@ -13127,11 +13090,12 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
     let matchedDoc = null;
 
     if (requestId) {
-      const r = await pool.query(
+      const r = await client.query(
         `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at
          FROM tokens_firma_contrato
          WHERE docs_firma @> $1::jsonb AND estado = 'en_proceso'
-         LIMIT 1`,
+         LIMIT 1
+         FOR UPDATE`,
         [JSON.stringify([{ request_id: requestId }])]
       );
       if (r.rowCount > 0) {
@@ -13142,11 +13106,12 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
     }
 
     if (!proceso && incomingSignatureId) {
-      const r = await pool.query(
+      const r = await client.query(
         `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at
          FROM tokens_firma_contrato
          WHERE docs_firma @> $1::jsonb AND estado = 'en_proceso'
-         LIMIT 1`,
+         LIMIT 1
+         FOR UPDATE`,
         [JSON.stringify([{ signature_id: incomingSignatureId }])]
       );
       if (r.rowCount > 0) {
@@ -13158,11 +13123,12 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
     }
 
     if (!proceso && contractId) {
-      const r = await pool.query(
+      const r = await client.query(
         `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at
          FROM tokens_firma_contrato
          WHERE docs_firma @> $1::jsonb AND estado = 'en_proceso'
-         LIMIT 1`,
+         LIMIT 1
+         FOR UPDATE`,
         [JSON.stringify([{ contract_id: contractId }])]
       );
       if (r.rowCount > 0) {
@@ -13173,6 +13139,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
     }
 
     if (!proceso) {
+      await rollbackIfOpen();
       console.warn("Webhook contrato: no se encontro proceso para", { requestId, contractId, signatureId: incomingSignatureId });
       return false;
     }
@@ -13203,17 +13170,8 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
 
       if (!resolvedPdf || !isPdfBuffer(resolvedPdf.buffer)) {
         console.warn("Webhook contrato: PDF no disponible aún, reintentando en 30s", { requestId, contractId });
-        setTimeout(async () => {
-          try {
-            const r = await pool.query(
-              `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
-              [proceso.id]
-            );
-            if (r.rows[0]) await reconcileContratoDocsForProcess(r.rows[0], { docIndex, reason: "webhook_retry" });
-          } catch (retryErr) {
-            console.error("Error en reconcile diferido de contrato:", retryErr?.message || retryErr);
-          }
-        }, 30000);
+        await rollbackIfOpen();
+        scheduleContratoWebhookRetry(proceso.id, docIndex);
         return true;
       }
       try {
@@ -13222,20 +13180,17 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
           matchedDoc ||
           docsActualesParaUpload.find((d) => Number(d?.doc_index || 0) === Number(docIndex || 0)) ||
           (docIndex ? { doc_index: Number(docIndex) } : {});
-        oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName, { doc: docParaUpload });
+        oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName, {
+          doc: docParaUpload,
+          personaContext: {
+            nombreCompleto: proceso?.nombre_persona || "",
+            created_at: proceso?.created_at || null
+          }
+        });
       } catch (upErr) {
         console.error("Error subiendo contrato firmado a OneDrive:", upErr.message);
-        setTimeout(async () => {
-          try {
-            const r = await pool.query(
-              `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
-              [proceso.id]
-            );
-            if (r.rows[0]) await reconcileContratoDocsForProcess(r.rows[0], { docIndex, reason: "webhook_retry" });
-          } catch (retryErr) {
-            console.error("Error en reconcile diferido de contrato:", retryErr?.message || retryErr);
-          }
-        }, 30000);
+        scheduleContratoWebhookRetry(proceso.id, docIndex);
+        throw upErr;
       }
     }
 
@@ -13299,7 +13254,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
 
     const todosFirmados = finalDocs.length > 0 && finalDocs.every((d) => contratoDocSyncCompleted(d));
 
-    await pool.query(
+    await client.query(
       `UPDATE tokens_firma_contrato
        SET docs_firma = $1::jsonb,
            estado = $2,
@@ -13307,6 +13262,9 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
        WHERE id = $3`,
       [JSON.stringify(finalDocs), todosFirmados ? "completado" : "en_proceso", proceso.id]
     );
+
+    await client.query("COMMIT");
+    transactionOpen = false;
 
     if (todosFirmados) {
       try {
@@ -13319,8 +13277,13 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
     console.log(`Contrato doc${docIndex || "?"} estado ${status} para proceso ${proceso.id}. Completado: ${todosFirmados}`);
     return true;
   } catch (err) {
+    try {
+      await rollbackIfOpen();
+    } catch { }
     console.error("Error procesando webhook de contrato:", err.message);
-    return false;
+    throw err;
+  } finally {
+    client.release();
   }
 }
 
@@ -13358,10 +13321,7 @@ const RECONCILIACION_BATCH = 10; // máximo por ciclo
 const RECONCILIACION_CONTRATOS_INTERVAL_MS = 10 * 60 * 1000; // cada 10 minutos
 const RECONCILIACION_CONTRATOS_MIN_EDAD_MIN = 20; // solo procesos con más de 20 min sin actualizar
 const RECONCILIACION_CONTRATOS_BATCH = 10; // máximo por ciclo
-const RECONCILIACION_CONTRATOS_EXPIRAR_HORAS = Math.max(
-  1,
-  Number(process.env.RECONCILIACION_CONTRATOS_EXPIRAR_HORAS || 24)
-);
+const RECONCILIACION_CONTRATOS_EXPIRAR_HORAS = CONTRATOS_TOKEN_EXPIRY_HOURS;
 
 async function jobReconciliarCuentasEnFirma() {
   if (isShuttingDown) return;
@@ -13588,6 +13548,7 @@ async function jobReconciliarContratosEnFirma() {
        SET estado = 'expirado',
            updated_at = NOW()
        WHERE estado = 'en_proceso'
+         AND expires_at <= NOW()
          AND created_at < NOW() - ($1 || ' hours')::INTERVAL
        RETURNING public_id, nombre_persona`,
       [String(RECONCILIACION_CONTRATOS_EXPIRAR_HORAS)]

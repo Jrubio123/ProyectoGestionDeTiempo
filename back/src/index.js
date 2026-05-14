@@ -7432,7 +7432,7 @@ async function notifyContratoFirmaCompletada(tokenId) {
       LEFT JOIN solicitudes_contratacion sc ON sc.id = t.solicitud_id
       LEFT JOIN preregistro_personas pp ON pp.id = t.preregistro_id
       WHERE t.id = $1
-      FOR UPDATE
+      FOR UPDATE OF t
       `,
       [tokenId]
     );

@@ -1054,25 +1054,57 @@ async function notifyCuentaCobroFirmadaToProveedores({
   if (prev.enviada) return prev;
 
   // Candado atómico en DB: solo el primer proceso que ejecute este UPDATE procede a enviar.
-  // Si otro proceso ya marcó enviada=true (o está en proceso), rowCount=0 y abortamos.
   const cuentaPublicId = cuenta?.public_id;
+  const intentosAnteriores = Number(prev.intentos) || 0;
   if (cuentaPublicId) {
     const claim = await pool.query(
       `UPDATE cuenta_cobro
        SET datos_adjuntos = jsonb_set(
-         datos_adjuntos,
-         '{firma,notificacion_proveedores,enviada}',
-         'true'::jsonb,
+         jsonb_set(
+           jsonb_set(
+             COALESCE(datos_adjuntos, '{}'::jsonb),
+             '{firma,notificacion_proveedores,estado}',
+             '"enviando"'::jsonb,
+             true
+           ),
+           '{firma,notificacion_proveedores,intentos}',
+           $2::text::jsonb,
+           true
+         ),
+         '{firma,notificacion_proveedores,ultimo_intento_en}',
+         $3::jsonb,
          true
        )
        WHERE public_id = $1
          AND COALESCE((datos_adjuntos->'firma'->'notificacion_proveedores'->>'enviada')::boolean, false) = false
+         AND COALESCE((datos_adjuntos->'firma'->'notificacion_proveedores'->>'intentos')::int, 0) < 5
+         AND (
+           COALESCE(datos_adjuntos->'firma'->'notificacion_proveedores'->>'estado', '') != 'enviando'
+           OR (datos_adjuntos->'firma'->'notificacion_proveedores'->>'ultimo_intento_en')::timestamp < NOW() - INTERVAL '30 minutes'
+         )
        RETURNING id`,
-      [cuentaPublicId]
+      [cuentaPublicId, String(intentosAnteriores + 1), JSON.stringify(nowIso)]
     );
     if (claim.rowCount === 0) {
-      // Otro proceso ya reclamó el envío
-      return { ...prev, enviada: true };
+      // Otro proceso ya reclamó el envío, ya se envió, o superó intentos.
+      // El caller hará UPDATE completo de datos_adjuntos con el retorno, así que devolver
+      // el prev stale del request pisaría cualquier escritura más reciente (p.ej. enviada=true
+      // hecha por otro proceso). Releemos el valor actual de BD para garantizar freshness.
+      try {
+        const fresh = await pool.query(
+          `SELECT datos_adjuntos->'firma'->'notificacion_proveedores' AS notif
+           FROM cuenta_cobro
+           WHERE public_id = $1`,
+          [cuentaPublicId]
+        );
+        const freshNotif = fresh.rows[0]?.notif;
+        if (freshNotif && typeof freshNotif === "object") {
+          return freshNotif;
+        }
+      } catch (readErr) {
+        console.error("[notify-proveedores] Error releyendo notificacion_proveedores tras claim fallido:", readErr?.message || readErr);
+      }
+      return { ...prev, estado: prev.estado || "pendiente" };
     }
   }
 
@@ -1102,28 +1134,71 @@ async function notifyCuentaCobroFirmadaToProveedores({
       closing: "Notificación automática del sistema de cuentas de cobro."
     });
 
-    let sendResult = await sendEmailSafe({
-      graphUserEmail: senderEmail || null,
-      to: CLICKSIGN_SIGNED_NOTIFY_TO,
-      cc: CLICKSIGN_SIGNED_NOTIFY_CC || null,
-      bcc: CLICKSIGN_SIGNED_NOTIFY_BCC || null,
-      subject,
-      text: textoPlano,
-      html,
-      attachments
-    });
+    let sendResult;
+    let errorMsg = null;
+    try {
+      sendResult = await sendEmailSafe({
+        graphUserEmail: senderEmail || null,
+        to: CLICKSIGN_SIGNED_NOTIFY_TO,
+        cc: CLICKSIGN_SIGNED_NOTIFY_CC || null,
+        bcc: CLICKSIGN_SIGNED_NOTIFY_BCC || null,
+        subject,
+        text: textoPlano,
+        html,
+        attachments
+      });
+    } catch (sendErr) {
+      sendResult = { ok: false, error: sendErr?.message || "Excepción al enviar correo" };
+      errorMsg = sendResult.error;
+    }
 
-    return {
+    const isOk = Boolean(sendResult?.ok);
+    const newNotificacion = {
       ...prev,
-      enviada: Boolean(sendResult?.ok),
+      estado: isOk ? "enviada" : "error",
+      enviada: isOk,
       ultimo_intento_en: nowIso,
-      enviada_en: sendResult?.ok ? nowIso : prev.enviada_en || null,
+      enviada_en: isOk ? nowIso : prev.enviada_en || null,
       destinatario: CLICKSIGN_SIGNED_NOTIFY_TO,
       asunto: subject,
       documento_url: documentoFirmado.url,
       adjuntos_enviados: Array.isArray(attachments) ? attachments.length : 0,
-      error: sendResult?.ok ? null : (sendResult?.error || "Error enviando correo")
+      error: isOk ? null : (sendResult?.error || errorMsg || "Error enviando correo"),
+      intentos: intentosAnteriores + 1
     };
+
+    if (cuentaPublicId) {
+      try {
+        await pool.query(
+          `UPDATE cuenta_cobro
+           SET datos_adjuntos = jsonb_set(
+             datos_adjuntos,
+             '{firma,notificacion_proveedores}',
+             $1::jsonb,
+             true
+           )
+           WHERE public_id = $2`,
+          [JSON.stringify(newNotificacion), cuentaPublicId]
+        );
+      } catch (persistErr) {
+        // Riesgo crítico: el correo pudo haberse enviado pero el estado no quedó persistido.
+        // Loguear con contexto suficiente para reconciliar manualmente y evitar doble envío silencioso.
+        console.error("[notify-proveedores] FALLO_PERSISTENCIA_TRAS_ENVIO", {
+          cuenta_public_id: cuentaPublicId,
+          email_enviado: isOk,
+          intento: intentosAnteriores + 1,
+          destinatario: CLICKSIGN_SIGNED_NOTIFY_TO,
+          documento_url: documentoFirmado.url,
+          error_db: persistErr?.message || String(persistErr),
+          error_envio: newNotificacion.error || null
+        });
+        // No relanzamos: la transacción del caller no debe romperse por esto.
+        // El lock de 30 min en datos_adjuntos.estado='enviando' permitirá que el job
+        // de reintento detecte la fila y reescriba el estado real en el próximo ciclo.
+      }
+    }
+
+    return newNotificacion;
   } finally {
     if (notificationLockKey) providerNotificationInFlight.delete(notificationLockKey);
   }
@@ -13506,23 +13581,13 @@ async function jobReconciliarCuentasEnFirma() {
             extraFiles: uploadedExtras
           });
           try {
-            const notificacion = await notifyCuentaCobroFirmadaToProveedores({
+            await notifyCuentaCobroFirmadaToProveedores({
               cuenta,
               documentoFirmado,
               attachments,
               prevNotification: prevFirma.notificacion_proveedores || {},
               nowIso
             });
-            // Fix #3: persistir el resultado de la notificación
-            if (notificacion) {
-              await pool.query(
-                `UPDATE cuenta_cobro
-                 SET datos_adjuntos = jsonb_set(datos_adjuntos, '{firma,notificacion_proveedores}', $1::jsonb),
-                     updated_at = CURRENT_TIMESTAMP
-                 WHERE id = $2`,
-                [JSON.stringify(notificacion), cuenta.id]
-              );
-            }
           } catch (notifErr) {
             console.warn(`[reconciliar-job] Notificación fallida para ${cuenta.public_id}:`, notifErr?.message);
           }
@@ -13643,9 +13708,69 @@ async function jobReconciliarContratosEnFirma() {
   }
 }
 
+async function jobReintentarCorreosCuentasCobro() {
+  try {
+    const estadoAprobado = await getCuentaCobroEstadoAprobado();
+    const result = await pool.query(
+      `SELECT
+         cc.id,
+         cc.public_id,
+         cc.created_by,
+         cc.fecha_correspondiente,
+         cc.created_at,
+         cc.datos_adjuntos,
+         u.nombre_usuario,
+         u.email
+       FROM cuenta_cobro cc
+       LEFT JOIN usuarios u ON u.id = cc.created_by
+       WHERE cc.estado = $1
+         AND cc.datos_adjuntos->'firma'->'documento_firmado'->>'url' IS NOT NULL
+         AND COALESCE((cc.datos_adjuntos->'firma'->'notificacion_proveedores'->>'enviada')::boolean, false) = false
+         AND COALESCE((cc.datos_adjuntos->'firma'->'notificacion_proveedores'->>'intentos')::int, 0) < 5
+         AND (
+           COALESCE(cc.datos_adjuntos->'firma'->'notificacion_proveedores'->>'estado', '') != 'enviando'
+           OR (cc.datos_adjuntos->'firma'->'notificacion_proveedores'->>'ultimo_intento_en')::timestamp < NOW() - INTERVAL '30 minutes'
+         )
+       ORDER BY (cc.datos_adjuntos->'firma'->'notificacion_proveedores'->>'ultimo_intento_en')::timestamp ASC NULLS FIRST, cc.updated_at ASC
+       LIMIT 20`,
+      [estadoAprobado]
+    );
+
+    const cuentas = result.rows || [];
+    if (cuentas.length === 0) return;
+
+    console.log(`[reintentar-correos] Iniciando revisión. Encontradas ${cuentas.length} cuentas pendientes/con error de notificación.`);
+
+    for (const cuenta of cuentas) {
+      if (isShuttingDown) break;
+      const prevAdjuntos = cuenta.datos_adjuntos || {};
+      const prevFirma = prevAdjuntos.firma || {};
+      const documentoFirmado = prevFirma.documento_firmado;
+      if (!documentoFirmado || !documentoFirmado.url) continue;
+
+      const prevNotification = prevFirma.notificacion_proveedores || {};
+
+      try {
+        console.log(`[reintentar-correos] Reintentando notificación cuenta ${cuenta.public_id || cuenta.id}`);
+        await notifyCuentaCobroFirmadaToProveedores({
+          cuenta,
+          documentoFirmado,
+          attachments: [],
+          prevNotification
+        });
+      } catch (err) {
+        console.error(`[reintentar-correos] Error en cuenta ${cuenta.public_id}:`, err?.message || err);
+      }
+    }
+  } catch (err) {
+    console.error("[reintentar-correos] Error general en el job:", err?.message || err);
+  }
+}
+
 // Primer ciclo a los 2 min del arranque para no sobrecargar el inicio
 let reconciliarJobInterval = null;
 let reconciliarContratosJobInterval = null;
+let reintentarCorreosJobInterval = null;
 setTimeout(() => {
   if (isShuttingDown) return;
   void jobReconciliarCuentasEnFirma();
@@ -13656,6 +13781,11 @@ setTimeout(() => {
   void jobReconciliarContratosEnFirma();
   reconciliarContratosJobInterval = setInterval(() => { void jobReconciliarContratosEnFirma(); }, RECONCILIACION_CONTRATOS_INTERVAL_MS);
 }, 2 * 60 * 1000);
+setTimeout(() => {
+  if (isShuttingDown) return;
+  void jobReintentarCorreosCuentasCobro();
+  reintentarCorreosJobInterval = setInterval(() => { void jobReintentarCorreosCuentasCobro(); }, 15 * 60 * 1000);
+}, 3 * 60 * 1000);
 // ─────────────────────────────────────────────────────────────────────────────
 
 let isShuttingDown = false;
@@ -13664,6 +13794,7 @@ async function gracefulShutdown(signal) {
   isShuttingDown = true;
   if (reconciliarJobInterval) clearInterval(reconciliarJobInterval);
   if (reconciliarContratosJobInterval) clearInterval(reconciliarContratosJobInterval);
+  if (reintentarCorreosJobInterval) clearInterval(reintentarCorreosJobInterval);
   console.log(`[shutdown] Se?al recibida: ${signal}. Cerrando API...`);
 
   const forceExitTimeout = setTimeout(() => {

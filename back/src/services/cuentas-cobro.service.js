@@ -1171,7 +1171,9 @@ async function reconciliarFirmaCuenta(req, res) {
         nowIso,
         graphContext: getGraphContext(req)
       });
-      if (notificacion) {
+      // Evita pisar el estado fresco que notify() persistió: el UPDATE de abajo escribe
+      // datos_adjuntos completo, así que firma.notificacion_proveedores debe reflejar lo recién escrito.
+      if (notificacion && typeof notificacion === "object") {
         firma.notificacion_proveedores = notificacion;
       }
     }
@@ -1482,7 +1484,9 @@ async function adjuntarFirmaCuenta(req, res) {
         nowIso,
         graphContext: getGraphContext(req)
       });
-      if (notificacion) {
+      // Evita pisar el estado fresco que notify() persistió: el UPDATE de abajo escribe
+      // datos_adjuntos completo, así que firma.notificacion_proveedores debe reflejar lo recién escrito.
+      if (notificacion && typeof notificacion === "object") {
         firma.notificacion_proveedores = notificacion;
       }
     }

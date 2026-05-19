@@ -12,6 +12,7 @@ const {
   uploadAdjuntosCuenta,
   iniciarFirmaCuenta,
   reconciliarFirmaCuenta,
+  reiniciarFirmaCuenta,
   adjuntarFirmaCuenta
 } = require("../services/cuentas-cobro.service");
 
@@ -32,6 +33,7 @@ router.post("/:id/adjuntos", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos:
 
 router.post("/:id/firma/iniciar", requireAccess({ roles: ROLES_FIRMA_SOPORTES, tipos: ["Asociado"] }), iniciarFirmaCuenta);
 router.post("/:id/firma/reconciliar", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), reconciliarFirmaCuenta);
+router.post("/:id/firma/reiniciar", requireAccess({ roles: ["Talento Humano", "Coordinador"] }), reiniciarFirmaCuenta);
 router.post("/:id/firma/adjuntar", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), adjuntarFirmaCuenta);
 
 module.exports = router;

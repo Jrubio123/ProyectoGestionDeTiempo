@@ -1290,6 +1290,75 @@ async function reconciliarFirmaCuenta(req, res) {
   }
 }
 
+async function reiniciarFirmaCuenta(req, res) {
+  const { id } = req.params;
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `
+      SELECT id, public_id, datos_adjuntos
+      FROM cuenta_cobro
+      WHERE public_id = $1
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [id]
+    );
+
+    const cuenta = result.rows[0] || null;
+    if (!cuenta) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Cuenta no encontrada" });
+    }
+
+    const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object"
+      ? cuenta.datos_adjuntos
+      : {};
+    const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object"
+      ? prevAdjuntos.firma
+      : {};
+    const prevReseteos = Array.isArray(prevAdjuntos.firma_reseteos)
+      ? prevAdjuntos.firma_reseteos
+      : [];
+    const { firma: _firmaOmitida, ...adjuntosSinFirma } = prevAdjuntos;
+    const adjuntos = {
+      ...adjuntosSinFirma,
+      firma_reseteos: [
+        ...prevReseteos,
+        {
+          ...prevFirma,
+          reseteado_en: new Date().toISOString(),
+          motivo: "reinicio manual"
+        }
+      ]
+    };
+
+    await client.query(
+      `
+      UPDATE cuenta_cobro
+      SET datos_adjuntos = $1::jsonb,
+          estado = 'Pendiente'::tipo_estado_reporte,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      `,
+      [JSON.stringify(adjuntos), cuenta.id]
+    );
+    await client.query("COMMIT");
+
+    return res.json({ ok: true, cuenta_id: String(cuenta.public_id || "") });
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (_) { }
+    console.error("Error reiniciando firma de cuenta de cobro:", err);
+    return res.status(500).json({ error: "Error reiniciando firma de cuenta de cobro" });
+  } finally {
+    client.release();
+  }
+}
+
 async function adjuntarFirmaCuenta(req, res) {
   const {
     assertCuentaCobroOwnerAccess,
@@ -1482,4 +1551,4 @@ async function adjuntarFirmaCuenta(req, res) {
   }
 }
 
-module.exports = { previewCuentaCobro, crearCuentaCobro, getHistorialCuentas, getAprobadoresCuentas, getSoportesCuentas, getDetalleCuenta, getCuentaPdf, uploadAdjuntosCuenta, iniciarFirmaCuenta, reconciliarFirmaCuenta, adjuntarFirmaCuenta };
+module.exports = { previewCuentaCobro, crearCuentaCobro, getHistorialCuentas, getAprobadoresCuentas, getSoportesCuentas, getDetalleCuenta, getCuentaPdf, uploadAdjuntosCuenta, iniciarFirmaCuenta, reconciliarFirmaCuenta, reiniciarFirmaCuenta, adjuntarFirmaCuenta };

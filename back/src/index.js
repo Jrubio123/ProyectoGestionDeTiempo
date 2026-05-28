@@ -2001,6 +2001,9 @@ async function getPreregistroDetalleById(internalId) {
       pp.id_solicitud_rrhh,
       pp.factura_en_colombia,
       pp.tipo_persona,
+      pp.banco_id,
+      pp.tipo_cuenta,
+      pp.numero_cuenta,
       pp.razon_social,
       pp.nit_empresa,
       pp.representante_legal,
@@ -10014,6 +10017,7 @@ async function getContratoPersonaBaseRecord(db, {
       p.telefono_contacto_emergencia,
       p.parentesco,
       p.hijos,
+      p.personas_a_cargo,
       p.edades_hijos,
       p.visa_paises,
       p.acepta_tratamiento_datos,
@@ -10141,6 +10145,7 @@ function buildContratoPersonaFormData(baseRecord, personaContext, moduloRef = nu
     parentesco: toNullableTrimmedString(baseRecord?.parentesco) || "",
     telefono_contacto_emergencia: toNullableTrimmedString(baseRecord?.telefono_contacto_emergencia) || "",
     hijos: normalizeNonNegativeIntegerInput(baseRecord?.hijos) ?? 0,
+    personas_a_cargo: normalizeNonNegativeIntegerInput(baseRecord?.personas_a_cargo) ?? 0,
     edades_hijos: toNullableTrimmedString(baseRecord?.edades_hijos) || "",
     visa_paises: toNullableTrimmedString(baseRecord?.visa_paises) || "",
     acepta_tratamiento_datos: baseRecord?.acepta_tratamiento_datos === true
@@ -10149,6 +10154,7 @@ function buildContratoPersonaFormData(baseRecord, personaContext, moduloRef = nu
 
 function normalizeContratoPersonaFormPayload(body = {}) {
   const hijos = normalizeNonNegativeIntegerInput(body.hijos) ?? 0;
+  const personasACargo = normalizeNonNegativeIntegerInput(body.personas_a_cargo) ?? 0;
   const aceptaTratamiento = normalizeNullableBooleanInput(body.acepta_tratamiento_datos);
   return {
     nombre: toNullableTrimmedString(body.nombre),
@@ -10178,9 +10184,50 @@ function normalizeContratoPersonaFormPayload(body = {}) {
     parentesco: toNullableTrimmedString(body.parentesco),
     telefono_contacto_emergencia: toNullableTrimmedString(body.telefono_contacto_emergencia),
     hijos,
+    personas_a_cargo: personasACargo,
     edades_hijos: hijos && hijos > 0 ? toNullableTrimmedString(body.edades_hijos) : null,
     visa_paises: toNullableTrimmedString(body.visa_paises),
     acepta_tratamiento_datos: aceptaTratamiento
+  };
+}
+
+async function resolveTipoCuentaBancariaId(db, value) {
+  const raw = toNullableTrimmedString(value);
+  if (!raw) return null;
+
+  const id = await resolveInternalIdFromPublicIdOrId(db, ID_TABLES.tipoCuentaBancaria, raw);
+  if (id) return id;
+
+  const r = await db.query(
+    `SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) ORDER BY id LIMIT 1`,
+    [`${raw}%`]
+  );
+  return r.rows[0]?.id || null;
+}
+
+async function buildContratoPersonaSyncData(db, personaContext) {
+  const extra = parseJsonObject(personaContext?.solicitud?.datos_extra || personaContext?.datos_extra || {});
+  const bancoId = await resolveInternalIdFromPublicIdOrId(
+    db,
+    ID_TABLES.bancos,
+    extra.banco_id || personaContext?.preregistro?.banco_id || null
+  );
+  const tipoCuentaId = await resolveTipoCuentaBancariaId(
+    db,
+    extra.tipo_cuenta || personaContext?.preregistro?.tipo_cuenta || null
+  );
+
+  return {
+    bancoId,
+    tipoCuentaId,
+    numeroCuenta:
+      toNullableTrimmedString(extra.numero_cuenta) ||
+      toNullableTrimmedString(personaContext?.preregistro?.numero_cuenta),
+    modalidad:
+      toNullableTrimmedString(personaContext?.modalidad_contrato) ||
+      toNullableTrimmedString(personaContext?.solicitud?.modalidad_contrato) ||
+      toNullableTrimmedString(extra.modalidad_contrato) ||
+      toNullableTrimmedString(extra.modalidad)
   };
 }
 
@@ -10298,6 +10345,7 @@ app.post("/contratacion/datos-persona", requireTokenFirma, async (req, res) => {
     const moduloOtro =
       data.modulo_otro ||
       (!moduloRef?.id ? toNullableTrimmedString(personaContext?.modulo_nombre) : null);
+    const syncData = await buildContratoPersonaSyncData(client, personaContext);
     const personaValues = [
       data.numero_documento,
       tipoDocumentoRef.id,
@@ -10441,6 +10489,29 @@ app.post("/contratacion/datos-persona", requireTokenFirma, async (req, res) => {
     }
 
     const personaId = personaResult.rows[0]?.id || null;
+    if (personaId) {
+      await client.query(
+        `
+        UPDATE personas
+        SET banco_id           = COALESCE($1, banco_id),
+            tipo_cuenta_id     = COALESCE($2, tipo_cuenta_id),
+            numero_cuenta      = COALESCE($3, numero_cuenta),
+            modalidad          = COALESCE($4, modalidad),
+            personas_a_cargo   = $5,
+            updated_at         = NOW()
+        WHERE id = $6
+        `,
+        [
+          syncData.bancoId,
+          syncData.tipoCuentaId,
+          syncData.numeroCuenta,
+          syncData.modalidad,
+          data.personas_a_cargo,
+          personaId
+        ]
+      );
+    }
+
     if (usuarioId && personaId) {
       await client.query(
         `

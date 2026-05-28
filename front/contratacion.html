@@ -402,6 +402,10 @@
                                             <span class="text-xs font-semibold text-slate-500">Número de hijos</span>
                                             <input x-model.number="personaDatos.hijos" min="0" type="number" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
+                                        <label class="block">
+                                            <span class="text-xs font-semibold text-slate-500">Personas a cargo</span>
+                                            <input x-model.number="personaDatos.personas_a_cargo" min="0" type="number" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                        </label>
                                         <label class="block" x-show="requiereEdadesHijos">
                                             <span class="text-xs font-semibold text-slate-500">Edades de los hijos</span>
                                             <input x-model="personaDatos.edades_hijos" type="text" placeholder="Ej: 4; 9; 13" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">

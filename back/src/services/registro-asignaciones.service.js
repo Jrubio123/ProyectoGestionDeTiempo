@@ -507,8 +507,7 @@ async function crearRegistroAsignacion(req, res) {
             m.id_consultor,
             m.id_modulo,
             CASE 
-              WHEN m.id_tipo_asignacion IN (5, 6)
-                OR m.n_tipo LIKE '%mesa%'
+              WHEN m.n_tipo LIKE '%mesa%'
                 OR m.n_tipo LIKE '%service desk%'
                 OR m.n_tipo LIKE '%servicedesk%'
                 OR m.n_tipo LIKE '%fabrica%' THEN true

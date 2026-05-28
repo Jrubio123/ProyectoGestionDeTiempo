@@ -595,12 +595,8 @@ function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, hints = {},
   const hasMesaByTitle = isTipoAsignacionMesa(tituloNorm);
   const hasFabricaByTitle = isTipoAsignacionFabrica(tituloNorm);
 
-  const tipoAsignacionNumeric = Number(tipoAsignacionId || 0);
   if (hasFabricaByTitle && !hasMesaByTitle) return "fabrica";
   if (hasMesaByTitle && !hasFabricaByTitle) return "mesa";
-  // Compatibilidad con instalaciones que usan ids clásicos 5/6.
-  if (tipoAsignacionNumeric === 6) return "fabrica";
-  if (tipoAsignacionNumeric === 5) return "mesa";
   if (hasFabricaHints) return "fabrica";
   if (hasMesaHints) return "mesa";
   if (hasFabricaByTitle) return "fabrica";
@@ -11844,8 +11840,7 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
         )
         AND ra.estado IN ($3::tipo_estado_asignacion, $4::tipo_estado_asignacion)
         AND NOT (
-          COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
-          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mesa%'
+          LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mesa%'
           OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%service desk%'
           OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%servicedesk%'
           OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%fabrica%'
@@ -11975,8 +11970,7 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
       WHERE ra.consultor_responsable_id = $1
         AND ra.estado IN ($2::tipo_estado_asignacion, $3::tipo_estado_asignacion)
         AND (
-          COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
-          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mesa%'
+          LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mesa%'
           OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%service desk%'
           OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%servicedesk%'
           OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%fabrica%'

@@ -261,8 +261,7 @@ async function crearCuentaCobro(req, res) {
           WHERE ra.id_consultoria = con.id
             AND ra.id IN (SELECT id_registro_asignacion FROM c_upd_rep)
             AND NOT (
-              COALESCE(con.id_tipo_asignacion, 0) IN (5, 6)
-              OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mesa%'
+              LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%mesa%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%service desk%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%servicedesk%'
               OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%fabrica%'

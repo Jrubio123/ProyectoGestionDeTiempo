@@ -5,6 +5,46 @@ function getIndexHelpers() {
   return require("../index");
 }
 
+async function syncPersonaCorreoElectronico({ personaContext, correoPersonal, numeroDocumento, preregistroId }) {
+  const correo = String(correoPersonal || "").trim().toLowerCase();
+  if (!correo) return 0;
+
+  const personaId = Number(personaContext?.persona_id) || null;
+  const documento = String(personaContext?.numeroDocumento || numeroDocumento || "").trim() || null;
+  const preId = Number(personaContext?.preregistro_id || preregistroId) || null;
+
+  if (!personaId && !documento && !preId) return 0;
+
+  const result = await pool.query(
+    `
+    WITH target AS (
+      SELECT id
+      FROM personas
+      WHERE
+        ($2::int IS NOT NULL AND id = $2)
+        OR ($3::text IS NOT NULL AND NULLIF(BTRIM(numero_documento), '') = $3)
+        OR ($4::int IS NOT NULL AND preregistro_id = $4)
+      ORDER BY
+        CASE WHEN $2::int IS NOT NULL AND id = $2 THEN 0 ELSE 1 END,
+        CASE WHEN $4::int IS NOT NULL AND preregistro_id = $4 THEN 0 ELSE 1 END,
+        updated_at DESC NULLS LAST,
+        id DESC
+      LIMIT 1
+    )
+    UPDATE personas p
+       SET correo_electronico = $1,
+           updated_at = NOW()
+      FROM target
+     WHERE p.id = target.id
+       AND COALESCE(LOWER(NULLIF(BTRIM(p.correo_electronico), '')), '') <> LOWER($1)
+    RETURNING p.id
+    `,
+    [correo, personaId, documento, preId]
+  );
+
+  return result.rowCount;
+}
+
 /**
  * Obtiene la lista de tokens generados para procesos de firma de contratos
  */
@@ -227,6 +267,16 @@ async function generarTokenFirma(req, res) {
       return res.status(400).json({ error: "No se pudo resolver nombre_persona o correo_personal del proceso" });
     }
 
+    if (correoIngresado) {
+      await syncPersonaCorreoElectronico({
+        personaContext,
+        correoPersonal: correoIngresado,
+        numeroDocumento: numero_documento,
+        preregistroId: preId
+      });
+      if (personaContext) personaContext.correoPersonal = correoIngresado;
+    }
+
     // Expirar todos los tokens activos de la persona (por numero_documento)
     const numDocFinal = toNullableTrimmedString(personaContext?.numeroDocumento) || toNullableTrimmedString(numero_documento);
     if (numDocFinal) {
@@ -262,7 +312,7 @@ async function generarTokenFirma(req, res) {
     }
 
     const hasBaseContract = await hasContratoBaseFirmado({
-      correoPersonal: toNullableTrimmedString(personaContext?.correoPersonal) || correoFinal,
+      correoPersonal: correoFinal || toNullableTrimmedString(personaContext?.correoPersonal),
       numeroDocumento: personaContext?.numeroDocumento || null
     });
     const docsPlan = buildDocsFirmaPlan({

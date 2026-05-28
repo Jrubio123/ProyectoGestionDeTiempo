@@ -1,0 +1,145 @@
+<div x-data="tempCrearUsuariosApp()" x-init="init()" class="max-w-5xl mx-auto space-y-6 animate-fade-in-up">
+    <div class="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-100">
+        <h1 class="text-2xl md:text-3xl font-extrabold text-slate-800">Crear usuario temporal</h1>
+        <p class="text-sm text-slate-500 mt-1">Registro rapido mientras se implementa la vista oficial de usuarios.</p>
+    </div>
+
+    <form @submit.prevent="crearUsuario()" class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 md:p-6 space-y-5">
+        <div x-show="error" x-cloak class="p-3 rounded-xl bg-red-50 border border-red-100 text-red-700 text-sm font-semibold" x-text="error"></div>
+        <div x-show="ok" x-cloak class="p-3 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-700 text-sm font-semibold" x-text="ok"></div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="md:col-span-3">
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Buscar usuario en Microsoft 365</label>
+                <input x-model="usuarioSeleccionado"
+                       @input.debounce.500ms="buscarUsuariosTenant()"
+                       @change="cargarUsuarioSeleccionado()"
+                       list="tempTenantUsuariosList"
+                       type="text"
+                       class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500"
+                       placeholder="Escribe nombre o correo del tenant">
+                <datalist id="tempTenantUsuariosList">
+                    <template x-for="u in catalogos.tenantUsuarios" :key="u.azure_oid || u.email">
+                        <option :value="`${u.nombre_usuario || ''} - ${u.email || ''}`"></option>
+                    </template>
+                </datalist>
+            </div>
+
+            <div class="md:col-span-2">
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Nombre usuario *</label>
+                <input x-model="form.nombre_usuario" type="text" class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500" placeholder="Nombre completo">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Rol</label>
+                <select x-model="form.rol_usuario_id" class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500">
+                    <option value="">Sin rol</option>
+                    <template x-for="rol in catalogos.roles" :key="rol.id">
+                        <option :value="String(rol.id)" x-text="rol.titulo"></option>
+                    </template>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Email *</label>
+                <div class="flex gap-2">
+                    <input x-model="form.email"
+                           @input.debounce.500ms="buscarUsuariosTenant()"
+                           @blur="cargarDesdeEmailTenant()"
+                           list="tempTenantEmailsList"
+                           type="email"
+                           class="min-w-0 flex-1 px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500"
+                           placeholder="usuario@silverconsulting.com.co">
+                    <button type="button" @click="cargarDesdeEmailTenant()" :disabled="buscando || !form.email.trim()" class="px-4 py-3 bg-slate-800 text-white rounded-xl text-sm font-semibold hover:bg-slate-900 disabled:opacity-50">
+                        <span x-text="buscando ? 'Buscando...' : 'Buscar'"></span>
+                    </button>
+                </div>
+                <datalist id="tempTenantEmailsList">
+                    <template x-for="u in catalogos.tenantUsuarios" :key="`mail-${u.azure_oid || u.email}`">
+                        <option :value="u.email" x-text="u.nombre_usuario"></option>
+                    </template>
+                </datalist>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Documento</label>
+                <select x-model="form.tipo_documento_id" class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500">
+                    <option value="">Sin documento</option>
+                    <template x-for="doc in catalogos.documentos" :key="doc.id">
+                        <option :value="String(doc.id)" x-text="doc.titulo"></option>
+                    </template>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Cedula</label>
+                <input x-model="form.cedula" type="text" class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Telefono</label>
+                <input x-model="form.telefono" type="text" class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Ciudad</label>
+                <input x-model="form.ciudad" type="text" class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500">
+            </div>
+
+            <div class="md:col-span-2">
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Direccion</label>
+                <input x-model="form.direccion" type="text" class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Banco</label>
+                <select x-model="form.banco_id" class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500">
+                    <option value="">Sin banco</option>
+                    <template x-for="banco in catalogos.bancos" :key="banco.id">
+                        <option :value="String(banco.id)" x-text="banco.nombre"></option>
+                    </template>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Tipo cuenta</label>
+                <select x-model="form.tipo_cuenta_id" class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500">
+                    <option value="">Sin tipo cuenta</option>
+                    <template x-for="tipo in catalogos.tipoCuenta" :key="tipo.id">
+                        <option :value="String(tipo.id)" x-text="tipo.titulo"></option>
+                    </template>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Numero de cuenta</label>
+                <input x-model="form.nro_cuenta_bancaria" type="text" class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Tipo persona</label>
+                <select x-model="form.tipo_persona" class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500">
+                    <option value="">Sin tipo</option>
+                    <option value="Natural">Natural</option>
+                    <option value="Juridica">Jur&iacute;dica</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Tipo consultor</label>
+                <select x-model="form.tipo_consultor_enum" class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-blue-500">
+                    <option value="">Sin tipo</option>
+                    <option value="Principal">Principal</option>
+                    <option value="Asociado">Asociado</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row justify-end gap-3 pt-2">
+            <button type="button" @click="limpiar()" class="px-4 py-3 bg-white text-slate-700 border border-slate-200 rounded-xl text-sm font-semibold hover:bg-slate-50">Limpiar</button>
+            <button type="submit" :disabled="guardando || cargando" class="px-5 py-3 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 disabled:opacity-50">
+                <span x-text="guardando ? 'Guardando...' : (usuarioExiste ? 'Actualizar usuario' : 'Crear usuario')"></span>
+            </button>
+        </div>
+    </form>
+</div>

@@ -11762,7 +11762,7 @@ const authMiddleware = (req, res, next) => {
 
 app.use(authMiddleware);
 
-// Responsables activos: coordinadores y administradores
+// Responsables activos para consultorias
 app.get("/coordinadores", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   try {
     const result = await pool.query(`
@@ -11773,7 +11773,7 @@ app.get("/coordinadores", requireAccess({ roles: ["Administrador"] }), async (re
       FROM usuarios u
       LEFT JOIN roles r ON u.rol_usuario_id = r.id
       WHERE u.activo = true
-        AND LOWER(TRIM(r.titulo)) IN ('coordinador', 'administrador')
+        AND LOWER(TRIM(r.titulo)) IN ('coordinador', 'administrador', 'comercial')
       ORDER BY u.nombre_usuario ASC
     `);
     res.json(result.rows);

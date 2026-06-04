@@ -55,7 +55,7 @@ async function listConsultorias(req, res) {
   }
 }
 
-// Crear consultoría (solo Administrador asigna clientes a coordinadores)
+// Crear consultoría (solo Administrador asigna clientes a responsables)
 /**
  * Crea una nueva consultoría, asigna los responsables y envía una notificación por correo
  */
@@ -118,7 +118,7 @@ async function crearConsultoria(req, res) {
 
     const created = result.rows[0];
 
-    // Email al coordinador asignado
+    // Email al responsable asignado
     if (created.coordinador_email) {
       const portalUrl = buildPortalUrl("mis-asignaciones-coordinador");
       await sendEmailSafe({
@@ -133,7 +133,7 @@ async function crearConsultoria(req, res) {
           `Revisa en: ${portalUrl}\n`,
         html: buildEmailLayout({
           title: "Nueva consultoría asignada",
-          intro: `Hola <strong>${created.nombre_coordinador || "Coordinador"}</strong>, se creó una consultoría para que inicies gestión operativa.`,
+          intro: `Hola <strong>${created.nombre_coordinador || "Responsable"}</strong>, se creó una consultoría para que inicies gestión operativa.`,
           blocks: [
             { label: "Cliente", value: created.nombre_cliente },
             { label: "Tipo de asignación", value: created.tipo_asignacion || "N/A" },

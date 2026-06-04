@@ -8180,6 +8180,7 @@ function buildGestionConsultoresScopeCondition(actorParam) {
               AND sc.coordinador_solicitante_id = ${actorParam}::int
               AND COALESCE(sc.estado, '') <> 'Cancelado'
           )
+          OR u.created_by = ${actorParam}::text
         )`;
 }
 
@@ -8248,13 +8249,50 @@ app.get("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordina
 
 // POST /admin/consultores - crear persona y usuario consultor con acceso al sistema
 app.post("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial", "Talento Humano"] }), async (req, res) => {
-  const { nombre, apellidos, email, tipo_documento_id, numero_documento, azure_oid } = req.body || {};
+  const {
+    nombre,
+    apellidos,
+    email,
+    tipo_documento_id,
+    numero_documento,
+    azure_oid,
+    telefono,
+    ciudad,
+    direccion,
+    nro_cuenta_bancaria,
+    banco_id,
+    tipo_cuenta_id,
+    tipo_consultor,
+    id_consultor_principal,
+    consultor_principal_id,
+    moneda_cobro,
+    factura_en_colombia,
+    tipo_persona
+  } = req.body || {};
   const nombreVal = toNullableTrimmedString(nombre);
   const apellidosVal = toNullableTrimmedString(apellidos);
   const emailVal = toNullableTrimmedString(email)?.toLowerCase() || null;
   const documentoVal = toNullableTrimmedString(numero_documento);
   const tipoDocumentoVal = toNullableTrimmedString(tipo_documento_id);
   const azureOid = toNullableTrimmedString(azure_oid);
+  const telefonoVal = toNullableTrimmedString(telefono);
+  const ciudadVal = toNullableTrimmedString(ciudad);
+  const direccionVal = toNullableTrimmedString(direccion);
+  const numeroCuentaVal = toNullableTrimmedString(nro_cuenta_bancaria);
+  const tipoPersonaVal = toNullableTrimmedString(tipo_persona);
+  const tipoPersonaNormalizada = tipoPersonaVal ? normalizeTipoPersonaForUsuariosInput(tipoPersonaVal) : null;
+  const tipoConsultorVal = toNullableTrimmedString(tipo_consultor);
+  const tipoConsultorNormalizado = tipoConsultorVal ? normalizeTipoConsultorInput(tipoConsultorVal) : null;
+  const monedaNormalizada = (toNullableTrimmedString(moneda_cobro) || "COP").toUpperCase();
+  const principalInput = toNullableTrimmedString(id_consultor_principal ?? consultor_principal_id);
+  const facturaEnColombiaNormalizada =
+    factura_en_colombia === undefined || factura_en_colombia === null || factura_en_colombia === ""
+      ? null
+      : factura_en_colombia === true || factura_en_colombia === "true" || factura_en_colombia === 1 || factura_en_colombia === "1"
+        ? true
+        : factura_en_colombia === false || factura_en_colombia === "false" || factura_en_colombia === 0 || factura_en_colombia === "0"
+          ? false
+          : "__invalid__";
 
   if (!nombreVal || !apellidosVal || !emailVal || !tipoDocumentoVal || !documentoVal) {
     return res.status(400).json({ error: "Nombre, apellidos, email, tipo de documento y numero de documento son obligatorios" });
@@ -8265,12 +8303,54 @@ app.post("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordin
   if (!isValidEmailFormat(emailVal)) {
     return res.status(400).json({ error: "El email no tiene un formato valido" });
   }
+  if (tipoPersonaVal && !tipoPersonaNormalizada) {
+    return res.status(400).json({ error: "Tipo de persona invalido" });
+  }
+  if (tipoConsultorVal && !tipoConsultorNormalizado) {
+    return res.status(400).json({ error: "Tipo de consultor invalido" });
+  }
+  if (!["COP", "USD", "EUR"].includes(monedaNormalizada)) {
+    return res.status(400).json({ error: "Moneda no valida" });
+  }
+  if (facturaEnColombiaNormalizada === "__invalid__") {
+    return res.status(400).json({ error: "Factura en Colombia no valida" });
+  }
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
     const tipoDocumentoRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.documentoIdentidad, tipoDocumentoVal, "Tipo de documento");
+    const bancoRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.bancos, banco_id, "Banco");
+    const tipoCuentaRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.tipoCuentaBancaria, tipo_cuenta_id, "Tipo de cuenta");
+    const principalRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.usuarios, principalInput, "Consultor principal");
+    let nextTipoConsultor = tipoConsultorNormalizado;
+    const nextPrincipalId = principalRef.id || null;
+
+    if (nextPrincipalId && !nextTipoConsultor) nextTipoConsultor = "Asociado";
+    if (nextPrincipalId && nextTipoConsultor !== "Asociado") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Solo un consultor asociado puede tener consultor principal asignado" });
+    }
+    if (!nextPrincipalId && nextTipoConsultor === "Asociado") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Un consultor asociado debe tener consultor principal asignado" });
+    }
+    if (nextPrincipalId) {
+      const principalMeta = await client.query(
+        "SELECT tipo_consultor FROM usuarios WHERE id = $1 AND activo = true LIMIT 1",
+        [nextPrincipalId]
+      );
+      if (principalMeta.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "Consultor principal no valido" });
+      }
+      if (normalizeValue(principalMeta.rows[0]?.tipo_consultor) === "asociado") {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "Un consultor asociado no puede ser consultor principal" });
+      }
+    }
+
     const rolRes = await client.query(
       "SELECT id FROM roles WHERE LOWER(titulo) = LOWER($1) LIMIT 1",
       ["Consultor"]
@@ -8289,9 +8369,17 @@ app.post("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordin
         nombre,
         apellidos,
         correo_electronico,
+        tipo_persona,
+        factura_en_colombia,
+        numero_contacto,
+        direccion_residencia,
+        ciudad_residencia,
+        banco_id,
+        tipo_cuenta_id,
+        numero_cuenta,
         created_by
       )
-      VALUES ($1, $2, $3, $4, $5, $6)
+      VALUES ($1, $2, $3, $4, $5, $6::tipo_persona, $7, $8, $9, $10, $11, $12, $13, $14)
       RETURNING id, public_id, numero_documento, nombre, apellidos, estado, created_at
       `,
       [
@@ -8300,6 +8388,14 @@ app.post("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordin
         nombreVal,
         apellidosVal,
         emailVal,
+        tipoPersonaNormalizada,
+        facturaEnColombiaNormalizada,
+        telefonoVal,
+        direccionVal,
+        ciudadVal,
+        bancoRef.id,
+        tipoCuentaRef.id,
+        numeroCuentaVal,
         req.user?.id || null
       ]
     );
@@ -8315,12 +8411,23 @@ app.post("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordin
         activo,
         tipo_documento_id,
         cedula,
+        telefono,
+        direccion,
+        ciudad,
+        tipo_persona,
+        factura_en_colombia,
+        moneda_cobro,
+        nro_cuenta_bancaria,
+        banco_id,
+        tipo_cuenta_id,
+        tipo_consultor,
+        id_consultor_principal,
         persona_id,
         azure_oid,
         created_by
       )
-      VALUES ($1, $2, $3, true, $4, $5, $6, $7, $8)
-      RETURNING public_id AS id, nombre_usuario, email, activo, azure_oid
+      VALUES ($1, $2, $3, true, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11::tipo_moneda, $12, $13, $14, $15::tipo_consultor_enum, $16, $17, $18, $19)
+      RETURNING public_id AS id, nombre_usuario, email, activo, azure_oid, tipo_consultor, moneda_cobro
       `,
       [
         nombreUsuario,
@@ -8328,6 +8435,17 @@ app.post("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordin
         rolConsultorId,
         tipoDocumentoRef.id,
         documentoVal,
+        telefonoVal,
+        direccionVal,
+        ciudadVal,
+        tipoPersonaNormalizada,
+        facturaEnColombiaNormalizada,
+        monedaNormalizada,
+        numeroCuentaVal,
+        bancoRef.id,
+        tipoCuentaRef.id,
+        nextTipoConsultor,
+        nextPrincipalId,
         persona.id,
         azureOid,
         String(req.user?.id || "gestion_consultores")
@@ -8348,6 +8466,326 @@ app.post("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordin
     if (err?.status === 400) return res.status(400).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: "Error al crear consultor" });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /admin/consultores/existente - busca un consultor/persona ya registrado para precargar el formulario
+app.get("/admin/consultores/existente", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial", "Talento Humano"] }), async (req, res) => {
+  const email = toNullableTrimmedString(req.query?.email)?.toLowerCase() || null;
+  const numeroDocumento = toNullableTrimmedString(req.query?.numero_documento);
+  const azureOid = toNullableTrimmedString(req.query?.azure_oid);
+
+  if (!email && !numeroDocumento && !azureOid) {
+    return res.status(400).json({ error: "Debes enviar email, numero de documento o Azure OID" });
+  }
+
+  try {
+    const scoped = isGestionConsultoresScopedRole(req);
+    const result = await pool.query(`
+      SELECT
+        u.public_id                                             AS id,
+        u.nombre_usuario,
+        u.email,
+        u.azure_oid,
+        u.activo,
+        u.moneda_cobro,
+        u.tipo_consultor,
+        cp.public_id                                            AS id_consultor_principal,
+        p.nombre,
+        p.apellidos,
+        COALESCE(p.numero_documento, u.cedula)                  AS numero_documento,
+        COALESCE(di_p.public_id, di_u.public_id)                AS tipo_documento_id,
+        COALESCE(p.numero_contacto, u.telefono)                 AS telefono,
+        COALESCE(p.direccion_residencia, u.direccion)           AS direccion,
+        COALESCE(p.ciudad_residencia, u.ciudad)                 AS ciudad,
+        COALESCE(p.tipo_persona, u.tipo_persona)                AS tipo_persona,
+        COALESCE(p.factura_en_colombia, u.factura_en_colombia)  AS factura_en_colombia,
+        COALESCE(p.numero_cuenta, u.nro_cuenta_bancaria)        AS nro_cuenta_bancaria,
+        COALESCE(b_p.public_id, b_u.public_id)                  AS banco_id,
+        COALESCE(tc_p.public_id, tc_u.public_id)                AS tipo_cuenta_id,
+        ${buildGestionConsultoresVisibleExpression("$4", "$5")} AS gestion_consultores_visible
+      FROM usuarios u
+      LEFT JOIN personas p                ON p.id = u.persona_id
+      LEFT JOIN bancos b_p                ON b_p.id = p.banco_id
+      LEFT JOIN bancos b_u                ON b_u.id = u.banco_id
+      LEFT JOIN tipo_cuenta_bancaria tc_p ON tc_p.id = p.tipo_cuenta_id
+      LEFT JOIN tipo_cuenta_bancaria tc_u ON tc_u.id = u.tipo_cuenta_id
+      LEFT JOIN documento_identidad di_p  ON di_p.id = p.tipo_documento_id
+      LEFT JOIN documento_identidad di_u  ON di_u.id = u.tipo_documento_id
+      LEFT JOIN usuarios cp               ON cp.id = u.id_consultor_principal
+      WHERE (
+        ($1::text IS NOT NULL AND LOWER(u.email) = $1::text)
+        OR ($1::text IS NOT NULL AND LOWER(COALESCE(p.correo_electronico, '')) = $1::text)
+        OR ($2::text IS NOT NULL AND COALESCE(p.numero_documento, u.cedula) = $2::text)
+        OR ($3::text IS NOT NULL AND u.azure_oid = $3::text)
+      )
+      ORDER BY u.updated_at DESC NULLS LAST, u.id DESC
+      LIMIT 1
+    `, [email, numeroDocumento, azureOid, req.user?.id || null, scoped]);
+
+    if (result.rowCount === 0) return res.status(404).json({ error: "Consultor no encontrado" });
+    const row = result.rows[0];
+    if (scoped && !row.gestion_consultores_visible) {
+      return res.status(403).json({ error: "No autorizado para consultar este consultor" });
+    }
+
+    delete row.gestion_consultores_visible;
+    res.json(row);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al buscar consultor existente" });
+  }
+});
+
+// PUT /admin/consultores/:id - actualiza desde el modal de alta cuando el consultor ya existe
+app.put("/admin/consultores/:id", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial", "Talento Humano"] }), async (req, res) => {
+  const { id } = req.params;
+  const {
+    nombre,
+    apellidos,
+    email,
+    tipo_documento_id,
+    numero_documento,
+    azure_oid,
+    telefono,
+    ciudad,
+    direccion,
+    nro_cuenta_bancaria,
+    banco_id,
+    tipo_cuenta_id,
+    tipo_consultor,
+    id_consultor_principal,
+    consultor_principal_id,
+    moneda_cobro,
+    factura_en_colombia,
+    tipo_persona
+  } = req.body || {};
+
+  const nombreVal = toNullableTrimmedString(nombre);
+  const apellidosVal = toNullableTrimmedString(apellidos);
+  const emailVal = toNullableTrimmedString(email)?.toLowerCase() || null;
+  const documentoVal = toNullableTrimmedString(numero_documento);
+  const tipoDocumentoVal = toNullableTrimmedString(tipo_documento_id);
+  const azureOid = toNullableTrimmedString(azure_oid);
+  const telefonoVal = toNullableTrimmedString(telefono);
+  const ciudadVal = toNullableTrimmedString(ciudad);
+  const direccionVal = toNullableTrimmedString(direccion);
+  const numeroCuentaVal = toNullableTrimmedString(nro_cuenta_bancaria);
+  const tipoPersonaVal = toNullableTrimmedString(tipo_persona);
+  const tipoPersonaNormalizada = tipoPersonaVal ? normalizeTipoPersonaForUsuariosInput(tipoPersonaVal) : null;
+  const tipoConsultorVal = toNullableTrimmedString(tipo_consultor);
+  const tipoConsultorNormalizado = tipoConsultorVal ? normalizeTipoConsultorInput(tipoConsultorVal) : null;
+  const monedaNormalizada = (toNullableTrimmedString(moneda_cobro) || "COP").toUpperCase();
+  const principalInput = toNullableTrimmedString(id_consultor_principal ?? consultor_principal_id);
+  const facturaEnColombiaNormalizada =
+    factura_en_colombia === undefined || factura_en_colombia === null || factura_en_colombia === ""
+      ? null
+      : factura_en_colombia === true || factura_en_colombia === "true" || factura_en_colombia === 1 || factura_en_colombia === "1"
+        ? true
+        : factura_en_colombia === false || factura_en_colombia === "false" || factura_en_colombia === 0 || factura_en_colombia === "0"
+          ? false
+          : "__invalid__";
+
+  if (!nombreVal || !apellidosVal || !emailVal || !tipoDocumentoVal || !documentoVal) {
+    return res.status(400).json({ error: "Nombre, apellidos, email, tipo de documento y numero de documento son obligatorios" });
+  }
+  if (!isGuid(tipoDocumentoVal)) {
+    return res.status(400).json({ error: "Tipo de documento invalido" });
+  }
+  if (!isValidEmailFormat(emailVal)) {
+    return res.status(400).json({ error: "El email no tiene un formato valido" });
+  }
+  if (tipoPersonaVal && !tipoPersonaNormalizada) {
+    return res.status(400).json({ error: "Tipo de persona invalido" });
+  }
+  if (tipoConsultorVal && !tipoConsultorNormalizado) {
+    return res.status(400).json({ error: "Tipo de consultor invalido" });
+  }
+  if (!["COP", "USD", "EUR"].includes(monedaNormalizada)) {
+    return res.status(400).json({ error: "Moneda no valida" });
+  }
+  if (facturaEnColombiaNormalizada === "__invalid__") {
+    return res.status(400).json({ error: "Factura en Colombia no valida" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const scoped = isGestionConsultoresScopedRole(req);
+    const usuarioRes = await client.query(`
+      SELECT
+        u.id,
+        u.persona_id,
+        ${buildGestionConsultoresVisibleExpression("$2", "$3")} AS gestion_consultores_visible
+      FROM usuarios u
+      WHERE u.public_id = $1
+      LIMIT 1
+    `, [id, req.user?.id || null, scoped]);
+
+    if (usuarioRes.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Consultor no encontrado" });
+    }
+
+    const usuario = usuarioRes.rows[0];
+    if (scoped && !usuario.gestion_consultores_visible) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "No autorizado para actualizar este consultor" });
+    }
+
+    const tipoDocumentoRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.documentoIdentidad, tipoDocumentoVal, "Tipo de documento");
+    const bancoRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.bancos, banco_id, "Banco");
+    const tipoCuentaRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.tipoCuentaBancaria, tipo_cuenta_id, "Tipo de cuenta");
+    const principalRef = await resolvePersonaReferenceOrThrow(client, ID_TABLES.usuarios, principalInput, "Consultor principal");
+    let nextTipoConsultor = tipoConsultorNormalizado;
+    const nextPrincipalId = principalRef.id || null;
+
+    if (nextPrincipalId && Number(nextPrincipalId) === Number(usuario.id)) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Una persona no puede ser su propio consultor principal" });
+    }
+    if (nextPrincipalId && !nextTipoConsultor) nextTipoConsultor = "Asociado";
+    if (nextPrincipalId && nextTipoConsultor !== "Asociado") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Solo un consultor asociado puede tener consultor principal asignado" });
+    }
+    if (!nextPrincipalId && nextTipoConsultor === "Asociado") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Un consultor asociado debe tener consultor principal asignado" });
+    }
+    if (nextPrincipalId) {
+      const principalMeta = await client.query(
+        "SELECT tipo_consultor FROM usuarios WHERE id = $1 AND activo = true LIMIT 1",
+        [nextPrincipalId]
+      );
+      if (principalMeta.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "Consultor principal no valido" });
+      }
+      if (normalizeValue(principalMeta.rows[0]?.tipo_consultor) === "asociado") {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "Un consultor asociado no puede ser consultor principal" });
+      }
+    }
+
+    let personaId = usuario.persona_id;
+    if (!personaId) {
+      const personaRes = await client.query(`
+        INSERT INTO personas (
+          numero_documento, tipo_documento_id, nombre, apellidos, correo_electronico,
+          tipo_persona, factura_en_colombia, numero_contacto, direccion_residencia,
+          ciudad_residencia, banco_id, tipo_cuenta_id, numero_cuenta, created_by
+        )
+        VALUES ($1, $2, $3, $4, $5, $6::tipo_persona, $7, $8, $9, $10, $11, $12, $13, $14)
+        RETURNING id
+      `, [
+        documentoVal,
+        tipoDocumentoRef.id,
+        nombreVal,
+        apellidosVal,
+        emailVal,
+        tipoPersonaNormalizada,
+        facturaEnColombiaNormalizada,
+        telefonoVal,
+        direccionVal,
+        ciudadVal,
+        bancoRef.id,
+        tipoCuentaRef.id,
+        numeroCuentaVal,
+        req.user?.id || null
+      ]);
+      personaId = personaRes.rows[0].id;
+    } else {
+      await client.query(`
+        UPDATE personas SET
+          numero_documento       = $1,
+          tipo_documento_id      = $2,
+          nombre                 = $3,
+          apellidos              = $4,
+          correo_electronico     = $5,
+          tipo_persona           = $6::tipo_persona,
+          factura_en_colombia    = $7,
+          numero_contacto        = $8,
+          direccion_residencia   = $9,
+          ciudad_residencia      = $10,
+          banco_id               = $11,
+          tipo_cuenta_id         = $12,
+          numero_cuenta          = $13,
+          updated_at             = CURRENT_TIMESTAMP
+        WHERE id = $14
+      `, [
+        documentoVal,
+        tipoDocumentoRef.id,
+        nombreVal,
+        apellidosVal,
+        emailVal,
+        tipoPersonaNormalizada,
+        facturaEnColombiaNormalizada,
+        telefonoVal,
+        direccionVal,
+        ciudadVal,
+        bancoRef.id,
+        tipoCuentaRef.id,
+        numeroCuentaVal,
+        personaId
+      ]);
+    }
+
+    const nombreUsuario = `${nombreVal} ${apellidosVal}`.trim();
+    const updated = await client.query(`
+      UPDATE usuarios SET
+        nombre_usuario          = $1,
+        email                   = $2,
+        tipo_documento_id       = $3,
+        cedula                  = $4,
+        telefono                = $5,
+        direccion               = $6,
+        ciudad                  = $7,
+        tipo_persona            = $8::tipo_persona,
+        factura_en_colombia     = $9,
+        moneda_cobro            = $10::tipo_moneda,
+        nro_cuenta_bancaria     = $11,
+        banco_id                = $12,
+        tipo_cuenta_id          = $13,
+        tipo_consultor          = $14::tipo_consultor_enum,
+        id_consultor_principal  = $15,
+        persona_id              = $16,
+        azure_oid               = $17,
+        updated_at              = CURRENT_TIMESTAMP
+      WHERE id = $18
+      RETURNING public_id AS id, nombre_usuario, email, activo, azure_oid, tipo_consultor, moneda_cobro
+    `, [
+      nombreUsuario,
+      emailVal,
+      tipoDocumentoRef.id,
+      documentoVal,
+      telefonoVal,
+      direccionVal,
+      ciudadVal,
+      tipoPersonaNormalizada,
+      facturaEnColombiaNormalizada,
+      monedaNormalizada,
+      numeroCuentaVal,
+      bancoRef.id,
+      tipoCuentaRef.id,
+      nextTipoConsultor,
+      nextPrincipalId,
+      personaId,
+      azureOid,
+      usuario.id
+    ]);
+
+    await client.query("COMMIT");
+    res.json(updated.rows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => { });
+    if (err.code === "23505") return res.status(409).json({ error: "El numero de documento o email ya esta en uso" });
+    if (err?.status === 400) return res.status(400).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar consultor" });
   } finally {
     client.release();
   }
@@ -9112,6 +9550,22 @@ app.put("/admin/personas/:id/operativa", requireAccess({ roles: ["Administrador"
 
 // GET /admin/tipos-cuenta-bancaria — catálogo para formulario (admin + TH)
 app.get("/admin/tipos-cuenta-bancaria", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT public_id AS id, titulo
+      FROM tipo_cuenta_bancaria
+      WHERE activo = true
+      ORDER BY titulo ASC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener tipos de cuenta" });
+  }
+});
+
+// Tipos de cuenta activos
+app.get("/tipos-cuenta-bancaria", requireAuthenticated, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT public_id AS id, titulo
@@ -11308,20 +11762,18 @@ const authMiddleware = (req, res, next) => {
 
 app.use(authMiddleware);
 
-// Coordinadores activos
+// Responsables activos: coordinadores y administradores
 app.get("/coordinadores", requireAccess({ roles: ["Administrador"] }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT 
         u.public_id AS id,
-        u.nombre_usuario AS nombre
+        u.nombre_usuario AS nombre,
+        r.titulo AS rol
       FROM usuarios u
       LEFT JOIN roles r ON u.rol_usuario_id = r.id
       WHERE u.activo = true
-        AND (
-          r.titulo = 'Coordinador'
-          OR u.rol_usuario_id = (SELECT id FROM roles WHERE titulo = 'Coordinador' LIMIT 1)
-        )
+        AND LOWER(TRIM(r.titulo)) IN ('coordinador', 'administrador')
       ORDER BY u.nombre_usuario ASC
     `);
     res.json(result.rows);

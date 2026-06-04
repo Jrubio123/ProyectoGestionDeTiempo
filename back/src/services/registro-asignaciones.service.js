@@ -92,9 +92,16 @@ async function actualizarRegistroAsignacion(req, res) {
 
     const cteQuery = `
       WITH
-        c_asignacion AS (SELECT id, id_consultoria FROM registro_asignaciones WHERE public_id = $1),
+        c_asignacion AS (
+          SELECT id, id_consultoria, consultor_responsable_id, id_modulo, estado
+          FROM registro_asignaciones
+          WHERE public_id = $1
+        ),
         c_consultor AS (SELECT id FROM usuarios WHERE public_id = $2),
         c_modulo AS (SELECT id FROM modulo WHERE id = $3::int),
+        c_estados AS (
+          SELECT $17::tipo_estado_asignacion AS st_abierto, $18::tipo_estado_asignacion AS st_proceso
+        ),
         
         c_meta AS (
           SELECT
@@ -127,6 +134,31 @@ async function actualizarRegistroAsignacion(req, res) {
           FROM c_asignacion a
           JOIN consultorias con ON con.id = a.id_consultoria
           LEFT JOIN tipo_asignacion ta ON ta.id = con.id_tipo_asignacion
+        ),
+
+        c_dup AS (
+          SELECT ra.id
+          FROM registro_asignaciones ra
+          JOIN consultorias con_existente ON con_existente.id = ra.id_consultoria
+          JOIN c_asignacion a_actual ON ra.id <> a_actual.id
+          JOIN consultorias con_actual ON con_actual.id = a_actual.id_consultoria
+          WHERE ra.estado IN ((SELECT st_abierto FROM c_estados), (SELECT st_proceso FROM c_estados))
+            AND COALESCE($12::tipo_estado_asignacion, a_actual.estado) IN ((SELECT st_abierto FROM c_estados), (SELECT st_proceso FROM c_estados))
+            AND con_existente.activo = true
+            AND con_existente.id_tipo_asignacion = con_actual.id_tipo_asignacion
+            AND con_existente.coordinador_responsable_id = con_actual.coordinador_responsable_id
+            AND ra.consultor_responsable_id = COALESCE((SELECT id FROM c_consultor), a_actual.consultor_responsable_id)
+            AND ra.id_modulo = COALESCE((SELECT id FROM c_modulo), a_actual.id_modulo)
+            AND daterange(
+              COALESCE(ra.fecha_inicio, DATE '-infinity'),
+              COALESCE(ra.fecha_fin, DATE 'infinity'),
+              '[]'
+            ) && daterange(
+              COALESCE($7::date, DATE '-infinity'),
+              COALESCE($8::date, DATE 'infinity'),
+              '[]'
+            )
+          LIMIT 1
         ),
 
         c_tarifa AS (
@@ -204,6 +236,7 @@ async function actualizarRegistroAsignacion(req, res) {
             AND (NOT (SELECT es_modalidad_horas FROM c_valores) OR (SELECT tarifa_calculada FROM c_valores) > 0)
             AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM c_consultor))
             AND ($3::text IS NULL OR EXISTS (SELECT 1 FROM c_modulo))
+            AND NOT EXISTS (SELECT 1 FROM c_dup)
           RETURNING ra.*
         )
       
@@ -214,6 +247,7 @@ async function actualizarRegistroAsignacion(req, res) {
         (SELECT id FROM c_asignacion) AS diag_asignacion,
         (SELECT id FROM c_consultor) AS diag_consultor,
         (SELECT id FROM c_modulo) AS diag_modulo,
+        (SELECT id FROM c_dup) AS diag_dup,
         (SELECT es_t_c_fijo FROM c_calc) AS diag_es_tcf,
         (SELECT es_modalidad_horas FROM c_tarifa) AS diag_es_modalidad_horas,
         (SELECT tarifa_calculada FROM c_tarifa) AS diag_tarifa_calc
@@ -242,7 +276,9 @@ async function actualizarRegistroAsignacion(req, res) {
       esCostoTotalInput,                // $13
       observacion || null,              // $14
       totalPagarNum,                    // $15
-      horasAsignadasNum                 // $16
+      horasAsignadasNum,                // $16
+      estados.abierto,                  // $17
+      estados.proceso                   // $18
       ]);
       await client.query("COMMIT");
       txStarted = false;
@@ -261,6 +297,11 @@ async function actualizarRegistroAsignacion(req, res) {
       if (!row.diag_asignacion) return res.status(404).json({ error: "Asignación no encontrada" });
       if (consultor_responsable_id && !row.diag_consultor) return res.status(404).json({ error: "Consultor no encontrado" });
       if (id_modulo && !row.diag_modulo) return res.status(404).json({ error: "Módulo no encontrado" });
+      if (row.diag_dup) {
+        return res.status(400).json({
+          error: "Ya existe una asignación activa para este consultor, módulo, modalidad, período y coordinador."
+        });
+      }
 
       if (row.diag_es_modalidad_horas && !(Number(row.diag_tarifa_calc) > 0)) {
         return res.status(400).json({ error: ERROR_TARIFA_HORAS });
@@ -274,6 +315,7 @@ async function actualizarRegistroAsignacion(req, res) {
     delete row.diag_asignacion;
     delete row.diag_consultor;
     delete row.diag_modulo;
+    delete row.diag_dup;
     delete row.diag_es_tcf;
     delete row.diag_es_modalidad_horas;
     delete row.diag_tarifa_calc;
@@ -447,15 +489,18 @@ async function crearRegistroAsignacion(req, res) {
           SELECT $4::tipo_estado_asignacion AS st_abierto, $5::tipo_estado_asignacion AS st_proceso
         ),
         
-        -- Validar duplicidad activa en la misma consultoría, consultor y módulo.
-        -- Para asignaciones con fechas, solo bloquea si el rango se solapa.
+        -- Validar duplicidad activa por consultor, módulo, modalidad, período y coordinador.
         c_dup AS (
           SELECT ra.id
           FROM registro_asignaciones ra
-          JOIN c_consultoria con ON ra.id_consultoria = con.id
+          JOIN consultorias con_existente ON con_existente.id = ra.id_consultoria
+          JOIN c_consultoria con
+            ON con_existente.id_tipo_asignacion = con.id_tipo_asignacion
+           AND con_existente.coordinador_responsable_id = con.coordinador_responsable_id
           JOIN c_consultor uc ON ra.consultor_responsable_id = uc.id
           JOIN c_modulo m ON ra.id_modulo = m.id
           WHERE ra.estado IN ((SELECT st_abierto FROM c_estados), (SELECT st_proceso FROM c_estados))
+            AND con_existente.activo = true
             AND daterange(
               COALESCE(ra.fecha_inicio, DATE '-infinity'),
               COALESCE(ra.fecha_fin, DATE 'infinity'),
@@ -715,7 +760,7 @@ async function crearRegistroAsignacion(req, res) {
       if (!row.diag_modulo) return res.status(404).json({ error: "Módulo no encontrado" });
       if (row.diag_dup) {
         return res.status(400).json({
-          error: "Ya existe una asignación activa para este consultor y módulo en la consultoría seleccionada (mismo período)."
+          error: "Ya existe una asignación activa para este consultor, módulo, modalidad, período y coordinador."
         });
       }
 

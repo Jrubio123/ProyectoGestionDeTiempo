@@ -10,7 +10,9 @@ window.gestionConsultoresApp = function () {
         modalAddConsultorOpen: false,
         guardandoAdd: false,
         buscando: false,
+        buscandoExistente: false,
         addError: "",
+        consultorExistente: null,
         tenantUsuarios: [],
         usuarioSeleccionado: "",
         addForm: {
@@ -19,7 +21,18 @@ window.gestionConsultoresApp = function () {
             apellidos: "",
             email: "",
             tipo_documento_id: "",
-            numero_documento: ""
+            numero_documento: "",
+            telefono: "",
+            ciudad: "",
+            direccion: "",
+            nro_cuenta_bancaria: "",
+            banco_id: "",
+            tipo_cuenta_id: "",
+            tipo_consultor: "",
+            id_consultor_principal: "",
+            moneda_cobro: "COP",
+            factura_en_colombia: "",
+            tipo_persona: ""
         },
 
         personas: [],
@@ -75,7 +88,7 @@ window.gestionConsultoresApp = function () {
 
             await Promise.all([
                 this.cargarPersonas(),
-                this.puedeEditar ? this.cargarCatalogos() : this.puedeAgregar ? this.cargarTiposDocumento() : Promise.resolve()
+                this.puedeEditar ? this.cargarCatalogos() : this.puedeAgregar ? this.cargarCatalogosAgregar() : Promise.resolve()
             ]);
         },
 
@@ -103,9 +116,21 @@ window.gestionConsultoresApp = function () {
                 apellidos: "",
                 email: "",
                 tipo_documento_id: "",
-                numero_documento: ""
+                numero_documento: "",
+                telefono: "",
+                ciudad: "",
+                direccion: "",
+                nro_cuenta_bancaria: "",
+                banco_id: "",
+                tipo_cuenta_id: "",
+                tipo_consultor: "",
+                id_consultor_principal: "",
+                moneda_cobro: "COP",
+                factura_en_colombia: "",
+                tipo_persona: ""
             };
             this.usuarioSeleccionado = "";
+            this.consultorExistente = null;
             this.addError = "";
         },
 
@@ -142,7 +167,7 @@ window.gestionConsultoresApp = function () {
             await this.cargarUsuariosTenant(this.usuarioSeleccionado || this.addForm.email);
         },
 
-        aplicarUsuarioTenant(usuario) {
+        async aplicarUsuarioTenant(usuario) {
             if (!usuario) return;
             const nombreCompleto = String(usuario.nombre_usuario || "").trim();
             const partes = nombreCompleto.split(/\s+/).filter(Boolean);
@@ -155,6 +180,7 @@ window.gestionConsultoresApp = function () {
             this.addForm.apellidos = String(usuario.apellidos || "").trim() || apellidosFallback || this.addForm.apellidos;
             this.usuarioSeleccionado = `${usuario.nombre_usuario || ""} - ${usuario.email || ""}`;
             this.addError = "";
+            await this.buscarConsultorExistente();
         },
 
         async cargarUsuarioSeleccionado() {
@@ -172,7 +198,7 @@ window.gestionConsultoresApp = function () {
                 return;
             }
 
-            this.aplicarUsuarioTenant(usuario);
+            await this.aplicarUsuarioTenant(usuario);
         },
 
         async cargarDesdeEmailTenant() {
@@ -189,22 +215,110 @@ window.gestionConsultoresApp = function () {
                 );
             }
             if (usuario) {
-                this.aplicarUsuarioTenant(usuario);
+                await this.aplicarUsuarioTenant(usuario);
+            } else {
+                await this.buscarConsultorExistente();
             }
+        },
+
+        async buscarConsultorExistente() {
+            const params = {};
+            if (this.addForm.email) params.email = this.addForm.email;
+            if (this.addForm.numero_documento) params.numero_documento = this.addForm.numero_documento;
+            if (this.addForm.azure_oid) params.azure_oid = this.addForm.azure_oid;
+            if (!Object.keys(params).length) return;
+
+            this.buscandoExistente = true;
+            this.consultorExistente = null;
+            try {
+                const res = await axios.get(`${API}/admin/consultores/existente`, {
+                    ...this.getAuthConfig(),
+                    params
+                });
+                this.aplicarConsultorExistente(res.data);
+            } catch (err) {
+                if (err?.response?.status !== 404) {
+                    this.addError = err?.response?.data?.error || "Error al buscar informacion existente";
+                }
+                if (err?.response?.status === 404) this.consultorExistente = null;
+            } finally {
+                this.buscandoExistente = false;
+            }
+        },
+
+        aplicarConsultorExistente(data) {
+            if (!data?.id) return;
+            const nombreCompleto = String(data.nombre_usuario || "").trim();
+            const partes = nombreCompleto.split(/\s+/).filter(Boolean);
+            const nombreFallback = partes.shift() || "";
+            const apellidosFallback = partes.join(" ");
+
+            this.consultorExistente = data;
+            this.addForm.azure_oid = data.azure_oid || this.addForm.azure_oid;
+            this.addForm.nombre = data.nombre || nombreFallback || this.addForm.nombre;
+            this.addForm.apellidos = data.apellidos || apellidosFallback || this.addForm.apellidos;
+            this.addForm.email = data.email || this.addForm.email;
+            this.addForm.tipo_documento_id = data.tipo_documento_id || this.addForm.tipo_documento_id;
+            this.addForm.numero_documento = data.numero_documento || this.addForm.numero_documento;
+            this.addForm.telefono = data.telefono || "";
+            this.addForm.ciudad = data.ciudad || "";
+            this.addForm.direccion = data.direccion || "";
+            this.addForm.nro_cuenta_bancaria = data.nro_cuenta_bancaria || "";
+            this.addForm.banco_id = data.banco_id || "";
+            this.addForm.tipo_cuenta_id = data.tipo_cuenta_id || "";
+            this.addForm.tipo_consultor = data.tipo_consultor || "";
+            this.addForm.id_consultor_principal = data.id_consultor_principal || "";
+            this.addForm.moneda_cobro = data.moneda_cobro || "COP";
+            this.addForm.factura_en_colombia =
+                data.factura_en_colombia === true ? "true" :
+                data.factura_en_colombia === false ? "false" : "";
+            this.addForm.tipo_persona = this.valorTipoPersonaForm(data.tipo_persona);
+            this.addError = "";
         },
 
         async crearConsultor() {
             this.guardandoAdd = true;
             this.addError = "";
             try {
-                await axios.post(`${API}/admin/consultores`, { ...this.addForm }, this.getAuthConfig());
+                if (this.addForm.tipo_consultor === "Asociado" && !this.addForm.id_consultor_principal) {
+                    this.addError = "Un consultor asociado debe tener consultor principal";
+                    return;
+                }
+
+                if (this.consultorExistente?.id) {
+                    await axios.put(`${API}/admin/consultores/${this.consultorExistente.id}`, { ...this.addForm }, this.getAuthConfig());
+                } else {
+                    await axios.post(`${API}/admin/consultores`, { ...this.addForm }, this.getAuthConfig());
+                }
+
                 this.modalAddConsultorOpen = false;
-                alert("Consultor creado correctamente");
+                alert(this.consultorExistente?.id ? "Consultor actualizado correctamente" : "Consultor creado correctamente");
                 await this.cargarPersonas();
             } catch (err) {
-                this.addError = err?.response?.data?.error || "Error al crear consultor";
+                this.addError = err?.response?.data?.error || "Error al guardar consultor";
             } finally {
                 this.guardandoAdd = false;
+            }
+        },
+
+        async cargarCatalogosAgregar() {
+            try {
+                const [resBancos, resTiposCuenta, resDocs, resPrincipales] = await Promise.all([
+                    axios.get(`${API}/bancos`, this.getAuthConfig()),
+                    axios.get(`${API}/tipos-cuenta-bancaria`, this.getAuthConfig()),
+                    axios.get(`${API}/documentos-identidad`, this.getAuthConfig()),
+                    axios.get(`${API}/consultores/principales`, this.getAuthConfig())
+                ]);
+
+                this.cat.bancos = resBancos.data || [];
+                this.cat.tiposCuenta = resTiposCuenta.data || [];
+                this.cat.tiposDocumento = resDocs.data || [];
+                this.cat.principales = resPrincipales.data || [];
+            } catch (e) {
+                this.cat.bancos = [];
+                this.cat.tiposCuenta = [];
+                this.cat.tiposDocumento = [];
+                this.cat.principales = [];
             }
         },
 
@@ -309,7 +423,7 @@ window.gestionConsultoresApp = function () {
                     telefono: this.ficha?.telefono || "",
                     direccion: this.ficha?.direccion || "",
                     ciudad: this.ficha?.ciudad || "",
-                    tipo_persona: this.ficha?.tipo_persona || ""
+                    tipo_persona: this.valorTipoPersonaForm(this.ficha?.tipo_persona)
                 };
                 return;
             }
@@ -393,6 +507,15 @@ window.gestionConsultoresApp = function () {
                 "Talento Humano": "bg-rose-500"
             };
             return mapa[rol] || "bg-slate-400";
+        },
+
+        valorTipoPersonaForm(value) {
+            const raw = String(value || "").toLowerCase().trim();
+            const normalized = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            if (!raw) return "";
+            if (raw === "natural") return "Natural";
+            if (normalized === "juridica") return "Juridica";
+            return value;
         },
 
         formatFechaHora(ts) {

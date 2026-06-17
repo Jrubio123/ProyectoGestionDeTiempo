@@ -4503,15 +4503,15 @@ async function convertDocxBufferToPdfBuffer(docxBuffer, fileBaseName) {
 }
 
 function buildContratistaComparecencia(personaContext) {
-  const nombre = personaContext?.nombreCompleto || "";
+  const nombre = String(personaContext?.nombreCompleto || "").toUpperCase();
   const tipoDoc = personaContext?.tipoDocumento || "";
   const numDoc = personaContext?.numeroDocumento || "";
   const tipoPersona = personaContext?.tipoPersona || "Natural";
 
   if (tipoPersona === "Jurídica" || tipoPersona === "Juridica") {
-    const razonSocial = personaContext?.razonSocial || nombre;
+    const razonSocial = String(personaContext?.razonSocial || nombre).toUpperCase();
     const nitEmpresa = personaContext?.nitEmpresa || "";
-    const repLegal = personaContext?.representanteLegalContratista || nombre;
+    const repLegal = String(personaContext?.representanteLegalContratista || nombre).toUpperCase();
     const tipoDocRep = personaContext?.tipoDocumentoRepresentante || tipoDoc;
     const numDocRep = personaContext?.numeroDocumentoRepresentante || numDoc;
     const nitPart = nitEmpresa ? `, persona jurídica identificada con NIT ${nitEmpresa}` : "";
@@ -4525,9 +4525,10 @@ function buildContratistaComparecencia(personaContext) {
 function buildContratistaFirmaPayload(personaContext) {
   const tipoPersona = personaContext?.tipoPersona || "Natural";
   const isJuridica = tipoPersona === "Jurídica" || tipoPersona === "Juridica";
-  const nombre = isJuridica
+  const nombreBase = isJuridica
     ? (personaContext?.representanteLegalContratista || personaContext?.nombreCompleto || "")
     : (personaContext?.nombreCompleto || "");
+  const nombre = String(nombreBase).toUpperCase();
   const tipoDoc = isJuridica
     ? (personaContext?.tipoDocumentoRepresentante || personaContext?.tipoDocumento || "")
     : (personaContext?.tipoDocumento || "");
@@ -4595,9 +4596,10 @@ function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correo
 
   const empresa = resolveEmpresaContratoConfig(personaContext?.facturaEnColombia ?? null);
   const contratistaFirma = buildContratistaFirmaPayload(personaContext);
+  const nombreCompleto = String(personaContext?.nombreCompleto || proceso?.nombre_persona || "").toUpperCase();
 
   return {
-    NombreCompleto: personaContext?.nombreCompleto || proceso?.nombre_persona || "",
+    NombreCompleto: nombreCompleto,
     TipoDocumento: personaContext?.tipoDocumento || "",
     NumeroDocumento: personaContext?.numeroDocumento || "",
     Telefono: personaContext?.telefono || "",
@@ -4652,50 +4654,87 @@ async function generateContratoPdfFromTemplate({ docDefinition, personaContext, 
 
 async function generateAnexoIndividualPdfFromItems({ userRow, items, correoFirmante, facturaEnColombia = null }) {
   const facturaContext = normalizeNullableBooleanInput(facturaEnColombia ?? userRow?.factura_en_colombia);
-  const docDefinition = getContratoDocDefinition("anexo_tecnico", facturaContext);
-  if (!docDefinition) {
-    throw new Error("No se encontro la configuracion del anexo tecnico");
-  }
-
-  const personaContext = {
-    nombreCompleto: userRow?.nombre_usuario || "",
-    tipoDocumento: userRow?.tipo_documento_codigo || userRow?.tipo_documento_titulo || "",
-    numeroDocumento: userRow?.cedula || "",
-    telefono: userRow?.telefono || "",
-    correoPersonal: correoFirmante || userRow?.email || "",
-    ciudad: userRow?.ciudad || CONTRATOS_CIUDAD_SILVER,
-    direccion: userRow?.direccion || "",
-    facturaEnColombia: facturaContext
-  };
-  const payload = buildContratoBaseTemplatePayload({
-    personaContext,
-    proceso: {
-      nombre_persona: userRow?.nombre_usuario || "",
-      correo_personal: correoFirmante || userRow?.email || ""
-    },
-    correoOverride: correoFirmante || userRow?.email || ""
-  });
-  payload.items = (items || []).map(buildAnexoItemForTemplateRow);
-
+  const empresa = resolveEmpresaContratoConfig(facturaContext);
+  const nombreContratista = String(userRow?.nombre_usuario || "").toUpperCase();
+  const tipoDocumento = userRow?.tipo_documento_codigo || userRow?.tipo_documento_titulo || "";
+  const numeroDocumento = userRow?.cedula || "";
+  const correo = correoFirmante || userRow?.email || "";
+  const direccion = userRow?.direccion || "";
+  const ciudad = userRow?.ciudad || CONTRATOS_CIUDAD_SILVER;
   const personaSlug = sanitizePathSegment(
     String(userRow?.nombre_usuario || "Persona").replace(/\s+/g, "_"),
     "Persona"
   );
-  const fileBaseName = `${personaSlug}_anexo_individual_${Date.now()}`;
-  const docxBuffer = renderDocxTemplateToBuffer({
-    templateFile: docDefinition.template_file,
-    data: payload
+  const fecha = new Date().toISOString().slice(0, 10);
+  const pdfBuffer = await new Promise((resolve, reject) => {
+    const chunks = [];
+    const doc = new PDFDocument({ margin: 40 });
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    const PW = pageWidth(doc);
+    const ML = MARGIN.left;
+    const PW_TOTAL = doc.page.width;
+    const headerH = 76;
+
+    fillRect(doc, 0, 0, PW_TOTAL, headerH, COLOR.azulMedio);
+    doc.fontSize(15).font("Helvetica-Bold").fillColor(COLOR.blanco)
+      .text("ANEXO TÉCNICO INDIVIDUAL", ML, 18, { width: PW / 2, lineBreak: false });
+    doc.fontSize(8).font("Helvetica").fillColor(COLOR.blanco)
+      .text("IDENTIFICACIÓN DE LAS PARTES", ML, 38, { width: PW / 2, lineBreak: false });
+    doc.fontSize(8).font("Helvetica").fillColor(COLOR.blanco)
+      .text(fmtFecha(fecha), ML + PW / 2, 26, { width: PW / 2, align: "right", lineBreak: false });
+    fillRect(doc, 0, headerH, PW_TOTAL, 4, COLOR.naranjaSilver);
+
+    let curY = headerH + 22;
+    curY = sectionTitle(doc, "IDENTIFICACIÓN DE LAS PARTES", curY);
+
+    const cardPad = 12;
+    const rowH = 17;
+    const labelW = 126;
+    const valueW = PW - (cardPad * 2) - labelW;
+
+    doc.save()
+      .roundedRect(ML, curY, PW, 126, 5)
+      .strokeColor(COLOR.grisLinea).lineWidth(0.8).stroke()
+      .restore();
+    doc.fontSize(9).font("Helvetica-Bold").fillColor(COLOR.azulOscuro)
+      .text("EMPRESA CONTRATANTE", ML + cardPad, curY + 11, { width: PW - (cardPad * 2), lineBreak: false });
+
+    let ry = curY + 32;
+    infoRow(doc, ML + cardPad, ry, "Razón social:", empresa.razonSocial, labelW, valueW); ry += rowH;
+    infoRow(doc, ML + cardPad, ry, "NIT:", empresa.nit, labelW, valueW); ry += rowH;
+    infoRow(doc, ML + cardPad, ry, "Representante legal:", empresa.representanteLegal, labelW, valueW); ry += rowH;
+    infoRow(doc, ML + cardPad, ry, "Cédula representante:", empresa.cedulaRepresentante, labelW, valueW); ry += rowH;
+    infoRow(doc, ML + cardPad, ry, "Domicilio:", empresa.domicilio, labelW, valueW); ry += rowH;
+    infoRow(doc, ML + cardPad, ry, "Ciudad:", empresa.ciudad, labelW, valueW);
+
+    curY += 142;
+    doc.save()
+      .roundedRect(ML, curY, PW, 112, 5)
+      .strokeColor(COLOR.grisLinea).lineWidth(0.8).stroke()
+      .restore();
+    doc.fontSize(9).font("Helvetica-Bold").fillColor(COLOR.azulOscuro)
+      .text("EL CONTRATISTA", ML + cardPad, curY + 11, { width: PW - (cardPad * 2), lineBreak: false });
+
+    ry = curY + 32;
+    infoRow(doc, ML + cardPad, ry, "Nombre completo:", nombreContratista, labelW, valueW); ry += rowH;
+    infoRow(doc, ML + cardPad, ry, "Documento:", [tipoDocumento, numeroDocumento].filter(Boolean).join(" "), labelW, valueW); ry += rowH;
+    infoRow(doc, ML + cardPad, ry, "Correo:", correo, labelW, valueW); ry += rowH;
+    infoRow(doc, ML + cardPad, ry, "Domicilio/Dirección:", direccion, labelW, valueW); ry += rowH;
+    infoRow(doc, ML + cardPad, ry, "Ciudad:", ciudad, labelW, valueW);
+
+    doc.end();
   });
-  const pdfBuffer = await convertDocxBufferToPdfBuffer(docxBuffer, fileBaseName);
   const fileName = sanitizePdfFileName(
-    `AnexoTecnico_${personaSlug}_${new Date().toISOString().slice(0, 10)}.pdf`,
+    `AnexoTecnico_${personaSlug}_${fecha}.pdf`,
     "AnexoTecnico.pdf"
   );
 
   return {
     pdfBuffer,
-    fileName,
-    docDefinition
+    fileName
   };
 }
 
@@ -5836,23 +5875,58 @@ async function resolveSignedPdfFromSource(source, preferredName = "CuentaCobroFi
   return null;
 }
 
+function buildClickSignApiRequestId(prefix) {
+  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+}
+
 function buildClickSignLookupRequests({ requestId = "", contractId = "", signatureId = "" } = {}) {
   const requests = [];
+  const requestIdValue = String(requestId || "").trim();
+  const contractIdValue = String(contractId || "").trim();
   const sidRaw = String(signatureId || "").trim();
   const sid = /^\d+$/.test(sidRaw) ? sidRaw : "";
-  const buildApiRequestId = (prefix) => `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
 
   if (sid) {
     requests.push(
       {
         method: "POST",
         path: "get_signature_status",
-        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("signature-status"), user: CLICKSIGN_USER, signature_id: sid }
+        body: { request: "GET_SIGNATURE_STATUS", request_id: buildClickSignApiRequestId("signature-status"), user: CLICKSIGN_USER, signature_id: sid }
       },
       {
         method: "POST",
         path: "get_signature_status",
-        body: { request: "GET_SIGNATURE_STATUS", request_id: buildApiRequestId("signature-status"), user: CLICKSIGN_USER, signature: { signature_id: sid } }
+        body: { request: "GET_SIGNATURE_STATUS", request_id: buildClickSignApiRequestId("signature-status"), user: CLICKSIGN_USER, signature: { signature_id: sid } }
+      }
+    );
+  }
+
+  if (contractIdValue) {
+    requests.push(
+      {
+        method: "POST",
+        path: "get_signature",
+        body: { request: "GET_SIGNATURE", request_id: buildClickSignApiRequestId("signature"), user: CLICKSIGN_USER, signature: { contract_id: contractIdValue } }
+      },
+      {
+        method: "POST",
+        path: "get_signature",
+        body: { request: "GET_SIGNATURE", request_id: buildClickSignApiRequestId("signature-cid"), user: CLICKSIGN_USER, contract_id: contractIdValue }
+      }
+    );
+  }
+
+  if (requestIdValue) {
+    requests.push(
+      {
+        method: "POST",
+        path: "get_signature",
+        body: { request: "GET_SIGNATURE", request_id: buildClickSignApiRequestId("signature"), user: CLICKSIGN_USER, signature: { request_id: requestIdValue } }
+      },
+      {
+        method: "POST",
+        path: "get_signature",
+        body: { request: "GET_SIGNATURE", request_id: buildClickSignApiRequestId("signature-rid"), user: CLICKSIGN_USER, request_id_search: requestIdValue }
       }
     );
   }
@@ -6301,6 +6375,176 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
   };
 }
 
+function collectCuentaFirmaCandidates(adjuntos = {}) {
+  const source = adjuntos && typeof adjuntos === "object" ? adjuntos : {};
+  const candidates = [];
+  const seen = new Set();
+
+  const pushCandidate = (firma, origen) => {
+    if (!firma || typeof firma !== "object") return;
+    const candidate = {
+      request_id: String(firma.request_id || "").trim(),
+      contract_id: String(firma.contract_id || "").trim(),
+      signature_id: String(firma.signature_id || "").trim(),
+      origen
+    };
+    if (!candidate.request_id && !candidate.contract_id && !candidate.signature_id) return;
+    const key = [
+      candidate.request_id.toLowerCase(),
+      candidate.contract_id.toLowerCase(),
+      candidate.signature_id
+    ].join("|");
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(candidate);
+  };
+
+  pushCandidate(source.firma, "firma");
+  const reseteos = Array.isArray(source.firma_reseteos) ? source.firma_reseteos : [];
+  reseteos.forEach((firma, index) => pushCandidate(firma, `firma_reseteos[${index}]`));
+
+  return candidates;
+}
+
+function buildCuentaFirmaDiagnostico({
+  candidate = {},
+  rawStatus = "",
+  normalizedStatus = "",
+  catalogSource = "",
+  reason = "pending",
+  nowIso = new Date().toISOString()
+} = {}) {
+  return {
+    ultimo_check_en: nowIso,
+    request_id: candidate.request_id || null,
+    contract_id: candidate.contract_id || null,
+    signature_id: candidate.signature_id || null,
+    rawStatus: rawStatus || null,
+    normalizedStatus: normalizedStatus || null,
+    catalogSource: catalogSource || null,
+    reason: reason || "pending"
+  };
+}
+
+function pickCuentaFirmaPrimaryDiagnostico(diagnostics = []) {
+  if (!Array.isArray(diagnostics) || diagnostics.length === 0) {
+    return buildCuentaFirmaDiagnostico({ reason: "sin_identificadores" });
+  }
+  return diagnostics.find((item) => item?.origen === "firma") || diagnostics[0];
+}
+
+async function resolveCuentaFirmaFirmadaAcrossAttempts({ cuenta, prevAdjuntos } = {}) {
+  const publicId = String(cuenta?.public_id || cuenta?.id || "");
+  const candidates = collectCuentaFirmaCandidates(prevAdjuntos);
+  const diagnostics = [];
+  const nowIso = new Date().toISOString();
+
+  if (candidates.length === 0) {
+    const diagnostico = buildCuentaFirmaDiagnostico({ reason: "sin_identificadores", nowIso });
+    return {
+      signed: false,
+      diagnostics: [diagnostico],
+      diagnostico,
+      rawStatus: "",
+      normalizedStatus: "",
+      reason: "sin_identificadores"
+    };
+  }
+
+  for (const candidate of candidates) {
+    const requestId = candidate.request_id || "";
+    const contractId = candidate.contract_id || "";
+    const signatureId = candidate.signature_id || "";
+    try {
+      const snapshot = await fetchClickSignSignatureSnapshot({ requestId, contractId, signatureId });
+      const event = snapshot?.event && typeof snapshot.event === "object" ? snapshot.event : {};
+      const resolvedSignatureId = String(
+        snapshot?.signatureId ||
+        extractClickSignSignatureId(event) ||
+        signatureId ||
+        ""
+      ).trim();
+      const rawStatus = String(snapshot?.rawStatus || snapshot?.status || "pending").trim();
+      const normalizedStatus = snapshot?.status || normalizeClickSignStatus(rawStatus) || "pending";
+      const artifacts = await resolveClickSignArtifacts({
+        event,
+        requestId,
+        contractId,
+        publicId,
+        signatureId: resolvedSignatureId || signatureId,
+        allowCatalogFallback: true
+      });
+      const catalogSource = artifacts?.catalogSource || snapshot?.source || "";
+      const resolvedPdf = artifacts?.signedPdf || null;
+
+      if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
+        return {
+          signed: true,
+          signedPdf: resolvedPdf,
+          extraFiles: artifacts?.extraFiles || [],
+          signatureId: resolvedSignatureId || signatureId || null,
+          requestId: requestId || null,
+          contractId: contractId || null,
+          catalogSource: catalogSource || null,
+          source: candidate.origen,
+          rawStatus: rawStatus || "signed",
+          normalizedStatus: "signed",
+          catalogEntries: artifacts?.catalogEntries || [],
+          diagnostics
+        };
+      }
+
+      let reason = "pending";
+      if (normalizedStatus === "signed") {
+        reason = artifacts?.catalogEntries?.length ? "firmado_sin_pdf" : "pdf_no_encontrado";
+      } else if (normalizedStatus === "rejected") {
+        reason = "rechazado";
+      } else if (artifacts?.catalogEntries?.length) {
+        reason = "pdf_no_encontrado";
+      }
+
+      diagnostics.push({
+        ...buildCuentaFirmaDiagnostico({
+          candidate: {
+            ...candidate,
+            signature_id: resolvedSignatureId || signatureId
+          },
+          rawStatus,
+          normalizedStatus,
+          catalogSource,
+          reason,
+          nowIso
+        }),
+        origen: candidate.origen
+      });
+    } catch (err) {
+      const statusCode = Number(err?.status || err?.response?.status || 0);
+      diagnostics.push({
+        ...buildCuentaFirmaDiagnostico({
+          candidate,
+          rawStatus: err?.message || "error",
+          normalizedStatus: "",
+          catalogSource: "",
+          reason: statusCode === 408 ? "timeout" : "error",
+          nowIso
+        }),
+        origen: candidate.origen
+      });
+    }
+  }
+
+  const diagnostico = pickCuentaFirmaPrimaryDiagnostico(diagnostics);
+  return {
+    signed: false,
+    diagnostics,
+    diagnostico,
+    rawStatus: diagnostico.rawStatus || "",
+    normalizedStatus: diagnostico.normalizedStatus || "",
+    catalogSource: diagnostico.catalogSource || "",
+    reason: diagnostico.reason || "pending"
+  };
+}
+
 async function uploadClickSignExtraFilesToOneDrive(cuenta, extraFiles = [], targetPathHint = "") {
   if (!ONEDRIVE_ENABLED || !Array.isArray(extraFiles) || extraFiles.length === 0) return { uploaded: [], carpeta: targetPathHint || "" };
 
@@ -6543,6 +6787,38 @@ function extractClickSignDocumentStatus(source) {
   return { rawStatus, status: normalized || "" };
 }
 
+function collectClickSignSignatoryStatuses(source) {
+  const candidates = [
+    getByPath(source, "signature.signatories"),
+    getByPath(source, "data.signature.signatories"),
+    getByPath(source, "data.signatories"),
+    getByPath(source, "result.signature.signatories"),
+    getByPath(source, "result.signatories"),
+    getByPath(source, "signatories")
+  ];
+  const statuses = [];
+  for (const value of candidates) {
+    if (!Array.isArray(value)) continue;
+    for (const item of value) {
+      const status = pickStringByPaths(item, [
+        "status",
+        "signature_status",
+        "document_status",
+        "event.status",
+        "event.name",
+        "event.type"
+      ]);
+      if (status) statuses.push(status);
+    }
+  }
+  return statuses;
+}
+
+function hasClickSignSignedSignatory(source) {
+  return collectClickSignSignatoryStatuses(source)
+    .some((status) => normalizeClickSignStatus(status) === "signed");
+}
+
 async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = "", signatureId = "" } = {}) {
   const lookupRequests = buildClickSignLookupRequests({ requestId, contractId, signatureId });
   const statusPaths = [
@@ -6577,6 +6853,7 @@ async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = ""
       });
       const event = response?.data && typeof response.data === "object" ? response.data : {};
       lastEvent = event;
+      const resolvedSignatureId = String(extractClickSignSignatureId(event) || "").trim();
 
       const signedCandidate = extractSignedPdfCandidate(event);
       if (signedCandidate?.url || signedCandidate?.base64) {
@@ -6584,18 +6861,29 @@ async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = ""
           event,
           rawStatus: "signed",
           status: "signed",
+          signatureId: resolvedSignatureId || String(signatureId || "").trim() || null,
           source: `lookup:${lookup.path}`
         };
       }
 
       const rawStatus = pickStringByPaths(event, statusPaths);
       const status = normalizeClickSignStatus(rawStatus);
-      const resolvedSignatureId = String(extractClickSignSignatureId(event) || "").trim();
+      if (hasClickSignSignedSignatory(event)) {
+        return {
+          event,
+          rawStatus: rawStatus || "signed",
+          status: "signed",
+          signatureId: resolvedSignatureId || String(signatureId || "").trim() || null,
+          source: `lookup:${lookup.path}`
+        };
+      }
+
       if (resolvedSignatureId && !pendingCandidate) {
         pendingCandidate = {
           event,
           rawStatus: rawStatus || "pending",
           status: status || "pending",
+          signatureId: resolvedSignatureId,
           source: `lookup:${lookup.path}`
         };
       }
@@ -6605,6 +6893,7 @@ async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = ""
           event,
           rawStatus,
           status,
+          signatureId: resolvedSignatureId || String(signatureId || "").trim() || null,
           source: `lookup:${lookup.path}`
         };
       }
@@ -6614,6 +6903,7 @@ async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = ""
           event,
           rawStatus,
           status,
+          signatureId: resolvedSignatureId || String(signatureId || "").trim() || null,
           source: `lookup:${lookup.path}`
         };
       }
@@ -6627,6 +6917,7 @@ async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = ""
     event: lastEvent || {},
     rawStatus: "",
     status: "",
+    signatureId: String(signatureId || extractClickSignSignatureId(lastEvent || {}) || "").trim() || null,
     source: ""
   };
 }
@@ -6649,6 +6940,7 @@ async function getCuentaCobroPdfContext(cuentaInternalId) {
       u.nombre_usuario,
       u.email,
       u.moneda_cobro,
+      COALESCE(p.factura_en_colombia, u.factura_en_colombia) AS factura_en_colombia,
       COALESCE(p.numero_documento, u.cedula)            AS cedula,
       COALESCE(p.direccion_residencia, u.direccion)     AS direccion,
       COALESCE(p.numero_contacto, u.telefono)           AS telefono,
@@ -6826,7 +7118,7 @@ function normalizeCuentaCobroIdentityValue(value) {
 }*/
 
 // ============================================================
-//  writeCuentaCobroPdf  ?  versión corregida
+//  writeCuentaCobroPdf  
 //  Fix: header sin solapamiento, fechas formateadas, espaciado
 // ============================================================
 
@@ -6953,6 +7245,9 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const cedulaConsultor = normalizeCuentaCobroIdentityValue(cuenta.cedula) || "-";
   const telefonoConsultor = normalizeCuentaCobroIdentityValue(cuenta.telefono) || "-";
   const cuentaBancariaConsultor = cuenta.nro_cuenta_bancaria || "-";
+  const empresaCuentaCobro = resolveEmpresaContratoConfig(
+    normalizeNullableBooleanInput(cuenta.factura_en_colombia)
+  );
 
   // ============================================================
   // 1. HEADER ? dos bloques separados sin solaparse
@@ -6962,10 +7257,10 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   // ? Bloque izquierdo: empresa
   doc.fontSize(15).font("Helvetica-Bold").fillColor(COLOR.blanco)
-    .text("SILVER CONSULTING S.A.S.", ML, 16, { width: PW / 2, lineBreak: false });
+    .text(empresaCuentaCobro.razonSocial, ML, 16, { width: PW / 2, lineBreak: false });
 
   doc.fontSize(8).font("Helvetica").fillColor(COLOR.blanco)
-    .text("NIT 901.149.190-0", ML, 34, { width: PW / 2, lineBreak: false });
+    .text(`NIT ${empresaCuentaCobro.nit}`, ML, 34, { width: PW / 2, lineBreak: false });
 
   // ? Bloque derecho: tipo doc + número + fecha
   const rightX = ML + PW / 2;
@@ -7190,7 +7485,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   doc.fontSize(7.5).font("Helvetica").fillColor(COLOR.textoSec)
     .text(
-      "Documento generado electrónicamente - Silver Consulting S.A.S.  -  NIT 901.149.190-0  -  Medellín, Colombia",
+      `Documento generado electrónicamente - ${empresaCuentaCobro.razonSocial}  -  NIT ${empresaCuentaCobro.nit}  -  Medellín, Colombia`,
       ML, curY, { width: PW, align: "center", lineBreak: false }
     );
 
@@ -8160,7 +8455,7 @@ app.get("/admin/personas", requireAccess({ roles: ["Administrador", "Coordinador
 // Helpers de RBAC para /admin/consultores.
 function isGestionConsultoresScopedRole(req) {
   const role = normalizeValue(req?.user?.rol || req?.user?.role);
-  return role === "coordinador" || role === "comercial";
+  return role === "comercial";
 }
 
 function buildGestionConsultoresScopeCondition(actorParam) {
@@ -9003,8 +9298,8 @@ app.get("/admin/personas/:id", requireAccess({ roles: ["Administrador", "Coordin
   }
 });
 
-// PUT /admin/personas/:id/identidad — nombre, email, rol, activo, azure_oid (admin + TH)
-app.put("/admin/personas/:id/identidad", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+// PUT /admin/personas/:id/identidad — nombre, email, rol, activo, azure_oid (admin + Coordinador + TH)
+app.put("/admin/personas/:id/identidad", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
   const { id } = req.params;
   const { nombre_usuario, email, rol_id, activo, azure_oid } = req.body || {};
   try {
@@ -9051,8 +9346,8 @@ app.put("/admin/personas/:id/identidad", requireAccess({ roles: ["Administrador"
   }
 });
 
-// PUT /admin/personas/:id/personal — escribe a tabla personas (crea si no existe) + fallback usuarios (admin + TH)
-app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+// PUT /admin/personas/:id/personal — escribe a tabla personas (crea si no existe) + fallback usuarios (admin + Coordinador + TH)
+app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
   const { id } = req.params;
   const {
     tipo_documento_id, cedula, telefono, direccion, ciudad, tipo_persona,
@@ -9216,8 +9511,8 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
   }
 });
 
-// PUT /admin/personas/:id/cobro — moneda queda en usuarios; banco/cuenta/factura van a personas (admin + TH)
-app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+// PUT /admin/personas/:id/cobro — moneda queda en usuarios; banco/cuenta/factura van a personas (admin + Coordinador + TH)
+app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
   const { id } = req.params;
   const { moneda_cobro, banco_id, tipo_cuenta_id, nro_cuenta_bancaria, factura_en_colombia } = req.body || {};
   const client = await pool.connect();
@@ -9320,8 +9615,8 @@ app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador", "T
   }
 });
 
-// PUT /admin/personas/:id/contratacion — tipo_contrato, módulo, cliente, seguridad social, familiar, emergencia (admin + TH)
-app.put("/admin/personas/:id/contratacion", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+// PUT /admin/personas/:id/contratacion — tipo_contrato, módulo, cliente, seguridad social, familiar, emergencia (admin + Coordinador + TH)
+app.put("/admin/personas/:id/contratacion", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
   const { id } = req.params;
   const {
     tipo_contrato, modalidad,
@@ -9446,8 +9741,8 @@ app.put("/admin/personas/:id/contratacion", requireAccess({ roles: ["Administrad
   }
 });
 
-// PUT /admin/personas/:id/operativa — tipo_consultor, consultor_principal (admin + TH)
-app.put("/admin/personas/:id/operativa", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+// PUT /admin/personas/:id/operativa — tipo_consultor, consultor_principal (admin + Coordinador + TH)
+app.put("/admin/personas/:id/operativa", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
   const { id } = req.params;
   const { tipo_consultor, consultor_principal_id } = req.body || {};
   const client = await pool.connect();
@@ -9548,8 +9843,8 @@ app.put("/admin/personas/:id/operativa", requireAccess({ roles: ["Administrador"
   }
 });
 
-// GET /admin/tipos-cuenta-bancaria — catálogo para formulario (admin + TH)
-app.get("/admin/tipos-cuenta-bancaria", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+// GET /admin/tipos-cuenta-bancaria — catálogo para formulario (admin + Coordinador + TH)
+app.get("/admin/tipos-cuenta-bancaria", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT public_id AS id, titulo
@@ -10692,7 +10987,24 @@ function validateContratoPersonaFormData(data) {
     ["apellidos", "Apellidos"],
     ["tipo_documento_id", "Tipo de documento"],
     ["numero_documento", "Numero de documento"],
+    ["lugar_nacimiento", "Lugar de nacimiento"],
+    ["lugar_expedicion", "Lugar de expedicion"],
+    ["nacionalidad", "Nacionalidad"],
+    ["estado_civil", "Estado civil"],
+    ["direccion_residencia", "Direccion de residencia"],
+    ["barrio", "Barrio"],
+    ["ciudad_residencia", "Ciudad"],
+    ["departamento_pais", "Departamento/Pais"],
+    ["pais_residencia", "Pais de residencia"],
     ["correo_electronico", "Correo electronico personal"],
+    ["numero_contacto", "Telefono celular"],
+    ["eps", "E.P.S"],
+    ["arl", "A.R.L"],
+    ["afp", "Fondo de pensiones"],
+    ["nombre_contacto_emergencia", "Contacto de emergencia"],
+    ["parentesco", "Parentesco"],
+    ["telefono_contacto_emergencia", "Telefono emergencia"],
+    ["visa_paises", "Visa"],
     ["titulo_profesional", "Profesion"]
   ];
   for (const [key, label] of requiredText) {
@@ -10951,16 +11263,14 @@ app.post("/contratacion/datos-persona", requireTokenFirma, async (req, res) => {
             tipo_cuenta_id     = COALESCE($2, tipo_cuenta_id),
             numero_cuenta      = COALESCE($3, numero_cuenta),
             modalidad          = COALESCE($4, modalidad),
-            personas_a_cargo   = $5,
             updated_at         = NOW()
-        WHERE id = $6
+        WHERE id = $5
         `,
         [
           syncData.bancoId,
           syncData.tipoCuentaId,
           syncData.numeroCuenta,
           syncData.modalidad,
-          data.personas_a_cargo,
           personaId
         ]
       );
@@ -13949,58 +14259,57 @@ async function jobReconciliarCuentasEnFirma() {
         const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object" ? prevAdjuntos.firma : {};
         const prevSoportes = prevAdjuntos.soportes && typeof prevAdjuntos.soportes === "object" ? prevAdjuntos.soportes : {};
 
-        const requestId = String(prevFirma.request_id || "").trim();
-        const contractId = String(prevFirma.contract_id || "").trim();
-        const signatureId = String(prevFirma.signature_id || "").trim();
-
-        const snapshot = await fetchClickSignSignatureSnapshot({ requestId, contractId, signatureId });
-        const event = snapshot.event && typeof snapshot.event === "object" ? snapshot.event : {};
-        const rawStatus = snapshot.rawStatus || prevFirma.ultimo_evento || "pending";
-        let status = normalizeClickSignStatus(rawStatus);
+        const resolution = await resolveCuentaFirmaFirmadaAcrossAttempts({ cuenta, prevAdjuntos });
+        const rawStatus = resolution.rawStatus || prevFirma.ultimo_evento || "pending";
+        let status = resolution.signed
+          ? "signed"
+          : (resolution.normalizedStatus || normalizeClickSignStatus(rawStatus) || "pending");
         const nowIso = new Date().toISOString();
+        const primaryDiagnostico = resolution.diagnostico || {};
+        const logDiagnostico = {
+          public_id: cuenta.public_id || null,
+          request_id: resolution.requestId || primaryDiagnostico.request_id || prevFirma.request_id || null,
+          contract_id: resolution.contractId || primaryDiagnostico.contract_id || prevFirma.contract_id || null,
+          signature_id: resolution.signatureId || primaryDiagnostico.signature_id || prevFirma.signature_id || null,
+          rawStatus: rawStatus || null,
+          normalizedStatus: status || null,
+          catalogSource: resolution.catalogSource || primaryDiagnostico.catalogSource || null,
+          reason: resolution.signed ? "firmado_subido" : (resolution.reason || primaryDiagnostico.reason || "pending")
+        };
 
         let documentoFirmado = null;
         let documentoFirmadoError = "";
         let uploadedExtras = [];
         let resolvedPdfForEmail = null;
 
-        if (status === "signed" || !status || status === "pending") {
-          const artifacts = await resolveClickSignArtifacts({
-            event,
-            requestId,
-            contractId,
-            publicId: String(cuenta.public_id || ""),
-            signatureId: signatureId || extractClickSignSignatureId(event) || "",
-            allowCatalogFallback: status === "signed"
-          });
-          const resolvedPdf = artifacts?.signedPdf || null;
-          if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
-            resolvedPdfForEmail = resolvedPdf;
+        if (resolution.signed && resolution.signedPdf && isPdfBuffer(resolution.signedPdf.buffer)) {
+          resolvedPdfForEmail = resolution.signedPdf;
+          try {
+            const uploadResult = await uploadSignedPdfToOneDrive(cuenta, resolution.signedPdf.buffer, resolution.signedPdf.fileName);
+            documentoFirmado = {
+              ...uploadResult.archivo,
+              carpeta: uploadResult.carpeta,
+              origen: resolution.signedPdf.source || "clicksign",
+              actualizado_en: nowIso
+            };
+            status = "signed";
             try {
-              const uploadResult = await uploadSignedPdfToOneDrive(cuenta, resolvedPdf.buffer, resolvedPdf.fileName);
-              documentoFirmado = {
-                ...uploadResult.archivo,
-                carpeta: uploadResult.carpeta,
-                origen: resolvedPdf.source || "clicksign",
-                actualizado_en: nowIso
-              };
-              status = "signed";
-              try {
-                const extrasResult = await uploadClickSignExtraFilesToOneDrive(cuenta, artifacts?.extraFiles || [], uploadResult.carpeta || "");
-                uploadedExtras = extrasResult.uploaded || [];
-              } catch (extraErr) {
-                console.warn(`[reconciliar-job] Extras no subidos para ${cuenta.public_id}:`, extraErr?.message);
-              }
-            } catch (uploadErr) {
-              documentoFirmadoError = `Error OneDrive: ${uploadErr.message || "desconocido"}`;
+              const extrasResult = await uploadClickSignExtraFilesToOneDrive(cuenta, resolution.extraFiles || [], uploadResult.carpeta || "");
+              uploadedExtras = extrasResult.uploaded || [];
+            } catch (extraErr) {
+              console.warn(`[reconciliar-job] Extras no subidos para ${cuenta.public_id}:`, extraErr?.message);
             }
-          } else if (status === "signed") {
+          } catch (uploadErr) {
+            documentoFirmadoError = `Error OneDrive: ${uploadErr.message || "desconocido"}`;
+            logDiagnostico.reason = "error";
+          }
+        } else if (status === "signed") {
+          logDiagnostico.reason = resolution.reason || "firmado_sin_pdf";
             // Fix #5: dejar error observable cuando Click&Sign dice firmado pero no hay PDF
             documentoFirmadoError = "No se encontró PDF firmado en API de Click&Sign (job).";
           }
-        }
 
-        if (status === "pending" && !documentoFirmado?.url) {
+        if (["pending", "sent", "en_proceso"].includes(status) && !documentoFirmado?.url) {
           const timeoutResult = await marcarCuentaCobroFirmaExpirada({
             cuentaId: cuenta.id,
             estadoEnFirma,
@@ -14008,7 +14317,10 @@ async function jobReconciliarCuentasEnFirma() {
             origen: "reconciliar-job"
           });
           if (timeoutResult.updated) {
-            console.log(`[reconciliar-job] ${cuenta.public_id} -> firma expirada por timeout (${FIRMA_CUENTA_TIMEOUT_HOURS}h).`);
+            console.log("[reconciliar-job]", {
+              ...logDiagnostico,
+              reason: "timeout"
+            });
             continue;
           }
         }
@@ -14019,8 +14331,21 @@ async function jobReconciliarCuentasEnFirma() {
         const firma = {
           ...prevFirma,
           estado: status || prevFirma.estado || "pending",
+          request_id: resolution.requestId || prevFirma.request_id || null,
+          contract_id: resolution.contractId || prevFirma.contract_id || null,
+          signature_id: resolution.signatureId || primaryDiagnostico.signature_id || prevFirma.signature_id || null,
           actualizado_en: nowIso,
-          ultimo_evento: ultimoEvento
+          ultimo_evento: ultimoEvento,
+          diagnostico: {
+            ultimo_check_en: nowIso,
+            request_id: logDiagnostico.request_id,
+            contract_id: logDiagnostico.contract_id,
+            signature_id: logDiagnostico.signature_id,
+            rawStatus: logDiagnostico.rawStatus,
+            normalizedStatus: logDiagnostico.normalizedStatus,
+            catalogSource: logDiagnostico.catalogSource,
+            reason: logDiagnostico.reason
+          }
         };
         if (documentoFirmado?.url) firma.documento_firmado = documentoFirmado;
         if (documentoFirmadoError) firma.documento_firmado_error = documentoFirmadoError;
@@ -14095,7 +14420,7 @@ async function jobReconciliarCuentasEnFirma() {
             signedPdf: resolvedPdfForEmail
               ? { buffer: resolvedPdfForEmail.buffer, fileName: resolvedPdfForEmail.fileName }
               : null,
-            extraFiles: uploadedExtras
+            extraFiles: resolution.extraFiles || []
           });
           try {
             await notifyCuentaCobroFirmadaToProveedores({
@@ -14112,7 +14437,7 @@ async function jobReconciliarCuentasEnFirma() {
           console.log(`[reconciliar-job] ${cuenta.public_id} omitida — ya fue resuelta por webhook.`);
         }
 
-        console.log(`[reconciliar-job] ${cuenta.public_id} → estado: ${estadoDestino || status || "sin cambio"}`);
+        console.log("[reconciliar-job]", logDiagnostico);
       } catch (cuentaErr) {
         console.error(`[reconciliar-job] Error procesando ${cuenta.public_id}:`, cuentaErr?.message || cuentaErr);
       }
@@ -14402,6 +14727,8 @@ module.exports = {
   getCuentaCobroEstadoEnFirma,
   getCuentaCobroEstadoAprobado,
   normalizeClickSignStatus,
+  collectCuentaFirmaCandidates,
+  resolveCuentaFirmaFirmadaAcrossAttempts,
   handleClickSignContratoWebhook,
   jobReconciliarContratosEnFirma,
   isPdfBuffer,

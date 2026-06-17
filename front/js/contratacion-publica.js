@@ -415,7 +415,6 @@ window.contratacionApp = function () {
                 parentesco: "",
                 telefono_contacto_emergencia: "",
                 hijos: 0,
-                personas_a_cargo: 0,
                 edades_hijos: "",
                 visa_paises: "",
                 acepta_tratamiento_datos: false

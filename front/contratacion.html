@@ -251,19 +251,19 @@
                                     <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Identificación</h4>
                                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Nombres</span>
-                                            <input x-model="personaDatos.nombre" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Nombres <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.nombre" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Apellidos</span>
-                                            <input x-model="personaDatos.apellidos" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Apellidos <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.apellidos" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Fecha de nacimiento</span>
+                                            <span class="text-xs font-semibold text-slate-500">Fecha de nacimiento <span class="text-rose-500">*</span></span>
                                             <input x-model="personaDatos.fecha_nacimiento" type="date" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Sexo</span>
+                                            <span class="text-xs font-semibold text-slate-500">Sexo <span class="text-rose-500">*</span></span>
                                             <select x-model="personaDatos.sexo" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                                 <option value="">Selecciona</option>
                                                 <option value="Hombre">Masculino</option>
@@ -272,12 +272,12 @@
                                             </select>
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Lugar de nacimiento</span>
-                                            <input x-model="personaDatos.lugar_nacimiento" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Lugar de nacimiento <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.lugar_nacimiento" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Tipo documento</span>
-                                            <select x-model="personaDatos.tipo_documento_id" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Tipo documento <span class="text-rose-500">*</span></span>
+                                            <select x-model="personaDatos.tipo_documento_id" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                                 <option value="">Selecciona</option>
                                                 <template x-for="doc in personaCatalogos.documentos_identidad" :key="doc.id">
                                                     <option :value="doc.id" x-text="doc.titulo"></option>
@@ -285,20 +285,20 @@
                                             </select>
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Número documento</span>
-                                            <input x-model="personaDatos.numero_documento" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Número documento <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.numero_documento" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Lugar de expedición</span>
-                                            <input x-model="personaDatos.lugar_expedicion" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Lugar de expedición <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.lugar_expedicion" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Nacionalidad</span>
-                                            <input x-model="personaDatos.nacionalidad" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Nacionalidad <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.nacionalidad" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Estado civil</span>
-                                            <select x-model="personaDatos.estado_civil" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Estado civil <span class="text-rose-500">*</span></span>
+                                            <select x-model="personaDatos.estado_civil" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                                 <option value="">Selecciona</option>
                                                 <template x-for="estado in personaCatalogos.estados_civiles" :key="estado">
                                                     <option :value="estado" x-text="estado"></option>
@@ -312,32 +312,32 @@
                                     <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Contacto</h4>
                                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                                         <label class="block md:col-span-2">
-                                            <span class="text-xs font-semibold text-slate-500">Dirección de residencia</span>
-                                            <input x-model="personaDatos.direccion_residencia" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Dirección de residencia <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.direccion_residencia" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Barrio</span>
-                                            <input x-model="personaDatos.barrio" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Barrio <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.barrio" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Ciudad</span>
-                                            <input x-model="personaDatos.ciudad_residencia" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Ciudad <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.ciudad_residencia" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Departamento</span>
-                                            <input x-model="personaDatos.departamento_pais" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Departamento <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.departamento_pais" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">País</span>
-                                            <input x-model="personaDatos.pais_residencia" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">País <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.pais_residencia" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Correo personal</span>
-                                            <input x-model="personaDatos.correo_electronico" type="email" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Correo personal <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.correo_electronico" type="email" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Teléfono celular</span>
-                                            <input x-model="personaDatos.numero_contacto" type="tel" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Teléfono celular <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.numero_contacto" type="tel" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                     </div>
                                 </section>
@@ -346,8 +346,8 @@
                                     <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Profesional</h4>
                                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Profesión</span>
-                                            <input x-model="personaDatos.titulo_profesional" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Profesión <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.titulo_profesional" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
                                             <span class="text-xs font-semibold text-slate-500">Módulo SAP</span>
@@ -369,28 +369,28 @@
                                     <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Seguridad social y emergencia</h4>
                                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">E.P.S</span>
-                                            <input x-model="personaDatos.eps" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">E.P.S <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.eps" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">A.R.L</span>
-                                            <input x-model="personaDatos.arl" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">A.R.L <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.arl" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Fondo de pensiones</span>
-                                            <input x-model="personaDatos.afp" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Fondo de pensiones <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.afp" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Contacto de emergencia</span>
-                                            <input x-model="personaDatos.nombre_contacto_emergencia" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Contacto de emergencia <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.nombre_contacto_emergencia" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Parentesco</span>
-                                            <input x-model="personaDatos.parentesco" type="text" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Parentesco <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.parentesco" type="text" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Teléfono emergencia</span>
-                                            <input x-model="personaDatos.telefono_contacto_emergencia" type="tel" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Teléfono emergencia <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.telefono_contacto_emergencia" type="tel" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                     </div>
                                 </section>
@@ -402,21 +402,17 @@
                                             <span class="text-xs font-semibold text-slate-500">Número de hijos</span>
                                             <input x-model.number="personaDatos.hijos" min="0" type="number" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
-                                        <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Personas a cargo</span>
-                                            <input x-model.number="personaDatos.personas_a_cargo" min="0" type="number" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                                        </label>
                                         <label class="block" x-show="requiereEdadesHijos">
                                             <span class="text-xs font-semibold text-slate-500">Edades de los hijos</span>
                                             <input x-model="personaDatos.edades_hijos" type="text" placeholder="Ej: 4; 9; 13" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="block">
-                                            <span class="text-xs font-semibold text-slate-500">Visa</span>
-                                            <input x-model="personaDatos.visa_paises" type="text" placeholder="Países o No" class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                            <span class="text-xs font-semibold text-slate-500">Visa <span class="text-rose-500">*</span></span>
+                                            <input x-model="personaDatos.visa_paises" type="text" placeholder="Países o No" required class="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                                         </label>
                                         <label class="md:col-span-2 xl:col-span-3 flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3">
-                                            <input x-model="personaDatos.acepta_tratamiento_datos" type="checkbox" class="mt-0.5 w-4 h-4 accent-blue-600 flex-shrink-0">
-                                            <span class="text-sm text-blue-900 font-medium">Acepto el manejo de información por parte de Silver Consulting S.A.S.</span>
+                                            <input x-model="personaDatos.acepta_tratamiento_datos" type="checkbox" required class="mt-0.5 w-4 h-4 accent-blue-600 flex-shrink-0">
+                                            <span class="text-sm text-blue-900 font-medium">Acepto el manejo de información por parte de Silver Consulting S.A.S. <span class="text-rose-500">*</span></span>
                                         </label>
                                     </div>
                                 </section>

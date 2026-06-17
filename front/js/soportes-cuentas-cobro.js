@@ -14,6 +14,10 @@ window.soportesCuentasCobroApp = function () {
         modalFirmasAtascadasOpen: false,
         firmasAtascadasSearch: "",
         forzandoFirmaId: null,
+        modalErrorSeguridadOpen: false,
+        errorSeguridadSearch: "",
+        subiendoSeguridadId: null,
+        modalCargarSeguridadOpen: false,
 
         async init() {
             await Promise.all([this.cargarConsultores(), this.cargarAprobadores(), this.cargarSoportes()]);
@@ -116,6 +120,15 @@ window.soportesCuentasCobroApp = function () {
             this.modalFirmasAtascadasOpen = false;
         },
 
+        abrirModalErrorSeguridad() {
+            this.errorSeguridadSearch = "";
+            this.modalErrorSeguridadOpen = true;
+        },
+
+        cerrarModalErrorSeguridad() {
+            this.modalErrorSeguridadOpen = false;
+        },
+
         isFirmaAtascada(item) {
             const firma = item?.datos_adjuntos?.firma;
             if (!firma || typeof firma !== "object") return false;
@@ -140,6 +153,67 @@ window.soportesCuentasCobroApp = function () {
             return atascadas.filter((item) =>
                 String(item?.consultor_nombre || "").toLowerCase().includes(q)
             );
+        },
+
+        cuentasSinSeguridad() {
+            const lista = Array.isArray(this.soportes) ? this.soportes : [];
+            return lista.filter((item) =>
+                this.getSoporteUrl(item, "cuenta") !== "" &&
+                this.getSoporteUrl(item, "seguridad") === ""
+            );
+        },
+
+        cuentasSinSeguridadFiltradas() {
+            const cuentas = this.cuentasSinSeguridad();
+            const q = String(this.errorSeguridadSearch || "").trim().toLowerCase();
+            if (!q) return cuentas;
+            return cuentas.filter((item) =>
+                String(item?.consultor_nombre || "").toLowerCase().includes(q)
+            );
+        },
+
+        leerArchivoComoDataUrl(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(reader.error || new Error("No se pudo leer el archivo."));
+                reader.readAsDataURL(file);
+            });
+        },
+
+        async cargarSeguridadSocial(item, file) {
+            if (!item?.id || !file) return;
+
+            const fileName = String(file.name || "");
+            const fileType = String(file.type || "").toLowerCase();
+            const isPdf = fileType === "application/pdf" || fileName.toLowerCase().endsWith(".pdf");
+            if (!isPdf) {
+                window.alert("Debe seleccionar un archivo PDF.");
+                return;
+            }
+
+            this.subiendoSeguridadId = item.id;
+            try {
+                const dataUrl = await this.leerArchivoComoDataUrl(file);
+                await axios.post(
+                    `${API}/cuentas-cobro/${item.id}/seguridad-social`,
+                    {
+                        seguridad_social_nombre: file.name,
+                        seguridad_social_base64: dataUrl
+                    },
+                    { headers: { "Content-Type": "application/json" } }
+                );
+                window.alert("Seguridad social cargada exitosamente.");
+                await this.cargarSoportes();
+            } catch (err) {
+                const msg =
+                    err?.response?.data?.error ||
+                    err?.message ||
+                    "Error al cargar la seguridad social. Intenta nuevamente.";
+                window.alert(msg);
+            } finally {
+                this.subiendoSeguridadId = null;
+            }
         },
 
         async forzarReinicioFirma(public_id) {

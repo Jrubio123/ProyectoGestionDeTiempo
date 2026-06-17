@@ -9,11 +9,11 @@ router.get("/admin/modulos", requireAccess({ roles: ["Administrador"] }), listMo
 router.post("/admin/modulos", requireAccess({ roles: ["Administrador"] }), createModulo);
 router.put("/admin/modulos/:id", requireAccess({ roles: ["Administrador"] }), updateModulo);
 router.delete("/admin/modulos/:id", requireAccess({ roles: ["Administrador"] }), deleteModulo);
-router.get("/admin/roles", requireAccess({ roles: ["Administrador", "Talento Humano"] }), listRolesAdmin);
+router.get("/admin/roles", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), listRolesAdmin);
 router.post("/admin/roles", requireAccess({ roles: ["Administrador"] }), createRol);
 router.put("/admin/roles/:id", requireAccess({ roles: ["Administrador"] }), updateRol);
 router.delete("/admin/roles/:id", requireAccess({ roles: ["Administrador"] }), deleteRol);
-router.get("/admin/bancos", requireAccess({ roles: ["Administrador", "Talento Humano"] }), listBancosAdmin);
+router.get("/admin/bancos", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), listBancosAdmin);
 router.post("/admin/bancos", requireAccess({ roles: ["Administrador"] }), createBanco);
 router.put("/admin/bancos/:id", requireAccess({ roles: ["Administrador"] }), updateBanco);
 router.delete("/admin/bancos/:id", requireAccess({ roles: ["Administrador"] }), deleteBanco);

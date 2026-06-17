@@ -83,7 +83,7 @@ window.gestionConsultoresApp = function () {
             }
 
             const roleKey = window.auth?.getRoleKey?.() || "other";
-            this.puedeEditar = roleKey === "admin" || roleKey === "talento_humano";
+            this.puedeEditar = roleKey === "admin" || roleKey === "talento_humano" || roleKey === "coordinador";
             this.puedeAgregar = ["admin", "talento_humano", "coordinador", "comercial"].includes(roleKey);
 
             await Promise.all([

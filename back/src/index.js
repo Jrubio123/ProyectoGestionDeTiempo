@@ -7241,7 +7241,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const totalNumeros = Number(cuenta.total_cuenta_cobro || 0);
   const totalLetras = buildTotalLetras(totalNumeros, cuenta.moneda_cobro || "COP");
   const monedaSimbolo = String(cuenta.moneda_cobro || "COP").toUpperCase() === "USD" ? "USD" : "COP";
-  const nombreConsultor = cuenta.nombre_usuario || "Consultor";
+  const nombreConsultor = String(cuenta.nombre_usuario || "Consultor").toUpperCase();
   const cedulaConsultor = normalizeCuentaCobroIdentityValue(cuenta.cedula) || "-";
   const telefonoConsultor = normalizeCuentaCobroIdentityValue(cuenta.telefono) || "-";
   const cuentaBancariaConsultor = cuenta.nro_cuenta_bancaria || "-";
@@ -14305,9 +14305,9 @@ async function jobReconciliarCuentasEnFirma() {
           }
         } else if (status === "signed") {
           logDiagnostico.reason = resolution.reason || "firmado_sin_pdf";
-            // Fix #5: dejar error observable cuando Click&Sign dice firmado pero no hay PDF
-            documentoFirmadoError = "No se encontró PDF firmado en API de Click&Sign (job).";
-          }
+          // Fix #5: dejar error observable cuando Click&Sign dice firmado pero no hay PDF
+          documentoFirmadoError = "No se encontró PDF firmado en API de Click&Sign (job).";
+        }
 
         if (["pending", "sent", "en_proceso"].includes(status) && !documentoFirmado?.url) {
           const timeoutResult = await marcarCuentaCobroFirmaExpirada({
@@ -14719,59 +14719,3 @@ module.exports = {
   pickStringByPaths,
   extractClickSignSignatureId,
   sameResourceUrl,
-  uploadSignedPdfToOneDrive,
-  resolveClickSignArtifacts,
-  uploadClickSignExtraFilesToOneDrive,
-  isContratoBaseOneDriveDoc,
-  isAnexoTecnicoContratoDoc,
-  getCuentaCobroEstadoEnFirma,
-  getCuentaCobroEstadoAprobado,
-  normalizeClickSignStatus,
-  collectCuentaFirmaCandidates,
-  resolveCuentaFirmaFirmadaAcrossAttempts,
-  handleClickSignContratoWebhook,
-  jobReconciliarContratosEnFirma,
-  isPdfBuffer,
-  toBooleanInput,
-  withPublicId,
-  getGraphContext,
-  buildPortalUrl,
-  buildEmailLayout,
-  getEstadoAsignacionValues,
-  getMesaFabricaScope,
-  buildReporteResumen,
-  isAsignacionReportableEstado,
-  isTipoAsignacionHorasPorDemanda,
-  isTipoAsignacionMensual,
-  isTipoAsignacionTiempoCostoFijo,
-  isTipoAsignacionMesaOFabrica,
-  normalizeTipoAsignacionTitulo,
-  applyTicketCaseFields,
-  normalizeTipoServicioInput,
-  resolveEstadoAsignacionInput,
-  resolveInternalIdFromPublicIdOrId,
-  toNullableTrimmedString,
-  toNullableInteger,
-  toNullableNumber,
-  isGuid,
-  CONTRATOS_TOKEN_EXPIRY_HOURS,
-  CONTRATOS_BASE_URL,
-  CLAVES_REQUERIDAS_FIRMA,
-  CLICKSIGN_USER,
-  CLICKSIGN_CONTRATOS_CONFIG_ID,
-  CLICKSIGN_SIGNATURE_CB_URL,
-  CLICKSIGN_SIGNATORY_CB_URL,
-  CLICKSIGN_SIGNATORY_EMAIL_CB_URL,
-  CLICKSIGN_WEBHOOK_TOKEN,
-  contratoDocNeedsReconciliation,
-  fetchClickSignSignatureSnapshot,
-  generateCuentaCobroPdfBuffer,
-  getContratoDocDefinition,
-  graphPutBinaryWithRetry,
-  normalizeDocStatus,
-  notifyContratoFirmaCompletada,
-  reconcileContratoDocsForProcess,
-  uploadContratoFirmadoToOneDrive,
-  upsertDocFirmaEntry,
-  ID_TABLES
-};

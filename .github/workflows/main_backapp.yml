@@ -1,7 +1,3 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# More GitHub Actions for Azure: https://github.com/Azure/actions
-# Redeploy marker: updated to force Azure App Service deployment refresh.
-
 name: Build and deploy Node.js app to Azure Web App - BackApp
 
 on:
@@ -11,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -25,7 +21,7 @@ jobs:
         with:
           node-version: "22.x"
 
-      - name: npm install, build, and test
+      - name: Install dependencies
         run: |
           cd back
           npm install

@@ -33,7 +33,15 @@
       "Bash(git --no-pager diff --cached -- back/src/index.js back/src/routes/catalogos.routes.js front/js/gestion-consultores.js)",
       "Bash(node --check back/src/routes/catalogos.routes.js)",
       "Bash(node --check front/js/gestion-consultores.js)",
-      "Bash(node \"C:/Users/JuanPabloRubioMejía/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs\" cancel task-mqgu7oo5-d5ss61 --json)"
+      "Bash(node \"C:/Users/JuanPabloRubioMejía/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs\" cancel task-mqgu7oo5-d5ss61 --json)",
+      "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs task --help)",
+      "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mqtm0ypn-7xn5bd)",
+      "Bash(grep -iE \"migrations|\\\\.sql$\")",
+      "Bash(node -c back/src/index.js)",
+      "Bash(node -c back/src/services/firma-contratos.service.js)",
+      "Bash(node -c back/src/routes/firma-contratos.routes.js)",
+      "Bash(node -c front/js/firma-contratos-admin.js)",
+      "Bash(node -c front/js/gestion-personas.js)"
     ]
   },
   "enabledPlugins": {

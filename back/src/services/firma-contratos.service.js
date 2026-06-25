@@ -45,6 +45,89 @@ async function syncPersonaCorreoElectronico({ personaContext, correoPersonal, nu
   return result.rowCount;
 }
 
+async function resolveDatosLaboralesPersonaContext(input, helpers) {
+  const {
+    resolveContratoPersonaContext,
+    resolveInternalIdFromPublicIdOrId,
+    ID_TABLES,
+    toNullableTrimmedString
+  } = helpers;
+
+  const solicitudInput = input?.solicitud_id || null;
+  const preregistroInput = input?.preregistro_id || null;
+  const numeroDocumento = toNullableTrimmedString(input?.numero_documento);
+  const correoPersonal = toNullableTrimmedString(input?.correo_personal);
+
+  let solicitudId = null;
+  let preregistroId = null;
+  if (solicitudInput) {
+    solicitudId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.solicitudesContratacion, solicitudInput);
+    if (!solicitudId) {
+      const err = new Error("Solicitud no encontrada");
+      err.status = 404;
+      throw err;
+    }
+  }
+  if (preregistroInput) {
+    preregistroId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.preregistroPersonas, preregistroInput);
+    if (!preregistroId) {
+      const err = new Error("Preregistro no encontrado");
+      err.status = 404;
+      throw err;
+    }
+  }
+
+  if (!solicitudId && !preregistroId && !numeroDocumento && !correoPersonal) {
+    const err = new Error("Debes indicar numero_documento, correo_personal, solicitud_id o preregistro_id");
+    err.status = 400;
+    throw err;
+  }
+
+  return resolveContratoPersonaContext({
+    solicitud_id: solicitudId,
+    preregistro_id: preregistroId,
+    numero_documento: numeroDocumento,
+    correo_personal: correoPersonal
+  });
+}
+
+function buildDatosLaboralesResponse(personaContext, getCamposLaboralesFaltantes) {
+  if (!personaContext?.persona_id) {
+    return {
+      persona_id: null,
+      tipo_contrato: null,
+      requiere_laboral: false,
+      datos: {},
+      faltantes: []
+    };
+  }
+
+  const requiereLaboral = personaContext?.tipoContrato === "Vinculado";
+  return {
+    persona_id: personaContext.persona_id,
+    tipo_contrato: personaContext.tipoContrato || null,
+    requiere_laboral: requiereLaboral,
+    datos: {
+      tipo_trabajador: personaContext.tipoTrabajador || null,
+      cargo: personaContext.cargo || null,
+      salario_mensual: personaContext.salarioMensual ?? null,
+      salario_moneda: personaContext.salarioMoneda || "COP",
+      periodo_pago: personaContext.periodoPago || null,
+      periodo_prueba: personaContext.periodoPrueba || null,
+      jefe_inmediato: personaContext.jefeInmediato || null,
+      caja_compensacion: personaContext.cajaCompensacion || null,
+      condiciones_especiales: personaContext.condicionesEspeciales || null,
+      duracion_contrato: personaContext.duracionContrato || null,
+      fecha_inicio_labores: personaContext.fechaInicioLabores || null,
+      lugar_celebracion: personaContext.lugarCelebracion || null,
+      eps: personaContext.eps || null,
+      afp: personaContext.afp || null,
+      arl: personaContext.arl || null
+    },
+    faltantes: requiereLaboral ? getCamposLaboralesFaltantes(personaContext) : []
+  };
+}
+
 /**
  * Obtiene la lista de tokens generados para procesos de firma de contratos
  */
@@ -209,6 +292,7 @@ async function generarTokenFirma(req, res) {
     hasContratoBaseFirmado,
     buildDocsFirmaPlan,
     requirePersistedAnexoFromProceso,
+    getCamposLaboralesFaltantes,
     CONTRATOS_TOKEN_EXPIRY_HOURS,
     CONTRATOS_BASE_URL,
     buildContratoEmailHtml,
@@ -250,7 +334,8 @@ async function generarTokenFirma(req, res) {
       solicitud_id: solId,
       preregistro_id: preId,
       nombre_persona: nombre_persona || "",
-      correo_personal: correo_personal || ""
+      correo_personal: correo_personal || "",
+      numero_documento: numero_documento || ""
     };
     const personaContext = await resolveContratoPersonaContext(procesoContext);
     const nombreIngresado = toNullableTrimmedString(nombre_persona);
@@ -275,6 +360,21 @@ async function generarTokenFirma(req, res) {
         preregistroId: preId
       });
       if (personaContext) personaContext.correoPersonal = correoIngresado;
+    }
+
+    if (personaContext?.tipoContrato === "Vinculado") {
+      let personaLaboral = personaContext;
+      if (personaContext?.persona_id) {
+        const personaRes = await pool.query("SELECT * FROM personas WHERE id = $1", [personaContext.persona_id]);
+        personaLaboral = personaRes.rows[0] || personaLaboral;
+      }
+      const faltantes = getCamposLaboralesFaltantes(personaLaboral);
+      if (faltantes.length) {
+        return res.status(400).json({
+          error: `Faltan datos laborales obligatorios para el contrato: ${faltantes.join(", ")}`,
+          missing: faltantes
+        });
+      }
     }
 
     // Expirar todos los tokens activos de la persona (por numero_documento)
@@ -368,6 +468,62 @@ async function generarTokenFirma(req, res) {
       return res.status(status).json({ error: err.message || "No fue posible generar el token de firma" });
     }
     res.status(500).json({ error: "Error generando token de firma" });
+  }
+}
+
+/**
+ * Consulta y guarda datos laborales requeridos antes de generar contratos vinculados
+ */
+async function getDatosLaboralesFirma(req, res) {
+  const helpers = getIndexHelpers();
+  const { getCamposLaboralesFaltantes } = helpers;
+
+  try {
+    const personaContext = await resolveDatosLaboralesPersonaContext(req.query || {}, helpers);
+    res.json(buildDatosLaboralesResponse(personaContext, getCamposLaboralesFaltantes));
+  } catch (err) {
+    const status = Number(err?.status || 500);
+    if (status >= 400 && status < 500) {
+      return res.status(status).json({ error: err.message || "No fue posible consultar datos laborales" });
+    }
+    console.error(err);
+    res.status(500).json({ error: "Error consultando datos laborales" });
+  }
+}
+
+async function updateDatosLaboralesFirma(req, res) {
+  const helpers = getIndexHelpers();
+  const {
+    getCamposLaboralesFaltantes,
+    updatePersonaDatosLaborales
+  } = helpers;
+  let client = null;
+
+  try {
+    const personaContext = await resolveDatosLaboralesPersonaContext(req.body || {}, helpers);
+    if (!personaContext?.persona_id) {
+      return res.status(400).json({ error: "No existe ficha de persona para guardar datos laborales" });
+    }
+
+    client = await pool.connect();
+    await client.query("BEGIN");
+    const personaActualizada = await updatePersonaDatosLaborales(client, personaContext.persona_id, req.body || {});
+    await client.query("COMMIT");
+
+    res.json({
+      success: true,
+      faltantes: getCamposLaboralesFaltantes(personaActualizada)
+    });
+  } catch (err) {
+    if (client) await client.query("ROLLBACK").catch(() => { });
+    const status = Number(err?.status || 500);
+    if (status >= 400 && status < 500) {
+      return res.status(status).json({ error: err.message || "No fue posible guardar datos laborales" });
+    }
+    console.error(err);
+    res.status(500).json({ error: "Error guardando datos laborales" });
+  } finally {
+    if (client) client.release();
   }
 }
 
@@ -524,6 +680,8 @@ module.exports = {
   listFirmaContratos,
   listCandidatos,
   generarTokenFirma,
+  getDatosLaboralesFirma,
+  updateDatosLaboralesFirma,
   listAnexoItems,
   createAnexoItem,
   deleteFirmaContrato

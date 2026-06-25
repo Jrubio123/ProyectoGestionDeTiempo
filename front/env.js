@@ -22,7 +22,6 @@
         if (raw.startsWith("//")) return `${window.location.protocol}${raw}`.replace(/\/+$/, "");
         if (raw.startsWith("/")) return `${window.location.origin}${raw}`.replace(/\/+$/, "");
 
-        // If the value looks like a host without protocol, default to HTTPS.
         if (/^[a-z0-9.-]+\.[a-z]{2,}(:\d+)?(\/.*)?$/i.test(raw)) {
             return `https://${raw}`.replace(/\/+$/, "");
         }
@@ -71,7 +70,6 @@
             ? "prod"
             : (isLocalHost ? "local" : null);
 
-    // In production/test hosts we ignore a stale localStorage mode to prevent local/test UI flicker.
     const localSafeStoredMode = isLocalHost && storedMode === "prod" ? null : storedMode;
     const storedModeCandidate = (isProdHost || isKnownTestFront) ? null : localSafeStoredMode;
     let mode = modeParam || inferredMode || storedModeCandidate || config.mode;

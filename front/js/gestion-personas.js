@@ -41,24 +41,28 @@ window.gestionPersonasApp = function () {
             identidad: false,
             personal: false,
             cobro: false,
+            laboral: false,
             operativa: false
         },
         draft: {
             identidad: {},
             personal: {},
             cobro: {},
+            laboral: {},
             operativa: {}
         },
         guardando: {
             identidad: false,
             personal: false,
             cobro: false,
+            laboral: false,
             operativa: false
         },
         errores: {
             identidad: null,
             personal: null,
             cobro: null,
+            laboral: null,
             operativa: null
         },
 
@@ -316,6 +320,27 @@ window.gestionPersonasApp = function () {
                     factura_en_colombia:
                         this.ficha?.factura_en_colombia === true ? "true" :
                         this.ficha?.factura_en_colombia === false ? "false" : ""
+                };
+                return;
+            }
+
+            if (seccion === "laboral") {
+                this.draft.laboral = {
+                    tipo_trabajador: this.ficha?.tipo_trabajador || "",
+                    cargo: this.ficha?.cargo || "",
+                    salario_mensual: this.ficha?.salario_mensual || "",
+                    salario_moneda: this.ficha?.salario_moneda || "COP",
+                    periodo_pago: this.ficha?.periodo_pago || "",
+                    periodo_prueba: this.ficha?.periodo_prueba || "",
+                    jefe_inmediato: this.ficha?.jefe_inmediato || "",
+                    caja_compensacion: this.ficha?.caja_compensacion || "",
+                    condiciones_especiales: this.ficha?.condiciones_especiales || "",
+                    duracion_contrato: this.ficha?.duracion_contrato || "",
+                    fecha_inicio_labores: this.ficha?.fecha_inicio_labores ? String(this.ficha.fecha_inicio_labores).slice(0, 10) : "",
+                    lugar_celebracion: this.ficha?.lugar_celebracion || "",
+                    eps: this.ficha?.eps || "",
+                    afp: this.ficha?.afp || "",
+                    arl: this.ficha?.arl || ""
                 };
                 return;
             }

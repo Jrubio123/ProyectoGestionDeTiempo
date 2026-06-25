@@ -481,6 +481,20 @@ CREATE TABLE personas
     tipo_contrato tipo_contrato,
     modalidad     VARCHAR(50),
 
+    -- Datos laborales (contrato Vinculado)
+    tipo_trabajador        VARCHAR(100),
+    cargo                  VARCHAR(200),
+    salario_mensual        NUMERIC(15,2),
+    salario_moneda         VARCHAR(3) DEFAULT 'COP',
+    periodo_pago           VARCHAR(50),
+    periodo_prueba         VARCHAR(150),
+    jefe_inmediato         VARCHAR(200),
+    caja_compensacion      VARCHAR(100),
+    condiciones_especiales TEXT,
+    duracion_contrato      VARCHAR(100),
+    fecha_inicio_labores   DATE,
+    lugar_celebracion      VARCHAR(150),
+
     -- Módulo asignado (de catálogo o libre)
     modulo_id   INTEGER REFERENCES modulo(id),
     modulo_otro VARCHAR(150),

@@ -11,6 +11,66 @@ window.firmaContratosApp = function () {
         return headers;
     }
 
+    function defaultDatosLaborales() {
+        return {
+            tipo_trabajador: "",
+            cargo: "",
+            salario_mensual: "",
+            salario_moneda: "COP",
+            periodo_pago: "",
+            periodo_prueba: "",
+            jefe_inmediato: "",
+            caja_compensacion: "",
+            condiciones_especiales: "",
+            duracion_contrato: "",
+            fecha_inicio_labores: "",
+            lugar_celebracion: "",
+            eps: "",
+            afp: "",
+            arl: ""
+        };
+    }
+
+    function normalizeDateInput(value) {
+        if (!value) return "";
+        return String(value).slice(0, 10);
+    }
+
+    function mergeDatosLaborales(datos = {}) {
+        return {
+            ...defaultDatosLaborales(),
+            ...datos,
+            salario_mensual: datos.salario_mensual ?? "",
+            salario_moneda: datos.salario_moneda || "COP",
+            fecha_inicio_labores: normalizeDateInput(datos.fecha_inicio_labores)
+        };
+    }
+
+    function validarDatosLaborales(datos = {}) {
+        const requeridos = [
+            ["tipo_trabajador", "Tipo de trabajador"],
+            ["cargo", "Cargo u oficio"],
+            ["periodo_pago", "Periodo de pago"],
+            ["periodo_prueba", "Periodo de prueba"],
+            ["jefe_inmediato", "Jefe inmediato"],
+            ["eps", "EPS"],
+            ["afp", "AFP"],
+            ["arl", "ARL"],
+            ["caja_compensacion", "Caja de compensacion"],
+            ["fecha_inicio_labores", "Fecha de inicio de labores"]
+        ];
+        const faltantes = requeridos
+            .filter(([key]) => !String(datos[key] || "").trim())
+            .map(([, label]) => label);
+        const salario = Number(datos.salario_mensual);
+        if (!Number.isFinite(salario) || salario <= 0) faltantes.push("Salario mensual");
+        return faltantes;
+    }
+
+    function mensajeFaltantes(faltantes = []) {
+        return `Faltan datos laborales obligatorios para el contrato: ${faltantes.join(", ")}`;
+    }
+
     return {
         tokens: [],
         // candidatos: lista unificada de personas (de tabla personas + en-vuelo)
@@ -32,7 +92,10 @@ window.firmaContratosApp = function () {
             item: null,
             error: "",
             exito: false,
-            guardando: false
+            guardando: false,
+            requiere_laboral: false,
+            datos_laborales: defaultDatosLaborales(),
+            faltantes: []
         },
 
         async init() {
@@ -165,17 +228,38 @@ window.firmaContratosApp = function () {
                 item: null,
                 error: "",
                 exito: false,
-                guardando: false
+                guardando: false,
+                requiere_laboral: false,
+                datos_laborales: defaultDatosLaborales(),
+                faltantes: []
             };
         },
 
-        onPersonaSeleccionada() {
+        async onPersonaSeleccionada() {
             this.modal.nombre_persona = "";
             this.modal.correo_personal = "";
+            this.modal.requiere_laboral = false;
+            this.modal.datos_laborales = defaultDatosLaborales();
+            this.modal.faltantes = [];
+            this.modal.error = "";
             const persona = this.personaSeleccionada;
             if (!persona) return;
             this.modal.nombre_persona = persona.nombre_completo || "";
             this.modal.correo_personal = persona.correo_personal || "";
+            try {
+                const params = {};
+                if (persona.numero_documento) params.numero_documento = persona.numero_documento;
+                if (persona.correo_personal) params.correo_personal = persona.correo_personal;
+                const res = await axios.get(`${API}/admin/firma-contratos/datos-laborales`, {
+                    headers: getHeaders(),
+                    params
+                });
+                this.modal.requiere_laboral = Boolean(res.data?.requiere_laboral);
+                this.modal.datos_laborales = mergeDatosLaborales(res.data?.datos || {});
+                this.modal.faltantes = Array.isArray(res.data?.faltantes) ? res.data.faltantes : [];
+            } catch (e) {
+                this.modal.error = e?.response?.data?.error || "No fue posible consultar datos laborales.";
+            }
         },
 
         async generarToken() {
@@ -192,6 +276,20 @@ window.firmaContratosApp = function () {
             const persona = this.personaSeleccionada;
             this.modal.guardando = true;
             try {
+                if (this.modal.requiere_laboral) {
+                    const faltantes = validarDatosLaborales(this.modal.datos_laborales);
+                    if (faltantes.length) {
+                        this.modal.faltantes = faltantes;
+                        this.modal.error = mensajeFaltantes(faltantes);
+                        return;
+                    }
+                    await axios.put(`${API}/admin/firma-contratos/datos-laborales`, {
+                        numero_documento: persona?.numero_documento || null,
+                        correo_personal: persona?.correo_personal || this.modal.correo_personal || null,
+                        ...this.modal.datos_laborales
+                    }, { headers: getHeaders() });
+                }
+
                 const payload = {
                     nombre_persona: this.modal.nombre_persona,
                     correo_personal: this.modal.correo_personal,
@@ -206,7 +304,13 @@ window.firmaContratosApp = function () {
                 this.modal.exito = true;
                 await Promise.all([this.cargar(), this.cargarCandidatos()]);
             } catch (e) {
-                this.modal.error = e?.response?.data?.error || "Error generando el proceso. Intenta de nuevo.";
+                const missing = e?.response?.data?.missing;
+                if (Array.isArray(missing) && missing.length) {
+                    this.modal.faltantes = missing;
+                    this.modal.error = mensajeFaltantes(missing);
+                } else {
+                    this.modal.error = e?.response?.data?.error || "Error generando el proceso. Intenta de nuevo.";
+                }
             } finally {
                 this.modal.guardando = false;
             }

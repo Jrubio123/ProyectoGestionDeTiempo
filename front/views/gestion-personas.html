@@ -176,6 +176,51 @@
 
         <div class="overflow-hidden bg-white border border-gray-100 shadow-sm rounded-2xl">
           <div class="flex items-center justify-between px-6 py-4 border-b border-gray-50">
+            <h3 class="flex items-center gap-2 font-bold text-gray-700"><span class="w-1.5 h-5 bg-sky-500 rounded-full"></span>Datos laborales (contrato)</h3>
+            <button x-show="puedeEditar && !editando.laboral" @click="abrirEdicion('laboral')" class="px-3 py-1 text-xs font-semibold transition-colors rounded-lg text-sky-600 hover:text-sky-800 hover:bg-sky-50">Editar</button>
+          </div>
+          <div x-show="!editando.laboral" class="grid grid-cols-2 gap-4 px-6 py-4">
+            <div><p class="mb-1 text-xs font-bold text-gray-400 uppercase">Tipo trabajador</p><p class="text-sm text-gray-800" x-text="ficha?.tipo_trabajador || '-'"></p></div>
+            <div><p class="mb-1 text-xs font-bold text-gray-400 uppercase">Cargo u oficio</p><p class="text-sm text-gray-800" x-text="ficha?.cargo || '-'"></p></div>
+            <div><p class="mb-1 text-xs font-bold text-gray-400 uppercase">Salario mensual</p><p class="text-sm text-gray-800" x-text="ficha?.salario_mensual || '-'"></p></div>
+            <div><p class="mb-1 text-xs font-bold text-gray-400 uppercase">Moneda salario</p><p class="text-sm text-gray-800" x-text="ficha?.salario_moneda || '-'"></p></div>
+            <div><p class="mb-1 text-xs font-bold text-gray-400 uppercase">Periodo pago</p><p class="text-sm text-gray-800" x-text="ficha?.periodo_pago || '-'"></p></div>
+            <div><p class="mb-1 text-xs font-bold text-gray-400 uppercase">Periodo prueba</p><p class="text-sm text-gray-800" x-text="ficha?.periodo_prueba || '-'"></p></div>
+            <div><p class="mb-1 text-xs font-bold text-gray-400 uppercase">Jefe inmediato</p><p class="text-sm text-gray-800" x-text="ficha?.jefe_inmediato || '-'"></p></div>
+            <div><p class="mb-1 text-xs font-bold text-gray-400 uppercase">Caja compensacion</p><p class="text-sm text-gray-800" x-text="ficha?.caja_compensacion || '-'"></p></div>
+            <div><p class="mb-1 text-xs font-bold text-gray-400 uppercase">EPS</p><p class="text-sm text-gray-800" x-text="ficha?.eps || '-'"></p></div>
+            <div><p class="mb-1 text-xs font-bold text-gray-400 uppercase">AFP</p><p class="text-sm text-gray-800" x-text="ficha?.afp || '-'"></p></div>
+            <div><p class="mb-1 text-xs font-bold text-gray-400 uppercase">ARL</p><p class="text-sm text-gray-800" x-text="ficha?.arl || '-'"></p></div>
+            <div><p class="mb-1 text-xs font-bold text-gray-400 uppercase">Fecha inicio labores</p><p class="text-sm text-gray-800" x-text="ficha?.fecha_inicio_labores ? String(ficha.fecha_inicio_labores).slice(0, 10) : '-'"></p></div>
+            <div><p class="mb-1 text-xs font-bold text-gray-400 uppercase">Duracion contrato</p><p class="text-sm text-gray-800" x-text="ficha?.duracion_contrato || '-'"></p></div>
+            <div><p class="mb-1 text-xs font-bold text-gray-400 uppercase">Lugar celebracion</p><p class="text-sm text-gray-800" x-text="ficha?.lugar_celebracion || '-'"></p></div>
+            <div class="col-span-2"><p class="mb-1 text-xs font-bold text-gray-400 uppercase">Condiciones especiales</p><p class="text-sm text-gray-800 whitespace-pre-line" x-text="ficha?.condiciones_especiales || '-'"></p></div>
+          </div>
+          <div x-show="editando.laboral" class="px-6 py-4 space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+              <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Tipo trabajador</label><input type="text" x-model="draft.laboral.tipo_trabajador" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
+              <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Cargo u oficio</label><input type="text" x-model="draft.laboral.cargo" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
+              <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Salario mensual</label><input type="number" min="0" step="0.01" x-model="draft.laboral.salario_mensual" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
+              <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Moneda salario</label><input type="text" x-model="draft.laboral.salario_moneda" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
+              <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Periodo pago</label><input type="text" x-model="draft.laboral.periodo_pago" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
+              <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Periodo prueba</label><input type="text" x-model="draft.laboral.periodo_prueba" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
+              <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Jefe inmediato</label><input type="text" x-model="draft.laboral.jefe_inmediato" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
+              <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Caja compensacion</label><input type="text" x-model="draft.laboral.caja_compensacion" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
+              <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">EPS</label><input type="text" x-model="draft.laboral.eps" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
+              <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">AFP</label><input type="text" x-model="draft.laboral.afp" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
+              <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">ARL</label><input type="text" x-model="draft.laboral.arl" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
+              <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Fecha inicio labores</label><input type="date" x-model="draft.laboral.fecha_inicio_labores" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
+              <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Duracion contrato</label><input type="text" x-model="draft.laboral.duracion_contrato" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
+              <div><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Lugar celebracion</label><input type="text" x-model="draft.laboral.lugar_celebracion" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></div>
+              <div class="col-span-2"><label class="block mb-1 text-xs font-bold text-gray-500 uppercase">Condiciones especiales</label><textarea rows="3" x-model="draft.laboral.condiciones_especiales" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-gray-50"></textarea></div>
+            </div>
+            <div x-show="errores.laboral" class="px-3 py-2 text-sm text-red-600 rounded-lg bg-red-50" x-text="errores.laboral"></div>
+            <div class="flex justify-end gap-2"><button @click="cancelarEdicion('laboral')" class="px-4 py-2 text-sm text-gray-500 transition-colors border border-gray-200 hover:text-gray-700 rounded-xl hover:bg-gray-50">Cancelar</button><button @click="guardar('laboral')" :disabled="guardando.laboral" class="px-4 py-2 text-sm font-semibold text-white transition-colors bg-sky-600 rounded-xl hover:bg-sky-700 disabled:opacity-60"><span x-show="!guardando.laboral">Guardar</span><span x-show="guardando.laboral">Guardando...</span></button></div>
+          </div>
+        </div>
+
+        <div class="overflow-hidden bg-white border border-gray-100 shadow-sm rounded-2xl">
+          <div class="flex items-center justify-between px-6 py-4 border-b border-gray-50">
             <h3 class="flex items-center gap-2 font-bold text-gray-700"><span class="w-1.5 h-5 bg-amber-500 rounded-full"></span>Relacion Operativa</h3>
             <button x-show="puedeEditar && !editando.operativa" @click="abrirEdicion('operativa')" class="px-3 py-1 text-xs font-semibold transition-colors rounded-lg text-amber-600 hover:text-amber-800 hover:bg-amber-50">Editar</button>
           </div>

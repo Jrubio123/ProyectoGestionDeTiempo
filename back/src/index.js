@@ -2141,6 +2141,7 @@ async function resolveContratoPersonaContext(proceso) {
     toNullableTrimmedString(canonical?.numero_documento) ||
     toNullableTrimmedString(solicitud?.numero_documento) ||
     toNullableTrimmedString(preregistro?.numero_documento) ||
+    toNullableTrimmedString(proceso?.numero_documento) ||
     null;
   const correoPersonalBase =
     toNullableTrimmedString(canonical?.correo_personal) ||
@@ -2275,6 +2276,22 @@ async function resolveContratoPersonaContext(proceso) {
       null,
     facturaEnColombia,
     tipoPersona,
+    tipoContrato: toNullableTrimmedString(personaBase?.tipo_contrato),
+    eps: toNullableTrimmedString(personaBase?.eps),
+    afp: toNullableTrimmedString(personaBase?.afp),
+    arl: toNullableTrimmedString(personaBase?.arl),
+    tipoTrabajador: toNullableTrimmedString(personaBase?.tipo_trabajador),
+    cargo: toNullableTrimmedString(personaBase?.cargo),
+    salarioMensual: toNullableNumber(personaBase?.salario_mensual),
+    salarioMoneda: normalizeMonedaContrato(personaBase?.salario_moneda),
+    periodoPago: toNullableTrimmedString(personaBase?.periodo_pago),
+    periodoPrueba: toNullableTrimmedString(personaBase?.periodo_prueba),
+    jefeInmediato: toNullableTrimmedString(personaBase?.jefe_inmediato),
+    cajaCompensacion: toNullableTrimmedString(personaBase?.caja_compensacion),
+    condicionesEspeciales: toNullableTrimmedString(personaBase?.condiciones_especiales),
+    duracionContrato: toNullableTrimmedString(personaBase?.duracion_contrato),
+    fechaInicioLabores: personaBase?.fecha_inicio_labores || null,
+    lugarCelebracion: toNullableTrimmedString(personaBase?.lugar_celebracion),
     razonSocial,
     nitEmpresa,
     representanteLegalContratista,
@@ -4597,6 +4614,8 @@ function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correo
   const empresa = resolveEmpresaContratoConfig(personaContext?.facturaEnColombia ?? null);
   const contratistaFirma = buildContratistaFirmaPayload(personaContext);
   const nombreCompleto = String(personaContext?.nombreCompleto || proceso?.nombre_persona || "").toUpperCase();
+  const salarioMensual = toNullableNumber(personaContext?.salarioMensual);
+  const salarioMoneda = personaContext?.salarioMoneda || "COP";
 
   return {
     NombreCompleto: nombreCompleto,
@@ -4628,8 +4647,109 @@ function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correo
     CedulaRL: empresa.cedulaRepresentante,
     NitSilver: empresa.nit,
     CiudadSilver: empresa.ciudad,
+    TipoTrabajador: personaContext?.tipoTrabajador || "",
+    CargoOficio: personaContext?.cargo || "",
+    SalarioMensual: formatCurrencyForTemplate(salarioMensual, salarioMoneda),
+    SalarioMensualLetras: salarioMensual !== null && salarioMensual > 0 ? buildTotalLetras(Number(salarioMensual), salarioMoneda) : "",
+    PeriodoPago: personaContext?.periodoPago || "",
+    PeriodoPrueba: personaContext?.periodoPrueba || "",
+    JefeInmediato: personaContext?.jefeInmediato || "",
+    CajaCompensacion: personaContext?.cajaCompensacion || "",
+    Eps: personaContext?.eps || "",
+    Afp: personaContext?.afp || "",
+    Arl: personaContext?.arl || "",
+    CondicionesEspeciales: personaContext?.condicionesEspeciales || "",
+    DuracionContrato: personaContext?.duracionContrato || (personaContext?.tipoContrato === "Vinculado" ? "Indefinida" : ""),
+    FechaInicioLabores: safeFmtDate(personaContext?.fechaInicioLabores, "es-CO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "America/Bogota" }),
+    LugarCelebracion: personaContext?.lugarCelebracion || personaContext?.ciudad || "",
     ...contratistaFirma
   };
+}
+
+function getLaboralFieldValue(persona, snakeKey, camelKey = null) {
+  if (!persona) return null;
+  if (Object.prototype.hasOwnProperty.call(persona, snakeKey)) return persona[snakeKey];
+  if (camelKey && Object.prototype.hasOwnProperty.call(persona, camelKey)) return persona[camelKey];
+  return null;
+}
+
+function getCamposLaboralesFaltantes(persona) {
+  const tipoContrato = toNullableTrimmedString(
+    getLaboralFieldValue(persona, "tipo_contrato", "tipoContrato")
+  );
+  if (tipoContrato !== "Vinculado") return [];
+
+  const required = [
+    ["tipo_trabajador", "tipoTrabajador", "Tipo de trabajador"],
+    ["cargo", "cargo", "Cargo u oficio"],
+    ["periodo_pago", "periodoPago", "Periodo de pago"],
+    ["periodo_prueba", "periodoPrueba", "Periodo de prueba"],
+    ["jefe_inmediato", "jefeInmediato", "Jefe inmediato"],
+    ["eps", "eps", "EPS"],
+    ["afp", "afp", "AFP"],
+    ["arl", "arl", "ARL"],
+    ["caja_compensacion", "cajaCompensacion", "Caja de compensacion"],
+    ["fecha_inicio_labores", "fechaInicioLabores", "Fecha de inicio de labores"]
+  ];
+
+  const faltantes = required
+    .filter(([snakeKey, camelKey]) => !toNullableTrimmedString(getLaboralFieldValue(persona, snakeKey, camelKey)))
+    .map(([, , label]) => label);
+
+  const salarioMensual = toNullableNumber(getLaboralFieldValue(persona, "salario_mensual", "salarioMensual"));
+  if (salarioMensual === null || salarioMensual <= 0) faltantes.push("Salario mensual");
+
+  return faltantes;
+}
+
+async function updatePersonaDatosLaborales(client, personaId, body = {}) {
+  const id = toNullableInteger(personaId);
+  if (!id) return null;
+
+  const salarioMensual = toNullableNumber(body.salario_mensual ?? body.salarioMensual);
+  const salarioMoneda = normalizeMonedaContrato(body.salario_moneda ?? body.salarioMoneda) || "COP";
+  const result = await client.query(
+    `
+    UPDATE personas SET
+      tipo_trabajador        = $1,
+      cargo                  = $2,
+      salario_mensual        = $3,
+      salario_moneda         = $4,
+      periodo_pago           = $5,
+      periodo_prueba         = $6,
+      jefe_inmediato         = $7,
+      caja_compensacion      = $8,
+      condiciones_especiales = $9,
+      duracion_contrato      = $10,
+      fecha_inicio_labores   = $11,
+      lugar_celebracion      = $12,
+      eps                    = $13,
+      afp                    = $14,
+      arl                    = $15,
+      updated_at             = NOW()
+    WHERE id = $16
+    RETURNING *
+    `,
+    [
+      toNullableTrimmedString(body.tipo_trabajador ?? body.tipoTrabajador),
+      toNullableTrimmedString(body.cargo),
+      salarioMensual,
+      salarioMoneda,
+      toNullableTrimmedString(body.periodo_pago ?? body.periodoPago),
+      toNullableTrimmedString(body.periodo_prueba ?? body.periodoPrueba),
+      toNullableTrimmedString(body.jefe_inmediato ?? body.jefeInmediato),
+      toNullableTrimmedString(body.caja_compensacion ?? body.cajaCompensacion),
+      toNullableTrimmedString(body.condiciones_especiales ?? body.condicionesEspeciales),
+      toNullableTrimmedString(body.duracion_contrato ?? body.duracionContrato),
+      normalizeDateOnlyInput(body.fecha_inicio_labores ?? body.fechaInicioLabores),
+      toNullableTrimmedString(body.lugar_celebracion ?? body.lugarCelebracion),
+      toNullableTrimmedString(body.eps),
+      toNullableTrimmedString(body.afp),
+      toNullableTrimmedString(body.arl),
+      id
+    ]
+  );
+  return result.rows[0] || null;
 }
 
 async function buildContratoTemplatePayload({ docDefinition, personaContext, proceso }) {
@@ -9138,6 +9258,18 @@ app.get("/admin/consultores/:id", requireAccess({ roles: ["Administrador", "Coor
         p.parentesco,
         p.tipo_contrato,
         p.modalidad,
+        p.tipo_trabajador,
+        p.cargo,
+        p.salario_mensual,
+        p.salario_moneda,
+        p.periodo_pago,
+        p.periodo_prueba,
+        p.jefe_inmediato,
+        p.caja_compensacion,
+        p.condiciones_especiales,
+        p.duracion_contrato,
+        p.fecha_inicio_labores,
+        p.lugar_celebracion,
         m.public_id                                             AS persona_modulo_id,
         m.titulo                                                AS persona_modulo,
         p.modulo_otro,
@@ -9736,6 +9868,48 @@ app.put("/admin/personas/:id/contratacion", requireAccess({ roles: ["Administrad
     if (err?.status === 400) return res.status(400).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: "Error al actualizar datos de contratación" });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /admin/personas/:id/laboral — datos laborales para contrato vinculado (admin + Coordinador + TH)
+app.put("/admin/personas/:id/laboral", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
+  const { id } = req.params;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const usuarioRes = await client.query(
+      "SELECT id, persona_id, nombre_usuario FROM usuarios WHERE public_id = $1",
+      [id]
+    );
+    if (usuarioRes.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Persona no encontrada" });
+    }
+
+    const usuario = usuarioRes.rows[0];
+    let personaId = usuario.persona_id;
+    if (!personaId) {
+      const newPersona = await client.query(
+        "INSERT INTO personas (nombre, created_by) VALUES ($1, $2) RETURNING id",
+        [usuario.nombre_usuario, usuario.id]
+      );
+      personaId = newPersona.rows[0].id;
+      await client.query(
+        "UPDATE usuarios SET persona_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+        [personaId, usuario.id]
+      );
+    }
+
+    await updatePersonaDatosLaborales(client, personaId, req.body || {});
+    await client.query("COMMIT");
+    res.json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => { });
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar datos laborales" });
   } finally {
     client.release();
   }
@@ -10773,6 +10947,19 @@ async function getContratoPersonaBaseRecord(db, {
       p.eps,
       p.afp,
       p.arl,
+      p.tipo_contrato,
+      p.tipo_trabajador,
+      p.cargo,
+      p.salario_mensual,
+      p.salario_moneda,
+      p.periodo_pago,
+      p.periodo_prueba,
+      p.jefe_inmediato,
+      p.caja_compensacion,
+      p.condiciones_especiales,
+      p.duracion_contrato,
+      p.fecha_inicio_labores,
+      p.lugar_celebracion,
       p.modulo_id,
       m.public_id::text AS modulo_public_id,
       m.titulo AS modulo_titulo,
@@ -14668,6 +14855,7 @@ module.exports = {
   ...(module.exports || {}),
   sendEmailSafe,
   buildTotalLetras,
+  formatCurrencyForTemplate,
   graphGet,
   graphPutBinary,
   encodeGraphPath,
@@ -14704,6 +14892,8 @@ module.exports = {
   normalizeDocsFirmaListCompat,
   requirePersistedAnexoFromProceso,
   resolveContratoPersonaContext,
+  getCamposLaboralesFaltantes,
+  updatePersonaDatosLaborales,
   resolveProcesoForPersona,
   sanitizeDownloadFileName,
   isAnexoIndividualInfraError,

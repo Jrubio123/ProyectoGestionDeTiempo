@@ -41,7 +41,6 @@
         try {
             localStorage.setItem(key, value);
         } catch (e) {
-            // ignore storage errors
         }
     };
 

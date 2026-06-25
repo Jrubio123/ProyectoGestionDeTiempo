@@ -128,6 +128,11 @@ function buildDatosLaboralesResponse(personaContext, getCamposLaboralesFaltantes
   };
 }
 
+function normalizeTipoContratacionFirma(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["vinculado", "todosilver"].includes(normalized) ? normalized : null;
+}
+
 /**
  * Obtiene la lista de tokens generados para procesos de firma de contratos
  */
@@ -300,6 +305,10 @@ async function generarTokenFirma(req, res) {
   } = getIndexHelpers();
 
   const { solicitud_id, preregistro_id, nombre_persona, correo_personal, numero_documento } = req.body || {};
+  const tipoContratacion = normalizeTipoContratacionFirma(req.body?.tipo_contratacion);
+  if (!tipoContratacion) {
+    return res.status(400).json({ error: "Debes indicar el tipo de contratación (vinculado o todosilver)" });
+  }
 
   if (!solicitud_id && !preregistro_id && !numero_documento && !correo_personal) {
     return res.status(400).json({ error: "Debes indicar numero_documento, correo_personal, solicitud_id o preregistro_id" });
@@ -362,7 +371,7 @@ async function generarTokenFirma(req, res) {
       if (personaContext) personaContext.correoPersonal = correoIngresado;
     }
 
-    if (personaContext?.tipoContrato === "Vinculado") {
+    if (tipoContratacion === "vinculado" || personaContext?.tipoContrato === "Vinculado") {
       let personaLaboral = personaContext;
       if (personaContext?.persona_id) {
         const personaRes = await pool.query("SELECT * FROM personas WHERE id = $1", [personaContext.persona_id]);
@@ -417,7 +426,8 @@ async function generarTokenFirma(req, res) {
     });
     const docsPlan = buildDocsFirmaPlan({
       hasContratoBase: hasBaseContract,
-      facturaEnColombia: personaContext?.facturaEnColombia ?? null
+      facturaEnColombia: personaContext?.facturaEnColombia ?? null,
+      tipoContratacion
     });
     if (docsPlan.some((doc) => doc?.doc_key === "anexo_tecnico")) {
       await requirePersistedAnexoFromProceso(procesoContext, personaContext);
@@ -456,7 +466,7 @@ async function generarTokenFirma(req, res) {
       token,
       expires_at: row.expires_at,
       docs_firma: normalizeDocsFirmaListCompat(row.docs_firma),
-      paquete_documentos: hasBaseContract ? "anexo_tecnico" : "completo",
+      paquete_documentos: tipoContratacion === "vinculado" ? "vinculado" : (hasBaseContract ? "anexo_tecnico" : "completo"),
       link,
       correo_destino: correoFinal,
       correo_enviado: true

@@ -89,6 +89,7 @@ window.firmaContratosApp = function () {
             persona_key: "",
             nombre_persona: "",
             correo_personal: "",
+            tipo_contratacion: "",
             item: null,
             error: "",
             exito: false,
@@ -225,6 +226,7 @@ window.firmaContratosApp = function () {
                 persona_key: "",
                 nombre_persona: "",
                 correo_personal: "",
+                tipo_contratacion: "",
                 item: null,
                 error: "",
                 exito: false,
@@ -238,6 +240,7 @@ window.firmaContratosApp = function () {
         async onPersonaSeleccionada() {
             this.modal.nombre_persona = "";
             this.modal.correo_personal = "";
+            this.modal.tipo_contratacion = "";
             this.modal.requiere_laboral = false;
             this.modal.datos_laborales = defaultDatosLaborales();
             this.modal.faltantes = [];
@@ -254,6 +257,7 @@ window.firmaContratosApp = function () {
                     headers: getHeaders(),
                     params
                 });
+                this.modal.tipo_contratacion = res.data?.tipo_contrato === "Vinculado" ? "vinculado" : "todosilver";
                 this.modal.requiere_laboral = Boolean(res.data?.requiere_laboral);
                 this.modal.datos_laborales = mergeDatosLaborales(res.data?.datos || {});
                 this.modal.faltantes = Array.isArray(res.data?.faltantes) ? res.data.faltantes : [];
@@ -270,6 +274,10 @@ window.firmaContratosApp = function () {
             }
             if (!this.modal.nombre_persona.trim() || !this.modal.correo_personal.trim()) {
                 this.modal.error = "Nombre y correo son obligatorios.";
+                return;
+            }
+            if (!["vinculado", "todosilver"].includes(this.modal.tipo_contratacion)) {
+                this.modal.error = "Selecciona el tipo de contratación.";
                 return;
             }
 
@@ -293,6 +301,7 @@ window.firmaContratosApp = function () {
                 const payload = {
                     nombre_persona: this.modal.nombre_persona,
                     correo_personal: this.modal.correo_personal,
+                    tipo_contratacion: this.modal.tipo_contratacion,
                     numero_documento: persona?.numero_documento || null
                 };
 
@@ -316,12 +325,22 @@ window.firmaContratosApp = function () {
             }
         },
 
+        getTipoContratacionToken(token) {
+            const docs = Array.isArray(token?.docs_firma) ? token.docs_firma : [];
+            const esVinculado = docs.some(d => {
+                const docKey = String(d?.doc_key || "").trim();
+                return d?.folder === "vinculado" || docKey === "cl_termino_indefinido" || docKey.endsWith("_vinculado");
+            });
+            return esVinculado ? "vinculado" : "todosilver";
+        },
+
         async reenviarCorreo(token) {
             if (!confirm(`¿Reenviar el correo a ${token.correo_personal}?`)) return;
             try {
                 await axios.post(`${API}/admin/firma-contratos/generar`, {
                     nombre_persona: token.nombre_persona,
                     correo_personal: token.correo_personal,
+                    tipo_contratacion: this.getTipoContratacionToken(token),
                     solicitud_id: token.solicitud_public_id || null,
                     preregistro_id: token.preregistro_public_id || null
                 }, { headers: getHeaders() });

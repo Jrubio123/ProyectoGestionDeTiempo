@@ -735,6 +735,7 @@ const ONEDRIVE_ENABLED = String(process.env.ONEDRIVE_ENABLED || "true").toLowerC
 const ONEDRIVE_TARGET_USER = process.env.ONEDRIVE_TARGET_USER || "admin.apps@silverconsulting.com.co";
 const ONEDRIVE_ROOT_FOLDER = process.env.ONEDRIVE_ROOT_FOLDER || 'AdjuntosCuentasCobro';
 const folderContratos = process.env.ONEDRIVE_CONTRATOS || 'Contratos';
+const folderContratosVinculados = process.env.ONEDRIVE_CONTRATOS_VINCULADOS || 'ContratosVinculados';
 const folderAnexo = process.env.ONEDRIVE_ANEXO_TECNICO || 'AnexoTecnico';
 const ANEXO_TECNICO_CLICKSIGN_DOCUMENT_TYPES = Object.freeze({
   silver: "AnexoTecnico",
@@ -811,7 +812,7 @@ const CONTRATOS_CAPITAL_CEDULA_REPRESENTANTE = String(process.env.CONTRATOS_CAPI
 const CONTRATOS_CAPITAL_NIT = String(process.env.CONTRATOS_CAPITAL_NIT || "901473416-8").trim();
 const CONTRATOS_CAPITAL_CIUDAD = String(process.env.CONTRATOS_CAPITAL_CIUDAD || "Medellin").trim();
 const CONTRATOS_CAPITAL_DOMICILIO = String(process.env.CONTRATOS_CAPITAL_DOMICILIO || "Medellín – Antioquia").trim();
-const CONTRATOS_DOCX_DIR = path.join(__dirname, "static", "contratos");
+const CONTRATOS_TEMPLATE_BASE_DIR = path.join(__dirname, "static");
 function resolveEmpresaContratoConfig(facturaEnColombia) {
   if (facturaEnColombia === false) {
     return {
@@ -835,11 +836,12 @@ function resolveEmpresaContratoConfig(facturaEnColombia) {
   };
 }
 
-function defineContratoDoc(docKey, titulo, templateFiles) {
+function defineContratoDoc(docKey, titulo, templateFiles, folder = "todoSilver") {
   const files = Object.freeze({ ...templateFiles });
   return Object.freeze({
     doc_key: docKey,
     titulo,
+    folder,
     template_file: files.silver,
     template_files: files
   });
@@ -849,29 +851,46 @@ const CONTRATO_DOC_DEFINITIONS_FULL = Object.freeze([
   defineContratoDoc("contrato_prestacion_servicios", "Contrato Prestacion de Servicios", {
     silver: "Contrato Prestación de Servicios .docx",
     capital: "ContratoPrestacionServicioCapital.docx"
-  }),
+  }, "todoSilver"),
   defineContratoDoc("acuerdo_confidencialidad", "Acuerdo de Confidencialidad", {
     silver: "Acuerdo de Confidencialidad .docx",
     capital: "AcuerdoConfidencialdiadCapital.docx"
-  }),
+  }, "todoSilver"),
   defineContratoDoc("politica_garantia", "Politica de Garantia", {
     silver: "Política de Garantía.docx",
     capital: "PoliticaGarantiaCapital.docx"
-  }),
+  }, "todoSilver"),
   defineContratoDoc("autorizacion_datos_personales", "Autorizacion de Tratamiento de Datos Personales", {
     silver: "AUTORIZACIÓN EXPRESA PARA EL TRATAMIENTO DE DATOS PERSONALES.docx",
     capital: "AutorizacionTratamientoDatosCapital.docx"
-  }),
+  }, "todoSilver"),
   defineContratoDoc("anexo_tecnico", "Anexo Tecnico", {
     silver: "Anexo Técnico.docx",
     capital: "AnexoTecnicoCapital.docx"
-  })
+  }, "todoSilver")
+]);
+const CONTRATO_DOC_DEFINITIONS_VINCULADO = Object.freeze([
+  defineContratoDoc("cl_termino_indefinido", "Contrato a T\u00e9rmino Indefinido", {
+    silver: "CL - TERMINO INDEFINIDO.docx"
+  }, "vinculado"),
+  defineContratoDoc("acuerdo_confidencialidad_vinculado", "Acuerdo de Confidencialidad", {
+    silver: "ACUERDO DE CONFIDENCIALIDAD.docx"
+  }, "vinculado"),
+  defineContratoDoc("autorizacion_datos_personales_vinculado", "Autorizaci\u00f3n Tratamiento de Datos Personales", {
+    silver: "AUTORIZACI\u00d3N EXPRESA PARA EL TRATAMIENTO DE DATOS PERSONALES.docx"
+  }, "vinculado"),
+  defineContratoDoc("autorizacion_datos_sensibles_vinculado", "Autorizaci\u00f3n Tratamiento de Datos Sensibles", {
+    silver: "AUTORIZACI\u00d3N EXPRESA PARA EL TRATAMIENTO DE DATOS SENSIBLES.docx"
+  }, "vinculado")
 ]);
 const CONTRATO_DOC_DEFINITIONS_ANEXO_ONLY = Object.freeze(
   CONTRATO_DOC_DEFINITIONS_FULL.filter((d) => d.doc_key === "anexo_tecnico")
 );
+const CONTRATO_VINCULADO_DOC_KEYS = new Set(
+  CONTRATO_DOC_DEFINITIONS_VINCULADO.map((d) => d.doc_key)
+);
 const CONTRATO_DOC_DEFINITIONS_BY_KEY = new Map(
-  CONTRATO_DOC_DEFINITIONS_FULL.map((d) => [d.doc_key, d])
+  [...CONTRATO_DOC_DEFINITIONS_FULL, ...CONTRATO_DOC_DEFINITIONS_VINCULADO].map((d) => [d.doc_key, d])
 );
 const LEGACY_DOC_INDEX_TO_KEY = new Map([
   [1, "contrato_prestacion_servicios"],
@@ -881,7 +900,8 @@ const CONTRATO_BASE_ONEDRIVE_DOC_KEYS = new Set([
   "contrato_prestacion_servicios",
   "acuerdo_confidencialidad",
   "politica_garantia",
-  "autorizacion_datos_personales"
+  "autorizacion_datos_personales",
+  ...CONTRATO_VINCULADO_DOC_KEYS
 ]);
 const CONTRATO_BASE_ONEDRIVE_TEXT_KEYS = new Set([
   ...[...CONTRATO_BASE_ONEDRIVE_DOC_KEYS].map(normalizeTextKey),
@@ -1560,7 +1580,9 @@ function isAnexoTecnicoClickSignConfigured() {
 
 function hydrateContratoDocDefinitionForEmpresa(def, facturaEnColombia = null) {
   if (!def) return null;
-  const empresaKey = getContratoEmpresaKey(facturaEnColombia);
+  const empresaKey = def.folder === "vinculado"
+    ? getContratoEmpresaKey(null)
+    : getContratoEmpresaKey(facturaEnColombia);
   const templateFile =
     def.template_files?.[empresaKey] ||
     def.template_file ||
@@ -1619,13 +1641,18 @@ function resolveContratoDocDefinitionForFirma(docKey, { facturaEnColombia = null
   };
 }
 
-function buildDocsFirmaPlan({ hasContratoBase = false, facturaEnColombia = null } = {}) {
-  const baseDefs = hasContratoBase ? CONTRATO_DOC_DEFINITIONS_ANEXO_ONLY : CONTRATO_DOC_DEFINITIONS_FULL;
-  const defs = baseDefs.map((def) => hydrateContratoDocDefinitionForEmpresa(def, facturaEnColombia));
+function buildDocsFirmaPlan({ hasContratoBase = false, facturaEnColombia = null, tipoContratacion = "todosilver" } = {}) {
+  const esVinculado = String(tipoContratacion || "").trim().toLowerCase() === "vinculado";
+  const baseDefs = esVinculado
+    ? CONTRATO_DOC_DEFINITIONS_VINCULADO
+    : (hasContratoBase ? CONTRATO_DOC_DEFINITIONS_ANEXO_ONLY : CONTRATO_DOC_DEFINITIONS_FULL);
+  const facturaPlan = esVinculado ? null : facturaEnColombia;
+  const defs = baseDefs.map((def) => hydrateContratoDocDefinitionForEmpresa(def, facturaPlan));
   return defs.map((def, index) => ({
     doc_index: index + 1,
     doc_key: def.doc_key,
     titulo: def.titulo,
+    folder: def.folder,
     template_file: def.template_file,
     empresa_key: def.empresa_key,
     estado: "pending",
@@ -1675,6 +1702,7 @@ function normalizeDocsFirmaList(docsRaw, options = {}) {
         doc_index: docIndex,
         doc_key: docKey,
         titulo: toNullableTrimmedString(doc.titulo) || def?.titulo || `Documento ${docIndex}`,
+        folder: toNullableTrimmedString(doc.folder) || def?.folder || null,
         template_file: resolvedTemplateFile,
         empresa_key: resolvedEmpresaKey,
         estado: normalizeDocStatus(doc.estado)
@@ -1720,6 +1748,7 @@ function refreshDocsFirmaDefinitionsForContext(docsRaw, { facturaEnColombia = nu
         ...doc,
         doc_key: def.doc_key,
         titulo: toNullableTrimmedString(doc.titulo) || def.titulo,
+        folder: toNullableTrimmedString(doc.folder) || def.folder,
         template_file: toNullableTrimmedString(doc.template_file) || def.template_file,
         empresa_key:
           toNullableTrimmedString(doc.empresa_key) ||
@@ -1730,6 +1759,7 @@ function refreshDocsFirmaDefinitionsForContext(docsRaw, { facturaEnColombia = nu
       ...doc,
       doc_key: def.doc_key,
       titulo: def.titulo,
+      folder: def.folder,
       template_file: def.template_file,
       empresa_key: def.empresa_key
     };
@@ -4051,32 +4081,42 @@ function normalizeTemplateFileName(value) {
     .trim();
 }
 
-function getDocxTemplateBinary(templateFile) {
+function getDocxTemplateBinary(templateFile, folder = null) {
   const safeTemplate = toNullableTrimmedString(templateFile);
   if (!safeTemplate) {
     throw new Error("template_file no definido para documento de contrato");
   }
 
-  const directPath = path.join(CONTRATOS_DOCX_DIR, safeTemplate);
   const normalizedTemplate = normalizeTemplateFileName(safeTemplate);
-  let resolvedPath = directPath;
+  const folderCandidates = [folder, "todoSilver", "vinculado"]
+    .map(toNullableTrimmedString)
+    .filter((value, index, values) => value && values.indexOf(value) === index);
+  let resolvedPath = null;
 
-  if (!fs.existsSync(resolvedPath)) {
+  for (const folderName of folderCandidates) {
+    const folderPath = path.join(CONTRATOS_TEMPLATE_BASE_DIR, folderName);
+    const directPath = path.join(folderPath, safeTemplate);
+    if (fs.existsSync(directPath)) {
+      resolvedPath = directPath;
+      break;
+    }
+
     try {
-      const files = fs.readdirSync(CONTRATOS_DOCX_DIR);
+      const files = fs.readdirSync(folderPath);
       const match = files.find((name) => normalizeTemplateFileName(name) === normalizedTemplate);
       if (match) {
-        resolvedPath = path.join(CONTRATOS_DOCX_DIR, match);
+        resolvedPath = path.join(folderPath, match);
+        break;
       }
     } catch (_) {
-      // keep default path and fail below with explicit error.
+      // keep searching in remaining template folders.
     }
   }
 
-  if (docxTemplateCache.has(resolvedPath)) return docxTemplateCache.get(resolvedPath);
-  if (!fs.existsSync(resolvedPath)) {
+  if (!resolvedPath || !fs.existsSync(resolvedPath)) {
     throw new Error(`Plantilla de contrato no encontrada: ${safeTemplate}`);
   }
+  if (docxTemplateCache.has(resolvedPath)) return docxTemplateCache.get(resolvedPath);
 
   const binary = fs.readFileSync(resolvedPath, "binary");
   docxTemplateCache.set(resolvedPath, binary);
@@ -4136,11 +4176,11 @@ function buildDocxtemplaterInstanceFromBinary(binary, templateFile) {
   throw new Error(`Error compilando plantilla ${templateFile}: ${summary || "sin detalles"}`);
 }
 
-function renderDocxTemplateToBuffer({ templateFile, data }) {
+function renderDocxTemplateToBuffer({ templateFile, folder = null, data }) {
   if (!PizZip || !Docxtemplater) {
     throw new Error("Dependencias DOCX no disponibles en servidor (pizzip/docxtemplater)");
   }
-  const binary = getDocxTemplateBinary(templateFile);
+  const binary = getDocxTemplateBinary(templateFile, folder);
   const doc = buildDocxtemplaterInstanceFromBinary(binary, templateFile);
   try {
     doc.render(data || {});
@@ -4611,7 +4651,9 @@ function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correo
     ? `${Number(fechaInicioDia)} de ${fechaInicioMesTexto} de ${fechaInicioAnio}`
     : "";
 
-  const empresa = resolveEmpresaContratoConfig(personaContext?.facturaEnColombia ?? null);
+  const empresa = resolveEmpresaContratoConfig(
+    personaContext?.tipoContrato === "Vinculado" ? null : (personaContext?.facturaEnColombia ?? null)
+  );
   const contratistaFirma = buildContratistaFirmaPayload(personaContext);
   const nombreCompleto = String(personaContext?.nombreCompleto || proceso?.nombre_persona || "").toUpperCase();
   const salarioMensual = toNullableNumber(personaContext?.salarioMensual);
@@ -4767,6 +4809,7 @@ async function generateContratoPdfFromTemplate({ docDefinition, personaContext, 
   const payload = await buildContratoTemplatePayload({ docDefinition, personaContext, proceso });
   const docxBuffer = renderDocxTemplateToBuffer({
     templateFile: docDefinition.template_file,
+    folder: docDefinition.folder,
     data: payload
   });
   return convertDocxBufferToPdfBuffer(docxBuffer, fileBaseName);
@@ -10563,7 +10606,7 @@ registerContratacionesRoutes({
 //  RUTAS PÚBLICAS - MÓDULO FIRMA DE CONTRATOS (sin auth de Microsoft)
 // ========================================================================================================================
 
-const CONTRATOS_STATIC_DIR = path.join(__dirname, "static", "contratos");
+const CONTRATOS_STATIC_DIR = path.join(__dirname, "static", "informacion");
 
 // plantilla: true ? el frontend descarga automáticamente al confirmar lectura
 const DOCS_ESTATICOS = [
@@ -11715,6 +11758,7 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
     const fileBaseName = `${personaSlug}_${docDefinitionKey}_${idx}`;
     const docxBuffer = renderDocxTemplateToBuffer({
       templateFile: docDefinition.template_file,
+      folder: docDefinition.folder,
       data: payload
     });
 
@@ -13889,8 +13933,11 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, opt
     nombrePersona
   } = buildContratoOneDriveFolderNames(proceso, personaContext);
   const safeName = sanitizePdfFileName(fileName || `Contrato_${nombrePersona}.pdf`, "Contrato.pdf");
+  const docKey = toNullableTrimmedString(docContext?.doc_key || docContext?.docKey);
+  const esVinculado = Boolean(docKey && CONTRATO_VINCULADO_DOC_KEYS.has(docKey));
+  const rootFolder = esVinculado ? folderContratosVinculados : folderContratos;
 
-  let targetPath = sanitizePathSegment(folderContratos, "Contratos");
+  let targetPath = sanitizePathSegment(rootFolder, "Contratos");
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
   targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, nombrePersonaCarpeta);
   let folderWebUrl = "";

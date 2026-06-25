@@ -69,6 +69,8 @@ Rutas ya modularizadas:
 - `reportes.routes.js`
 - `anexo-individual.routes.js`
 - `firma-contratos.routes.js`
+- `preregistro-routes.js`
+- `contrataciones-routes.js`
 - `cuentas-cobro.routes.js`
 - `health.routes.js`
 
@@ -85,6 +87,7 @@ Servicios principales:
 - `cuentas-cobro.service.js`
 - `firma-contratos.service.js`
 - `anexo-individual.service.js`
+- `firma-cuenta-timeout.service.js`
 - `clicksign.service.js`
 
 ## Identidad de datos
@@ -173,6 +176,7 @@ Tipo usado en flujos asociados:
 - `POST /admin/bancos`
 - `PUT /admin/bancos/:id`
 - `DELETE /admin/bancos/:id`
+- `GET /supervisores`
 - `GET /tipos-asignacion`
 - `GET /bancos`
 - `GET /documentos-identidad`
@@ -213,6 +217,14 @@ Tipo usado en flujos asociados:
 - `POST /mesa-fabrica/:id/enviar-aprobacion`
 - `PUT /mesa-fabrica/:id`
 
+### Tarifas
+
+- `GET /tarifas`
+- `POST /tarifas`
+- `PUT /tarifas/:id`
+- `DELETE /tarifas/:id`
+- `GET /tarifa-consultor`
+
 ### Cuentas de cobro
 
 - `POST /cuentas-cobro/preview`
@@ -228,6 +240,7 @@ Tipo usado en flujos asociados:
 
 ### Usuarios
 
+- `GET /admin/tenant/usuarios`
 - `GET /admin/usuarios-roles`
 - `GET /admin/usuarios-licencias`
 - `PATCH /admin/usuarios-licencias/:public_id/estado`
@@ -263,7 +276,7 @@ Tipo usado en flujos asociados:
 - `PATCH /contrataciones/solicitudes/:id/seccion-3`
 - `PATCH /contrataciones/solicitudes/:id/revision-th`
 
-### Personas
+### Personas y Consultores
 
 - `GET /admin/personas`
 - `POST /admin/personas`
@@ -272,6 +285,7 @@ Tipo usado en flujos asociados:
 - `PUT /admin/personas/:id/personal`
 - `PUT /admin/personas/:id/cobro`
 - `PUT /admin/personas/:id/contratacion`
+- `PUT /admin/personas/:id/laboral`
 - `PUT /admin/personas/:id/operativa`
 - `GET /admin/personas-standalone`
 - `GET /admin/personas/p/:personaId`
@@ -279,6 +293,11 @@ Tipo usado en flujos asociados:
 - `PUT /admin/personas/p/:personaId/cobro`
 - `PUT /admin/personas/p/:personaId/contratacion`
 - `PATCH /admin/personas/p/:personaId/estado`
+- `GET /admin/consultores`
+- `POST /admin/consultores`
+- `GET /admin/consultores/existente`
+- `PUT /admin/consultores/:id`
+- `GET /admin/consultores/:id`
 
 ### Firma de contratos
 
@@ -380,7 +399,10 @@ Variables clave:
 - Click&Sign: `CLICKSIGN_API_BASE`, `CLICKSIGN_API_KEY`, `CLICKSIGN_USER`, `CLICKSIGN_CONFIG_ID`
 - Click&Sign contratos: `CLICKSIGN_CONTRATOS_CONFIG_ID`
 - Webhooks: `CLICKSIGN_WEBHOOK_TOKEN`, `CLICKSIGN_SIGNATURE_CB_URL`
+- Click&Sign anexo técnico: `CLICKSIGN_ANEXO_TECNICO_CONFIG_ID`
+- Contratos Capital: `CONTRATOS_CAPITAL_RAZON_SOCIAL`, `CONTRATOS_CAPITAL_REPRESENTANTE_LEGAL`, `CONTRATOS_CAPITAL_CEDULA_REPRESENTANTE`, `CONTRATOS_CAPITAL_NIT`, `CONTRATOS_CAPITAL_CIUDAD`, `CONTRATOS_CAPITAL_DOMICILIO`
 - Adobe PDF: `ADOBE_PDF_CLIENT_ID`, `ADOBE_PDF_CLIENT_SECRET`, `ADOBE_PDF_ORGANIZATION_ID`
+- Notificaciones: `ANEXO_INDIVIDUAL_NOTIFY_EMAIL`
 
 ## Ejecucion local con Docker
 

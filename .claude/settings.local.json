@@ -41,7 +41,8 @@
       "Bash(node -c back/src/services/firma-contratos.service.js)",
       "Bash(node -c back/src/routes/firma-contratos.routes.js)",
       "Bash(node -c front/js/firma-contratos-admin.js)",
-      "Bash(node -c front/js/gestion-personas.js)"
+      "Bash(node -c front/js/gestion-personas.js)",
+      "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mqtob5pb-rrrl1j)"
     ]
   },
   "enabledPlugins": {

@@ -161,6 +161,16 @@
                 Esta persona ya tiene un proceso de firma activo. Al generar uno nuevo, el anterior quedará expirado.
             </div>
 
+            <div class="mb-5">
+                <label class="text-xs font-bold text-gray-400 uppercase">Tipo de contratación *</label>
+                <select x-model="modal.tipo_contratacion" required
+                        class="w-full mt-1 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400">
+                    <option value="">Seleccionar tipo...</option>
+                    <option value="vinculado">Vinculado</option>
+                    <option value="todosilver">TodoSilver</option>
+                </select>
+            </div>
+
             <!-- Nombre y correo -->
             <div class="space-y-3 mb-5">
                 <div>

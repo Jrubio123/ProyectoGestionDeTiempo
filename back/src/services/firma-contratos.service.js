@@ -138,7 +138,9 @@ function normalizeTipoContratacionFirma(value) {
  */
 async function listFirmaContratos(req, res) {
   const {
-    CLAVES_REQUERIDAS_FIRMA
+    CLAVES_REQUERIDAS_FIRMA,
+    esProcesoVinculado,
+    getClavesRequeridasFirma
   } = getIndexHelpers();
 
   try {
@@ -162,15 +164,26 @@ async function listFirmaContratos(req, res) {
         LEFT JOIN usuarios u ON u.id = t.generado_por
       ORDER BY t.created_at DESC
     `);
-    const checksRequeridos = Array.isArray(CLAVES_REQUERIDAS_FIRMA) && CLAVES_REQUERIDAS_FIRMA.length
+    const checksRequeridosFallback = Array.isArray(CLAVES_REQUERIDAS_FIRMA) && CLAVES_REQUERIDAS_FIRMA.length
       ? [...CLAVES_REQUERIDAS_FIRMA]
       : ["pdf1", "pdf2", "pdf3", "pdf4", "pdf5"];
+    const getChecksRequeridosRow = (row) => {
+      if (typeof getClavesRequeridasFirma !== "function") return [...checksRequeridosFallback];
+      try {
+        const vinculado = typeof esProcesoVinculado === "function"
+          ? esProcesoVinculado(row.docs_firma)
+          : false;
+        return getClavesRequeridasFirma(vinculado);
+      } catch {
+        return [...checksRequeridosFallback];
+      }
+    };
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
     res.json(result.rows.map((row) => ({
       ...row,
-      checks_requeridos: checksRequeridos
+      checks_requeridos: getChecksRequeridosRow(row)
     })));
   } catch (err) {
     console.error(err);

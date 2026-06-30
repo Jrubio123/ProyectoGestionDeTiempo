@@ -10619,8 +10619,21 @@ const DOCS_ESTATICOS = [
   { clave: "guia_ingreso_365", archivo: "Silver Consulting - Ingresar a Microsoft 365 Est\u00E1ndar.pdf", label: "Guia ingreso Microsoft 365 Estandar" },
 ];
 
+const DOCS_VINCULADO_LECTURA = [
+  {
+    clave: "vinc_responsabilidad_social",
+    label: "Pol\u00EDtica de Responsabilidad Social Empresarial",
+    archivo: "POL\u00CDTICA DE RESPONSABILIDAD SOCIAL EMPRESARIAL.pdf"
+  },
+  {
+    clave: "vinc_escritorio_limpio",
+    label: "TI-003 Pol\u00EDtica de Escritorio y Pantalla Limpia",
+    archivo: "TI-003 POL\u00CDTICA DE ESCRITORIO Y PANTALLA LIMPIA.pdf"
+  }
+];
+
 const ARCHIVOS_ESTATICOS_CONTRATACION = new Set(
-  DOCS_ESTATICOS
+  [...DOCS_ESTATICOS, ...DOCS_VINCULADO_LECTURA]
     .flatMap((d) => [d.archivo, d.descarga_archivo])
     .filter(Boolean)
 );
@@ -10648,6 +10661,7 @@ const VIDEO_BIENVENIDA = "Silver Consulting - Bienvenida.mp4";
 
 const CLAVES_ESTATICAS_VALIDAS = new Set([
   ...DOCS_ESTATICOS.map(d => d.clave),
+  ...DOCS_VINCULADO_LECTURA.map(d => d.clave),
   LEGACY_LINK_FORMULARIO_CLAVE,
   // backward compat con tokens antiguos
   "pdf1", "pdf2", "pdf3", "pdf4", "pdf5"
@@ -10657,6 +10671,20 @@ const CLAVES_REQUERIDAS_FIRMA = [
   ...DOCS_ESTATICOS.map(d => d.clave),
   FORM_DATOS_PERSONA.clave
 ];
+
+function esProcesoVinculado(docsFirma) {
+  return normalizeDocsFirmaListCompat(docsFirma).some((doc) => {
+    const folder = toNullableTrimmedString(doc?.folder);
+    const docKey = toNullableTrimmedString(doc?.doc_key);
+    return folder === "vinculado" || (docKey && CONTRATO_VINCULADO_DOC_KEYS.has(docKey));
+  });
+}
+
+function getClavesRequeridasFirma(esVinculado = false) {
+  return esVinculado
+    ? [...CLAVES_REQUERIDAS_FIRMA, ...DOCS_VINCULADO_LECTURA.map(d => d.clave)]
+    : [...CLAVES_REQUERIDAS_FIRMA];
+}
 
 const requireTokenFirma = (req, res, next) => {
   const auth = req.headers.authorization || "";
@@ -10823,9 +10851,26 @@ app.post("/contratacion/firma/reconciliar", requireTokenFirma, async (req, res) 
 });
 
 // GET /contratacion/docs-info ? lista de documentos estáticos (sin auth de archivo)
-app.get("/contratacion/docs-info", requireTokenFirma, (req, res) => {
+app.get("/contratacion/docs-info", requireTokenFirma, async (req, res) => {
+  let docsContratacion = DOCS_ESTATICOS;
+
+  try {
+    const tokenId = toNullableInteger(req.tokenFirma?.token_id);
+    if (tokenId) {
+      const r = await pool.query(
+        `SELECT docs_firma FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
+        [tokenId]
+      );
+      if (esProcesoVinculado(r.rows[0]?.docs_firma)) {
+        docsContratacion = [...DOCS_ESTATICOS, ...DOCS_VINCULADO_LECTURA];
+      }
+    }
+  } catch (err) {
+    console.warn("No se pudo resolver informativos por proceso:", err?.message || err);
+  }
+
   res.json({
-    docs: DOCS_ESTATICOS.map(d => ({ clave: d.clave, label: d.label, archivo: d.archivo, plantilla: !!d.plantilla, descarga_archivo: d.descarga_archivo || null })),
+    docs: docsContratacion.map(d => ({ clave: d.clave, label: d.label, archivo: d.archivo, plantilla: !!d.plantilla, descarga_archivo: d.descarga_archivo || null })),
     form: { clave: FORM_DATOS_PERSONA.clave, label: FORM_DATOS_PERSONA.label },
     video_disponible: fs.existsSync(path.join(CONTRATOS_STATIC_DIR, VIDEO_BIENVENIDA))
   });
@@ -11687,7 +11732,8 @@ app.get("/contratacion/docs-firma/:doc_index/pdf", requireTokenFirma, async (req
 
     const proceso = r.rows[0];
     const checks = proceso.checks_completados || {};
-    const faltantes = CLAVES_REQUERIDAS_FIRMA.filter(c => !checks[c]);
+    const esVinc = esProcesoVinculado(proceso.docs_firma);
+    const faltantes = getClavesRequeridasFirma(esVinc).filter(c => !checks[c]);
     if (faltantes.length > 0) {
       return res.status(400).json({ error: "Debes revisar todos los documentos informativos antes de descargar o firmar" });
     }
@@ -11834,7 +11880,8 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
 
     const proceso = r.rows[0];
     const checks = proceso.checks_completados || {};
-    const faltantes = CLAVES_REQUERIDAS_FIRMA.filter(c => !checks[c]);
+    const esVinc = esProcesoVinculado(proceso.docs_firma);
+    const faltantes = getClavesRequeridasFirma(esVinc).filter(c => !checks[c]);
     if (faltantes.length > 0) {
       return res.status(400).json({ error: "Debes revisar todos los documentos informativos antes de firmar" });
     }
@@ -14994,6 +15041,8 @@ module.exports = {
   CONTRATOS_TOKEN_EXPIRY_HOURS,
   CONTRATOS_BASE_URL,
   CLAVES_REQUERIDAS_FIRMA,
+  esProcesoVinculado,
+  getClavesRequeridasFirma,
   CLICKSIGN_USER,
   CLICKSIGN_CONTRATOS_CONFIG_ID,
   CLICKSIGN_SIGNATURE_CB_URL,

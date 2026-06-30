@@ -42,7 +42,15 @@
       "Bash(node -c back/src/routes/firma-contratos.routes.js)",
       "Bash(node -c front/js/firma-contratos-admin.js)",
       "Bash(node -c front/js/gestion-personas.js)",
-      "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mqtob5pb-rrrl1j)"
+      "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mqtob5pb-rrrl1j)",
+      "Bash(ls -la \".mcp.json\" 2>/dev/null; ls -la \"$HOME/.claude.json\" 2>/dev/null && echo \"--- existe ~/.claude.json ---\"; ls -la \".claude/\" 2>/dev/null)",
+      "Read(//c/Users/JuanPabloRubioMejía/**)",
+      "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mr0vtmwo-h7udjg)",
+      "Bash(node -e ' *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'Muestra informativos de solo lectura segun el tipo de contratacion \\(vinculado\\)' -m '- /contratacion/docs-info ahora responde por proceso: si es vinculado, agrega las politicas de solo lectura \\(Responsabilidad Social Empresarial y TI-003 Escritorio Limpio\\) a los informativos generales; todosilver se mantiene igual. *)",
+      "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mr12nqqh-89pmwq)"
     ]
   },
   "enabledPlugins": {

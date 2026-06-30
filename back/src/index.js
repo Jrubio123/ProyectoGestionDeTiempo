@@ -6259,18 +6259,30 @@ function normalizeClickSignFileEntries(source) {
       const fileId = String(item.file_id || item.id || "").trim();
       const rawFileType = String(item.file_type || item.type || item.file_group || item.group || "").trim();
       const fileType = rawFileType.toLowerCase().replace(/\s+/g, "_");
+      const fileGroup = String(item.file_group || item.group || "").trim().toLowerCase().replace(/\s+/g, "_");
+      const status = String(item.status || item.file_status || "").trim().toLowerCase();
       const fileName = sanitizePdfFileName(
         item.filename || item.file_name || item.name || "DocumentoClickSign.pdf",
         "DocumentoClickSign.pdf"
       );
       if (!fileId) continue;
-      entries.push({ fileId, fileType, rawFileType, fileName });
+      entries.push({ fileId, fileType, rawFileType, fileName, fileGroup, status });
     }
   }
   return entries;
 }
 
+function isClickSignUploadedOrOriginalGroup(fileGroup = "") {
+  return ["uploaded_files", "uploaded", "original", "originals"].includes(String(fileGroup || "").toLowerCase());
+}
+
 function isClickSignSignedFileEntry(entry = {}) {
+  const fileGroup = String(entry.fileGroup || "").toLowerCase();
+  const status = String(entry.status || "").toLowerCase();
+  // Click&Sign marca el firmado real con file_group=signed.
+  if (fileGroup === "signed") return status ? status === "available" : true;
+  if (isClickSignUploadedOrOriginalGroup(fileGroup)) return false;
+
   const fileType = String(entry.fileType || "").toLowerCase();
   const fileName = String(entry.fileName || "").toLowerCase();
   return [
@@ -6291,6 +6303,9 @@ function isClickSignSignedFileEntry(entry = {}) {
 }
 
 function isClickSignSecondaryFileEntry(entry = {}) {
+  const fileGroup = String(entry.fileGroup || "").toLowerCase();
+  if (isClickSignUploadedOrOriginalGroup(fileGroup)) return true;
+
   const text = `${entry.fileType || ""} ${entry.fileName || ""}`.toLowerCase();
   return /evidence|evidencia|attachment|adjunto|uploaded|original|certificate|certificado/.test(text);
 }
@@ -6445,7 +6460,13 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
   const hasCatalogEntries = Array.isArray(catalog.entries) && catalog.entries.length > 0;
   let signedPdf = null;
   let signedFileId = "";
-  const signedCandidates = catalog.entries.filter(isClickSignSignedFileEntry);
+  const signedCandidates = catalog.entries
+    .filter(isClickSignSignedFileEntry)
+    .sort((a, b) => {
+      const aIsAuthoritative = a.fileGroup === "signed" && a.status === "available";
+      const bIsAuthoritative = b.fileGroup === "signed" && b.status === "available";
+      return Number(bIsAuthoritative) - Number(aIsAuthoritative);
+    });
 
   for (const signedEntry of signedCandidates) {
     const buffer = await fetchClickSignFileBuffer(signedEntry.fileId);
@@ -6460,7 +6481,10 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
   }
 
   if (!signedPdf && hasCatalogEntries && allowCatalogFallback) {
-    const fallbackCandidates = catalog.entries.filter((entry) => !isClickSignSecondaryFileEntry(entry));
+    const fallbackCandidates = catalog.entries.filter((entry) => {
+      const fileGroup = String(entry.fileGroup || "").toLowerCase();
+      return isClickSignSignedFileEntry(entry) || (!isClickSignSecondaryFileEntry(entry) && !isClickSignUploadedOrOriginalGroup(fileGroup));
+    });
     for (const entry of fallbackCandidates) {
       const buffer = await fetchClickSignFileBuffer(entry.fileId);
       if (!isPdfBuffer(buffer)) continue;
@@ -6481,6 +6505,7 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
 
   const extraFiles = [];
   const uploadedEntry =
+    catalog.entries.find((entry) => entry.fileGroup === "uploaded_files" && (!entry.status || entry.status === "available")) ||
     byType.get("uploaded")?.[0] ||
     byType.get("uploaded_files")?.[0] ||
     null;

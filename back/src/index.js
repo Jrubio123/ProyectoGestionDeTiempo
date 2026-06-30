@@ -14530,6 +14530,12 @@ const RECONCILIACION_CONTRATOS_INTERVAL_MS = 10 * 60 * 1000; // cada 10 minutos
 const RECONCILIACION_CONTRATOS_MIN_EDAD_MIN = 20; // solo procesos con más de 20 min sin actualizar
 const RECONCILIACION_CONTRATOS_BATCH = 10; // máximo por ciclo
 const RECONCILIACION_CONTRATOS_EXPIRAR_HORAS = CONTRATOS_TOKEN_EXPIRY_HOURS;
+const REVALIDACION_SOPORTES_INTERVAL_MS = 30 * 60 * 1000; // cada 30 min
+const REVALIDACION_SOPORTES_MIN_EDAD_MIN = 20; // cuentas con >20 min sin update
+const REVALIDACION_SOPORTES_BATCH = 10;
+const REVALIDACION_SOPORTES_MAX_INTENTOS = 5; // back-off duro por cuenta
+const REVALIDACION_SOPORTES_REINTENTO_MIN = 60; // min minutos entre intentos por cuenta
+const ORIGENES_FIRMADO_CONFIABLES = ["get_file_signed_contract", "clicksign_reparacion", "clicksign_revalidacion"];
 
 async function jobReconciliarCuentasEnFirma() {
   if (isShuttingDown) return;
@@ -14753,6 +14759,206 @@ async function jobReconciliarCuentasEnFirma() {
   }
 }
 
+async function jobRevalidarSoportesCuentasFirmadas() {
+  if (isShuttingDown) return;
+  try {
+    const estadoAprobado = await getCuentaCobroEstadoAprobado();
+    const result = await pool.query(
+      `SELECT cc.id, cc.public_id, cc.created_by, cc.fecha_correspondiente, cc.created_at, cc.datos_adjuntos,
+              u.nombre_usuario, u.email
+       FROM cuenta_cobro cc
+       LEFT JOIN usuarios u ON u.id = cc.created_by
+       WHERE cc.estado = $1::tipo_estado_reporte
+         AND COALESCE(cc.datos_adjuntos->'firma'->'documento_firmado'->>'url','') <> ''
+         AND (
+              NULLIF(BTRIM(cc.datos_adjuntos->'firma'->>'request_id'), '') IS NOT NULL
+           OR NULLIF(BTRIM(cc.datos_adjuntos->'firma'->>'contract_id'), '') IS NOT NULL
+           OR NULLIF(BTRIM(cc.datos_adjuntos->'firma'->>'signature_id'), '') IS NOT NULL
+         )
+         AND (
+              COALESCE(cc.datos_adjuntos->'soportes'->'seguridad_social'->>'url','') = ''
+           OR COALESCE(cc.datos_adjuntos->'firma'->'documento_firmado'->>'origen','') = 'get_file_catalog_fallback'
+         )
+         AND COALESCE((cc.datos_adjuntos->'revalidacion_soportes'->>'intentos')::int, 0) < $2
+         AND (
+              cc.datos_adjuntos->'revalidacion_soportes'->>'ultimo_intento' IS NULL
+           OR (cc.datos_adjuntos->'revalidacion_soportes'->>'ultimo_intento')::timestamptz
+                < NOW() - ($3 || ' minutes')::INTERVAL
+         )
+         AND cc.updated_at < NOW() - ($4 || ' minutes')::INTERVAL
+       ORDER BY cc.updated_at ASC
+       LIMIT $5`,
+      [
+        estadoAprobado,
+        REVALIDACION_SOPORTES_MAX_INTENTOS,
+        String(REVALIDACION_SOPORTES_REINTENTO_MIN),
+        String(REVALIDACION_SOPORTES_MIN_EDAD_MIN),
+        REVALIDACION_SOPORTES_BATCH
+      ]
+    );
+
+    const cuentas = result.rows || [];
+    if (cuentas.length === 0) return;
+
+    console.log(`[revalidar-soportes] ${cuentas.length} cuenta(s) firmada(s) pendientes de revalidar.`);
+
+    for (const cuenta of cuentas) {
+      if (isShuttingDown) break;
+      try {
+        const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object" ? cuenta.datos_adjuntos : {};
+        const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object" ? prevAdjuntos.firma : {};
+        const prevSoportes = prevAdjuntos.soportes && typeof prevAdjuntos.soportes === "object" ? prevAdjuntos.soportes : {};
+        const faltaSeguridad = !(prevSoportes?.seguridad_social?.url);
+        const firmadoSospechoso = String(prevFirma?.documento_firmado?.origen || "") === "get_file_catalog_fallback";
+
+        const resolution = await resolveCuentaFirmaFirmadaAcrossAttempts({ cuenta, prevAdjuntos });
+        const signedPdfValido = Boolean(resolution.signed && resolution.signedPdf && isPdfBuffer(resolution.signedPdf.buffer));
+        const signedPdfOrigen = String(resolution.signedPdf?.source || "");
+        const signedPdfConfiable = ORIGENES_FIRMADO_CONFIABLES.includes(signedPdfOrigen);
+        const nowIso = new Date().toISOString();
+        let carpeta = prevSoportes.carpeta || "";
+        let nuevoDocumentoFirmado = null;
+        let extraSeguridad = null;
+
+        if (signedPdfValido) {
+          if (firmadoSospechoso && signedPdfConfiable) {
+            try {
+              const uploadResult = await uploadSignedPdfToOneDrive(cuenta, resolution.signedPdf.buffer, resolution.signedPdf.fileName);
+              nuevoDocumentoFirmado = {
+                ...uploadResult.archivo,
+                carpeta: uploadResult.carpeta,
+                origen: resolution.signedPdf.source || "clicksign_revalidacion",
+                actualizado_en: nowIso
+              };
+              carpeta = uploadResult.carpeta || carpeta;
+            } catch (err) {
+              console.warn(`[revalidar-soportes] Firmado no reemplazado para ${cuenta.public_id}:`, err?.message || err);
+            }
+          } else if (firmadoSospechoso) {
+            console.warn(
+              `[revalidar-soportes] Firmado no reemplazado para ${cuenta.public_id}: origen no confiable (${signedPdfOrigen || "sin_origen"}).`
+            );
+          }
+
+          try {
+            const extrasResult = await uploadClickSignExtraFilesToOneDrive(cuenta, resolution.extraFiles || [], carpeta || "");
+            carpeta = extrasResult.carpeta || carpeta;
+            extraSeguridad = (extrasResult.uploaded || []).find((x) => x.kind === "seguridad_social_firma" && x.url) || null;
+          } catch (err) {
+            console.warn(`[revalidar-soportes] Seguridad social no subida para ${cuenta.public_id}:`, err?.message || err);
+          }
+        }
+
+        const client = await pool.connect();
+        let ultimoResultado = "sin_firmado";
+        let reemplazoFirmado = false;
+        let seguridadAgregada = false;
+
+        try {
+          await client.query("BEGIN");
+          const locked = await client.query(
+            `SELECT datos_adjuntos FROM cuenta_cobro WHERE id = $1 FOR UPDATE`,
+            [cuenta.id]
+          );
+          if (locked.rowCount === 0) {
+            await client.query("ROLLBACK");
+            console.log(`[revalidar-soportes] ${cuenta.public_id} omitida: cuenta no encontrada.`);
+            continue;
+          }
+
+          const currentAdjuntos = locked.rows[0].datos_adjuntos && typeof locked.rows[0].datos_adjuntos === "object"
+            ? locked.rows[0].datos_adjuntos
+            : {};
+          const currentFirma = currentAdjuntos.firma && typeof currentAdjuntos.firma === "object" ? currentAdjuntos.firma : {};
+          const currentSoportes = currentAdjuntos.soportes && typeof currentAdjuntos.soportes === "object" ? currentAdjuntos.soportes : {};
+          const currentRevalidacion = currentAdjuntos.revalidacion_soportes && typeof currentAdjuntos.revalidacion_soportes === "object"
+            ? currentAdjuntos.revalidacion_soportes
+            : {};
+          const currentOrigenFirmado = String(currentFirma?.documento_firmado?.origen || "");
+          const currentFirmadoSospechoso = currentOrigenFirmado === "get_file_catalog_fallback"
+            && !ORIGENES_FIRMADO_CONFIABLES.includes(currentOrigenFirmado);
+          const currentFaltaSeguridad = !(currentSoportes?.seguridad_social?.url);
+
+          const nuevoFirma = { ...currentFirma };
+          const nuevoSoportes = { ...currentSoportes };
+          const carpetaFinal = carpeta || currentSoportes.carpeta || "";
+
+          if (nuevoDocumentoFirmado?.url && currentFirmadoSospechoso) {
+            nuevoFirma.documento_firmado = {
+              ...nuevoDocumentoFirmado,
+              carpeta: nuevoDocumentoFirmado.carpeta || carpetaFinal,
+              origen: ORIGENES_FIRMADO_CONFIABLES.includes(nuevoDocumentoFirmado.origen)
+                ? nuevoDocumentoFirmado.origen
+                : "clicksign_revalidacion",
+              actualizado_en: nowIso
+            };
+            nuevoSoportes.cuenta_cobro_firmada = {
+              id: nuevoDocumentoFirmado.id || null,
+              nombre: nuevoDocumentoFirmado.nombre || "CuentaCobroFirmada.pdf",
+              url: nuevoDocumentoFirmado.url
+            };
+            reemplazoFirmado = true;
+          }
+
+          if (extraSeguridad?.url && currentFaltaSeguridad) {
+            nuevoSoportes.seguridad_social = {
+              id: extraSeguridad.id || null,
+              nombre: extraSeguridad.nombre || "SeguridadSocial.pdf",
+              url: extraSeguridad.url
+            };
+            nuevoSoportes.seguridad_social_firma = { ...nuevoSoportes.seguridad_social };
+            nuevoSoportes.seguridad_social_origen = "clicksign_revalidacion";
+            nuevoSoportes.seguridad_social_cargado_en = nowIso;
+            seguridadAgregada = true;
+          }
+
+          const cambio = reemplazoFirmado || seguridadAgregada;
+          if (cambio) {
+            nuevoSoportes.carpeta = carpetaFinal;
+            nuevoSoportes.actualizado_en = nowIso;
+            currentAdjuntos.firma = nuevoFirma;
+            currentAdjuntos.soportes = nuevoSoportes;
+          }
+
+          ultimoResultado = cambio ? "actualizado" : (resolution.signed ? "sin_seguridad_disponible" : "sin_firmado");
+          currentAdjuntos.revalidacion_soportes = {
+            ultimo_intento: nowIso,
+            intentos: (Number.parseInt(currentRevalidacion.intentos, 10) || 0) + 1,
+            ultimo_resultado: ultimoResultado,
+            firmado_reemplazado: Boolean(reemplazoFirmado),
+            seguridad_agregada: Boolean(seguridadAgregada)
+          };
+
+          await client.query(
+            `UPDATE cuenta_cobro
+             SET datos_adjuntos = $1::jsonb, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2`,
+            [JSON.stringify(currentAdjuntos), cuenta.id]
+          );
+          await client.query("COMMIT");
+        } catch (err) {
+          try {
+            await client.query("ROLLBACK");
+          } catch (_) {
+            // noop
+          }
+          throw err;
+        } finally {
+          client.release();
+        }
+
+        console.log(
+          `[revalidar-soportes] ${cuenta.public_id} -> ${ultimoResultado} (${reemplazoFirmado}, ${seguridadAgregada})`
+        );
+      } catch (cuentaErr) {
+        console.error(`[revalidar-soportes] Error procesando ${cuenta.public_id}:`, cuentaErr?.message || cuentaErr);
+      }
+    }
+  } catch (err) {
+    console.error("[revalidar-soportes] Error en ciclo:", err?.message || err);
+  }
+}
+
 async function jobReconciliarContratosEnFirma() {
   if (isShuttingDown) return;
   try {
@@ -14917,12 +15123,18 @@ async function jobReintentarCorreosCuentasCobro() {
 
 // Primer ciclo a los 2 min del arranque para no sobrecargar el inicio
 let reconciliarJobInterval = null;
+let revalidarSoportesJobInterval = null;
 let reconciliarContratosJobInterval = null;
 let reintentarCorreosJobInterval = null;
 setTimeout(() => {
   if (isShuttingDown) return;
   void jobReconciliarCuentasEnFirma();
   reconciliarJobInterval = setInterval(() => { void jobReconciliarCuentasEnFirma(); }, RECONCILIACION_JOB_INTERVAL_MS);
+}, 2 * 60 * 1000);
+setTimeout(() => {
+  if (isShuttingDown) return;
+  void jobRevalidarSoportesCuentasFirmadas();
+  revalidarSoportesJobInterval = setInterval(() => { void jobRevalidarSoportesCuentasFirmadas(); }, REVALIDACION_SOPORTES_INTERVAL_MS);
 }, 2 * 60 * 1000);
 setTimeout(() => {
   if (isShuttingDown) return;
@@ -14941,6 +15153,7 @@ async function gracefulShutdown(signal) {
   if (isShuttingDown) return;
   isShuttingDown = true;
   if (reconciliarJobInterval) clearInterval(reconciliarJobInterval);
+  if (revalidarSoportesJobInterval) clearInterval(revalidarSoportesJobInterval);
   if (reconciliarContratosJobInterval) clearInterval(reconciliarContratosJobInterval);
   if (reintentarCorreosJobInterval) clearInterval(reintentarCorreosJobInterval);
   console.log(`[shutdown] Se?al recibida: ${signal}. Cerrando API...`);

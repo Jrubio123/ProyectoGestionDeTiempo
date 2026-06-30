@@ -50,7 +50,8 @@
       "Bash(git checkout *)",
       "Bash(git add *)",
       "Bash(git commit -m 'Muestra informativos de solo lectura segun el tipo de contratacion \\(vinculado\\)' -m '- /contratacion/docs-info ahora responde por proceso: si es vinculado, agrega las politicas de solo lectura \\(Responsabilidad Social Empresarial y TI-003 Escritorio Limpio\\) a los informativos generales; todosilver se mantiene igual. *)",
-      "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mr12nqqh-89pmwq)"
+      "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mr12nqqh-89pmwq)",
+      "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mr139rkr-40vef9)"
     ]
   },
   "enabledPlugins": {

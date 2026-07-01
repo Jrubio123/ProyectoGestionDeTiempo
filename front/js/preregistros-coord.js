@@ -753,6 +753,9 @@ window.preregistrosCoordApp = function () {
                 if (this.form.grupo_usuario === "Otro" && !String(this.form.grupo_usuario_otro || "").trim()) {
                     errors.push("Especifique el grupo de usuario");
                 }
+                if (!this.form.grupo_distribucion_todos_silver && !this.form.grupo_distribucion_vinculados) {
+                    errors.push("Grupo de distribución (Todos Silver o Vinculados)");
+                }
             }
 
             if (this.tipoModal === "Retiro") {

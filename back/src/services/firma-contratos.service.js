@@ -48,6 +48,7 @@ async function syncPersonaCorreoElectronico({ personaContext, correoPersonal, nu
 async function resolveDatosLaboralesPersonaContext(input, helpers) {
   const {
     resolveContratoPersonaContext,
+    resolveProcesoForPersona,
     resolveInternalIdFromPublicIdOrId,
     ID_TABLES,
     toNullableTrimmedString
@@ -83,6 +84,17 @@ async function resolveDatosLaboralesPersonaContext(input, helpers) {
     throw err;
   }
 
+  // Sin IDs de proceso: resolvemos el proceso vigente por documento/correo para heredar
+  // datos del flujo del coordinador (ej. grupo_distribucion => tipo de contratación sugerido).
+  if (!solicitudId && !preregistroId && (numeroDocumento || correoPersonal)) {
+    const proceso = await resolveProcesoForPersona(pool, {
+      numero_documento: numeroDocumento,
+      correo_personal: correoPersonal
+    });
+    solicitudId = proceso.solicitud_id;
+    preregistroId = proceso.preregistro_id;
+  }
+
   return resolveContratoPersonaContext({
     solicitud_id: solicitudId,
     preregistro_id: preregistroId,
@@ -91,11 +103,25 @@ async function resolveDatosLaboralesPersonaContext(input, helpers) {
   });
 }
 
+// Sugerencia del tipo de contratación (vinculado | todosilver) para prellenar el formulario
+// de firma. Prioriza lo que envió el coordinador (grupo_distribucion) y cae a la naturaleza
+// del contrato ya registrada en personas. Es solo una sugerencia: TH puede editarla.
+function resolveTipoContratacionSugerido(personaContext) {
+  const grupo = String(personaContext?.grupoDistribucion || "").toLowerCase();
+  if (grupo.includes("vinculado")) return "vinculado";
+  if (grupo.includes("todos silver") || grupo.includes("todosilver")) return "todosilver";
+  if (String(personaContext?.tipoContrato || "").trim() === "Vinculado") return "vinculado";
+  return null;
+}
+
 function buildDatosLaboralesResponse(personaContext, getCamposLaboralesFaltantes) {
+  const tipoContratacionSugerido = resolveTipoContratacionSugerido(personaContext);
+
   if (!personaContext?.persona_id) {
     return {
       persona_id: null,
       tipo_contrato: null,
+      tipo_contratacion_sugerido: tipoContratacionSugerido,
       requiere_laboral: false,
       datos: {},
       faltantes: []
@@ -106,6 +132,7 @@ function buildDatosLaboralesResponse(personaContext, getCamposLaboralesFaltantes
   return {
     persona_id: personaContext.persona_id,
     tipo_contrato: personaContext.tipoContrato || null,
+    tipo_contratacion_sugerido: tipoContratacionSugerido,
     requiere_laboral: requiereLaboral,
     datos: {
       tipo_trabajador: personaContext.tipoTrabajador || null,

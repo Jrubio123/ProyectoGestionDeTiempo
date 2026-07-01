@@ -1988,6 +1988,7 @@ async function getSolicitudContratacionDetalleById(internalId) {
       sc.fecha_extension_desde,
       sc.fecha_extension_hasta,
       sc.fecha_retiro,
+      sc.grupo_distribucion,
       sc.datos_extra,
       sc.created_at,
       di.public_id AS tipo_documento_public_id,
@@ -2027,6 +2028,7 @@ async function getPreregistroDetalleById(internalId) {
       pp.tarifa_medio_tiempo,
       pp.tarifa_capacitacion,
       pp.fecha_fin,
+      pp.grupo_distribucion,
       pp.created_at,
       pp.id_solicitud_rrhh,
       pp.factura_en_colombia,
@@ -2307,6 +2309,10 @@ async function resolveContratoPersonaContext(proceso) {
     facturaEnColombia,
     tipoPersona,
     tipoContrato: toNullableTrimmedString(personaBase?.tipo_contrato),
+    grupoDistribucion:
+      toNullableTrimmedString(solicitud?.grupo_distribucion) ||
+      toNullableTrimmedString(preregistro?.grupo_distribucion) ||
+      null,
     eps: toNullableTrimmedString(personaBase?.eps),
     afp: toNullableTrimmedString(personaBase?.afp),
     arl: toNullableTrimmedString(personaBase?.arl),

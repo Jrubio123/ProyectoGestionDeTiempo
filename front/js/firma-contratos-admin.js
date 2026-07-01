@@ -257,7 +257,11 @@ window.firmaContratosApp = function () {
                     headers: getHeaders(),
                     params
                 });
-                this.modal.tipo_contratacion = res.data?.tipo_contrato === "Vinculado" ? "vinculado" : "todosilver";
+                // Prellenamos con lo que envió el coordinador (grupo_distribucion). Sigue siendo editable.
+                const sugerido = res.data?.tipo_contratacion_sugerido;
+                this.modal.tipo_contratacion = ["vinculado", "todosilver"].includes(sugerido)
+                    ? sugerido
+                    : (res.data?.tipo_contrato === "Vinculado" ? "vinculado" : "todosilver");
                 this.modal.requiere_laboral = Boolean(res.data?.requiere_laboral);
                 this.modal.datos_laborales = mergeDatosLaborales(res.data?.datos || {});
                 this.modal.faltantes = Array.isArray(res.data?.faltantes) ? res.data.faltantes : [];

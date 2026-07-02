@@ -163,7 +163,7 @@
 
             <div class="mb-5">
                 <label class="text-xs font-bold text-gray-400 uppercase">Tipo de contratación *</label>
-                <select x-model="modal.tipo_contratacion" required
+                <select x-model="modal.tipo_contratacion" required @change="onTipoContratacionChange()"
                         class="w-full mt-1 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400">
                     <option value="">Seleccionar tipo...</option>
                     <option value="vinculado">Vinculado</option>

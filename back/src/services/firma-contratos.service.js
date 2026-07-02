@@ -128,7 +128,9 @@ function buildDatosLaboralesResponse(personaContext, getCamposLaboralesFaltantes
     };
   }
 
-  const requiereLaboral = personaContext?.tipoContrato === "Vinculado";
+  const requiereLaboral =
+    tipoContratacionSugerido === "vinculado" ||
+    personaContext?.tipoContrato === "Vinculado";
   return {
     persona_id: personaContext.persona_id,
     tipo_contrato: personaContext.tipoContrato || null,
@@ -151,7 +153,7 @@ function buildDatosLaboralesResponse(personaContext, getCamposLaboralesFaltantes
       afp: personaContext.afp || null,
       arl: personaContext.arl || null
     },
-    faltantes: requiereLaboral ? getCamposLaboralesFaltantes(personaContext) : []
+    faltantes: requiereLaboral ? getCamposLaboralesFaltantes(personaContext, { forzarVinculado: true }) : []
   };
 }
 
@@ -417,7 +419,9 @@ async function generarTokenFirma(req, res) {
         const personaRes = await pool.query("SELECT * FROM personas WHERE id = $1", [personaContext.persona_id]);
         personaLaboral = personaRes.rows[0] || personaLaboral;
       }
-      const faltantes = getCamposLaboralesFaltantes(personaLaboral);
+      const faltantes = getCamposLaboralesFaltantes(personaLaboral, {
+        forzarVinculado: tipoContratacion === "vinculado"
+      });
       if (faltantes.length) {
         return res.status(400).json({
           error: `Faltan datos laborales obligatorios para el contrato: ${faltantes.join(", ")}`,

@@ -340,6 +340,16 @@ window.firmaContratosApp = function () {
             this.jefeBuscando = false;
         },
 
+        onTipoContratacionChange() {
+            // El modal de datos laborales depende del tipo de contratacion elegido, NO de
+            // personas.tipo_contrato. Si TH elige vinculado, mostramos/exigimos los datos laborales.
+            if (this.modal.tipo_contratacion === "vinculado") {
+                this.modal.requiere_laboral = true;
+            } else if (this.modal.tipo_contratacion === "todosilver") {
+                this.modal.requiere_laboral = false;
+            }
+        },
+
         normalizarDatosLaboralesParaEnvio() {
             const datos = { ...this.modal.datos_laborales };
             if (datos.duracion_contrato === "Otro") {

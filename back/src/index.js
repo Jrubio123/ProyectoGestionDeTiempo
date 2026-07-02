@@ -4741,11 +4741,13 @@ function getLaboralFieldValue(persona, snakeKey, camelKey = null) {
   return null;
 }
 
-function getCamposLaboralesFaltantes(persona) {
+function getCamposLaboralesFaltantes(persona, { forzarVinculado = false } = {}) {
   const tipoContrato = toNullableTrimmedString(
     getLaboralFieldValue(persona, "tipo_contrato", "tipoContrato")
   );
-  if (tipoContrato !== "Vinculado") return [];
+  // Cuando el proceso ya es vinculado por tipo_contratacion (aunque personas.tipo_contrato
+  // aun no este seteado), forzamos la validacion de los campos laborales.
+  if (!forzarVinculado && tipoContrato !== "Vinculado") return [];
 
   const required = [
     ["tipo_trabajador", "tipoTrabajador", "Tipo de trabajador"],

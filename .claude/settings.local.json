@@ -51,7 +51,11 @@
       "Bash(git add *)",
       "Bash(git commit -m 'Muestra informativos de solo lectura segun el tipo de contratacion \\(vinculado\\)' -m '- /contratacion/docs-info ahora responde por proceso: si es vinculado, agrega las politicas de solo lectura \\(Responsabilidad Social Empresarial y TI-003 Escritorio Limpio\\) a los informativos generales; todosilver se mantiene igual. *)",
       "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mr12nqqh-89pmwq)",
-      "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mr139rkr-40vef9)"
+      "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mr139rkr-40vef9)",
+      "Bash(grep -n \"POST\\\\|PUT\\\\|updatePreregistro\\\\|savePreregistro\" /c/Users/JuanPabloRubioMejía/Downloads/ProyectosDesarrollo\\\\ProyectoGestionDeTiempo\\\\back\\\\src\\\\preregistro-routes.js | head -20)",
+      "Read(//c/Users/JuanPabloRubioMejía/Downloads/**)",
+      "Bash(node --check back/src/services/firma-contratos.service.js)",
+      "Bash(node --check front/js/firma-contratos-admin.js)"
     ]
   },
   "enabledPlugins": {

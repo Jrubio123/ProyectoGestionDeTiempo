@@ -190,7 +190,13 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
                         <label class="text-xs font-bold text-gray-400 uppercase">Tipo trabajador *</label>
-                        <input type="text" x-model="modal.datos_laborales.tipo_trabajador" class="w-full mt-1 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400">
+                        <select x-model="modal.datos_laborales.tipo_trabajador" class="w-full mt-1 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400">
+                            <option value="">Seleccionar...</option>
+                            <option value="DIRECCIÓN">DIRECCIÓN</option>
+                            <option value="CONFIANZA Y MANEJO">CONFIANZA Y MANEJO</option>
+                            <option value="ADMINISTRATIVO">ADMINISTRATIVO</option>
+                            <option value="OPERATIVO">OPERATIVO</option>
+                        </select>
                     </div>
                     <div>
                         <label class="text-xs font-bold text-gray-400 uppercase">Cargo u oficio *</label>
@@ -206,15 +212,37 @@
                     </div>
                     <div>
                         <label class="text-xs font-bold text-gray-400 uppercase">Periodo pago *</label>
-                        <input type="text" x-model="modal.datos_laborales.periodo_pago" class="w-full mt-1 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400">
+                        <select x-model="modal.datos_laborales.periodo_pago" class="w-full mt-1 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400">
+                            <option value="Quincenal">Quincenal</option>
+                            <option value="Mensual">Mensual</option>
+                        </select>
                     </div>
                     <div>
                         <label class="text-xs font-bold text-gray-400 uppercase">Periodo prueba *</label>
-                        <input type="text" x-model="modal.datos_laborales.periodo_prueba" class="w-full mt-1 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400">
+                        <select x-model="modal.datos_laborales.periodo_prueba" class="w-full mt-1 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400">
+                            <option value="">Ninguno</option>
+                            <option value="2 meses">2 meses</option>
+                        </select>
                     </div>
                     <div>
                         <label class="text-xs font-bold text-gray-400 uppercase">Jefe inmediato *</label>
-                        <input type="text" x-model="modal.datos_laborales.jefe_inmediato" class="w-full mt-1 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400">
+                        <div class="relative" @click.outside="ocultarJefesTenant()">
+                            <input
+                                type="text"
+                                x-model="modal.datos_laborales.jefe_inmediato"
+                                @input="buscarJefesTenant(modal.datos_laborales.jefe_inmediato)"
+                                @focus="buscarJefesTenant(modal.datos_laborales.jefe_inmediato)"
+                                class="w-full mt-1 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400">
+                            <div x-show="jefeBuscando" class="absolute right-3 top-3 text-xs text-gray-400" style="display: none;">Buscando...</div>
+                            <div x-show="jefeSugerencias.length" class="absolute z-20 left-0 right-0 mt-1 max-h-52 overflow-auto border border-gray-200 rounded-xl bg-white divide-y divide-gray-100 shadow-lg" style="display: none;">
+                                <template x-for="item in jefeSugerencias" :key="item.email || item.nombre_usuario">
+                                    <button type="button" @click="seleccionarJefeTenant(item)" class="w-full text-left px-3 py-2 hover:bg-gray-50">
+                                        <p class="text-sm font-semibold text-gray-800" x-text="item.nombre_usuario"></p>
+                                        <p class="text-xs text-gray-500" x-text="item.email"></p>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
                     </div>
                     <div>
                         <label class="text-xs font-bold text-gray-400 uppercase">Caja compensacion *</label>
@@ -238,7 +266,15 @@
                     </div>
                     <div>
                         <label class="text-xs font-bold text-gray-400 uppercase">Duracion contrato</label>
-                        <input type="text" x-model="modal.datos_laborales.duracion_contrato" class="w-full mt-1 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400">
+                        <select x-model="modal.datos_laborales.duracion_contrato" @change="if (modal.datos_laborales.duracion_contrato !== 'Otro') modal.duracion_otro = ''" class="w-full mt-1 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400">
+                            <option value="Indefinida">Indefinida</option>
+                            <option value="3 meses">3 meses</option>
+                            <option value="2 meses">2 meses</option>
+                            <option value="6 meses">6 meses</option>
+                            <option value="1 año">1 año</option>
+                            <option value="Otro">Otro</option>
+                        </select>
+                        <input x-show="modal.datos_laborales.duracion_contrato === 'Otro'" type="text" x-model="modal.duracion_otro" placeholder="Duracion del contrato" class="w-full mt-2 p-2 border rounded-lg text-sm outline-none focus:border-indigo-400" style="display: none;">
                     </div>
                     <div>
                         <label class="text-xs font-bold text-gray-400 uppercase">Lugar celebracion</label>

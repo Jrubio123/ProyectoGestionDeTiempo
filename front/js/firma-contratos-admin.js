@@ -1,5 +1,6 @@
 window.firmaContratosApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
+    const DURACIONES_CONTRATO_PREDEFINIDAS = ["Indefinida", "3 meses", "2 meses", "6 meses", "1 año"];
 
     function getHeaders() {
         const token = window.auth?.getToken?.() || localStorage.getItem("token");
@@ -17,12 +18,12 @@ window.firmaContratosApp = function () {
             cargo: "",
             salario_mensual: "",
             salario_moneda: "COP",
-            periodo_pago: "",
-            periodo_prueba: "",
+            periodo_pago: "Quincenal",
+            periodo_prueba: "2 meses",
             jefe_inmediato: "",
             caja_compensacion: "",
             condiciones_especiales: "",
-            duracion_contrato: "",
+            duracion_contrato: "Indefinida",
             fecha_inicio_labores: "",
             lugar_celebracion: "",
             eps: "",
@@ -37,13 +38,28 @@ window.firmaContratosApp = function () {
     }
 
     function mergeDatosLaborales(datos = {}) {
-        return {
-            ...defaultDatosLaborales(),
-            ...datos,
-            salario_mensual: datos.salario_mensual ?? "",
-            salario_moneda: datos.salario_moneda || "COP",
-            fecha_inicio_labores: normalizeDateInput(datos.fecha_inicio_labores)
+        const defaults = defaultDatosLaborales();
+        const merged = {
+            ...defaults,
+            ...datos
         };
+        Object.keys(defaults).forEach((key) => {
+            if (datos[key] === null || datos[key] === undefined || datos[key] === "") {
+                merged[key] = defaults[key];
+            }
+        });
+        merged.fecha_inicio_labores = normalizeDateInput(merged.fecha_inicio_labores);
+        return merged;
+    }
+
+    function prepararDuracionContratoModal(modal) {
+        const duracion = String(modal?.datos_laborales?.duracion_contrato || "").trim();
+        if (duracion && !DURACIONES_CONTRATO_PREDEFINIDAS.includes(duracion)) {
+            modal.duracion_otro = duracion;
+            modal.datos_laborales.duracion_contrato = "Otro";
+            return;
+        }
+        modal.duracion_otro = "";
     }
 
     function validarDatosLaborales(datos = {}) {
@@ -83,6 +99,10 @@ window.firmaContratosApp = function () {
         _refreshTimer: null,
         filtroTexto: "",
         filtroEstado: "todos",
+        jefeSugerencias: [],
+        jefeBuscando: false,
+        _jefeDebounce: null,
+        _jefeLookupSeq: 0,
 
         modal: {
             tipo: null,        // 'generar' | 'detalle' | 'anular'
@@ -96,6 +116,7 @@ window.firmaContratosApp = function () {
             guardando: false,
             requiere_laboral: false,
             datos_laborales: defaultDatosLaborales(),
+            duracion_otro: "",
             faltantes: []
         },
 
@@ -233,8 +254,11 @@ window.firmaContratosApp = function () {
                 guardando: false,
                 requiere_laboral: false,
                 datos_laborales: defaultDatosLaborales(),
+                duracion_otro: "",
                 faltantes: []
             };
+            this.jefeSugerencias = [];
+            this.jefeBuscando = false;
         },
 
         async onPersonaSeleccionada() {
@@ -243,8 +267,11 @@ window.firmaContratosApp = function () {
             this.modal.tipo_contratacion = "";
             this.modal.requiere_laboral = false;
             this.modal.datos_laborales = defaultDatosLaborales();
+            this.modal.duracion_otro = "";
             this.modal.faltantes = [];
             this.modal.error = "";
+            this.jefeSugerencias = [];
+            this.jefeBuscando = false;
             const persona = this.personaSeleccionada;
             if (!persona) return;
             this.modal.nombre_persona = persona.nombre_completo || "";
@@ -264,10 +291,61 @@ window.firmaContratosApp = function () {
                     : (res.data?.tipo_contrato === "Vinculado" ? "vinculado" : "todosilver");
                 this.modal.requiere_laboral = Boolean(res.data?.requiere_laboral);
                 this.modal.datos_laborales = mergeDatosLaborales(res.data?.datos || {});
+                prepararDuracionContratoModal(this.modal);
                 this.modal.faltantes = Array.isArray(res.data?.faltantes) ? res.data.faltantes : [];
             } catch (e) {
                 this.modal.error = e?.response?.data?.error || "No fue posible consultar datos laborales.";
             }
+        },
+
+        buscarJefesTenant(q) {
+            const texto = String(q || "").trim();
+            if (this._jefeDebounce) clearTimeout(this._jefeDebounce);
+            if (texto.length < 2) {
+                this._jefeLookupSeq += 1;
+                this.jefeSugerencias = [];
+                this.jefeBuscando = false;
+                return;
+            }
+
+            const seq = this._jefeLookupSeq + 1;
+            this._jefeLookupSeq = seq;
+            this.jefeBuscando = true;
+            this._jefeDebounce = setTimeout(async () => {
+                try {
+                    const res = await axios.get(`${API}/admin/tenant/usuarios`, {
+                        headers: getHeaders(),
+                        params: { q: texto }
+                    });
+                    if (this._jefeLookupSeq !== seq) return;
+                    this.jefeSugerencias = Array.isArray(res.data) ? res.data : [];
+                } catch (_) {
+                    if (this._jefeLookupSeq === seq) this.jefeSugerencias = [];
+                } finally {
+                    if (this._jefeLookupSeq === seq) this.jefeBuscando = false;
+                }
+            }, 350);
+        },
+
+        ocultarJefesTenant() {
+            this._jefeLookupSeq += 1;
+            this.jefeSugerencias = [];
+            this.jefeBuscando = false;
+        },
+
+        seleccionarJefeTenant(item) {
+            this._jefeLookupSeq += 1;
+            this.modal.datos_laborales.jefe_inmediato = item?.nombre_usuario || "";
+            this.jefeSugerencias = [];
+            this.jefeBuscando = false;
+        },
+
+        normalizarDatosLaboralesParaEnvio() {
+            const datos = { ...this.modal.datos_laborales };
+            if (datos.duracion_contrato === "Otro") {
+                datos.duracion_contrato = String(this.modal.duracion_otro || "").trim() || null;
+            }
+            return datos;
         },
 
         async generarToken() {
@@ -289,7 +367,8 @@ window.firmaContratosApp = function () {
             this.modal.guardando = true;
             try {
                 if (this.modal.requiere_laboral) {
-                    const faltantes = validarDatosLaborales(this.modal.datos_laborales);
+                    const datosLaborales = this.normalizarDatosLaboralesParaEnvio();
+                    const faltantes = validarDatosLaborales(datosLaborales);
                     if (faltantes.length) {
                         this.modal.faltantes = faltantes;
                         this.modal.error = mensajeFaltantes(faltantes);
@@ -298,7 +377,7 @@ window.firmaContratosApp = function () {
                     await axios.put(`${API}/admin/firma-contratos/datos-laborales`, {
                         numero_documento: persona?.numero_documento || null,
                         correo_personal: persona?.correo_personal || this.modal.correo_personal || null,
-                        ...this.modal.datos_laborales
+                        ...datosLaborales
                     }, { headers: getHeaders() });
                 }
 

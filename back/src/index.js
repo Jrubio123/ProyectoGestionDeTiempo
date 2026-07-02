@@ -1961,9 +1961,11 @@ async function getSolicitudContratacionDetalleById(internalId) {
       sc.modalidad_contrato,
       sc.persona_usuario_id,
       sc.coordinador_solicitante_id,
+      sc.supervisor_id,
       sc.nombre,
       sc.apellidos,
       sc.numero_documento,
+      sc.perfil,
       sc.correo_personal,
       sc.telefono,
       sc.ubicacion,
@@ -1972,6 +1974,7 @@ async function getSolicitudContratacionDetalleById(internalId) {
       sc.cliente_id,
       c.public_id AS cliente_public_id,
       c.titulo AS cliente_nombre,
+      sup.nombre_usuario AS supervisor_nombre,
       CASE
         WHEN LOWER(BTRIM(sc.datos_extra->>'factura_en_colombia')) IN ('true', 't', '1', 'yes', 'y', 'on', 'si', 'sí') THEN true
         WHEN LOWER(BTRIM(sc.datos_extra->>'factura_en_colombia')) IN ('false', 'f', '0', 'no', 'n', 'off') THEN false
@@ -1996,6 +1999,7 @@ async function getSolicitudContratacionDetalleById(internalId) {
       di.codigo AS tipo_documento_codigo
     FROM solicitudes_contratacion sc
     LEFT JOIN clientes c ON c.id = sc.cliente_id
+    LEFT JOIN usuarios sup ON sup.id = sc.supervisor_id
     LEFT JOIN documento_identidad di ON di.id = sc.tipo_documento_id
     WHERE sc.id = $1
     LIMIT 1
@@ -2022,6 +2026,8 @@ async function getPreregistroDetalleById(internalId) {
       pp.ciudad,
       pp.pais_ubicacion,
       pp.direccion,
+      pp.responsable_supervisor_id,
+      pp.responsable_supervisor,
       pp.moneda,
       pp.tarifa_hora,
       pp.tarifa_mes,
@@ -2048,6 +2054,7 @@ async function getPreregistroDetalleById(internalId) {
       sr.cliente_id,
       c.public_id AS cliente_public_id,
       c.titulo AS cliente_nombre,
+      sup.nombre_usuario AS supervisor_nombre,
       di.public_id AS tipo_documento_public_id,
       di.titulo AS tipo_documento_titulo,
       di.codigo AS tipo_documento_codigo
@@ -2055,6 +2062,7 @@ async function getPreregistroDetalleById(internalId) {
     LEFT JOIN solicitudes_rrhh sr ON sr.id = pp.id_solicitud_rrhh
     LEFT JOIN modulo m ON m.id = sr.modulo_id
     LEFT JOIN clientes c ON c.id = sr.cliente_id
+    LEFT JOIN usuarios sup ON sup.id = pp.responsable_supervisor_id
     LEFT JOIN documento_identidad di ON di.id = pp.tipo_documento_id
     WHERE pp.id = $1
     LIMIT 1
@@ -2312,6 +2320,16 @@ async function resolveContratoPersonaContext(proceso) {
     grupoDistribucion:
       toNullableTrimmedString(solicitud?.grupo_distribucion) ||
       toNullableTrimmedString(preregistro?.grupo_distribucion) ||
+      null,
+    perfilSolicitud:
+      toNullableTrimmedString(solicitud?.perfil) ||
+      toNullableTrimmedString(preregistro?.modulo_titulo) ||
+      null,
+    tarifaMes: toNullableNumber(solicitud?.tarifa_mes ?? preregistro?.tarifa_mes),
+    supervisorNombre:
+      toNullableTrimmedString(solicitud?.supervisor_nombre) ||
+      toNullableTrimmedString(preregistro?.supervisor_nombre) ||
+      toNullableTrimmedString(preregistro?.responsable_supervisor) ||
       null,
     eps: toNullableTrimmedString(personaBase?.eps),
     afp: toNullableTrimmedString(personaBase?.afp),
@@ -4644,8 +4662,10 @@ function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correo
 
   // Fecha de inicio del contrato: fecha_inicio de la solicitud → fecha de generación
   const fechaInicioRaw =
-    personaContext?.fecha_inicio ||
-    personaContext?.fecha_extension_desde ||
+    personaContext?.fechaInicioLabores ||
+    personaContext?.solicitud?.fecha_inicio ||
+    personaContext?.solicitud?.fecha_extension_desde ||
+    personaContext?.preregistro?.fecha_fin ||
     null;
   const fechaInicioValue = fechaInicioRaw
     ? `${String(fechaInicioRaw).slice(0, 10)}T12:00:00.000Z`

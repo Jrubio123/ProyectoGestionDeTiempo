@@ -144,14 +144,14 @@ function buildDatosLaboralesResponse(personaContext, getCamposLaboralesFaltantes
       periodo_pago: personaContext.periodoPago || "Quincenal",
       periodo_prueba: personaContext.periodoPrueba || "2 meses",
       jefe_inmediato: personaContext.jefeInmediato || personaContext.supervisorNombre || null,
-      caja_compensacion: personaContext.cajaCompensacion || null,
+      caja_compensacion: personaContext.cajaCompensacion || "Comfama",
       condiciones_especiales: personaContext.condicionesEspeciales || null,
       duracion_contrato: personaContext.duracionContrato || "Indefinida",
       fecha_inicio_labores: personaContext.fechaInicioLabores || null,
       lugar_celebracion: personaContext.lugarCelebracion || null,
       eps: personaContext.eps || null,
       afp: personaContext.afp || null,
-      arl: personaContext.arl || null
+      arl: personaContext.arl || "Sura"
     },
     faltantes: requiereLaboral ? getCamposLaboralesFaltantes(personaContext, { forzarVinculado: true }) : []
   };

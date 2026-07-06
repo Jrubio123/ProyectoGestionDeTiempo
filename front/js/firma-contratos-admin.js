@@ -21,14 +21,14 @@ window.firmaContratosApp = function () {
             periodo_pago: "Quincenal",
             periodo_prueba: "2 meses",
             jefe_inmediato: "",
-            caja_compensacion: "",
+            caja_compensacion: "Comfama",
             condiciones_especiales: "",
             duracion_contrato: "Indefinida",
             fecha_inicio_labores: "",
             lugar_celebracion: "",
             eps: "",
             afp: "",
-            arl: ""
+            arl: "Sura"
         };
     }
 

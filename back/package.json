@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node src/index.js"
+    "dev": "node src/index.js",
+    "test": "node --test --test-isolation=none test/*.test.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.0",

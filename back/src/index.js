@@ -28,6 +28,12 @@ const { NumerosALetras } = require("numero-a-letras");
 const { sendEmail, getGraphAccessToken } = require("./email");
 const { pool, getPoolStats, isTransientDbError } = require("./db");
 const { FIRMA_CUENTA_TIMEOUT_HOURS, marcarCuentaCobroFirmaExpirada } = require("./services/firma-cuenta-timeout.service");
+const { resolverFirmaCuentaVerificada } = require("./services/clicksign-firma-verificada.service");
+const {
+  cerrarCuentaCobroConFirmaResuelta,
+  buildCuentaFirmaDiagnosticoFromResolution
+} = require("./services/cuenta-cobro-cierre.service");
+const { persistirDiagnosticoFirmaCuenta } = require("./services/cuentas-cobro.service");
 const { env } = require("./config/env");
 const { requireAccess, requireAuthenticated, hasAccess } = require("./middlewares/access");
 const registerPreregistroRoutes = require("./preregistro-routes");
@@ -6591,174 +6597,8 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
   };
 }
 
-function collectCuentaFirmaCandidates(adjuntos = {}) {
-  const source = adjuntos && typeof adjuntos === "object" ? adjuntos : {};
-  const candidates = [];
-  const seen = new Set();
-
-  const pushCandidate = (firma, origen) => {
-    if (!firma || typeof firma !== "object") return;
-    const candidate = {
-      request_id: String(firma.request_id || "").trim(),
-      contract_id: String(firma.contract_id || "").trim(),
-      signature_id: String(firma.signature_id || "").trim(),
-      origen
-    };
-    if (!candidate.request_id && !candidate.contract_id && !candidate.signature_id) return;
-    const key = [
-      candidate.request_id.toLowerCase(),
-      candidate.contract_id.toLowerCase(),
-      candidate.signature_id
-    ].join("|");
-    if (seen.has(key)) return;
-    seen.add(key);
-    candidates.push(candidate);
-  };
-
-  pushCandidate(source.firma, "firma");
-  const reseteos = Array.isArray(source.firma_reseteos) ? source.firma_reseteos : [];
-  reseteos.forEach((firma, index) => pushCandidate(firma, `firma_reseteos[${index}]`));
-
-  return candidates;
-}
-
-function buildCuentaFirmaDiagnostico({
-  candidate = {},
-  rawStatus = "",
-  normalizedStatus = "",
-  catalogSource = "",
-  reason = "pending",
-  nowIso = new Date().toISOString()
-} = {}) {
-  return {
-    ultimo_check_en: nowIso,
-    request_id: candidate.request_id || null,
-    contract_id: candidate.contract_id || null,
-    signature_id: candidate.signature_id || null,
-    rawStatus: rawStatus || null,
-    normalizedStatus: normalizedStatus || null,
-    catalogSource: catalogSource || null,
-    reason: reason || "pending"
-  };
-}
-
-function pickCuentaFirmaPrimaryDiagnostico(diagnostics = []) {
-  if (!Array.isArray(diagnostics) || diagnostics.length === 0) {
-    return buildCuentaFirmaDiagnostico({ reason: "sin_identificadores" });
-  }
-  return diagnostics.find((item) => item?.origen === "firma") || diagnostics[0];
-}
-
 async function resolveCuentaFirmaFirmadaAcrossAttempts({ cuenta, prevAdjuntos } = {}) {
-  const publicId = String(cuenta?.public_id || cuenta?.id || "");
-  const candidates = collectCuentaFirmaCandidates(prevAdjuntos);
-  const diagnostics = [];
-  const nowIso = new Date().toISOString();
-
-  if (candidates.length === 0) {
-    const diagnostico = buildCuentaFirmaDiagnostico({ reason: "sin_identificadores", nowIso });
-    return {
-      signed: false,
-      diagnostics: [diagnostico],
-      diagnostico,
-      rawStatus: "",
-      normalizedStatus: "",
-      reason: "sin_identificadores"
-    };
-  }
-
-  for (const candidate of candidates) {
-    const requestId = candidate.request_id || "";
-    const contractId = candidate.contract_id || "";
-    const signatureId = candidate.signature_id || "";
-    try {
-      const snapshot = await fetchClickSignSignatureSnapshot({ requestId, contractId, signatureId });
-      const event = snapshot?.event && typeof snapshot.event === "object" ? snapshot.event : {};
-      const resolvedSignatureId = String(
-        snapshot?.signatureId ||
-        extractClickSignSignatureId(event) ||
-        signatureId ||
-        ""
-      ).trim();
-      const rawStatus = String(snapshot?.rawStatus || snapshot?.status || "pending").trim();
-      const normalizedStatus = snapshot?.status || normalizeClickSignStatus(rawStatus) || "pending";
-      const artifacts = await resolveClickSignArtifacts({
-        event,
-        requestId,
-        contractId,
-        publicId,
-        signatureId: resolvedSignatureId || signatureId,
-        allowCatalogFallback: true
-      });
-      const catalogSource = artifacts?.catalogSource || snapshot?.source || "";
-      const resolvedPdf = artifacts?.signedPdf || null;
-
-      if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
-        return {
-          signed: true,
-          signedPdf: resolvedPdf,
-          extraFiles: artifacts?.extraFiles || [],
-          signatureId: resolvedSignatureId || signatureId || null,
-          requestId: requestId || null,
-          contractId: contractId || null,
-          catalogSource: catalogSource || null,
-          source: candidate.origen,
-          rawStatus: rawStatus || "signed",
-          normalizedStatus: "signed",
-          catalogEntries: artifacts?.catalogEntries || [],
-          diagnostics
-        };
-      }
-
-      let reason = "pending";
-      if (normalizedStatus === "signed") {
-        reason = artifacts?.catalogEntries?.length ? "firmado_sin_pdf" : "pdf_no_encontrado";
-      } else if (normalizedStatus === "rejected") {
-        reason = "rechazado";
-      } else if (artifacts?.catalogEntries?.length) {
-        reason = "pdf_no_encontrado";
-      }
-
-      diagnostics.push({
-        ...buildCuentaFirmaDiagnostico({
-          candidate: {
-            ...candidate,
-            signature_id: resolvedSignatureId || signatureId
-          },
-          rawStatus,
-          normalizedStatus,
-          catalogSource,
-          reason,
-          nowIso
-        }),
-        origen: candidate.origen
-      });
-    } catch (err) {
-      const statusCode = Number(err?.status || err?.response?.status || 0);
-      diagnostics.push({
-        ...buildCuentaFirmaDiagnostico({
-          candidate,
-          rawStatus: err?.message || "error",
-          normalizedStatus: "",
-          catalogSource: "",
-          reason: statusCode === 408 ? "timeout" : "error",
-          nowIso
-        }),
-        origen: candidate.origen
-      });
-    }
-  }
-
-  const diagnostico = pickCuentaFirmaPrimaryDiagnostico(diagnostics);
-  return {
-    signed: false,
-    diagnostics,
-    diagnostico,
-    rawStatus: diagnostico.rawStatus || "",
-    normalizedStatus: diagnostico.normalizedStatus || "",
-    catalogSource: diagnostico.catalogSource || "",
-    reason: diagnostico.reason || "pending"
-  };
+  return resolverFirmaCuentaVerificada({ cuenta, prevAdjuntos });
 }
 
 async function uploadClickSignExtraFilesToOneDrive(cuenta, extraFiles = [], targetPathHint = "") {
@@ -14569,7 +14409,6 @@ async function jobReconciliarCuentasEnFirma() {
   if (isShuttingDown) return;
   try {
     const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
-    // Fix #2: filtrar IDs vacíos con NULLIF+BTRIM para no agarrar cuentas migradas con ""
     const result = await pool.query(
       `SELECT cc.id, cc.public_id, cc.created_by, cc.fecha_correspondiente,
               cc.created_at, cc.datos_adjuntos, u.nombre_usuario, u.email
@@ -14597,59 +14436,45 @@ async function jobReconciliarCuentasEnFirma() {
       try {
         const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object" ? cuenta.datos_adjuntos : {};
         const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object" ? prevAdjuntos.firma : {};
-        const prevSoportes = prevAdjuntos.soportes && typeof prevAdjuntos.soportes === "object" ? prevAdjuntos.soportes : {};
+        const resolution = await resolverFirmaCuentaVerificada({ cuenta, prevAdjuntos });
+        const diagnostico = buildCuentaFirmaDiagnosticoFromResolution(resolution);
 
-        const resolution = await resolveCuentaFirmaFirmadaAcrossAttempts({ cuenta, prevAdjuntos });
-        const rawStatus = resolution.rawStatus || prevFirma.ultimo_evento || "pending";
-        let status = resolution.signed
-          ? "signed"
-          : (resolution.normalizedStatus || normalizeClickSignStatus(rawStatus) || "pending");
-        const nowIso = new Date().toISOString();
-        const primaryDiagnostico = resolution.diagnostico || {};
-        const logDiagnostico = {
-          public_id: cuenta.public_id || null,
-          request_id: resolution.requestId || primaryDiagnostico.request_id || prevFirma.request_id || null,
-          contract_id: resolution.contractId || primaryDiagnostico.contract_id || prevFirma.contract_id || null,
-          signature_id: resolution.signatureId || primaryDiagnostico.signature_id || prevFirma.signature_id || null,
-          rawStatus: rawStatus || null,
-          normalizedStatus: status || null,
-          catalogSource: resolution.catalogSource || primaryDiagnostico.catalogSource || null,
-          reason: resolution.signed ? "firmado_subido" : (resolution.reason || primaryDiagnostico.reason || "pending")
-        };
-
-        let documentoFirmado = null;
-        let documentoFirmadoError = "";
-        let uploadedExtras = [];
-        let resolvedPdfForEmail = null;
-
-        if (resolution.signed && resolution.signedPdf && isPdfBuffer(resolution.signedPdf.buffer)) {
-          resolvedPdfForEmail = resolution.signedPdf;
-          try {
-            const uploadResult = await uploadSignedPdfToOneDrive(cuenta, resolution.signedPdf.buffer, resolution.signedPdf.fileName);
-            documentoFirmado = {
-              ...uploadResult.archivo,
-              carpeta: uploadResult.carpeta,
-              origen: resolution.signedPdf.source || "clicksign",
-              actualizado_en: nowIso
-            };
-            status = "signed";
-            try {
-              const extrasResult = await uploadClickSignExtraFilesToOneDrive(cuenta, resolution.extraFiles || [], uploadResult.carpeta || "");
-              uploadedExtras = extrasResult.uploaded || [];
-            } catch (extraErr) {
-              console.warn(`[reconciliar-job] Extras no subidos para ${cuenta.public_id}:`, extraErr?.message);
-            }
-          } catch (uploadErr) {
-            documentoFirmadoError = `Error OneDrive: ${uploadErr.message || "desconocido"}`;
-            logDiagnostico.reason = "error";
+        if (resolution.signed) {
+          const cierre = await cerrarCuentaCobroConFirmaResuelta({
+            cuenta,
+            resolution,
+            origen: "reconciliar-job"
+          });
+          if (cierre.updated !== true) {
+            await persistirDiagnosticoFirmaCuenta({
+              cuentaId: cuenta.id,
+              estadoEnFirma,
+              status: prevFirma.estado || "pending",
+              resolution: {
+                ...resolution,
+                signed: false,
+                reason: "firmado_verificado_pendiente_cierre",
+                diagnostico: {
+                  ...diagnostico,
+                  reason: "firmado_verificado_pendiente_cierre"
+                }
+              },
+              origen: "reconciliar-job"
+            });
           }
-        } else if (status === "signed") {
-          logDiagnostico.reason = resolution.reason || "firmado_sin_pdf";
-          // Fix #5: dejar error observable cuando Click&Sign dice firmado pero no hay PDF
-          documentoFirmadoError = "No se encontró PDF firmado en API de Click&Sign (job).";
+          console.log("[reconciliar-job]", {
+            public_id: cuenta.public_id || null,
+            request_id: resolution.requestId || diagnostico.request_id || null,
+            contract_id: resolution.contractId || diagnostico.contract_id || null,
+            signature_id: resolution.signatureId || diagnostico.signature_id || null,
+            rawStatus: resolution.rawStatus || null,
+            normalizedStatus: "signed",
+            reason: cierre.updated ? "firmado_subido" : cierre.reason || "firmado_verificado_pendiente_cierre"
+          });
+          continue;
         }
 
-        if (["pending", "sent", "en_proceso"].includes(status) && !documentoFirmado?.url) {
+        if ((resolution.normalizedStatus || diagnostico.normalizedStatus || "pending") === "pending" && !prevFirma?.documento_firmado?.url) {
           const timeoutResult = await marcarCuentaCobroFirmaExpirada({
             cuentaId: cuenta.id,
             estadoEnFirma,
@@ -14658,126 +14483,29 @@ async function jobReconciliarCuentasEnFirma() {
           });
           if (timeoutResult.updated) {
             console.log("[reconciliar-job]", {
-              ...logDiagnostico,
+              public_id: cuenta.public_id || null,
               reason: "timeout"
             });
             continue;
           }
         }
 
-        const ultimoEvento = status === "pending" && String(prevFirma.ultimo_evento || "").trim().toUpperCase() === "START_SIGNATURE"
-          ? prevFirma.ultimo_evento
-          : rawStatus || status || "reconciliar-job";
-        const firma = {
-          ...prevFirma,
-          estado: status || prevFirma.estado || "pending",
-          request_id: resolution.requestId || prevFirma.request_id || null,
-          contract_id: resolution.contractId || prevFirma.contract_id || null,
-          signature_id: resolution.signatureId || primaryDiagnostico.signature_id || prevFirma.signature_id || null,
-          actualizado_en: nowIso,
-          ultimo_evento: ultimoEvento,
-          diagnostico: {
-            ultimo_check_en: nowIso,
-            request_id: logDiagnostico.request_id,
-            contract_id: logDiagnostico.contract_id,
-            signature_id: logDiagnostico.signature_id,
-            rawStatus: logDiagnostico.rawStatus,
-            normalizedStatus: logDiagnostico.normalizedStatus,
-            catalogSource: logDiagnostico.catalogSource,
-            reason: logDiagnostico.reason
-          }
-        };
-        if (documentoFirmado?.url) firma.documento_firmado = documentoFirmado;
-        if (documentoFirmadoError) firma.documento_firmado_error = documentoFirmadoError;
-        else if (status === "signed") firma.documento_firmado_error = null;
-
-        const adjuntos = { ...prevAdjuntos, firma };
-        if (documentoFirmado?.url) {
-          const cuentaFirmadaUrl = documentoFirmado.url;
-          adjuntos.soportes = {
-            ...prevSoportes,
-            carpeta: documentoFirmado.carpeta || prevSoportes.carpeta || "",
-            actualizado_en: nowIso,
-            cuenta_cobro_firmada: {
-              id: documentoFirmado.id || prevSoportes?.cuenta_cobro_firmada?.id || null,
-              nombre: documentoFirmado.nombre || prevSoportes?.cuenta_cobro_firmada?.nombre || "CuentaCobroFirmada.pdf",
-              url: cuentaFirmadaUrl
-            }
-          };
-          // Fix #4: replicar todos los extras igual que el webhook/manual
-          const extraSeguridad = uploadedExtras.find((x) => x.kind === "seguridad_social_firma" && x.url);
-          const extraEvidencia = uploadedExtras.find((x) => x.kind === "evidencia_firma" && x.url);
-          const extraAnexo = uploadedExtras.find((x) => x.kind === "anexo_firma" && x.url);
-          if (extraSeguridad && !sameResourceUrl(extraSeguridad.url, cuentaFirmadaUrl)) {
-            adjuntos.soportes.seguridad_social_firma = { id: extraSeguridad.id || null, nombre: extraSeguridad.nombre || "SeguridadSocial.pdf", url: extraSeguridad.url };
-            if (!adjuntos.soportes.seguridad_social?.url) adjuntos.soportes.seguridad_social = { ...adjuntos.soportes.seguridad_social_firma };
-          }
-          if (extraEvidencia && !sameResourceUrl(extraEvidencia.url, cuentaFirmadaUrl)) {
-            adjuntos.soportes.evidencia_firma = { id: extraEvidencia.id || null, nombre: extraEvidencia.nombre || "EvidenciaFirma.pdf", url: extraEvidencia.url };
-          }
-          if (extraAnexo && !sameResourceUrl(extraAnexo.url, cuentaFirmadaUrl)) {
-            adjuntos.soportes.anexo_firma = { id: extraAnexo.id || null, nombre: extraAnexo.nombre || "AnexoFirma.pdf", url: extraAnexo.url };
-          }
-        }
-
-        let estadoDestino = null;
-        if (status === "signed") {
-          const estadoAprobado = await getCuentaCobroEstadoAprobado();
-          estadoDestino = documentoFirmado?.url ? estadoAprobado : estadoEnFirma;
-        } else if (status === "rejected") {
-          estadoDestino = "Rechazado";
-        }
-
-        // UPDATE condicional: no pisar si el webhook ganó la carrera.
-        // Doble guard: URL vacía (caso firmado-con-PDF) + estado sigue en EnFirma
-        // (cubre el caso rechazado-sin-URL que el check de URL no detecta).
-        let updateResult;
-        if (estadoDestino) {
-          updateResult = await pool.query(
-            `UPDATE cuenta_cobro
-             SET datos_adjuntos = $1::jsonb, estado = $2::tipo_estado_reporte, updated_at = CURRENT_TIMESTAMP
-             WHERE id = $3
-               AND estado = $4::tipo_estado_reporte
-               AND COALESCE(datos_adjuntos->'firma'->'documento_firmado'->>'url', '') = ''`,
-            [JSON.stringify(adjuntos), estadoDestino, cuenta.id, estadoEnFirma]
-          );
-        } else {
-          updateResult = await pool.query(
-            `UPDATE cuenta_cobro
-             SET datos_adjuntos = $1::jsonb, updated_at = CURRENT_TIMESTAMP
-             WHERE id = $2
-               AND estado = $3::tipo_estado_reporte
-               AND COALESCE(datos_adjuntos->'firma'->'documento_firmado'->>'url', '') = ''`,
-            [JSON.stringify(adjuntos), cuenta.id, estadoEnFirma]
-          );
-        }
-
-        // Fix #1 y #3: solo notificar si el UPDATE ganó la carrera, y persistir resultado
-        if (updateResult.rowCount > 0 && status === "signed" && documentoFirmado?.url) {
-          // Fix #4: pasar el PDF real al correo igual que webhook/manual
-          const attachments = buildCuentaCobroEmailAttachments({
-            cuenta,
-            signedPdf: resolvedPdfForEmail
-              ? { buffer: resolvedPdfForEmail.buffer, fileName: resolvedPdfForEmail.fileName }
-              : null,
-            extraFiles: resolution.extraFiles || []
-          });
-          try {
-            await notifyCuentaCobroFirmadaToProveedores({
-              cuenta,
-              documentoFirmado,
-              attachments,
-              prevNotification: prevFirma.notificacion_proveedores || {},
-              nowIso
-            });
-          } catch (notifErr) {
-            console.warn(`[reconciliar-job] Notificación fallida para ${cuenta.public_id}:`, notifErr?.message);
-          }
-        } else if (updateResult.rowCount === 0) {
-          console.log(`[reconciliar-job] ${cuenta.public_id} omitida — ya fue resuelta por webhook.`);
-        }
-
-        console.log("[reconciliar-job]", logDiagnostico);
+        await persistirDiagnosticoFirmaCuenta({
+          cuentaId: cuenta.id,
+          estadoEnFirma,
+          status: resolution.normalizedStatus === "rejected" ? "rejected" : prevFirma.estado || "pending",
+          resolution,
+          origen: "reconciliar-job"
+        });
+        console.log("[reconciliar-job]", {
+          public_id: cuenta.public_id || null,
+          request_id: resolution.requestId || diagnostico.request_id || null,
+          contract_id: resolution.contractId || diagnostico.contract_id || null,
+          signature_id: resolution.signatureId || diagnostico.signature_id || null,
+          rawStatus: resolution.rawStatus || null,
+          normalizedStatus: resolution.normalizedStatus || diagnostico.normalizedStatus || null,
+          reason: resolution.reason || diagnostico.reason || "pending"
+        });
       } catch (cuentaErr) {
         console.error(`[reconciliar-job] Error procesando ${cuenta.public_id}:`, cuentaErr?.message || cuentaErr);
       }
@@ -15277,7 +15005,6 @@ module.exports = {
   getCuentaCobroEstadoEnFirma,
   getCuentaCobroEstadoAprobado,
   normalizeClickSignStatus,
-  collectCuentaFirmaCandidates,
   resolveCuentaFirmaFirmadaAcrossAttempts,
   handleClickSignContratoWebhook,
   jobReconciliarContratosEnFirma,

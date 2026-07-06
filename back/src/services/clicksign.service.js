@@ -1,5 +1,16 @@
 const { pool } = require("../db");
 const { extractPublicIdFromContract } = require("../lib/clicksign");
+const {
+  resolverFirmaCuentaVerificada
+} = require("./clicksign-firma-verificada.service");
+const {
+  cerrarCuentaCobroConFirmaResuelta,
+  cuentasFirmaAutocierreHabilitado,
+  buildCuentaFirmaDiagnosticoFromResolution
+} = require("./cuenta-cobro-cierre.service");
+const {
+  persistirDiagnosticoFirmaCuenta
+} = require("./cuentas-cobro.service");
 
 function getIndexHelpers() {
   return require("../index");
@@ -31,120 +42,296 @@ function esWebhookDeAnexoIndividual({ requestId = "", contractId = "" } = {}) {
   return esIdentificadorAnexoIndividualClickSign(requestId) || esIdentificadorAnexoIndividualClickSign(contractId);
 }
 
+function asPlainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+async function buscarCuentaCobroFirmaParaWebhook(client, { publicIdFromEvent = "", requestId = "", contractId = "" } = {}) {
+  const CUENTA_COBRO_SELECT = `
+        SELECT
+          cc.id,
+          cc.public_id,
+          cc.created_by,
+          cc.fecha_correspondiente,
+          cc.created_at,
+          cc.estado,
+          cc.datos_adjuntos,
+          u.nombre_usuario,
+          u.email
+        FROM cuenta_cobro cc
+        LEFT JOIN usuarios u ON u.id = cc.created_by`;
+
+  let cuentaResult = null;
+  if (publicIdFromEvent) {
+    cuentaResult = await client.query(
+      `${CUENTA_COBRO_SELECT} WHERE cc.public_id = $1 LIMIT 1 FOR UPDATE`,
+      [publicIdFromEvent]
+    );
+  }
+  if (!cuentaResult?.rows?.length && requestId) {
+    cuentaResult = await client.query(
+      `${CUENTA_COBRO_SELECT}
+       WHERE cc.datos_adjuntos->'firma'->>'request_id' = $1
+       ORDER BY cc.id DESC LIMIT 1 FOR UPDATE`,
+      [requestId]
+    );
+  }
+  if (!cuentaResult?.rows?.length && contractId) {
+    cuentaResult = await client.query(
+      `${CUENTA_COBRO_SELECT}
+       WHERE cc.datos_adjuntos->'firma'->>'contract_id' = $1
+       ORDER BY cc.id DESC LIMIT 1 FOR UPDATE`,
+      [contractId]
+    );
+  }
+  return cuentaResult?.rows?.[0] || null;
+}
+
+async function registrarHintWebhookCuentaCobro({
+  event,
+  publicIdFromEvent = "",
+  requestId = "",
+  contractId = "",
+  signatureId = "",
+  rawStatus = "",
+  status = ""
+} = {}) {
+  const { getCuentaCobroEstadoEnFirma } = getIndexHelpers();
+  const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const cuenta = await buscarCuentaCobroFirmaParaWebhook(client, { publicIdFromEvent, requestId, contractId });
+    if (!cuenta) {
+      await client.query("ROLLBACK");
+      return { cuenta: null, estadoEnFirma };
+    }
+
+    const prevAdjuntos = asPlainObject(cuenta.datos_adjuntos);
+    const prevFirma = asPlainObject(prevAdjuntos.firma);
+    const eventosPrev = Array.isArray(prevFirma.eventos) ? prevFirma.eventos.slice(-19) : [];
+    const nowIso = new Date().toISOString();
+    const estadoPrevioSeguro = String(prevFirma.estado || "").trim().toLowerCase() === "signed"
+      ? "pending"
+      : prevFirma.estado || "pending";
+    const firma = {
+      ...prevFirma,
+      estado: estadoPrevioSeguro,
+      request_id: requestId || prevFirma.request_id || null,
+      contract_id: contractId || prevFirma.contract_id || null,
+      signature_id: signatureId || prevFirma.signature_id || null,
+      actualizado_en: nowIso,
+      ultimo_evento: rawStatus || status || "webhook",
+      diagnostico: {
+        ultimo_check_en: nowIso,
+        request_id: requestId || prevFirma.request_id || null,
+        contract_id: contractId || prevFirma.contract_id || null,
+        signature_id: signatureId || prevFirma.signature_id || null,
+        rawStatus: rawStatus || null,
+        normalizedStatus: status || null,
+        catalogSource: null,
+        reason: "webhook_hint",
+        origen: "webhook"
+      },
+      eventos: [
+        ...eventosPrev,
+        {
+          recibido_en: nowIso,
+          status: rawStatus || status || "",
+          request_id: requestId || null,
+          contract_id: contractId || null,
+          origen: "webhook"
+        }
+      ]
+    };
+
+    const adjuntos = {
+      ...prevAdjuntos,
+      firma
+    };
+    await client.query(
+      `
+      UPDATE cuenta_cobro
+      SET datos_adjuntos = $1::jsonb,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+        AND estado = $3::tipo_estado_reporte
+        AND COALESCE(datos_adjuntos->'firma'->'documento_firmado'->>'url', '') = ''
+      `,
+      [JSON.stringify(adjuntos), cuenta.id, estadoEnFirma]
+    );
+    await client.query("COMMIT");
+
+    return {
+      cuenta: {
+        ...cuenta,
+        datos_adjuntos: adjuntos
+      },
+      estadoEnFirma
+    };
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (_) { }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function procesarWebhookCuentaCobroEstricto({
+  event,
+  publicIdFromEvent = "",
+  requestId = "",
+  contractId = "",
+  signatureId = "",
+  rawStatus = "",
+  status = ""
+} = {}) {
+  const { cuenta, estadoEnFirma } = await registrarHintWebhookCuentaCobro({
+    event,
+    publicIdFromEvent,
+    requestId,
+    contractId,
+    signatureId,
+    rawStatus,
+    status
+  });
+
+  if (!cuenta) {
+    console.warn("Webhook Click&Sign de cuenta de cobro sin cuenta asociada:", {
+      requestId,
+      contractId,
+      signatureId,
+      rawStatus
+    });
+    return;
+  }
+
+  const resolution = await resolverFirmaCuentaVerificada({
+    cuenta,
+    prevAdjuntos: asPlainObject(cuenta.datos_adjuntos)
+  });
+
+  if (resolution.signed) {
+    const cierre = await cerrarCuentaCobroConFirmaResuelta({
+      cuenta,
+      resolution,
+      origen: "webhook"
+    });
+    if (cierre.updated !== true) {
+      const diagnostico = buildCuentaFirmaDiagnosticoFromResolution(resolution);
+      await persistirDiagnosticoFirmaCuenta({
+        cuentaId: cuenta.id,
+        estadoEnFirma,
+        status: asPlainObject(asPlainObject(cuenta.datos_adjuntos).firma).estado || "pending",
+        resolution: {
+          ...resolution,
+          signed: false,
+          reason: "firmado_verificado_pendiente_cierre",
+          diagnostico: {
+            ...diagnostico,
+            reason: "firmado_verificado_pendiente_cierre"
+          }
+        },
+        origen: "webhook"
+      });
+    }
+    return;
+  }
+
+  await persistirDiagnosticoFirmaCuenta({
+    cuentaId: cuenta.id,
+    estadoEnFirma,
+    status: resolution.normalizedStatus === "rejected" ? "rejected" : asPlainObject(asPlainObject(cuenta.datos_adjuntos).firma).estado || "pending",
+    resolution,
+    origen: "webhook"
+  });
+
+  if (cuentasFirmaAutocierreHabilitado() && resolution.normalizedStatus !== "rejected") {
+    console.warn("Webhook cuenta cobro: firma no verificada, reintentando en 30s", {
+      cuentaId: cuenta.id,
+      requestId,
+      contractId,
+      rawStatus
+    });
+    setTimeout(() => reintentarCuentaCobroFirma(cuenta.id), 30000);
+    return;
+  }
+
+  console.warn("Webhook cuenta cobro: firma no verificada; autocierre deshabilitado, sin reintento 30s", {
+    cuentaId: cuenta.id,
+    requestId,
+    contractId,
+    rawStatus,
+    reason: resolution.reason || "pending"
+  });
+}
+
 /**
  * Reintenta procesar una cuenta de cobro firmada
  */
 async function reintentarCuentaCobroFirma(cuentaId) {
-  const {
-    fetchClickSignSignatureSnapshot,
-    extractClickSignSignatureId,
-    normalizeClickSignStatus,
-    resolveClickSignArtifacts,
-    isPdfBuffer,
-    uploadSignedPdfToOneDrive,
-    getCuentaCobroEstadoAprobado,
-    buildCuentaCobroEmailAttachments,
-    notifyCuentaCobroFirmadaToProveedores
-  } = getIndexHelpers();
-
-  try {
-    const cuentaResult = await pool.query(
-      `SELECT cc.id, cc.public_id, cc.created_by, cc.fecha_correspondiente, cc.created_at, cc.datos_adjuntos,
-              u.nombre_usuario, u.email
-       FROM cuenta_cobro cc LEFT JOIN usuarios u ON u.id = cc.created_by
-       WHERE cc.id = $1 LIMIT 1`,
-      [cuentaId]
-    );
-    const cuenta = cuentaResult.rows[0];
-    if (!cuenta) return;
-
-    const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object" ? cuenta.datos_adjuntos : {};
-    const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object" ? prevAdjuntos.firma : {};
-
-    if (prevFirma.documento_firmado?.url) return; // ya está resuelto
-
-    const requestId = String(prevFirma.request_id || "").trim();
-    const contractId = String(prevFirma.contract_id || `CC-${cuenta.public_id || cuenta.id}`).trim();
-    let signatureId = String(prevFirma.signature_id || "").trim();
-    let event = {};
-    let firmaEstado = normalizeClickSignStatus(prevFirma.estado || "");
-
-    if (firmaEstado !== "signed") {
-      const snapshot = await fetchClickSignSignatureSnapshot({ requestId, contractId, signatureId });
-      event = snapshot.event && typeof snapshot.event === "object" ? snapshot.event : {};
-      firmaEstado = normalizeClickSignStatus(snapshot.rawStatus || snapshot.status || prevFirma.estado || "");
-      signatureId = signatureId || String(extractClickSignSignatureId(event) || "").trim();
-      if (firmaEstado !== "signed") return;
-    }
-
-    const artifacts = await resolveClickSignArtifacts({
-      event,
-      requestId,
-      contractId,
-      publicId: String(cuenta.public_id || ""),
-      signatureId,
-      allowCatalogFallback: true
-    });
-    const resolvedPdf = artifacts?.signedPdf || null;
-    if (!resolvedPdf || !isPdfBuffer(resolvedPdf.buffer)) {
-      console.warn("Reintento cuenta cobro: PDF aún no disponible", { cuentaId, requestId, contractId });
-      return;
-    }
-
-    const nowIso = new Date().toISOString();
-    const uploadResult = await uploadSignedPdfToOneDrive(cuenta, resolvedPdf.buffer, resolvedPdf.fileName);
-    const documentoFirmado = {
-      ...uploadResult.archivo,
-      onedrive_url: uploadResult.archivo?.url || "",
-      carpeta: uploadResult.carpeta,
-      origen: resolvedPdf.source || "clicksign",
-      actualizado_en: nowIso
-    };
-
-    const firma = { ...prevFirma, estado: "signed", documento_firmado: documentoFirmado, documento_firmado_error: null, actualizado_en: nowIso };
-    const prevSoportes = prevAdjuntos.soportes && typeof prevAdjuntos.soportes === "object" ? prevAdjuntos.soportes : {};
-    const adjuntos = {
-      ...prevAdjuntos,
-      firma,
-      soportes: {
-        ...prevSoportes,
-        carpeta: documentoFirmado.carpeta || prevSoportes.carpeta || "",
-        actualizado_en: nowIso,
-        cuenta_cobro_firmada: {
-          id: documentoFirmado.id || prevSoportes?.cuenta_cobro_firmada?.id || null,
-          nombre: documentoFirmado.nombre || prevSoportes?.cuenta_cobro_firmada?.nombre || "CuentaCobroFirmada.pdf",
-          url: documentoFirmado.url || ""
-        }
-      }
-    };
-
-    const estadoAprobado = await getCuentaCobroEstadoAprobado();
-    await pool.query(
-      `UPDATE cuenta_cobro SET datos_adjuntos = $1::jsonb, estado = $2::tipo_estado_reporte, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
-      [JSON.stringify(adjuntos), estadoAprobado, cuenta.id]
-    );
+  {
+    const { getCuentaCobroEstadoEnFirma } = getIndexHelpers();
     try {
-      const attachments = buildCuentaCobroEmailAttachments({
-        cuenta,
-        signedPdf: {
-          buffer: resolvedPdf.buffer,
-          fileName: resolvedPdf.fileName || ""
-        },
-        extraFiles: artifacts?.extraFiles || []
+      const cuentaResultStrict = await pool.query(
+        `SELECT cc.id, cc.public_id, cc.created_by, cc.fecha_correspondiente, cc.created_at, cc.datos_adjuntos,
+                u.nombre_usuario, u.email
+         FROM cuenta_cobro cc LEFT JOIN usuarios u ON u.id = cc.created_by
+         WHERE cc.id = $1 LIMIT 1`,
+        [cuentaId]
+      );
+      const cuentaStrict = cuentaResultStrict.rows[0] || null;
+      if (!cuentaStrict) return;
+
+      const prevAdjuntosStrict = asPlainObject(cuentaStrict.datos_adjuntos);
+      const prevFirmaStrict = asPlainObject(prevAdjuntosStrict.firma);
+      if (prevFirmaStrict.documento_firmado?.url) return;
+
+      const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
+      const resolution = await resolverFirmaCuentaVerificada({
+        cuenta: cuentaStrict,
+        prevAdjuntos: prevAdjuntosStrict
       });
-      await notifyCuentaCobroFirmadaToProveedores({
-        cuenta,
-        documentoFirmado,
-        attachments,
-        prevNotification: prevFirma.notificacion_proveedores || {},
-        nowIso
+      if (resolution.signed) {
+        const cierre = await cerrarCuentaCobroConFirmaResuelta({
+          cuenta: cuentaStrict,
+          resolution,
+          origen: "webhook-reintento"
+        });
+        if (cierre.updated !== true) {
+          const diagnostico = buildCuentaFirmaDiagnosticoFromResolution(resolution);
+          await persistirDiagnosticoFirmaCuenta({
+            cuentaId: cuentaStrict.id,
+            estadoEnFirma,
+            status: prevFirmaStrict.estado || "pending",
+            resolution: {
+              ...resolution,
+              signed: false,
+              reason: "firmado_verificado_pendiente_cierre",
+              diagnostico: {
+                ...diagnostico,
+                reason: "firmado_verificado_pendiente_cierre"
+              }
+            },
+            origen: "webhook-reintento"
+          });
+        }
+        return;
+      }
+
+      await persistirDiagnosticoFirmaCuenta({
+        cuentaId: cuentaStrict.id,
+        estadoEnFirma,
+        status: resolution.normalizedStatus === "rejected" ? "rejected" : prevFirmaStrict.estado || "pending",
+        resolution,
+        origen: "webhook-reintento"
       });
-    } catch (notifyErr) {
-      console.warn("No se pudo notificar cuenta de cobro firmada en reintento:", notifyErr?.message || notifyErr);
+    } catch (err) {
+      console.error("Error en reintento diferido de cuenta cobro firmada:", err?.message || err);
     }
-    console.log(`Reintento exitoso: cuenta cobro ${cuenta.id} subida a OneDrive desde webhook diferido.`);
-  } catch (err) {
-    console.error("Error en reintento diferido de cuenta cobro firmada:", err?.message || err);
+    return;
   }
 }
 
@@ -156,17 +343,8 @@ async function processSignatureEvent(event) {
     pickStringByPaths,
     extractClickSignSignatureId,
     normalizeClickSignStatus,
-    getCuentaCobroEstadoAprobado,
-    getCuentaCobroEstadoEnFirma,
     handleClickSignAnexoIndividualWebhook,
-    handleClickSignContratoWebhook,
-    resolveClickSignArtifacts,
-    isPdfBuffer,
-    uploadSignedPdfToOneDrive,
-    uploadClickSignExtraFilesToOneDrive,
-    buildCuentaCobroEmailAttachments,
-    notifyCuentaCobroFirmadaToProveedores,
-    sameResourceUrl
+    handleClickSignContratoWebhook
   } = getIndexHelpers();
 
   try {
@@ -241,6 +419,24 @@ async function processSignatureEvent(event) {
       return;
     }
 
+    if (esCuentaCobro) {
+      const publicIdFromEvent = extractPublicIdFromContract(contractId) || pickStringByPaths(event, [
+        "public_id",
+        "cuenta_public_id",
+        "data.public_id"
+      ]);
+      await procesarWebhookCuentaCobroEstricto({
+        event,
+        publicIdFromEvent,
+        requestId,
+        contractId,
+        signatureId,
+        rawStatus,
+        status
+      });
+      return;
+    }
+
     const publicIdFromEvent = extractPublicIdFromContract(contractId) || pickStringByPaths(event, [
       "public_id",
       "cuenta_public_id",
@@ -264,7 +460,6 @@ async function processSignatureEvent(event) {
     let transactionOpen = false;
     let cuenta = null;
     let sinCuenta = false;
-    let notificacionPendiente = null;
     const rollbackIfOpen = async () => {
       if (!transactionOpen) return;
       await client.query("ROLLBACK");
@@ -303,242 +498,18 @@ async function processSignatureEvent(event) {
       if (!cuenta) {
         await rollbackIfOpen();
         sinCuenta = true;
-      } else if (status !== "signed" && status !== "rejected") {
-        console.warn("Webhook cuenta cobro: firma no completada, reintentando en 30s", {
-          cuentaId: cuenta.id,
+      } else {
+        await rollbackIfOpen();
+        await procesarWebhookCuentaCobroEstricto({
+          event,
+          publicIdFromEvent,
           requestId,
           contractId,
-          rawStatus
+          signatureId,
+          rawStatus,
+          status
         });
-        await rollbackIfOpen();
-        setTimeout(() => reintentarCuentaCobroFirma(cuenta.id), 30000);
         return;
-      } else {
-        const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object"
-          ? cuenta.datos_adjuntos
-          : {};
-        const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object"
-          ? prevAdjuntos.firma
-          : {};
-        const prevDocumentoFirmado = prevFirma.documento_firmado && typeof prevFirma.documento_firmado === "object"
-          ? {
-            ...prevFirma.documento_firmado,
-            onedrive_url: prevFirma.documento_firmado.onedrive_url || prevFirma.documento_firmado.url || ""
-          }
-          : null;
-
-        const nowIso = new Date().toISOString();
-        const eventosPrev = Array.isArray(prevFirma.eventos) ? prevFirma.eventos.slice(-19) : [];
-        const eventoResumen = {
-          recibido_en: nowIso,
-          status: rawStatus || status || "",
-          request_id: requestId || null,
-          contract_id: contractId || null
-        };
-
-        let documentoFirmado = prevDocumentoFirmado;
-        let documentosAdjuntosCorreo = [];
-        let uploadedExtras = [];
-
-        if (status === "signed" && !documentoFirmado?.url) {
-          let artifacts = null;
-          try {
-            artifacts = await resolveClickSignArtifacts({
-              event,
-              requestId,
-              contractId,
-              publicId: String(cuenta.public_id || ""),
-              signatureId: signatureId || prevFirma.signature_id || "",
-              allowCatalogFallback: true
-            });
-          } catch (pdfErr) {
-            const statusCode = Number(pdfErr?.status || pdfErr?.response?.status || 0);
-            if (statusCode === 404) {
-              console.warn("Webhook cuenta cobro: PDF firmado no disponible (404), reintentando en 30s", {
-                cuentaId: cuenta.id,
-                requestId,
-                contractId
-              });
-              await rollbackIfOpen();
-              setTimeout(() => reintentarCuentaCobroFirma(cuenta.id), 30000);
-              return;
-            }
-            throw pdfErr;
-          }
-
-          const resolvedPdf = artifacts?.signedPdf || null;
-          if (!resolvedPdf || !isPdfBuffer(resolvedPdf.buffer)) {
-            console.warn("Webhook cuenta cobro: PDF firmado no disponible, reintentando en 30s", {
-              cuentaId: cuenta.id,
-              requestId,
-              contractId
-            });
-            await rollbackIfOpen();
-            setTimeout(() => reintentarCuentaCobroFirma(cuenta.id), 30000);
-            return;
-          }
-
-          documentosAdjuntosCorreo = buildCuentaCobroEmailAttachments({
-            cuenta,
-            signedPdf: {
-              buffer: resolvedPdf.buffer,
-              fileName: resolvedPdf.fileName || ""
-            },
-            extraFiles: artifacts?.extraFiles || []
-          });
-
-          let uploadResult = null;
-          try {
-            uploadResult = await uploadSignedPdfToOneDrive(
-              cuenta,
-              resolvedPdf.buffer,
-              resolvedPdf.fileName
-            );
-          } catch (uploadErr) {
-            console.error("Error guardando firmado de cuenta de cobro en OneDrive:", uploadErr?.message || uploadErr);
-            await rollbackIfOpen();
-            setTimeout(() => reintentarCuentaCobroFirma(cuenta.id), 30000);
-            return;
-          }
-
-          documentoFirmado = {
-            ...uploadResult.archivo,
-            onedrive_url: uploadResult.archivo?.url || "",
-            carpeta: uploadResult.carpeta,
-            origen: resolvedPdf.source || "clicksign",
-            actualizado_en: nowIso
-          };
-          if (!documentoFirmado?.url) {
-            await rollbackIfOpen();
-            setTimeout(() => reintentarCuentaCobroFirma(cuenta.id), 30000);
-            return;
-          }
-
-          try {
-            const extrasResult = await uploadClickSignExtraFilesToOneDrive(
-              cuenta,
-              artifacts?.extraFiles || [],
-              uploadResult.carpeta || ""
-            );
-            uploadedExtras = extrasResult.uploaded || [];
-          } catch (extraErr) {
-            console.warn("No se pudieron subir adjuntos extra de Click&Sign:", extraErr?.message || extraErr);
-          }
-        }
-
-        const firma = {
-          ...prevFirma,
-          estado: status || prevFirma.estado || "pending",
-          request_id: requestId || prevFirma.request_id || null,
-          contract_id: contractId || prevFirma.contract_id || null,
-          signature_id: signatureId || prevFirma.signature_id || null,
-          actualizado_en: nowIso,
-          ultimo_evento: rawStatus || status || "webhook",
-          eventos: [...eventosPrev, eventoResumen]
-        };
-        if (documentoFirmado?.url) {
-          firma.documento_firmado = documentoFirmado;
-        }
-        if (status === "signed") {
-          firma.documento_firmado_error = documentoFirmado?.url ? null : prevFirma.documento_firmado_error || null;
-        }
-
-        const adjuntos = {
-          ...prevAdjuntos,
-          firma
-        };
-        if (documentoFirmado?.url) {
-          const prevSoportes = prevAdjuntos.soportes && typeof prevAdjuntos.soportes === "object"
-            ? prevAdjuntos.soportes
-            : {};
-          const nuevoSoporteCuentaFirmada = {
-            id: documentoFirmado.id || prevSoportes?.cuenta_cobro_firmada?.id || prevSoportes?.cuenta_cobro?.id || null,
-            nombre: documentoFirmado.nombre || prevSoportes?.cuenta_cobro_firmada?.nombre || prevSoportes?.cuenta_cobro?.nombre || "CuentaCobroFirmada.pdf",
-            url: documentoFirmado.url || prevSoportes?.cuenta_cobro_firmada?.url || prevSoportes?.cuenta_cobro?.url || ""
-          };
-          adjuntos.soportes = {
-            ...prevSoportes,
-            carpeta: documentoFirmado.carpeta || prevSoportes.carpeta || "",
-            actualizado_en: nowIso,
-            cuenta_cobro_firmada: nuevoSoporteCuentaFirmada
-          };
-          const extraSeguridad = uploadedExtras.find((item) => item.kind === "seguridad_social_firma" && item.url);
-          const extraEvidencia = uploadedExtras.find((item) => item.kind === "evidencia_firma" && item.url);
-          const extraAnexo = uploadedExtras.find((item) => item.kind === "anexo_firma" && item.url);
-          const cuentaFirmadaUrl = nuevoSoporteCuentaFirmada.url || "";
-          if (extraSeguridad && !sameResourceUrl(extraSeguridad.url, cuentaFirmadaUrl)) {
-            adjuntos.soportes.seguridad_social_firma = {
-              id: extraSeguridad.id || null,
-              nombre: extraSeguridad.nombre || "SeguridadSocial.pdf",
-              url: extraSeguridad.url || ""
-            };
-            if (!adjuntos.soportes.seguridad_social?.url) {
-              adjuntos.soportes.seguridad_social = { ...adjuntos.soportes.seguridad_social_firma };
-            }
-          }
-          if (extraEvidencia && !sameResourceUrl(extraEvidencia.url, cuentaFirmadaUrl)) {
-            adjuntos.soportes.evidencia_firma = {
-              id: extraEvidencia.id || null,
-              nombre: extraEvidencia.nombre || "EvidenciaFirma.pdf",
-              url: extraEvidencia.url || ""
-            };
-          }
-          if (extraAnexo && !sameResourceUrl(extraAnexo.url, cuentaFirmadaUrl)) {
-            adjuntos.soportes.anexo_firma = {
-              id: extraAnexo.id || null,
-              nombre: extraAnexo.nombre || "AnexoFirma.pdf",
-              url: extraAnexo.url || ""
-            };
-          }
-        }
-
-        let estadoDestino = null;
-        if (status === "signed") {
-          const estadoAprobado = await getCuentaCobroEstadoAprobado();
-          estadoDestino = estadoAprobado;
-        } else if (status === "rejected") {
-          estadoDestino = "Rechazado";
-        }
-
-        if (estadoDestino) {
-          await client.query(
-            `
-            UPDATE cuenta_cobro
-            SET datos_adjuntos = $1::jsonb,
-                estado = $2::tipo_estado_reporte,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = $3
-            `,
-            [JSON.stringify(adjuntos), estadoDestino, cuenta.id]
-          );
-        } else {
-          await client.query(
-            `
-            UPDATE cuenta_cobro
-            SET datos_adjuntos = $1::jsonb,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = $2
-            `,
-            [JSON.stringify(adjuntos), cuenta.id]
-          );
-        }
-
-        if (status === "signed" && documentoFirmado?.url) {
-          const prevNotificacionProveedores =
-            prevFirma.notificacion_proveedores && typeof prevFirma.notificacion_proveedores === "object"
-              ? prevFirma.notificacion_proveedores
-              : {};
-          notificacionPendiente = {
-            cuenta,
-            documentoFirmado,
-            attachments: documentosAdjuntosCorreo,
-            prevNotification: prevNotificacionProveedores,
-            nowIso
-          };
-        }
-
-        await client.query("COMMIT");
-        transactionOpen = false;
       }
     } catch (txErr) {
       try {
@@ -589,13 +560,6 @@ async function processSignatureEvent(event) {
       return;
     }
 
-    if (notificacionPendiente) {
-      try {
-        await notifyCuentaCobroFirmadaToProveedores(notificacionPendiente);
-      } catch (notifyErr) {
-        console.warn("No se pudo notificar cuenta de cobro firmada desde webhook:", notifyErr?.message || notifyErr);
-      }
-    }
   } catch (innerErr) {
     console.error("Error procesando webhook Click&Sign:", innerErr);
   }

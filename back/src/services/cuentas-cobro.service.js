@@ -1,6 +1,15 @@
-const { pool } = require("../db");
+﻿const { pool } = require("../db");
 const { getGraphAccessToken } = require("../email");
 const { FIRMA_CUENTA_TIMEOUT_HOURS, marcarCuentaCobroFirmaExpirada } = require("./firma-cuenta-timeout.service");
+const {
+  getDocumentoFirmadoUrl,
+  buildCuentaFirmaDiagnosticoFromResolution,
+  cerrarCuentaCobroConFirmaResuelta
+} = require("./cuenta-cobro-cierre.service");
+const {
+  resolverFirmaCuentaVerificada,
+  cancelarFirmaClickSign
+} = require("./clicksign-firma-verificada.service");
 const PDFDocument = require("pdfkit");
 
 const normalizeValue = (value) => String(value || "").toLowerCase().trim();
@@ -25,245 +34,15 @@ function asPlainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-function getDocumentoFirmadoUrl(adjuntos = {}) {
-  return String(asPlainObject(asPlainObject(adjuntos).firma).documento_firmado?.url || "").trim();
-}
-
-function buildCuentaFirmaDiagnosticoFromResolution(resolution = {}, nowIso = new Date().toISOString()) {
-  const diagnostico = asPlainObject(resolution.diagnostico);
-  return {
-    ultimo_check_en: diagnostico.ultimo_check_en || nowIso,
-    request_id: resolution.requestId || diagnostico.request_id || null,
-    contract_id: resolution.contractId || diagnostico.contract_id || null,
-    signature_id: resolution.signatureId || diagnostico.signature_id || null,
-    rawStatus: resolution.rawStatus || diagnostico.rawStatus || null,
-    normalizedStatus: resolution.normalizedStatus || diagnostico.normalizedStatus || null,
-    catalogSource: resolution.catalogSource || diagnostico.catalogSource || null,
-    reason: resolution.reason || diagnostico.reason || "pending",
-    origen: resolution.source || diagnostico.origen || null
-  };
-}
-
 function mapUploadedExtras(uploadedExtras = []) {
   return (Array.isArray(uploadedExtras) ? uploadedExtras : [])
     .map((item) => ({ kind: item.kind, nombre: item.nombre, url: item.url }));
 }
 
-async function cerrarCuentaCobroConFirmaResuelta({ req, cuenta, resolution, origen = "reconciliacion" } = {}) {
-  const {
-    isPdfBuffer,
-    buildCuentaCobroEmailAttachments,
-    uploadSignedPdfToOneDrive,
-    uploadClickSignExtraFilesToOneDrive,
-    sameResourceUrl,
-    notifyCuentaCobroFirmadaToProveedores,
-    getGraphContext,
-    getCuentaCobroEstadoAprobado,
-    getCuentaCobroEstadoEnFirma
-  } = getIndexHelpers();
-
-  if (!resolution?.signed || !resolution?.signedPdf || !isPdfBuffer(resolution.signedPdf.buffer)) {
-    return { updated: false, signed: false, reason: resolution?.reason || "sin_pdf" };
-  }
-
-  const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
-  const estadoAprobado = await getCuentaCobroEstadoAprobado();
-  const nowIso = new Date().toISOString();
-  const signedPdf = resolution.signedPdf;
-  const uploadResult = await uploadSignedPdfToOneDrive(
-    cuenta,
-    signedPdf.buffer,
-    signedPdf.fileName
-  );
-  const documentoFirmado = {
-    ...uploadResult.archivo,
-    carpeta: uploadResult.carpeta,
-    origen: signedPdf.source || "clicksign",
-    actualizado_en: nowIso
-  };
-
-  let uploadedExtras = [];
-  try {
-    const extrasResult = await uploadClickSignExtraFilesToOneDrive(
-      cuenta,
-      resolution.extraFiles || [],
-      uploadResult.carpeta || ""
-    );
-    uploadedExtras = extrasResult.uploaded || [];
-  } catch (extraErr) {
-    console.warn(`No se pudieron subir adjuntos extra de Click&Sign (${origen}):`, extraErr?.message || extraErr);
-  }
-
-  const attachments = buildCuentaCobroEmailAttachments({
-    cuenta,
-    signedPdf: {
-      buffer: signedPdf.buffer,
-      fileName: signedPdf.fileName || ""
-    },
-    extraFiles: resolution.extraFiles || []
-  });
-
-  const client = await pool.connect();
-  let prevNotificacionProveedores = {};
-  let persisted = null;
-  try {
-    await client.query("BEGIN");
-    const lockedResult = await client.query(
-      `
-      SELECT id, public_id, estado, datos_adjuntos
-      FROM cuenta_cobro
-      WHERE id = $1
-      FOR UPDATE
-      `,
-      [cuenta.id]
-    );
-    const lockedCuenta = lockedResult.rows[0] || null;
-    if (!lockedCuenta) {
-      await client.query("ROLLBACK");
-      const err = new Error("Cuenta no encontrada");
-      err.code = "PUBLIC_ID_NOT_FOUND";
-      throw err;
-    }
-
-    const currentAdjuntos = asPlainObject(lockedCuenta.datos_adjuntos);
-    const currentFirma = asPlainObject(currentAdjuntos.firma);
-    prevNotificacionProveedores = asPlainObject(currentFirma.notificacion_proveedores);
-    const currentDocumentoUrl = getDocumentoFirmadoUrl(currentAdjuntos);
-    if (lockedCuenta.estado !== estadoEnFirma || currentDocumentoUrl) {
-      await client.query("COMMIT");
-      return {
-        updated: false,
-        raceLost: true,
-        estadoCuenta: lockedCuenta.estado || null,
-        documentoFirmadoUrl: currentDocumentoUrl || null,
-        documentoFirmado,
-        uploadedExtras
-      };
-    }
-
-    const diagnostico = {
-      ...buildCuentaFirmaDiagnosticoFromResolution(resolution, nowIso),
-      normalizedStatus: "signed",
-      reason: "firmado_subido"
-    };
-    const firma = {
-      ...currentFirma,
-      estado: "signed",
-      request_id: resolution.requestId || null,
-      contract_id: resolution.contractId || null,
-      signature_id: resolution.signatureId || diagnostico.signature_id || null,
-      actualizado_en: nowIso,
-      ultimo_evento: resolution.rawStatus || "signed",
-      diagnostico,
-      documento_firmado: documentoFirmado,
-      documento_firmado_error: null
-    };
-    const adjuntos = {
-      ...currentAdjuntos,
-      firma
-    };
-
-    const prevSoportes = asPlainObject(currentAdjuntos.soportes);
-    const cuentaFirmadaUrl = documentoFirmado.url || "";
-    adjuntos.soportes = {
-      ...prevSoportes,
-      carpeta: documentoFirmado.carpeta || prevSoportes.carpeta || "",
-      actualizado_en: nowIso,
-      cuenta_cobro_firmada: {
-        id: documentoFirmado.id || prevSoportes?.cuenta_cobro_firmada?.id || prevSoportes?.cuenta_cobro?.id || null,
-        nombre: documentoFirmado.nombre || prevSoportes?.cuenta_cobro_firmada?.nombre || prevSoportes?.cuenta_cobro?.nombre || "CuentaCobroFirmada.pdf",
-        url: cuentaFirmadaUrl
-      }
-    };
-
-    const extraSeguridad = uploadedExtras.find((item) => item.kind === "seguridad_social_firma" && item.url);
-    const extraEvidencia = uploadedExtras.find((item) => item.kind === "evidencia_firma" && item.url);
-    const extraAnexo = uploadedExtras.find((item) => item.kind === "anexo_firma" && item.url);
-    if (extraSeguridad && !sameResourceUrl(extraSeguridad.url, cuentaFirmadaUrl)) {
-      adjuntos.soportes.seguridad_social_firma = {
-        id: extraSeguridad.id || null,
-        nombre: extraSeguridad.nombre || "SeguridadSocial.pdf",
-        url: extraSeguridad.url || ""
-      };
-      if (!adjuntos.soportes.seguridad_social?.url) {
-        adjuntos.soportes.seguridad_social = { ...adjuntos.soportes.seguridad_social_firma };
-      }
-    }
-    if (extraEvidencia && !sameResourceUrl(extraEvidencia.url, cuentaFirmadaUrl)) {
-      adjuntos.soportes.evidencia_firma = {
-        id: extraEvidencia.id || null,
-        nombre: extraEvidencia.nombre || "EvidenciaFirma.pdf",
-        url: extraEvidencia.url || ""
-      };
-    }
-    if (extraAnexo && !sameResourceUrl(extraAnexo.url, cuentaFirmadaUrl)) {
-      adjuntos.soportes.anexo_firma = {
-        id: extraAnexo.id || null,
-        nombre: extraAnexo.nombre || "AnexoFirma.pdf",
-        url: extraAnexo.url || ""
-      };
-    }
-
-    const updateResult = await client.query(
-      `
-      UPDATE cuenta_cobro
-      SET datos_adjuntos = $1::jsonb,
-          estado = $2::tipo_estado_reporte,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = $3
-        AND estado = $4::tipo_estado_reporte
-        AND COALESCE(datos_adjuntos->'firma'->'documento_firmado'->>'url', '') = ''
-      `,
-      [JSON.stringify(adjuntos), estadoAprobado, cuenta.id, estadoEnFirma]
-    );
-    await client.query("COMMIT");
-
-    if (updateResult.rowCount === 0) {
-      return {
-        updated: false,
-        raceLost: true,
-        estadoCuenta: null,
-        documentoFirmadoUrl: null,
-        documentoFirmado,
-        uploadedExtras
-      };
-    }
-
-    persisted = {
-      updated: true,
-      estadoCuenta: estadoAprobado,
-      documentoFirmado,
-      firma,
-      uploadedExtras,
-      diagnostico
-    };
-  } catch (err) {
-    try {
-      await client.query("ROLLBACK");
-    } catch (_) { }
-    throw err;
-  } finally {
-    client.release();
-  }
-
-  const notificacion = await notifyCuentaCobroFirmadaToProveedores({
-    cuenta,
-    documentoFirmado,
-    attachments,
-    prevNotification: prevNotificacionProveedores,
-    nowIso,
-    graphContext: getGraphContext(req)
-  });
-
-  return {
-    ...persisted,
-    notificacion
-  };
-}
-
 async function persistirDiagnosticoFirmaCuenta({ cuentaId, estadoEnFirma, status, resolution, origen = "reconciliacion" } = {}) {
   const nowIso = new Date().toISOString();
   const diagnostico = buildCuentaFirmaDiagnosticoFromResolution(resolution, nowIso);
+  const requestedStatus = String(status || "").trim().toLowerCase();
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -290,10 +69,16 @@ async function persistirDiagnosticoFirmaCuenta({ cuentaId, estadoEnFirma, status
     }
 
     const prevFirma = asPlainObject(prevAdjuntos.firma);
+    const prevEstadoFirmaSeguro = String(prevFirma.estado || "").trim().toLowerCase() === "signed"
+      ? "pending"
+      : prevFirma.estado || "pending";
+    const estadoFirmaSeguro = requestedStatus === "signed" && resolution?.permitirPersistirSigned !== true
+      ? prevEstadoFirmaSeguro
+      : (status || prevEstadoFirmaSeguro);
     const eventosPrev = Array.isArray(prevFirma.eventos) ? prevFirma.eventos.slice(-19) : [];
     const firma = {
       ...prevFirma,
-      estado: status || prevFirma.estado || "pending",
+      estado: estadoFirmaSeguro,
       request_id: diagnostico.request_id || prevFirma.request_id || null,
       contract_id: diagnostico.contract_id || prevFirma.contract_id || null,
       signature_id: diagnostico.signature_id || prevFirma.signature_id || null,
@@ -315,7 +100,7 @@ async function persistirDiagnosticoFirmaCuenta({ cuentaId, estadoEnFirma, status
       ...prevAdjuntos,
       firma
     };
-    const estadoDestino = status === "rejected" ? "Rechazado" : estadoEnFirma;
+    const estadoDestino = requestedStatus === "rejected" ? "Rechazado" : estadoEnFirma;
     const updateResult = await client.query(
       `
       UPDATE cuenta_cobro
@@ -337,6 +122,180 @@ async function persistirDiagnosticoFirmaCuenta({ cuentaId, estadoEnFirma, status
       adjuntos,
       diagnostico,
       estadoCuenta: estadoDestino
+    };
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (_) { }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+function usuarioEsAdministrador(req) {
+  return normalizeValue(req?.user?.rol) === "administrador";
+}
+
+function parseBooleanInput(value) {
+  if (value === true) return true;
+  return String(value || "").trim().toLowerCase() === "true";
+}
+
+function firmaTieneIdentificadoresCancelables(firma = {}) {
+  return Boolean(
+    String(firma?.signature_id || "").trim() ||
+    String(firma?.request_id || "").trim() ||
+    String(firma?.contract_id || "").trim()
+  );
+}
+
+async function resolverCancelacionIntentoFirma({ firma, req, motivo = "reinicio manual", cancelarFn = cancelarFirmaClickSign } = {}) {
+  if (!firmaTieneIdentificadoresCancelables(firma)) {
+    return {
+      ok: false,
+      statusCode: 502,
+      reason: "sin_identificadores_cancelacion",
+      mensaje: "No se pudo cancelar la firma anterior en Click&Sign: faltan identificadores."
+    };
+  }
+
+  const forzarSinCancelacion = parseBooleanInput(req?.body?.forzar_sin_cancelacion);
+  if (forzarSinCancelacion) {
+    if (!usuarioEsAdministrador(req)) {
+      return {
+        ok: false,
+        statusCode: 403,
+        reason: "forzar_sin_cancelacion_solo_administrador",
+        mensaje: "Solo Administrador puede omitir la cancelacion en Click&Sign."
+      };
+    }
+    return {
+      ok: true,
+      cancelada: false,
+      omitida: true,
+      reason: "cancelacion_omitida",
+      motivo,
+      resumen: { rawStatus: null, message: "forzar_sin_cancelacion" },
+      omitidaPor: {
+        usuario_id: req?.user?.id || null,
+        email: req?.user?.email || null,
+        rol: req?.user?.rol || null,
+        fecha: new Date().toISOString()
+      }
+    };
+  }
+
+  const cancelacion = await cancelarFn({
+    signatureId: firma.signature_id || "",
+    requestId: firma.request_id || "",
+    contractId: firma.contract_id || ""
+  });
+  if (!cancelacion.ok) {
+    return {
+      ok: false,
+      statusCode: 502,
+      reason: cancelacion.reason || "cancelacion_fallida",
+      mensaje: "No se pudo cancelar la firma anterior en Click&Sign. No se genero un enlace nuevo.",
+      cancelacion
+    };
+  }
+  return {
+    ok: true,
+    cancelada: cancelacion.cancelada === true,
+    omitida: false,
+    reason: cancelacion.reason || "cancelada",
+    resumen: cancelacion.resumen || null,
+    response: cancelacion.response || null
+  };
+}
+
+function limpiarSoportesDerivadosFirma(soportes = {}) {
+  const source = asPlainObject(soportes);
+  const {
+    cuenta_cobro_firmada: _cuentaFirmada,
+    seguridad_social_firma: _seguridadFirma,
+    evidencia_firma: _evidenciaFirma,
+    anexo_firma: _anexoFirma,
+    ...conservados
+  } = source;
+  return conservados;
+}
+
+function buildFirmaArchivada(prevFirma = {}, { motivo = "reinicio manual", cancelacionResult = {}, nowIso = new Date().toISOString() } = {}) {
+  const cancelada = cancelacionResult.cancelada === true;
+  const omitida = cancelacionResult.omitida === true;
+  const firmaBase = asPlainObject(prevFirma);
+  const firmaOriginal = {
+    ...firmaBase,
+    no_reconciliar: true,
+    cancelada_en_clicksign: cancelada
+  };
+  return {
+    ...firmaBase,
+    no_reconciliar: true,
+    cancelada_en_clicksign: cancelada,
+    cancelacion_omitida_por: omitida ? cancelacionResult.omitidaPor || null : null,
+    cancelacion_clicksign: cancelacionResult.resumen || null,
+    firma_original: firmaOriginal,
+    reseteado_en: nowIso,
+    motivo
+  };
+}
+
+async function archivarIntentoFirmaCuenta({ cuentaId, motivo = "reinicio manual", cancelacionResult = {} } = {}) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `
+      SELECT id, public_id, datos_adjuntos
+      FROM cuenta_cobro
+      WHERE id = $1
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [cuentaId]
+    );
+    const lockedCuenta = result.rows[0] || null;
+    if (!lockedCuenta) {
+      await client.query("ROLLBACK");
+      return { updated: false, reason: "not_found" };
+    }
+
+    const currentAdjuntos = asPlainObject(lockedCuenta.datos_adjuntos);
+    const prevFirma = asPlainObject(currentAdjuntos.firma);
+    const prevReseteos = Array.isArray(currentAdjuntos.firma_reseteos)
+      ? currentAdjuntos.firma_reseteos
+      : [];
+    const { firma: _firmaOmitida, ...adjuntosSinFirma } = currentAdjuntos;
+    const nowIso = new Date().toISOString();
+    const adjuntos = {
+      ...adjuntosSinFirma,
+      soportes: limpiarSoportesDerivadosFirma(currentAdjuntos.soportes),
+      firma_reseteos: [
+        ...prevReseteos,
+        buildFirmaArchivada(prevFirma, { motivo, cancelacionResult, nowIso })
+      ]
+    };
+
+    await client.query(
+      `
+      UPDATE cuenta_cobro
+      SET datos_adjuntos = $1::jsonb,
+          estado = 'Pendiente'::tipo_estado_reporte,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      `,
+      [JSON.stringify(adjuntos), lockedCuenta.id]
+    );
+    await client.query("COMMIT");
+
+    return {
+      updated: true,
+      cuenta: lockedCuenta,
+      adjuntos,
+      firmaArchivada: adjuntos.firma_reseteos[adjuntos.firma_reseteos.length - 1]
     };
   } catch (err) {
     try {
@@ -1301,6 +1260,13 @@ async function iniciarFirmaCuenta(req, res) {
       ? prevAdjuntos.firma_reseteos
       : [];
     const forceRestart = String(req.body?.force || "").toLowerCase() === "true" || req.body?.force === true;
+    const hasPreviousFirma = Boolean(
+      firmaExistente?.request_id ||
+      firmaExistente?.contract_id ||
+      firmaExistente?.signature_id ||
+      firmaExistente?.url_firma ||
+      firmaExistente?.iniciado_en
+    );
     const firmaEstado = String(firmaExistente?.estado || "").toLowerCase().trim();
     if (
       !forceRestart &&
@@ -1317,17 +1283,34 @@ async function iniciarFirmaCuenta(req, res) {
       });
     }
 
+    let adjuntosBaseNuevaFirma = prevAdjuntos;
+    if (forceRestart && hasPreviousFirma) {
+      const cancelacionResult = await resolverCancelacionIntentoFirma({
+        firma: firmaExistente,
+        req,
+        motivo: "reinicio force"
+      });
+      if (!cancelacionResult.ok) {
+        return res.status(cancelacionResult.statusCode || 502).json({
+          error: cancelacionResult.mensaje || "No se pudo cancelar la firma anterior en Click&Sign.",
+          motivo: cancelacionResult.reason || "cancelacion_fallida"
+        });
+      }
+      const archivoResult = await archivarIntentoFirmaCuenta({
+        cuentaId: cuentaInternalId,
+        motivo: "reinicio force",
+        cancelacionResult
+      });
+      if (!archivoResult.updated) {
+        return res.status(404).json({ error: "Cuenta no encontrada" });
+      }
+      adjuntosBaseNuevaFirma = archivoResult.adjuntos || prevAdjuntos;
+    }
+
     const pdfBuffer = await generateCuentaCobroPdfBuffer(cuenta, detalles);
     const cuentaPublicId = String(cuenta.public_id || "");
     const requestId = `CC-${cuentaPublicId || cuenta.id}-${Date.now()}`;
     const contractToken = String(cuentaPublicId || cuenta.id || "").split("-")[0];
-    const hasPreviousFirma = Boolean(
-      firmaExistente?.request_id ||
-      firmaExistente?.contract_id ||
-      firmaExistente?.signature_id ||
-      firmaExistente?.url_firma ||
-      firmaExistente?.iniciado_en
-    );
     const retryNumber = (prevReseteos.length || 0) + 1;
     const contractId = (hasPreviousFirma || prevReseteos.length > 0)
       ? `CC-${contractToken}-r${retryNumber}`
@@ -1412,8 +1395,8 @@ async function iniciarFirmaCuenta(req, res) {
       });
     }
 
-    const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object"
-      ? prevAdjuntos.firma
+    const prevFirma = adjuntosBaseNuevaFirma.firma && typeof adjuntosBaseNuevaFirma.firma === "object"
+      ? adjuntosBaseNuevaFirma.firma
       : {};
     const ahoraIso = new Date().toISOString();
     const firma = {
@@ -1429,7 +1412,7 @@ async function iniciarFirmaCuenta(req, res) {
       ultimo_evento: "START_SIGNATURE"
     };
     const adjuntos = {
-      ...prevAdjuntos,
+      ...adjuntosBaseNuevaFirma,
       firma
     };
     const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
@@ -1868,8 +1851,6 @@ async function reconciliarFirmaCuenta(req, res) {
   const {
     isClickSignConfigured,
     assertCuentaCobroOwnerAccess,
-    normalizeClickSignStatus,
-    resolveCuentaFirmaFirmadaAcrossAttempts,
     getCuentaCobroEstadoEnFirma,
     parseGraphErrorStatus
   } = getIndexHelpers();
@@ -1906,13 +1887,13 @@ async function reconciliarFirmaCuenta(req, res) {
     const prevAdjuntos = asPlainObject(cuenta.datos_adjuntos);
     const prevFirma = asPlainObject(prevAdjuntos.firma);
     const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
-    const resolution = await resolveCuentaFirmaFirmadaAcrossAttempts({ cuenta, prevAdjuntos });
+    const resolution = await resolverFirmaCuentaVerificada({ cuenta, prevAdjuntos });
     const diagnostico = buildCuentaFirmaDiagnosticoFromResolution(resolution);
     const rawStatusFromRequest = String(req.body?.status || "").trim();
     const rawStatus = rawStatusFromRequest || resolution.rawStatus || diagnostico.rawStatus || prevFirma.ultimo_evento || prevFirma.estado || "pending";
     const status = resolution.signed
       ? "signed"
-      : (resolution.normalizedStatus || diagnostico.normalizedStatus || normalizeClickSignStatus(rawStatus) || "pending");
+      : (resolution.normalizedStatus || diagnostico.normalizedStatus || "pending");
 
     if (resolution.signed) {
       const cierre = await cerrarCuentaCobroConFirmaResuelta({
@@ -1921,6 +1902,43 @@ async function reconciliarFirmaCuenta(req, res) {
         resolution,
         origen: "reconciliacion"
       });
+      if (cierre.updated !== true) {
+        const resolutionDiagnostico = {
+          ...resolution,
+          signed: false,
+          reason: "firmado_verificado_pendiente_cierre",
+          diagnostico: {
+            ...diagnostico,
+            reason: "firmado_verificado_pendiente_cierre"
+          }
+        };
+        const persistResult = await persistirDiagnosticoFirmaCuenta({
+          cuentaId: cuenta.id,
+          estadoEnFirma,
+          status: prevFirma.estado || "pending",
+          resolution: resolutionDiagnostico,
+          origen: "reconciliacion"
+        });
+        return res.json({
+          ok: true,
+          cuenta_id: String(cuenta.public_id || cuenta.id || ""),
+          request_id: resolution.requestId || diagnostico.request_id || null,
+          contract_id: resolution.contractId || diagnostico.contract_id || null,
+          signature_id: resolution.signatureId || diagnostico.signature_id || null,
+          estado_firma: persistResult.firma?.estado || prevFirma.estado || "pending",
+          estado_cuenta: cierre.estadoCuenta || persistResult.estadoCuenta || null,
+          documento_firmado_url: cierre.documentoFirmadoUrl || null,
+          documento_firmado_error: null,
+          origen_snapshot: resolution.source || null,
+          origen_catalogo: resolution.catalogSource || diagnostico.catalogSource || null,
+          origen: resolution.source || null,
+          reconciliado: false,
+          omitido_por_carrera: cierre.raceLost === true || persistResult.skipped === true,
+          motivo: cierre.reason || "firmado_verificado_pendiente_cierre",
+          diagnostico: persistResult.diagnostico || resolutionDiagnostico.diagnostico,
+          extras_subidos: []
+        });
+      }
       return res.json({
         ok: true,
         cuenta_id: String(cuenta.public_id || cuenta.id || ""),
@@ -1942,7 +1960,7 @@ async function reconciliarFirmaCuenta(req, res) {
       });
     }
 
-    if (["pending", "sent", "en_proceso"].includes(status) && !getDocumentoFirmadoUrl(prevAdjuntos)) {
+    if (status === "pending" && !getDocumentoFirmadoUrl(prevAdjuntos)) {
       const timeoutResult = await marcarCuentaCobroFirmaExpirada({
         cuentaId: cuenta.id,
         estadoEnFirma,
@@ -2038,8 +2056,7 @@ async function reconciliarFirmaCuenta(req, res) {
 async function reiniciarFirmaCuenta(req, res) {
   const {
     isClickSignConfigured,
-    isPdfBuffer,
-    resolveCuentaFirmaFirmadaAcrossAttempts,
+    getCuentaCobroEstadoEnFirma,
     parseGraphErrorStatus
   } = getIndexHelpers();
   const { id } = req.params;
@@ -2072,14 +2089,34 @@ async function reiniciarFirmaCuenta(req, res) {
     if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
 
     const prevAdjuntos = asPlainObject(cuenta.datos_adjuntos);
-    const resolution = await resolveCuentaFirmaFirmadaAcrossAttempts({ cuenta, prevAdjuntos });
-    if (resolution.signed && resolution.signedPdf && isPdfBuffer(resolution.signedPdf.buffer)) {
+    const prevFirma = asPlainObject(prevAdjuntos.firma);
+    const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
+    const resolution = await resolverFirmaCuentaVerificada({ cuenta, prevAdjuntos });
+    if (resolution.signed) {
       const cierre = await cerrarCuentaCobroConFirmaResuelta({
         req,
         cuenta,
         resolution,
         origen: "reinicio"
       });
+      if (cierre.updated !== true) {
+        const diagnostico = buildCuentaFirmaDiagnosticoFromResolution(resolution);
+        await persistirDiagnosticoFirmaCuenta({
+          cuentaId: cuenta.id,
+          estadoEnFirma,
+          status: prevFirma.estado || "pending",
+          resolution: {
+            ...resolution,
+            signed: false,
+            reason: "firmado_verificado_pendiente_cierre",
+            diagnostico: {
+              ...diagnostico,
+              reason: "firmado_verificado_pendiente_cierre"
+            }
+          },
+          origen: "reinicio"
+        });
+      }
       return res.json({
         ok: true,
         reconciliado: cierre.updated === true || Boolean(cierre.documentoFirmadoUrl),
@@ -2089,80 +2126,38 @@ async function reiniciarFirmaCuenta(req, res) {
         documento_firmado_url: cierre.updated === true
           ? cierre.documentoFirmado?.url || null
           : cierre.documentoFirmadoUrl || null,
-        mensaje: "La firma ya estaba completada en Click&Sign; se cerró la cuenta en lugar de reiniciar."
+        motivo: cierre.reason || null,
+        mensaje: "La firma ya estaba completada en Click&Sign; se intento cerrar la cuenta en lugar de reiniciar."
       });
     }
 
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      const result = await client.query(
-        `
-        SELECT id, public_id, datos_adjuntos
-        FROM cuenta_cobro
-        WHERE id = $1
-        LIMIT 1
-        FOR UPDATE
-        `,
-        [cuenta.id]
-      );
-      const lockedCuenta = result.rows[0] || null;
-      if (!lockedCuenta) {
-        await client.query("ROLLBACK");
-        return res.status(404).json({ error: "Cuenta no encontrada" });
-      }
-
-      const currentAdjuntos = asPlainObject(lockedCuenta.datos_adjuntos);
-      if (getDocumentoFirmadoUrl(currentAdjuntos)) {
-        await client.query("COMMIT");
-        return res.json({
-          ok: true,
-          reconciliado: true,
-          omitido_por_carrera: true,
-          cuenta_id: String(lockedCuenta.public_id || ""),
-          documento_firmado_url: getDocumentoFirmadoUrl(currentAdjuntos),
-          mensaje: "La cuenta ya estaba cerrada; no se reinició la firma."
-        });
-      }
-
-      const prevFirma = asPlainObject(currentAdjuntos.firma);
-      const prevReseteos = Array.isArray(currentAdjuntos.firma_reseteos)
-        ? currentAdjuntos.firma_reseteos
-        : [];
-      const { firma: _firmaOmitida, ...adjuntosSinFirma } = currentAdjuntos;
-      const adjuntos = {
-        ...adjuntosSinFirma,
-        firma_reseteos: [
-          ...prevReseteos,
-          {
-            ...prevFirma,
-            reseteado_en: new Date().toISOString(),
-            motivo: "reinicio manual"
-          }
-        ]
-      };
-
-      await client.query(
-        `
-        UPDATE cuenta_cobro
-        SET datos_adjuntos = $1::jsonb,
-            estado = 'Pendiente'::tipo_estado_reporte,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = $2
-        `,
-        [JSON.stringify(adjuntos), lockedCuenta.id]
-      );
-      await client.query("COMMIT");
-
-      return res.json({ ok: true, cuenta_id: String(lockedCuenta.public_id || "") });
-    } catch (err) {
-      try {
-        await client.query("ROLLBACK");
-      } catch (_) { }
-      throw err;
-    } finally {
-      client.release();
+    const cancelacionResult = await resolverCancelacionIntentoFirma({
+      firma: prevFirma,
+      req,
+      motivo: "reinicio manual"
+    });
+    if (!cancelacionResult.ok) {
+      return res.status(cancelacionResult.statusCode || 502).json({
+        error: cancelacionResult.mensaje || "No se pudo cancelar la firma anterior en Click&Sign.",
+        motivo: cancelacionResult.reason || "cancelacion_fallida"
+      });
     }
+    const archivoResult = await archivarIntentoFirmaCuenta({
+      cuentaId: cuenta.id,
+      motivo: "reinicio manual",
+      cancelacionResult
+    });
+    if (!archivoResult.updated) {
+      return res.status(404).json({ error: "Cuenta no encontrada" });
+    }
+
+    return res.json({
+      ok: true,
+      cuenta_id: String(archivoResult.cuenta?.public_id || cuenta.public_id || ""),
+      cancelada_en_clicksign: cancelacionResult.cancelada === true,
+      cancelacion_omitida: cancelacionResult.omitida === true
+    });
+
   } catch (err) {
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {
       return res.status(404).json({ error: "Cuenta no encontrada" });
@@ -2389,4 +2384,24 @@ async function adjuntarFirmaCuenta(req, res) {
   }
 }
 
-module.exports = { previewCuentaCobro, crearCuentaCobro, getHistorialCuentas, getAprobadoresCuentas, getSoportesCuentas, getDetalleCuenta, getCuentaPdf, uploadAdjuntosCuenta, subirSeguridadSocialManual, iniciarFirmaCuenta, reconciliarFirmaCuenta, reiniciarFirmaCuenta, adjuntarFirmaCuenta };
+module.exports = {
+  previewCuentaCobro,
+  crearCuentaCobro,
+  getHistorialCuentas,
+  getAprobadoresCuentas,
+  getSoportesCuentas,
+  getDetalleCuenta,
+  getCuentaPdf,
+  uploadAdjuntosCuenta,
+  subirSeguridadSocialManual,
+  iniciarFirmaCuenta,
+  reconciliarFirmaCuenta,
+  reiniciarFirmaCuenta,
+  adjuntarFirmaCuenta,
+  persistirDiagnosticoFirmaCuenta,
+  __private: {
+    resolverCancelacionIntentoFirma,
+    limpiarSoportesDerivadosFirma,
+    buildFirmaArchivada
+  }
+};

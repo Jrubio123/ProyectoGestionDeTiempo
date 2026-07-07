@@ -182,12 +182,10 @@ window.registroHorasApp = function () {
                 return;
             }
 
-            if (this.esExceso(item)) {
+            if (this.esExceso(item) && !esDias) {
                 const maximo = esCostoTotal
                     ? Number(item?.total_disponible ?? item?.total_pagar ?? 0)
-                    : esDias
-                        ? Number(item?.dias_disponibles ?? item?.cantidad_dias ?? 0)
-                        : Number(item?.horas_disponibles ?? item?.horas_asignadas ?? 0);
+                    : Number(item?.horas_disponibles ?? item?.horas_asignadas ?? 0);
                 alert(`No puedes reportar ${cantidad} ${unidad}. Maximo permitido: ${maximo}.`);
                 return;
             }

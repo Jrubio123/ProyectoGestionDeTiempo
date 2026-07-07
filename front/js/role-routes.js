@@ -59,7 +59,7 @@ window.roleAccess = (function () {
             "asignacion-fabrica-mesa-servicio"
         ],
         reclutador: ["inicio", "solicitudesRecl"],
-        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin", "temp-crear-usuarios"]
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "temp-crear-usuarios"]
     };
 
     const searchViews = [

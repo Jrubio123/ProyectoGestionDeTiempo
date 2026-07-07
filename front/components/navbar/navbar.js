@@ -42,7 +42,7 @@ function getRoleRoutes() {
             "gestion-consultores"
         ],
         reclutador: ["inicio", "solicitudesRecl"],
-        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin", "gestion-personas", "gestion-consultores"]
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "gestion-personas", "gestion-consultores"]
     };
 }
 

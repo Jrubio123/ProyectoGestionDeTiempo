@@ -21,7 +21,7 @@ const {
 const router = Router();
 const ROLES_ASOCIADOS = ["Consultor", "Consultor Principal", "Mesa de Servicio"];
 const ROLES_LECTURA_AMPLIA = ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador"];
-const ROLES_SOPORTES_CUENTAS = ["Administrador", "Coordinador", "Comercial"];
+const ROLES_SOPORTES_CUENTAS = ["Administrador", "Coordinador", "Comercial", "Talento Humano"];
 const ROLES_FIRMA_SOPORTES = ["Consultor", "Consultor Principal", "Mesa de Servicio", "Administrador", "Coordinador", "Comercial"];
 
 router.post("/preview", requireAccess({ roles: ROLES_ASOCIADOS, tipos: ["Asociado"] }), previewCuentaCobro);

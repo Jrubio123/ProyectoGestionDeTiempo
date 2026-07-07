@@ -31,7 +31,7 @@ const viewScripts = {
 // Guardar la promesa (no solo el resultado) evita inyectar el mismo
 // archivo dos veces si llegan dos navegaciones rápidas antes del onload.
 const _scriptPromises = new Map();
-const APP_ASSET_VERSION = "20260601-admin-asignaciones";
+const APP_ASSET_VERSION = "20260707-th-soportes";
 
 function loadScript(src) {
     if (_scriptPromises.has(src)) return _scriptPromises.get(src);
@@ -166,7 +166,7 @@ function router() {
             "soportes-cuentas-cobro",
             "gestion-consultores"
         ],
-        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin", "gestion-personas", "gestion-consultores"]
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "gestion-personas", "gestion-consultores"]
     };
     const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
     if (view && !allowed.has(view)) {

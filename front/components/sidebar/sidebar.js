@@ -119,7 +119,7 @@ function initSidebar() {
             "soportes-cuentas-cobro",
             "gestion-consultores"
         ],
-        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "firma-contratos-admin", "gestion-personas", "gestion-consultores"]
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "gestion-personas", "gestion-consultores"]
     };
 
     const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
@@ -127,7 +127,11 @@ function initSidebar() {
         const link = item.querySelector(".menu-link");
         if (!link) return;
         const hash = (link.getAttribute("href") || "").replace("#", "");
-        item.style.display = allowed.has(hash) ? "" : "none";
+        const roleList = String(item.dataset.roles || "")
+            .split(/\s+/)
+            .filter(Boolean);
+        const roleAllowed = roleList.length === 0 || roleList.includes(roleKey);
+        item.style.display = allowed.has(hash) && roleAllowed ? "" : "none";
     });
 
     const sections = sidebar.querySelectorAll(".menu-section");

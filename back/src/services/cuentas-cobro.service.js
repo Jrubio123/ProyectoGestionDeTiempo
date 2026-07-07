@@ -1202,6 +1202,199 @@ async function subirSeguridadSocialManual(req, res) {
   }
 }
 
+async function buscarSeguridadSocialClickSign(req, res) {
+  const {
+    isClickSignConfigured,
+    parseGraphErrorStatus,
+    resolveClickSignArtifacts,
+    sameResourceUrl,
+    uploadClickSignExtraFilesToOneDrive
+  } = getIndexHelpers();
+  const { id } = req.params;
+  const reemplazar = parseBooleanInput(
+    req.body?.forzar_reemplazo ??
+    req.body?.reemplazar ??
+    req.query?.forzar_reemplazo ??
+    req.query?.reemplazar
+  );
+
+  if (!isClickSignConfigured()) {
+    return res.status(503).json({
+      error: "Click&Sign no esta configurado. Falta CLICKSIGN_API_KEY, CLICKSIGN_USER o CLICKSIGN_CONFIG_ID."
+    });
+  }
+
+  try {
+    const cuentaResult = await pool.query(
+      `
+      SELECT
+        cc.id,
+        cc.public_id,
+        cc.created_by,
+        cc.fecha_correspondiente,
+        cc.created_at,
+        cc.datos_adjuntos,
+        u.nombre_usuario,
+        u.email
+      FROM cuenta_cobro cc
+      LEFT JOIN usuarios u ON u.id = cc.created_by
+      WHERE cc.public_id = $1
+      LIMIT 1
+      `,
+      [id]
+    );
+
+    const cuenta = cuentaResult.rows[0] || null;
+    if (!cuenta) return res.status(404).json({ error: "Cuenta de cobro no encontrada." });
+
+    const prevAdjuntos = asPlainObject(cuenta.datos_adjuntos);
+    const prevFirma = asPlainObject(prevAdjuntos.firma);
+    const prevSoportes = asPlainObject(prevAdjuntos.soportes);
+    const requestId = String(req.body?.request_id || prevFirma.request_id || "").trim();
+    const contractId = String(req.body?.contract_id || prevFirma.contract_id || "").trim();
+    const signatureId = String(req.body?.signature_id || prevFirma.signature_id || "").trim();
+
+    if (!requestId && !contractId && !signatureId) {
+      return res.status(400).json({
+        error: "La cuenta no tiene request_id/contract_id/signature_id para buscar archivos en Click&Sign."
+      });
+    }
+
+    const artifacts = await resolveClickSignArtifacts({
+      event: {},
+      requestId,
+      contractId,
+      publicId: cuenta.public_id,
+      signatureId,
+      allowCatalogFallback: false
+    });
+
+    const seguridadFile = (artifacts.extraFiles || [])
+      .find((item) => item?.kind === "seguridad_social_firma" && item?.buffer);
+
+    if (!seguridadFile) {
+      return res.status(404).json({
+        ok: false,
+        encontrada: false,
+        mensaje: "Click&Sign no devolvio archivo de seguridad social para esta firma.",
+        catalogo: artifacts.catalogEntries || [],
+        notificacion_proveedores: prevFirma.notificacion_proveedores || null
+      });
+    }
+
+    const targetPath = String(
+      prevSoportes.carpeta ||
+      prevFirma.documento_firmado?.carpeta ||
+      ""
+    ).trim();
+    const uploadResult = await uploadClickSignExtraFilesToOneDrive(cuenta, [seguridadFile], targetPath);
+    const extraSeguridad = (uploadResult.uploaded || [])
+      .find((item) => item?.kind === "seguridad_social_firma" && item?.url);
+
+    if (!extraSeguridad?.url) {
+      return res.status(502).json({
+        ok: false,
+        encontrada: true,
+        error: "Click&Sign devolvio seguridad social, pero no se pudo subir a OneDrive.",
+        catalogo: artifacts.catalogEntries || []
+      });
+    }
+
+    const lockedResult = await pool.query(
+      `
+      SELECT id, datos_adjuntos
+      FROM cuenta_cobro
+      WHERE id = $1
+      FOR UPDATE
+      `,
+      [cuenta.id]
+    );
+    const lockedCuenta = lockedResult.rows[0] || null;
+    if (!lockedCuenta) return res.status(404).json({ error: "Cuenta de cobro no encontrada." });
+
+    const currentAdjuntos = asPlainObject(lockedCuenta.datos_adjuntos);
+    const currentFirma = asPlainObject(currentAdjuntos.firma);
+    const currentSoportes = asPlainObject(currentAdjuntos.soportes);
+    const cuentaFirmadaUrl =
+      currentSoportes.cuenta_cobro_firmada?.url ||
+      currentFirma.documento_firmado?.url ||
+      "";
+
+    if (sameResourceUrl(extraSeguridad.url, cuentaFirmadaUrl)) {
+      return res.status(409).json({
+        ok: false,
+        encontrada: true,
+        error: "El archivo detectado como seguridad social es igual a la cuenta firmada; no se guarda."
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    const seguridadSocial = {
+      id: extraSeguridad.id || null,
+      nombre: extraSeguridad.nombre || "SeguridadSocial.pdf",
+      url: extraSeguridad.url || ""
+    };
+    const yaTieneSeguridad = Boolean(currentSoportes.seguridad_social?.url);
+    const soportes = {
+      ...currentSoportes,
+      carpeta: uploadResult.carpeta || targetPath || currentSoportes.carpeta || "",
+      actualizado_en: nowIso,
+      seguridad_social_firma: seguridadSocial,
+      seguridad_social_clicksign: seguridadSocial,
+      seguridad_social_clicksign_busqueda_en: nowIso
+    };
+
+    if (!yaTieneSeguridad || reemplazar) {
+      soportes.seguridad_social = seguridadSocial;
+      soportes.seguridad_social_origen = "clicksign_busqueda";
+      soportes.seguridad_social_cargado_por = req.user?.id ?? null;
+      soportes.seguridad_social_cargado_en = nowIso;
+    }
+
+    const adjuntos = {
+      ...currentAdjuntos,
+      soportes
+    };
+
+    await pool.query(
+      `
+      UPDATE cuenta_cobro
+      SET datos_adjuntos = $1::jsonb,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      `,
+      [JSON.stringify(adjuntos), cuenta.id]
+    );
+
+    return res.json({
+      ok: true,
+      encontrada: true,
+      cuenta_id: String(cuenta.public_id || ""),
+      reemplazada: !yaTieneSeguridad || reemplazar,
+      ya_tenia_seguridad_social: yaTieneSeguridad,
+      seguridad_social: soportes.seguridad_social || null,
+      seguridad_social_clicksign: seguridadSocial,
+      catalogo: artifacts.catalogEntries || [],
+      notificacion_proveedores: currentFirma.notificacion_proveedores || prevFirma.notificacion_proveedores || null
+    });
+  } catch (err) {
+    const graphStatus = parseGraphErrorStatus(err?.message || "");
+    if (graphStatus === 401 || graphStatus === 403 || graphStatus === 404) {
+      return res.status(502).json({
+        error: "Servicio de almacenamiento no disponible o no autorizado. Verifica permisos de Graph/OneDrive."
+      });
+    }
+    if (Number(err?.status || 0) > 0) {
+      return res.status(502).json({
+        error: "Error consultando archivos en Click&Sign",
+        detalle: err.response || err.message
+      });
+    }
+    console.error("Error buscando seguridad social en Click&Sign:", err);
+    return res.status(500).json({ error: "Error buscando seguridad social en Click&Sign" });
+  }
+}
+
 async function iniciarFirmaCuenta(req, res) {
   const {
     isClickSignConfigured,
@@ -2394,6 +2587,7 @@ module.exports = {
   getCuentaPdf,
   uploadAdjuntosCuenta,
   subirSeguridadSocialManual,
+  buscarSeguridadSocialClickSign,
   iniciarFirmaCuenta,
   reconciliarFirmaCuenta,
   reiniciarFirmaCuenta,

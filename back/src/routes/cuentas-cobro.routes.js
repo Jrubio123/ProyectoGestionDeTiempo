@@ -11,6 +11,7 @@ const {
   getCuentaPdf,
   uploadAdjuntosCuenta,
   subirSeguridadSocialManual,
+  buscarSeguridadSocialClickSign,
   iniciarFirmaCuenta,
   reconciliarFirmaCuenta,
   reiniciarFirmaCuenta,
@@ -31,6 +32,7 @@ router.get("/soportes", requireAccess({ roles: ROLES_SOPORTES_CUENTAS }), getSop
 router.get("/detalle/:cuentaId", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), getDetalleCuenta);
 router.get("/:id/pdf", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), getCuentaPdf);
 router.post("/:id/adjuntos", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), uploadAdjuntosCuenta);
+router.post("/:id/seguridad-social/buscar-clicksign", requireAccess({ roles: ROLES_SOPORTES_CUENTAS }), buscarSeguridadSocialClickSign);
 router.post("/:id/seguridad-social", requireAccess({ roles: ROLES_SOPORTES_CUENTAS }), subirSeguridadSocialManual);
 
 router.post("/:id/firma/iniciar", requireAccess({ roles: ROLES_FIRMA_SOPORTES, tipos: ["Asociado"] }), iniciarFirmaCuenta);

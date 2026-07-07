@@ -206,12 +206,19 @@ window.registroHorasApp = function () {
 
             try {
                 await axios.post(`${API}/reportar-horas`, payload);
-                alert("Reporte enviado correctamente");
-                item.input_cantidad = 0;
-                await this.cargarAsignaciones();
             } catch (e) {
                 const msg = e?.response?.data?.error || "Error al enviar reporte";
                 alert(msg);
+                return;
+            }
+
+            alert("Reporte enviado correctamente");
+            item.input_cantidad = 0;
+
+            try {
+                await this.cargarAsignaciones();
+            } catch (e) {
+                console.warn("Reporte enviado, pero no se pudo actualizar la lista", e);
             }
         },
 

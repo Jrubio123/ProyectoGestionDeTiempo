@@ -137,6 +137,10 @@ function usuarioEsAdministrador(req) {
   return normalizeValue(req?.user?.rol) === "administrador";
 }
 
+function usuarioPuedeGestionarFirmasCuenta(req) {
+  return ["administrador", "coordinador", "comercial", "talento humano"].includes(normalizeValue(req?.user?.rol));
+}
+
 function parseBooleanInput(value) {
   if (value === true) return true;
   return String(value || "").trim().toLowerCase() === "true";
@@ -1455,7 +1459,7 @@ async function iniciarFirmaCuenta(req, res) {
     const meta = await pool.query("SELECT id, created_by FROM cuenta_cobro WHERE public_id = $1", [id]);
     if (!meta.rows.length) return res.status(404).json({ error: "Cuenta no encontrada" });
     const cuentaInternalId = meta.rows[0].id;
-    if (normalizeValue(req.user?.rol) !== "comercial") {
+    if (!usuarioPuedeGestionarFirmasCuenta(req)) {
       await assertCuentaCobroOwnerAccess(meta.rows[0].created_by, req);
     }
 

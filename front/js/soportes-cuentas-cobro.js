@@ -150,9 +150,15 @@ window.soportesCuentasCobroApp = function () {
             const atascadas = lista.filter((item) => this.isFirmaAtascada(item));
             const q = String(this.firmasAtascadasSearch || "").trim().toLowerCase();
             if (!q) return atascadas;
-            return atascadas.filter((item) =>
-                String(item?.consultor_nombre || "").toLowerCase().includes(q)
-            );
+            return atascadas.filter((item) => {
+                const texto = [
+                    item?.id,
+                    this.cuentaCorta(item?.id),
+                    item?.consultor_nombre,
+                    item?.consultor_email
+                ].join(" ").toLowerCase();
+                return texto.includes(q);
+            });
         },
 
         cuentasSinSeguridad() {

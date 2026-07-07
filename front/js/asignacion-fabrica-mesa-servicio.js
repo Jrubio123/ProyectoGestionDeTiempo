@@ -306,33 +306,34 @@ window.mesaFabricaApp = function () {
         },
 
         getScope(item) {
-            const explicitScope = this.normalizeScope(item?.scope_mesa_fabrica || this.form?.scope_mesa_fabrica);
+            const source = item || this.form;
+            const explicitScope = this.normalizeScope(source?.scope_mesa_fabrica);
             if (explicitScope) return explicitScope;
 
-            const tipo = this.normalizeTipo(item?.tipo_asignacion || this.form?.tipo_asignacion || "");
+            const tipo = this.normalizeTipo(source?.tipo_asignacion || "");
             const tipoCompacto = tipo.replace(/\s+/g, "");
             const hasMesaByTipo =
                 tipo.includes("mesa") ||
                 tipo.includes("service desk") ||
                 tipoCompacto.includes("servicedesk");
             const hasFabricaByTipo = tipo.includes("fabrica");
+            if (hasFabricaByTipo && !hasMesaByTipo) return "fabrica";
+            if (hasMesaByTipo && !hasFabricaByTipo) return "mesa";
 
             const hasFabricaHints = Boolean(
-                String(item?.estado_fabrica || "").trim() ||
-                String(item?.wricef || "").trim() ||
-                String(item?.requerimiento || "").trim() ||
-                String(item?.perfil_fabrica || "").trim()
+                String(source?.estado_fabrica || "").trim() ||
+                String(source?.wricef || "").trim() ||
+                String(source?.requerimiento || "").trim() ||
+                String(source?.perfil_fabrica || "").trim()
             );
             const hasMesaHints = Boolean(
-                String(item?.estado_mesa_servicio || "").trim() ||
-                String(item?.nro_caso_cliente || "").trim() ||
-                String(item?.nro_caso_interno || "").trim() ||
-                String(item?.tipo_servicio || "").trim()
+                String(source?.estado_mesa_servicio || "").trim() ||
+                String(source?.nro_caso_cliente || "").trim() ||
+                String(source?.nro_caso_interno || "").trim() ||
+                String(source?.tipo_servicio || "").trim()
             );
             if (hasFabricaHints && !hasMesaHints) return "fabrica";
             if (hasMesaHints && !hasFabricaHints) return "mesa";
-            if (hasFabricaByTipo && !hasMesaByTipo) return "fabrica";
-            if (hasMesaByTipo && !hasFabricaByTipo) return "mesa";
             if (hasFabricaHints) return "fabrica";
             if (hasMesaHints) return "mesa";
             if (hasFabricaByTipo) return "fabrica";

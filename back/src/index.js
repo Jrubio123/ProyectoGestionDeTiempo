@@ -581,6 +581,12 @@ function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, hints = {},
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+  const hasMesaByTitle = isTipoAsignacionMesa(tituloNorm);
+  const hasFabricaByTitle = isTipoAsignacionFabrica(tituloNorm);
+
+  if (hasFabricaByTitle && !hasMesaByTitle) return "fabrica";
+  if (hasMesaByTitle && !hasFabricaByTitle) return "mesa";
+
   const hasMesaHints = [
     hints?.estado_mesa_servicio,
     hints?.tipo_servicio,
@@ -598,11 +604,6 @@ function getMesaFabricaScope(tipoAsignacionId, tipoAsignacionTitulo, hints = {},
   if (hasFabricaHints && !hasMesaHints) return "fabrica";
   if (hasMesaHints && !hasFabricaHints) return "mesa";
 
-  const hasMesaByTitle = isTipoAsignacionMesa(tituloNorm);
-  const hasFabricaByTitle = isTipoAsignacionFabrica(tituloNorm);
-
-  if (hasFabricaByTitle && !hasMesaByTitle) return "fabrica";
-  if (hasMesaByTitle && !hasFabricaByTitle) return "mesa";
   if (hasFabricaHints) return "fabrica";
   if (hasMesaHints) return "mesa";
   if (hasFabricaByTitle) return "fabrica";
@@ -13185,7 +13186,7 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         ra.nro_caso_cliente,
         ra.estado,
         ra.aprobar_coordinador,
-        ra.tipo_servicio,
+        COALESCE(rh.tipo_servicio, ra.tipo_servicio) AS tipo_servicio,
         ra.observacion,
         ra.fecha_inicio,
         ra.fecha_fin,
@@ -13413,7 +13414,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
     const finalNroCaso = serializeTicketCaseFields({
       nroCasoCliente: scope === "mesa" ? finalNroCasoCliente : null,
       nroCasoInterno: scope === "mesa" ? finalNroCasoInterno : null,
-      nroCasoIntExtFallback: bodyCases.legacy
+      nroCasoIntExtFallback: scope === "mesa" ? bodyCases.legacy : null
     });
     if (scope === "mesa" && (!finalNroCasoCliente || !finalNroCasoInterno)) {
       await client.query("ROLLBACK");
@@ -13461,15 +13462,15 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
         `UPDATE reporte_horas
          SET horas_reportadas = COALESCE($1, horas_reportadas),
              total_cobrar = COALESCE($2, total_cobrar),
-             tipo_servicio = COALESCE($3, tipo_servicio),
-             nro_caso_int_ext = COALESCE($4, nro_caso_int_ext),
+             tipo_servicio = CASE WHEN $20::boolean THEN COALESCE($3, tipo_servicio) ELSE NULL END,
+             nro_caso_int_ext = CASE WHEN $20::boolean THEN COALESCE($4, nro_caso_int_ext) ELSE NULL END,
              observacion_mesa_fabrica = COALESCE($5, observacion_mesa_fabrica),
              fecha_cierre_mesa_fab = COALESCE($6, fecha_cierre_mesa_fab),
-             estado_mesa_servicio = COALESCE($7, estado_mesa_servicio),
-             estado_fabrica = COALESCE($8, estado_fabrica),
-             requerimiento = COALESCE($9, requerimiento),
-             perfil_fabrica = COALESCE($10, perfil_fabrica),
-             wricef = COALESCE($11, wricef),
+             estado_mesa_servicio = CASE WHEN $20::boolean THEN COALESCE($7, estado_mesa_servicio) ELSE NULL END,
+             estado_fabrica = CASE WHEN $20::boolean THEN NULL ELSE COALESCE($8, estado_fabrica) END,
+             requerimiento = CASE WHEN $20::boolean THEN NULL ELSE COALESCE($9, requerimiento) END,
+             perfil_fabrica = CASE WHEN $20::boolean THEN NULL ELSE COALESCE($10, perfil_fabrica) END,
+             wricef = CASE WHEN $20::boolean THEN NULL ELSE COALESCE($11, wricef) END,
              created_at = COALESCE($12::timestamp, created_at),
              cliente_id = COALESCE(cliente_id, $13),
              tipo_asignacion_id = COALESCE(tipo_asignacion_id, $14),
@@ -13485,15 +13486,15 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
         [
           finalHoras,
           finalTotal,
-          finalTipoServicio,
+          scope === "mesa" ? finalTipoServicio : null,
           finalNroCaso,
           finalObservacion,
           finalFechaCierre,
           scope === "mesa" ? estadoMesaNormalizado : null,
           scope === "fabrica" ? estadoFabricaNormalizado : null,
-          finalRequerimiento,
+          scope === "fabrica" ? finalRequerimiento : null,
           finalPerfilFabrica,
-          finalWricef,
+          scope === "fabrica" ? finalWricef : null,
           finalFechaInicio,
           info.id_cliente,
           info.id_tipo_asignacion,
@@ -13501,7 +13502,8 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           info.coordinador_responsable_id,
           info.consultor_responsable_id,
           consultorPrincipalId,
-          editableRow.id
+          editableRow.id,
+          scope === "mesa"
         ]
       );
     } else if (reporte_id && !editableRow) {
@@ -13532,15 +13534,15 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
           info.id,
           finalHoras,
           finalTotal,
-          finalTipoServicio,
+          scope === "mesa" ? finalTipoServicio : null,
           finalNroCaso,
           finalObservacion,
           finalFechaCierre,
           scope === "mesa" ? estadoMesaNormalizado : null,
           scope === "fabrica" ? estadoFabricaNormalizado : null,
-          finalRequerimiento,
+          scope === "fabrica" ? finalRequerimiento : null,
           finalPerfilFabrica,
-          finalWricef,
+          scope === "fabrica" ? finalWricef : null,
           info.id_cliente,
           info.id_tipo_asignacion,
           info.id_modulo,
@@ -13795,7 +13797,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
     const finalNroCaso = serializeTicketCaseFields({
       nroCasoCliente: scope === "mesa" ? finalNroCasoCliente : null,
       nroCasoInterno: scope === "mesa" ? finalNroCasoInterno : null,
-      nroCasoIntExtFallback: bodyCases.legacy
+      nroCasoIntExtFallback: scope === "mesa" ? bodyCases.legacy : null
     });
     if (scope === "mesa" && (!finalNroCasoCliente || !finalNroCasoInterno)) {
       return res.status(400).json({
@@ -13842,15 +13844,15 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
         `UPDATE reporte_horas
          SET horas_reportadas = COALESCE($1, horas_reportadas),
              total_cobrar = COALESCE($2, total_cobrar),
-             tipo_servicio = COALESCE($3, tipo_servicio),
-             nro_caso_int_ext = COALESCE($4, nro_caso_int_ext),
+             tipo_servicio = CASE WHEN $15::boolean THEN COALESCE($3, tipo_servicio) ELSE NULL END,
+             nro_caso_int_ext = CASE WHEN $15::boolean THEN COALESCE($4, nro_caso_int_ext) ELSE NULL END,
              observacion_mesa_fabrica = COALESCE($5, observacion_mesa_fabrica),
              fecha_cierre_mesa_fab = COALESCE($6, fecha_cierre_mesa_fab),
-             estado_mesa_servicio = COALESCE($7, estado_mesa_servicio),
-              estado_fabrica = COALESCE($8, estado_fabrica),
-              requerimiento = COALESCE($9, requerimiento),
-              perfil_fabrica = COALESCE($10, perfil_fabrica),
-              wricef = COALESCE($11, wricef),
+             estado_mesa_servicio = CASE WHEN $15::boolean THEN COALESCE($7, estado_mesa_servicio) ELSE NULL END,
+              estado_fabrica = CASE WHEN $15::boolean THEN NULL ELSE COALESCE($8, estado_fabrica) END,
+              requerimiento = CASE WHEN $15::boolean THEN NULL ELSE COALESCE($9, requerimiento) END,
+              perfil_fabrica = CASE WHEN $15::boolean THEN NULL ELSE COALESCE($10, perfil_fabrica) END,
+              wricef = CASE WHEN $15::boolean THEN NULL ELSE COALESCE($11, wricef) END,
               consultor_principal_id = COALESCE($12, consultor_principal_id),
               created_at = COALESCE($13::timestamp, created_at),
               updated_at = CURRENT_TIMESTAMP
@@ -13858,18 +13860,19 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
         [
           finalHoras,
           finalTotal,
-          tipoServicioNormalizado,
+          scope === "mesa" ? tipoServicioNormalizado : null,
           finalNroCaso,
           observacion || null,
           fecha_cierre || null,
           scope === "mesa" ? estadoMesaNormalizado : null,
           scope === "fabrica" ? estadoFabricaNormalizado : null,
-          finalRequerimiento,
+          scope === "fabrica" ? finalRequerimiento : null,
           finalPerfilFabrica,
-          finalWricef,
+          scope === "fabrica" ? finalWricef : null,
           consultorPrincipalId,
           finalFechaInicio,
-          editable.rows[0].id
+          editable.rows[0].id,
+          scope === "mesa"
         ]
       );
     } else if (reporte_id && editable.rows.length === 0) {
@@ -13886,15 +13889,15 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
           registroId,
           finalHoras,
           finalTotal,
-          tipoServicioNormalizado,
+          scope === "mesa" ? tipoServicioNormalizado : null,
           finalNroCaso,
           observacion || null,
           fecha_cierre || null,
           scope === "mesa" ? estadoMesaNormalizado : null,
           scope === "fabrica" ? estadoFabricaNormalizado : null,
-          finalRequerimiento,
+          scope === "fabrica" ? finalRequerimiento : null,
           finalPerfilFabrica,
-          finalWricef,
+          scope === "fabrica" ? finalWricef : null,
           tipoValido.rows[0]?.id_cliente || null,
           tipoValido.rows[0]?.id_tipo_asignacion || null,
           tipoValido.rows[0]?.id_modulo || null,

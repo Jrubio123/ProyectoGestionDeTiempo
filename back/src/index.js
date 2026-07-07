@@ -13416,12 +13416,7 @@ app.post("/mesa-fabrica/:id/enviar-aprobacion", requireAccess({ roles: ["Consult
       nroCasoInterno: scope === "mesa" ? finalNroCasoInterno : null,
       nroCasoIntExtFallback: scope === "mesa" ? bodyCases.legacy : null
     });
-    if (scope === "mesa" && (!finalNroCasoCliente || !finalNroCasoInterno)) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({
-        error: "Debes indicar Nro Caso Interno y Nro Caso Cliente para Mesa de servicio"
-      });
-    }
+    // Nro de caso cliente/interno son opcionales para Mesa de servicio.
 
     const finalTipoServicio = normalizeTipoServicioInput(tipo_servicio || info.ra_tipo_servicio || "Servicio") || null;
     const finalObservacion = (observacion_mesa_fabrica || info.ra_observacion || "").toString().trim() || null;
@@ -13799,11 +13794,7 @@ app.put("/mesa-fabrica/:id", requireAccess({ roles: ["Consultor", "Consultor Pri
       nroCasoInterno: scope === "mesa" ? finalNroCasoInterno : null,
       nroCasoIntExtFallback: scope === "mesa" ? bodyCases.legacy : null
     });
-    if (scope === "mesa" && (!finalNroCasoCliente || !finalNroCasoInterno)) {
-      return res.status(400).json({
-        error: "Debes indicar Nro Caso Interno y Nro Caso Cliente para Mesa de servicio"
-      });
-    }
+    // Nro de caso cliente/interno son opcionales para Mesa de servicio.
     const perfilInputRaw = String(perfil_fabrica || "").trim();
     const perfilInputNormalizado = normalizePerfilFabricaInput(perfil_fabrica);
     const perfilEditable = normalizePerfilFabricaInput(editable.rows[0]?.perfil_fabrica);

@@ -223,36 +223,16 @@ window.mesaFabricaApp = function () {
         validarTicket(item) {
             const scope = this.getScope(item);
             const estado = String(item?.estado_ticket || this.getEstadoTicket(item) || "").trim();
-            const fechaIngreso = this.resolveFechaIngreso(item, scope === "fabrica");
             const fechaCierre = String(item?.fecha_cierre || item?.fecha_cierre_mesa_fab || "").trim();
             const horas = Number(item?.horas_reportadas || 0);
 
-            if (!estado) return { ok: false, error: "Debes seleccionar un estado." };
-            if (!fechaIngreso) return { ok: false, error: "Debes indicar la fecha de ingreso." };
             if (!(horas > 0)) return { ok: false, error: "Debes indicar horas mayores a 0." };
 
-            if (scope === "mesa") {
-                if (!String(item?.nro_caso_cliente || "").trim()) {
-                    return { ok: false, error: "Debes indicar el número de caso cliente." };
-                }
-                if (!String(item?.nro_caso_interno || "").trim()) {
-                    return { ok: false, error: "Debes indicar el número de caso interno." };
-                }
-                if (!String(item?.tipo_servicio || "").trim()) {
-                    return { ok: false, error: "Debes seleccionar el tipo de servicio." };
-                }
-                if (estado === "Cerrado" && !fechaCierre) {
-                    return { ok: false, error: "Debes indicar fecha de cierre cuando el estado es Cerrado." };
-                }
+            if (scope === "mesa" && estado === "Cerrado" && !fechaCierre) {
+                return { ok: false, error: "Debes indicar fecha de cierre cuando el estado es Cerrado." };
             }
 
             if (scope === "fabrica") {
-                if (!String(item?.wricef || "").trim()) {
-                    return { ok: false, error: "Debes indicar WRICEF." };
-                }
-                if (!String(item?.requerimiento || "").trim()) {
-                    return { ok: false, error: "Debes indicar el nombre del requerimiento." };
-                }
                 const perfilAsignado = this.getPerfilFabricaAsignado(item);
                 if (!perfilAsignado) {
                     return { ok: false, error: "Debes seleccionar el perfil de fábrica." };

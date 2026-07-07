@@ -67,7 +67,15 @@
       "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mrb56b7o-0rgvvk)",
       "PowerShell(git diff --stat)",
       "PowerShell(git diff back/src/index.js)",
-      "PowerShell(git diff front/js/asignacion-fabrica-mesa-servicio.js front/views/asignacion-fabrica-mesa-servicio.html)"
+      "PowerShell(git diff front/js/asignacion-fabrica-mesa-servicio.js front/views/asignacion-fabrica-mesa-servicio.html)",
+      "PowerShell($lines = Get-Content db\\\\init.sql; for \\($i = 620; $i -le 670; $i++\\) { if \\($lines[$i] -match 'CREATE TABLE'\\) { Write-Output \"$\\($i+1\\): $\\($lines[$i]\\)\" } }; for \\($i = 700; $i -le 745; $i++\\) { if \\($lines[$i] -match 'CREATE TABLE'\\) { Write-Output \"$\\($i+1\\): $\\($lines[$i]\\)\" } })",
+      "PowerShell(Select-String -Path .env -Pattern '^\\(DATABASE_URL|PGHOST|DB_\\)' | ForEach-Object { \\($_.Line -split '='\\)[0] })",
+      "PowerShell(node \"C:\\\\Users\\\\JUANPA~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-JuanPabloRubioMej-a-Downloads-ProyectosDesarrollo-ProyectoGestionDeTiempo\\\\15b7ba30-3ccb-4f4a-ae1d-fa78e2f7fd60\\\\scratchpad\\\\test-mesa-fabrica-query.js\")",
+      "PowerShell(git log --oneline -8)",
+      "PowerShell(git status --short)",
+      "PowerShell(try { \\(Get-Command psql -ErrorAction Stop\\).Source } catch { Write-Output \"NO_PSQL\" }; $envLines = Get-Content .env; \\($envLines | Select-String '^DB_HOST='\\).Line; \\($envLines | Select-String '^DB_PORT='\\).Line; \\($envLines | Select-String '^DB_SSL='\\).Line)",
+      "PowerShell(git status -sb)",
+      "PowerShell(git diff .claude/settings.local.json)"
     ]
   },
   "enabledPlugins": {

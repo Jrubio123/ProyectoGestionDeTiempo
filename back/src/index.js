@@ -13186,7 +13186,7 @@ app.get("/mesa-fabrica", requireAccess({ roles: ["Consultor", "Consultor Princip
         ra.nro_caso_cliente,
         ra.estado,
         ra.aprobar_coordinador,
-        COALESCE(rh.tipo_servicio, ra.tipo_servicio) AS tipo_servicio,
+        COALESCE(rh.tipo_servicio, ra.tipo_servicio::text) AS tipo_servicio,
         ra.observacion,
         ra.fecha_inicio,
         ra.fecha_fin,

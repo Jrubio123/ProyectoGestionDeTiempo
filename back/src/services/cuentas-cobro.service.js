@@ -1049,7 +1049,8 @@ async function subirSeguridadSocialManual(req, res) {
     parseGraphErrorStatus,
     parsePdfDataUrl,
     sanitizePathSegment,
-    sanitizePdfFileName
+    sanitizePdfFileName,
+    notifySeguridadSocialProveedoresTardia
   } = getIndexHelpers();
   const ONEDRIVE_ENABLED = String(process.env.ONEDRIVE_ENABLED || "true").toLowerCase() === "true";
   const ONEDRIVE_TARGET_USER = process.env.ONEDRIVE_TARGET_USER || "admin.apps@silverconsulting.com.co";
@@ -1079,7 +1080,8 @@ async function subirSeguridadSocialManual(req, res) {
         cc.fecha_correspondiente,
         cc.created_at,
         cc.datos_adjuntos,
-        u.nombre_usuario
+        u.nombre_usuario,
+        u.email
       FROM cuenta_cobro cc
       JOIN usuarios u ON u.id = cc.created_by
       WHERE cc.public_id = $1
@@ -1169,10 +1171,21 @@ async function subirSeguridadSocialManual(req, res) {
       [JSON.stringify(adjuntos), cuenta.id]
     );
 
+    let notificacionProveedoresTardia = null;
+    try {
+      notificacionProveedoresTardia = await notifySeguridadSocialProveedoresTardia({
+        cuenta,
+        seguridadBuffer: seguridadPdfBuffer
+      });
+    } catch (notifyErr) {
+      console.warn(`Notificacion tardia de seguridad social no enviada para ${cuenta.public_id || cuenta.id}:`, notifyErr?.message || notifyErr);
+    }
+
     return res.json({
       ok: true,
       mensaje: "Seguridad social cargada exitosamente",
-      soportes: adjuntos.soportes
+      soportes: adjuntos.soportes,
+      notificacion_proveedores_tardia: notificacionProveedoresTardia
     });
   } catch (err) {
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {
@@ -1208,7 +1221,8 @@ async function buscarSeguridadSocialClickSign(req, res) {
     parseGraphErrorStatus,
     resolveClickSignArtifacts,
     sameResourceUrl,
-    uploadClickSignExtraFilesToOneDrive
+    uploadClickSignExtraFilesToOneDrive,
+    notifySeguridadSocialProveedoresTardia
   } = getIndexHelpers();
   const { id } = req.params;
   const reemplazar = parseBooleanInput(
@@ -1350,6 +1364,7 @@ async function buscarSeguridadSocialClickSign(req, res) {
       soportes.seguridad_social_cargado_por = req.user?.id ?? null;
       soportes.seguridad_social_cargado_en = nowIso;
     }
+    const seguridadPersistida = !yaTieneSeguridad || reemplazar;
 
     const adjuntos = {
       ...currentAdjuntos,
@@ -1366,16 +1381,29 @@ async function buscarSeguridadSocialClickSign(req, res) {
       [JSON.stringify(adjuntos), cuenta.id]
     );
 
+    let notificacionProveedoresTardia = null;
+    if (seguridadPersistida) {
+      try {
+        notificacionProveedoresTardia = await notifySeguridadSocialProveedoresTardia({
+          cuenta,
+          seguridadBuffer: seguridadFile.buffer
+        });
+      } catch (notifyErr) {
+        console.warn(`Notificacion tardia de seguridad social no enviada para ${cuenta.public_id || cuenta.id}:`, notifyErr?.message || notifyErr);
+      }
+    }
+
     return res.json({
       ok: true,
       encontrada: true,
       cuenta_id: String(cuenta.public_id || ""),
-      reemplazada: !yaTieneSeguridad || reemplazar,
+      reemplazada: seguridadPersistida,
       ya_tenia_seguridad_social: yaTieneSeguridad,
       seguridad_social: soportes.seguridad_social || null,
       seguridad_social_clicksign: seguridadSocial,
       catalogo: artifacts.catalogEntries || [],
-      notificacion_proveedores: currentFirma.notificacion_proveedores || prevFirma.notificacion_proveedores || null
+      notificacion_proveedores: currentFirma.notificacion_proveedores || prevFirma.notificacion_proveedores || null,
+      notificacion_proveedores_tardia: notificacionProveedoresTardia
     });
   } catch (err) {
     const graphStatus = parseGraphErrorStatus(err?.message || "");

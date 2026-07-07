@@ -37,6 +37,7 @@ function getDefaultDeps() {
     uploadClickSignExtraFilesToOneDrive: index.uploadClickSignExtraFilesToOneDrive,
     sameResourceUrl: index.sameResourceUrl,
     notifyCuentaCobroFirmadaToProveedores: index.notifyCuentaCobroFirmadaToProveedores,
+    downloadGraphItemContent: index.downloadGraphItemContent,
     getGraphContext: index.getGraphContext,
     getCuentaCobroEstadoAprobado: index.getCuentaCobroEstadoAprobado,
     getCuentaCobroEstadoEnFirma: index.getCuentaCobroEstadoEnFirma,
@@ -90,6 +91,7 @@ async function cerrarCuentaCobroConFirmaResuelta({
     uploadClickSignExtraFilesToOneDrive,
     sameResourceUrl,
     notifyCuentaCobroFirmadaToProveedores,
+    downloadGraphItemContent,
     getGraphContext,
     getCuentaCobroEstadoAprobado,
     getCuentaCobroEstadoEnFirma,
@@ -104,6 +106,8 @@ async function cerrarCuentaCobroConFirmaResuelta({
   const estadoAprobado = await getCuentaCobroEstadoAprobado();
   const nowIso = new Date().toISOString();
   const signedPdf = resolution.signedPdf;
+  let seguridadEnAttachments = (resolution.extraFiles || [])
+    .some((file) => file?.kind === "seguridad_social_firma" && isPdfBuffer(file.buffer));
   const uploadResult = await uploadSignedPdfToOneDrive(
     cuenta,
     signedPdf.buffer,
@@ -139,6 +143,7 @@ async function cerrarCuentaCobroConFirmaResuelta({
 
   const client = await pool.connect();
   let prevNotificacionProveedores = {};
+  let prevSeguridadSocialSoporte = null;
   let persisted = null;
   try {
     await client.query("BEGIN");
@@ -199,6 +204,14 @@ async function cerrarCuentaCobroConFirmaResuelta({
     };
 
     const prevSoportes = asPlainObject(currentAdjuntos.soportes);
+    const currentSeguridadSocial = asPlainObject(prevSoportes.seguridad_social);
+    if (currentSeguridadSocial.id) {
+      prevSeguridadSocialSoporte = {
+        id: currentSeguridadSocial.id,
+        nombre: currentSeguridadSocial.nombre || "SeguridadSocial.pdf",
+        url: currentSeguridadSocial.url || ""
+      };
+    }
     const cuentaFirmadaUrl = documentoFirmado.url || "";
     adjuntos.soportes = {
       ...prevSoportes,
@@ -282,13 +295,41 @@ async function cerrarCuentaCobroConFirmaResuelta({
     client.release();
   }
 
+  if (!seguridadEnAttachments && prevSeguridadSocialSoporte?.id && attachments.length < 4 && typeof downloadGraphItemContent === "function") {
+    try {
+      const download = await downloadGraphItemContent(prevSeguridadSocialSoporte.id);
+      const seguridadBuffer = Buffer.isBuffer(download?.buffer) ? download.buffer : null;
+      if (isPdfBuffer(seguridadBuffer) && seguridadBuffer.length <= 8 * 1024 * 1024) {
+        attachments.push({
+          filename: prevSeguridadSocialSoporte.nombre || "SeguridadSocial.pdf",
+          contentType: "application/pdf",
+          content: seguridadBuffer
+        });
+        seguridadEnAttachments = true;
+      }
+    } catch (err) {
+      logger?.warn?.(`No se pudo adjuntar seguridad social previa para ${cuenta.public_id || cuenta.id}:`, err?.message || err);
+    }
+  }
+
+  if (!seguridadEnAttachments) {
+    let catalogo = "[]";
+    try {
+      catalogo = JSON.stringify(resolution.catalogEntries || []).slice(0, 1200);
+    } catch (_) {
+      catalogo = "[]";
+    }
+    logger?.warn?.(`[firma-cuenta] Cierre sin seguridad social adjunta para ${cuenta.public_id || cuenta.id}. catalogEntries=${catalogo}`);
+  }
+
   const notificacion = await notifyCuentaCobroFirmadaToProveedores({
     cuenta,
     documentoFirmado,
     attachments,
     prevNotification: prevNotificacionProveedores,
     nowIso,
-    graphContext: getGraphContext(req)
+    graphContext: getGraphContext(req),
+    extraMeta: { seguridad_social_incluida: seguridadEnAttachments }
   });
 
   return {

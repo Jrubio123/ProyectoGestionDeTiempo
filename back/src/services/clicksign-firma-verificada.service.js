@@ -336,16 +336,39 @@ function normalizeFileEntries(source) {
     for (const item of items) {
       if (!item || typeof item !== "object") continue;
       const fileId = String(item.file_id || item.fileId || item.id || item.file?.file_id || "").trim();
-      const fileGroup = String(item.file_group || item.fileGroup || item.group || item.file?.file_group || item.file?.group || "").trim().toUpperCase();
+      const fileGroup = String(item.file_group || item.fileGroup || item.group || item.file?.file_group || item.file?.group || "")
+        .trim()
+        .replace(/\s+/g, "_")
+        .toUpperCase();
+      const fileType = String(item.file_type || item.fileType || item.type || item.file?.file_type || item.file?.type || "")
+        .trim()
+        .replace(/\s+/g, "_")
+        .toLowerCase();
       const fileName = sanitizePdfFileName(
         item.filename || item.file_name || item.fileName || item.name || item.file?.filename || "DocumentoClickSign.pdf",
         "DocumentoClickSign.pdf"
       );
       if (!fileId) continue;
-      entries.push({ fileId, fileGroup, fileName });
+      entries.push({ fileId, fileGroup, fileType, fileName });
     }
   }
   return entries;
+}
+
+function normalizeLooseFileNameKey(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+}
+
+function summarizeFileCatalogEntries(entries = []) {
+  return (Array.isArray(entries) ? entries : []).map((entry) => ({
+    file_group: entry.fileGroup || "",
+    file_name: entry.fileName || "",
+    file_id_tail: String(entry.fileId || "").slice(-8)
+  }));
 }
 
 function extractPdfBufferFromResponse(response) {
@@ -583,6 +606,7 @@ function createClickSignFirmaVerificadaService(deps = {}) {
             buffer,
             fileName: sanitizePdfFileName(entry.fileName, "CuentaCobroFirmada.pdf"),
             fileGroup: entry.fileGroup,
+            fileId: entry.fileId,
             source: "file_group_verificado"
           });
           break;
@@ -596,12 +620,117 @@ function createClickSignFirmaVerificadaService(deps = {}) {
       files,
       allowlistValida: true,
       reason: files.length ? "" : "firmado_sin_pdf_en_grupos",
-      catalogEntries: unique.map((entry) => ({
-        file_group: entry.fileGroup,
-        file_name: entry.fileName,
-        file_id_tail: String(entry.fileId || "").slice(-8)
-      }))
+      catalogEntries: summarizeFileCatalogEntries(unique)
     };
+  }
+
+  async function listarArchivosAdjuntosFirma({
+    signatureId = "",
+    requestId = "",
+    contractId = "",
+    signedFileIds = [],
+    publicId = ""
+  } = {}) {
+    try {
+      const user = String(config.user || "").trim();
+      const sid = /^\d+$/.test(String(signatureId || "").trim()) ? String(signatureId).trim() : "";
+      const basePayload = {
+        request: "GET_FILE_LIST",
+        request_id: buildRequestId("file-list"),
+        user
+      };
+      if (sid) basePayload.signature_id = sid;
+      if (requestId) basePayload.request_id_search = requestId;
+      if (contractId) basePayload.contract_id = contractId;
+
+      const response = await postJson("get_file_list", basePayload);
+      const entries = normalizeFileEntries(response);
+      const catalogEntries = summarizeFileCatalogEntries(entries);
+      const signedIds = new Set((Array.isArray(signedFileIds) ? signedFileIds : [])
+        .map((item) => String(item || "").trim())
+        .filter(Boolean));
+      const publicKey = normalizeLooseFileNameKey(publicId);
+      const byKind = {
+        seguridad_social_firma: [],
+        evidencia_firma: [],
+        anexo_firma: []
+      };
+      const seenCandidates = new Set();
+
+      const resolveKind = (entry) => {
+        const fileGroup = String(entry.fileGroup || "").trim().toLowerCase();
+        const fileType = String(entry.fileType || "").trim().toLowerCase();
+        if (["uploaded_files", "uploaded", "attached", "attached_files"].includes(fileGroup)) {
+          return "seguridad_social_firma";
+        }
+        if (fileGroup.includes("evidence") || fileType.includes("evidence")) {
+          return "evidencia_firma";
+        }
+        if (["contract_files", "attachment_files", "attachments", "attachment"].includes(fileGroup) ||
+          ["contract_files", "attachment_files", "attachments", "attachment"].includes(fileType)) {
+          return "anexo_firma";
+        }
+        return "";
+      };
+
+      for (const entry of entries) {
+        const fileId = String(entry.fileId || "").trim();
+        const fileGroup = String(entry.fileGroup || "").trim().toUpperCase();
+        if (!fileId) continue;
+        if (signedIds.has(fileId)) continue;
+        if (SIGNED_FILE_GROUPS_KNOWN.has(fileGroup)) continue;
+
+        const kind = resolveKind(entry);
+        if (!kind) continue;
+
+        if (kind === "seguridad_social_firma") {
+          const fileNameKey = normalizeLooseFileNameKey(entry.fileName);
+          if (fileNameKey.startsWith("cuentacobro")) continue;
+          if (publicKey && fileNameKey.includes(publicKey) && fileNameKey.includes("cuenta")) continue;
+        }
+
+        const key = `${kind}|${fileId}`;
+        if (seenCandidates.has(key)) continue;
+        seenCandidates.add(key);
+        byKind[kind].push(entry);
+      }
+
+      const extraFiles = [];
+      for (const kind of ["seguridad_social_firma", "evidencia_firma", "anexo_firma"]) {
+        for (const entry of byKind[kind]) {
+          const bodyVariants = [
+            { request: "GET_FILE", request_id: buildRequestId("file"), user, file_id: entry.fileId },
+            { request: "GET_FILE", request_id: buildRequestId("file"), user, file: { file_id: entry.fileId } }
+          ];
+          let resolved = false;
+          for (const body of bodyVariants) {
+            try {
+              const fileResponse = await postBinary("get_file", body);
+              const buffer = extractPdfBufferFromResponse(fileResponse);
+              if (!isPdfBuffer(buffer)) continue;
+              extraFiles.push({
+                kind,
+                fileName: sanitizePdfFileName(entry.fileName, `${kind}.pdf`),
+                buffer
+              });
+              resolved = true;
+              break;
+            } catch (err) {
+              // Continua con la siguiente variante/candidato.
+            }
+          }
+          if (resolved) break;
+        }
+      }
+
+      return { extraFiles, catalogEntries };
+    } catch (err) {
+      return {
+        extraFiles: [],
+        catalogEntries: [],
+        reason: err?.message || "get_file_list_error"
+      };
+    }
   }
 
   function collectCuentaFirmaCandidates(adjuntos = {}) {
@@ -713,10 +842,27 @@ function createClickSignFirmaVerificadaService(deps = {}) {
 
         const signedPdf = filesResult.files[0] || null;
         if (signedPdf && isPdfBuffer(signedPdf.buffer)) {
+          let extraFiles = [];
+          let catalogEntries = filesResult.catalogEntries || [];
+          try {
+            const extrasResult = await listarArchivosAdjuntosFirma({
+              signatureId: resolvedSignatureId,
+              requestId: candidate.request_id,
+              contractId: candidate.contract_id,
+              signedFileIds: [signedPdf.fileId].filter(Boolean),
+              publicId: String(cuenta?.public_id || "")
+            });
+            extraFiles = extrasResult.extraFiles || [];
+            catalogEntries = (extrasResult.catalogEntries || []).length
+              ? extrasResult.catalogEntries
+              : catalogEntries;
+          } catch (extraErr) {
+            logger?.warn?.(`[firma-cuenta] No se pudieron resolver adjuntos Click&Sign para ${cuenta?.public_id || "sin_public_id"}:`, extraErr?.message || extraErr);
+          }
           return {
             signed: true,
             signedPdf,
-            extraFiles: [],
+            extraFiles,
             requestId: candidate.request_id || null,
             contractId: candidate.contract_id || null,
             signatureId: resolvedSignatureId || null,
@@ -724,7 +870,7 @@ function createClickSignFirmaVerificadaService(deps = {}) {
             rawStatus: statusResult.rawStatus || "signed",
             normalizedStatus: "signed",
             catalogSource: "get_file_list",
-            catalogEntries: filesResult.catalogEntries || [],
+            catalogEntries,
             diagnostics
           };
         }
@@ -817,6 +963,7 @@ function createClickSignFirmaVerificadaService(deps = {}) {
   return {
     consultarSignatureStatusOficial,
     listarArchivosFirmados,
+    listarArchivosAdjuntosFirma,
     resolverFirmaCuentaVerificada,
     cancelarFirmaClickSign,
     normalizeOfficialSignatureStatus,
@@ -833,6 +980,7 @@ module.exports = {
   createClickSignFirmaVerificadaService,
   consultarSignatureStatusOficial: defaultService.consultarSignatureStatusOficial,
   listarArchivosFirmados: defaultService.listarArchivosFirmados,
+  listarArchivosAdjuntosFirma: defaultService.listarArchivosAdjuntosFirma,
   resolverFirmaCuentaVerificada: defaultService.resolverFirmaCuentaVerificada,
   cancelarFirmaClickSign: defaultService.cancelarFirmaClickSign,
   normalizeOfficialSignatureStatus,

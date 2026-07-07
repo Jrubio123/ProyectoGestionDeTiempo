@@ -1067,7 +1067,8 @@ async function notifyCuentaCobroFirmadaToProveedores({
   attachments = [],
   prevNotification = null,
   nowIso = new Date().toISOString(),
-  graphContext = {}
+  graphContext = {},
+  extraMeta = {}
 } = {}) {
   const prev = prevNotification && typeof prevNotification === "object" ? prevNotification : {};
   if (!CLICKSIGN_SIGNED_NOTIFY_ENABLED || !CLICKSIGN_SIGNED_NOTIFY_TO) return prev;
@@ -1177,6 +1178,7 @@ async function notifyCuentaCobroFirmadaToProveedores({
     const isOk = Boolean(sendResult?.ok);
     const newNotificacion = {
       ...prev,
+      ...(extraMeta && typeof extraMeta === "object" ? extraMeta : {}),
       estado: isOk ? "enviada" : "error",
       enviada: isOk,
       ultimo_intento_en: nowIso,
@@ -1224,6 +1226,163 @@ async function notifyCuentaCobroFirmadaToProveedores({
   } finally {
     if (notificationLockKey) providerNotificationInFlight.delete(notificationLockKey);
   }
+}
+
+async function notifySeguridadSocialProveedoresTardia({
+  cuenta,
+  seguridadSoporte = null,
+  seguridadBuffer = null,
+  nowIso = new Date().toISOString(),
+  graphContext = {}
+} = {}) {
+  if (!CLICKSIGN_SIGNED_NOTIFY_ENABLED || !CLICKSIGN_SIGNED_NOTIFY_TO) return null;
+
+  const cuentaPublicId = String(cuenta?.public_id || "").trim();
+  if (!cuentaPublicId) return null;
+
+  const claim = await pool.query(
+    `UPDATE cuenta_cobro
+     SET datos_adjuntos = jsonb_set(
+       COALESCE(datos_adjuntos, '{}'::jsonb),
+       '{firma,notificacion_seguridad_tardia}',
+       COALESCE(datos_adjuntos->'firma'->'notificacion_seguridad_tardia', '{}'::jsonb)
+         || jsonb_build_object(
+           'estado', 'enviando',
+           'intentos', COALESCE((datos_adjuntos->'firma'->'notificacion_seguridad_tardia'->>'intentos')::int, 0) + 1,
+           'ultimo_intento_en', $2::text
+         ),
+       true
+     )
+     WHERE public_id = $1
+       AND COALESCE((datos_adjuntos->'firma'->'notificacion_proveedores'->>'enviada')::boolean, false) = true
+       AND COALESCE((datos_adjuntos->'firma'->'notificacion_proveedores'->>'seguridad_social_incluida')::boolean, false) = false
+       AND COALESCE((datos_adjuntos->'firma'->'notificacion_seguridad_tardia'->>'enviada')::boolean, false) = false
+       AND COALESCE((datos_adjuntos->'firma'->'notificacion_seguridad_tardia'->>'intentos')::int, 0) < 5
+       AND (
+         COALESCE(datos_adjuntos->'firma'->'notificacion_seguridad_tardia'->>'estado', '') != 'enviando'
+         OR (datos_adjuntos->'firma'->'notificacion_seguridad_tardia'->>'ultimo_intento_en')::timestamp < NOW() - INTERVAL '30 minutes'
+       )
+     RETURNING COALESCE((datos_adjuntos->'firma'->'notificacion_seguridad_tardia'->>'intentos')::int, 0) AS intentos`,
+    [cuentaPublicId, nowIso]
+  );
+
+  if (claim.rowCount === 0) {
+    try {
+      const fresh = await pool.query(
+        `SELECT datos_adjuntos->'firma'->'notificacion_seguridad_tardia' AS notif
+         FROM cuenta_cobro
+         WHERE public_id = $1`,
+        [cuentaPublicId]
+      );
+      const freshNotif = fresh.rows[0]?.notif;
+      return freshNotif && typeof freshNotif === "object" ? freshNotif : null;
+    } catch (readErr) {
+      console.warn("[notify-seguridad-tardia] Error releyendo notificacion_seguridad_tardia:", readErr?.message || readErr);
+      return null;
+    }
+  }
+
+  const intentos = Number(claim.rows[0]?.intentos) || 1;
+  const cuentaNumero = String(cuenta?.id || "");
+  const consultorNombre = resolveCuentaCobroConsultorNombre(cuenta);
+  const subject = `Seguridad social | ${consultorNombre} | N° ${cuentaNumero}`;
+  const senderEmail = String(cuenta?.email || graphContext?.graphUserEmail || "").trim();
+  const soporte = seguridadSoporte && typeof seguridadSoporte === "object" ? seguridadSoporte : {};
+
+  const persistResult = async (notificacion) => {
+    try {
+      await pool.query(
+        `UPDATE cuenta_cobro
+         SET datos_adjuntos = jsonb_set(
+           datos_adjuntos,
+           '{firma,notificacion_seguridad_tardia}',
+           $1::jsonb,
+           true
+         )
+         WHERE public_id = $2`,
+        [JSON.stringify(notificacion), cuentaPublicId]
+      );
+    } catch (persistErr) {
+      console.error("[notify-seguridad-tardia] Error persistiendo resultado:", persistErr?.message || persistErr);
+    }
+    return notificacion;
+  };
+
+  let pdfBuffer = isPdfBuffer(seguridadBuffer) ? seguridadBuffer : null;
+  if (!pdfBuffer && soporte.id) {
+    try {
+      const download = await downloadGraphItemContent(soporte.id, graphContext?.graphAccessToken || null);
+      pdfBuffer = isPdfBuffer(download?.buffer) ? download.buffer : null;
+    } catch (downloadErr) {
+      console.warn(`[notify-seguridad-tardia] No se pudo descargar seguridad social para ${cuentaPublicId}:`, downloadErr?.message || downloadErr);
+    }
+  }
+
+  if (!isPdfBuffer(pdfBuffer) || pdfBuffer.length > 8 * 1024 * 1024) {
+    return persistResult({
+      estado: "error",
+      enviada: false,
+      enviada_en: null,
+      ultimo_intento_en: nowIso,
+      destinatario: CLICKSIGN_SIGNED_NOTIFY_TO,
+      asunto: subject,
+      adjuntos_enviados: 0,
+      error: !isPdfBuffer(pdfBuffer) ? "Seguridad social no disponible" : "Seguridad social supera 8MB",
+      intentos
+    });
+  }
+
+  const seguridadFileName = sanitizePdfFileName(soporte.nombre || `SeguridadSocial_${cuentaPublicId}.pdf`, `SeguridadSocial_${cuentaPublicId}.pdf`);
+  const textoPlano =
+    `Se adjunta el soporte de seguridad social complementario.\n` +
+    `Consultor: ${consultorNombre}\n` +
+    `Cuenta de cobro: N° ${cuentaNumero}\n` +
+    `La firma de esta cuenta ya fue notificada previamente.\n`;
+  const html = buildEmailLayout({
+    title: "Seguridad social complementaria",
+    intro: `Se adjunta el soporte de seguridad social complementario de la cuenta de cobro <strong>N° ${cuentaNumero}</strong>, cuya firma ya fue notificada previamente.`,
+    blocks: [
+      { label: "Consultor", value: consultorNombre },
+      { label: "Cuenta de cobro", value: `N° ${cuentaNumero}` }
+    ],
+    closing: "Notificación automática del sistema de cuentas de cobro."
+  });
+
+  let sendResult;
+  let errorMsg = null;
+  try {
+    sendResult = await sendEmailSafe({
+      graphUserEmail: senderEmail || null,
+      to: CLICKSIGN_SIGNED_NOTIFY_TO,
+      cc: CLICKSIGN_SIGNED_NOTIFY_CC || null,
+      bcc: CLICKSIGN_SIGNED_NOTIFY_BCC || null,
+      subject,
+      text: textoPlano,
+      html,
+      attachments: [{
+        filename: seguridadFileName,
+        contentType: "application/pdf",
+        content: pdfBuffer
+      }]
+    });
+  } catch (sendErr) {
+    sendResult = { ok: false, error: sendErr?.message || "Excepcion al enviar correo" };
+    errorMsg = sendResult.error;
+  }
+
+  const isOk = Boolean(sendResult?.ok);
+  return persistResult({
+    estado: isOk ? "enviada" : "error",
+    enviada: isOk,
+    enviada_en: isOk ? nowIso : null,
+    ultimo_intento_en: nowIso,
+    destinatario: CLICKSIGN_SIGNED_NOTIFY_TO,
+    asunto: subject,
+    seguridad_social_url: soporte.url || null,
+    adjuntos_enviados: isOk ? 1 : 0,
+    error: isOk ? null : (sendResult?.error || errorMsg || "Error enviando correo"),
+    intentos
+  });
 }
 
 function isRrhhEstadoNotificable(estado) {
@@ -5162,6 +5321,98 @@ function graphGetBinary(path, accessToken) {
     req.on("error", reject);
     req.end();
   });
+}
+
+async function downloadGraphItemContent(itemId, accessToken = null) {
+  const itemIdValue = String(itemId || "").trim();
+  if (!itemIdValue) {
+    throw new Error("GRAPH_ITEM_ID_REQUIRED");
+  }
+  const token = accessToken || await getGraphAccessToken();
+  const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
+  const encodedItemId = encodeURIComponent(itemIdValue);
+  const graphPath = `/v1.0/users/${encodedUser}/drive/items/${encodedItemId}/content`;
+  const redirectStatuses = new Set([301, 302, 303, 307, 308]);
+
+  const requestBinary = (target, headers = {}, redirectCount = 0) => new Promise((resolve, reject) => {
+    const options = target instanceof URL
+      ? {
+          protocol: target.protocol,
+          hostname: target.hostname,
+          port: target.port || undefined,
+          path: `${target.pathname}${target.search}`,
+          method: "GET",
+          headers
+        }
+      : {
+          hostname: "graph.microsoft.com",
+          path: target,
+          method: "GET",
+          headers
+        };
+
+    if (options.protocol && options.protocol !== "https:") {
+      return reject(new Error(`Graph content redirect protocol not supported: ${options.protocol}`));
+    }
+
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+
+    const req = https.request(options, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        const buffer = Buffer.concat(chunks);
+        const statusCode = Number(res.statusCode || 0);
+        if (statusCode >= 200 && statusCode < 300) {
+          return done({
+            statusCode,
+            buffer,
+            contentType: String(res.headers["content-type"] || "application/octet-stream")
+          });
+        }
+
+        const location = String(res.headers.location || "").trim();
+        if (redirectStatuses.has(statusCode) && location) {
+          if (redirectCount >= 3) {
+            return fail(new Error(`Graph content redirect limit exceeded statusCode ${statusCode}`));
+          }
+          let redirectUrl;
+          try {
+            redirectUrl = new URL(location);
+          } catch (parseErr) {
+            return fail(new Error(`Graph content redirect invalid statusCode ${statusCode}: ${location}`));
+          }
+          return requestBinary(redirectUrl, {}, redirectCount + 1).then(done, fail);
+        }
+
+        return fail(
+          new Error(
+            `Graph content download error statusCode ${statusCode}: ${buffer.toString("utf8")}`
+          )
+        );
+      });
+    });
+
+    req.setTimeout(30000, () => {
+      const timeoutError = new Error("Graph content download timeout after 30000ms");
+      req.destroy(timeoutError);
+      fail(timeoutError);
+    });
+    req.on("error", fail);
+    req.end();
+  });
+
+  return requestBinary(graphPath, { Authorization: `Bearer ${token}` });
 }
 
 function graphPost(path, accessToken, body) {
@@ -14609,6 +14860,7 @@ async function jobRevalidarSoportesCuentasFirmadas() {
         let ultimoResultado = "sin_firmado";
         let reemplazoFirmado = false;
         let seguridadAgregada = false;
+        let nuevoSoportes = null;
 
         try {
           await client.query("BEGIN");
@@ -14636,7 +14888,7 @@ async function jobRevalidarSoportesCuentasFirmadas() {
           const currentFaltaSeguridad = !(currentSoportes?.seguridad_social?.url);
 
           const nuevoFirma = { ...currentFirma };
-          const nuevoSoportes = { ...currentSoportes };
+          nuevoSoportes = { ...currentSoportes };
           const carpetaFinal = carpeta || currentSoportes.carpeta || "";
 
           if (nuevoDocumentoFirmado?.url && currentFirmadoSospechoso) {
@@ -14706,6 +14958,17 @@ async function jobRevalidarSoportesCuentasFirmadas() {
         console.log(
           `[revalidar-soportes] ${cuenta.public_id} -> ${ultimoResultado} (${reemplazoFirmado}, ${seguridadAgregada})`
         );
+
+        if (seguridadAgregada === true) {
+          try {
+            await notifySeguridadSocialProveedoresTardia({
+              cuenta,
+              seguridadSoporte: nuevoSoportes?.seguridad_social || null
+            });
+          } catch (notifyErr) {
+            console.warn(`[revalidar-soportes] Notificacion tardia no enviada para ${cuenta.public_id}:`, notifyErr?.message || notifyErr);
+          }
+        }
       } catch (cuentaErr) {
         console.error(`[revalidar-soportes] Error procesando ${cuenta.public_id}:`, cuentaErr?.message || cuentaErr);
       }
@@ -14945,7 +15208,9 @@ module.exports = {
   buildTotalLetras,
   formatCurrencyForTemplate,
   graphGet,
+  graphGetBinary,
   graphPutBinary,
+  downloadGraphItemContent,
   encodeGraphPath,
   sanitizePathSegment,
   sanitizePdfFileName,
@@ -14958,6 +15223,7 @@ module.exports = {
   writeCuentaCobroPdf,
   buildCuentaCobroEmailAttachments,
   notifyCuentaCobroFirmadaToProveedores,
+  notifySeguridadSocialProveedoresTardia,
   handleClickSignAnexoIndividualWebhook,
   buildAnexoInsertPayload,
   buildContratoEmailHtml,

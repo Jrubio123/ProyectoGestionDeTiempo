@@ -191,8 +191,17 @@
                         </div>
                         <div>
                             <label class="text-xs font-bold text-gray-500 uppercase">Perfil</label>
-                            <div class="w-full mt-1 p-2 rounded-lg text-sm border bg-gray-50 text-gray-700" x-text="getPerfilFabricaAsignado(form) || 'Sin perfil asignado'"></div>
-                            <input type="hidden" x-model="form.perfil_fabrica">
+                            <template x-if="perfilFabricaBloqueado()">
+                                <div class="w-full mt-1 p-2 rounded-lg text-sm border bg-gray-50 text-gray-700" x-text="getPerfilFabricaAsignado(form) || 'Sin perfil asignado'"></div>
+                            </template>
+                            <template x-if="!perfilFabricaBloqueado()">
+                                <select x-model="form.perfil_fabrica" class="w-full mt-1 p-2 border rounded-lg text-sm bg-white">
+                                    <option value="">Seleccione...</option>
+                                    <template x-for="opt in perfilFabricaOptions()" :key="opt">
+                                        <option :value="opt" x-text="opt"></option>
+                                    </template>
+                                </select>
+                            </template>
                         </div>
                     </div>
                 </template>

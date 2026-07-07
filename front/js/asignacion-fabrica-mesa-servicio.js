@@ -255,7 +255,7 @@ window.mesaFabricaApp = function () {
                 }
                 const perfilAsignado = this.getPerfilFabricaAsignado(item);
                 if (!perfilAsignado) {
-                    return { ok: false, error: "No hay perfil de fábrica asignado para este ticket. Contacta al coordinador." };
+                    return { ok: false, error: "Debes seleccionar el perfil de fábrica." };
                 }
                 if (estado === "Finalizado" && !fechaCierre) {
                     return { ok: false, error: "Debes indicar fecha de cierre cuando el estado es Finalizado." };
@@ -353,9 +353,10 @@ window.mesaFabricaApp = function () {
         },
 
         getPerfilFabricaAsignado(item = null) {
-            const actual = this.normalizePerfilFabrica(item?.perfil_fabrica || this.form?.perfil_fabrica);
+            const source = item || this.form;
+            const actual = this.normalizePerfilFabrica(source?.perfil_fabrica);
             if (actual) return actual;
-            const asignacionId = item?.id || this.form?.id;
+            const asignacionId = source?.id;
             if (!asignacionId) return "";
             for (const ticket of this.tickets || []) {
                 if (String(ticket?.id || "") !== String(asignacionId)) continue;
@@ -363,6 +364,16 @@ window.mesaFabricaApp = function () {
                 if (perfil) return perfil;
             }
             return "";
+        },
+
+        perfilFabricaBloqueado() {
+            const asignacionId = this.form?.id;
+            if (!asignacionId) return false;
+            for (const ticket of this.tickets || []) {
+                if (String(ticket?.id || "") !== String(asignacionId)) continue;
+                if (this.normalizePerfilFabrica(ticket?.perfil_fabrica)) return true;
+            }
+            return false;
         },
 
         normalizePerfilFabrica(value) {

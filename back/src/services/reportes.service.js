@@ -235,12 +235,10 @@ async function reportarHoras(req, res) {
         const horasAsignadas = toNullableNumber(info.horas_asignadas);
         const diasAsignados = toNullableNumber(info.cantidad_dias);
 
-        if (esMensual && diasAsignados !== null) {
-          const diasUsados = permitirParcialesAcumulados ? diasComprometidas : diasAprobadas;
-          const disponibles = Math.max(diasAsignados - diasUsados, 0);
-          if (cantidadSolicitada > disponibles) {
-            return res.status(400).json({ error: `Excede dias disponibles de la asignacion (${disponibles})` });
-          }
+        if (esMensual) {
+          // Modalidad mensual (full-time/part-time): no se bloquea el exceso.
+          // El consultor puede reportar más días que los asignados;
+          // el total se calcula como días * valor_dia.
         } else if (!esMensual && horasAsignadas !== null) {
           const horasUsadas = permitirParcialesAcumulados ? horasComprometidas : horasAprobadas;
           const disponibles = Math.max(horasAsignadas - horasUsadas, 0);

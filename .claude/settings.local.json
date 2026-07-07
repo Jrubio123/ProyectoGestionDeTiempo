@@ -61,7 +61,8 @@
       "Read(//c/Users/JuanPabloRubioMejía/.claude/plugins/cache/**)",
       "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mrapjyxw-ilh59b)",
       "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs task --background --write --model gpt-5.5 --effort xhigh 'FIX PUNTUAL en c:\\\\Users\\\\JuanPabloRubioMejía\\\\Downloads\\\\ProyectosDesarrollo\\\\ProyectoGestionDeTiempo — archivo back/src/index.js. *)",
-      "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mraq4m8s-nopmp5)"
+      "Bash(node C:/Users/JuanPabloRubioMejía/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs result task-mraq4m8s-nopmp5)",
+      "Bash(grep -iv \"//\")"
     ]
   },
   "enabledPlugins": {

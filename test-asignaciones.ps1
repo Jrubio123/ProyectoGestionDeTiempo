@@ -235,6 +235,25 @@ if ($reporte2) {
 }
 
 # ============================================================
+Write-Host "`n=== PASO 8.1: Flujo Full Time: reportar exceso (prueba de flexibilidad) ===" -ForegroundColor Cyan
+
+# La asignacion es de 20 dias. Ya se reportaron y aprobaron 20.
+# Se reportan 2 dias extra (ej. horas extra aprobadas verbalmente)
+# El frontend lo permite con una advertencia, el backend debe aceptarlo.
+$reporteExceso = Invoke-Api POST "/reportar-horas" @{
+    id_registro_asignacion    = $asig1.id
+    cantidad_dias_reportados  = 2
+    tipo_servicio             = "Servicio"
+} -Token $CX -Label "Consultor reporta 2 dias extra (excediendo lo asignado)"
+Write-Host "  Reporte de exceso id: $($reporteExceso.id)" -ForegroundColor Gray
+
+if ($reporteExceso) {
+    # El coordinador puede ver este reporte y decidir si aprobarlo o no.
+    # Para este test, lo aprobamos para confirmar el flujo completo.
+    Invoke-Api PUT "/aprobaciones/$($reporteExceso.id)" @{ estado = "Aprobado" } -Token $C1 -Label "Coord1 aprueba los 2 dias extra" | Out-Null
+}
+
+# ============================================================
 Write-Host "`n=== PASO 9: Mesa de Servicio - Consultor crea tickets (Coord2) ===" -ForegroundColor Cyan
 
 if (-not $asig2 -or -not $asig2.id) {

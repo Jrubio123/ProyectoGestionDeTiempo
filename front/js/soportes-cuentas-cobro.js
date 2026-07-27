@@ -1,6 +1,5 @@
 window.soportesCuentasCobroApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
-    const ESTADOS_FIRMA_PENDIENTE = ["pending", "in_progress", "en_firma", "started", "sent"];
 
     return {
         soportes: [],
@@ -11,13 +10,6 @@ window.soportesCuentasCobroApp = function () {
             coordinador_id: ""
         },
         loading: false,
-        modalFirmasAtascadasOpen: false,
-        firmasAtascadasSearch: "",
-        forzandoFirmaId: null,
-        modalErrorSeguridadOpen: false,
-        errorSeguridadSearch: "",
-        subiendoSeguridadId: null,
-        modalCargarSeguridadOpen: false,
         modalDocsOpen: false,
         docsActuales: [],
         docsCuentaId: "",
@@ -93,15 +85,6 @@ window.soportesCuentasCobroApp = function () {
             return "";
         },
 
-        abrirSoporte(item, tipo) {
-            const url = this.getSoporteUrl(item, tipo);
-            if (!url) {
-                alert("No hay archivo disponible para este soporte.");
-                return;
-            }
-            window.open(url, "_blank", "noopener,noreferrer");
-        },
-
         getDocumentosDeItem(item) {
             const soporte = item?.datos_adjuntos?.soportes || {};
             const manuales = Array.isArray(soporte.documentos_manuales) ? soporte.documentos_manuales : [];
@@ -145,192 +128,6 @@ window.soportesCuentasCobroApp = function () {
                 currency: "COP",
                 maximumFractionDigits: 0
             }).format(Number(val || 0));
-        },
-
-        abrirModalFirmasAtascadas() {
-            this.firmasAtascadasSearch = "";
-            this.modalFirmasAtascadasOpen = true;
-        },
-
-        cerrarModalFirmasAtascadas() {
-            this.modalFirmasAtascadasOpen = false;
-        },
-
-        abrirModalErrorSeguridad() {
-            this.errorSeguridadSearch = "";
-            this.modalErrorSeguridadOpen = true;
-        },
-
-        cerrarModalErrorSeguridad() {
-            this.modalErrorSeguridadOpen = false;
-        },
-
-        isFirmaAtascada(item) {
-            const firma = item?.datos_adjuntos?.firma;
-            if (!firma || typeof firma !== "object") return false;
-            const docFirmadoUrl = firma?.documento_firmado?.url;
-            if (docFirmadoUrl) return false;
-            const estado = String(firma.estado || "").toLowerCase().trim();
-            if (ESTADOS_FIRMA_PENDIENTE.includes(estado)) return true;
-            return Boolean(firma.url_firma);
-        },
-
-        estadoFirmaLabel(item) {
-            const estado = String(item?.datos_adjuntos?.firma?.estado || "").trim();
-            if (!estado) return "En_Firma";
-            return estado;
-        },
-
-        firmasAtascadasFiltradas() {
-            const lista = Array.isArray(this.soportes) ? this.soportes : [];
-            const atascadas = lista.filter((item) => this.isFirmaAtascada(item));
-            const q = String(this.firmasAtascadasSearch || "").trim().toLowerCase();
-            if (!q) return atascadas;
-            return atascadas.filter((item) => {
-                const texto = [
-                    item?.id,
-                    this.cuentaCorta(item?.id),
-                    item?.consultor_nombre,
-                    item?.consultor_email
-                ].join(" ").toLowerCase();
-                return texto.includes(q);
-            });
-        },
-
-        cuentasSinSeguridad() {
-            const lista = Array.isArray(this.soportes) ? this.soportes : [];
-            return lista.filter((item) =>
-                this.getSoporteUrl(item, "cuenta") !== "" &&
-                this.getSoporteUrl(item, "seguridad") === ""
-            );
-        },
-
-        cuentasSinSeguridadFiltradas() {
-            const cuentas = this.cuentasSinSeguridad();
-            const q = String(this.errorSeguridadSearch || "").trim().toLowerCase();
-            if (!q) return cuentas;
-            return cuentas.filter((item) =>
-                String(item?.consultor_nombre || "").toLowerCase().includes(q)
-            );
-        },
-
-        leerArchivoComoDataUrl(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = () => reject(reader.error || new Error("No se pudo leer el archivo."));
-                reader.readAsDataURL(file);
-            });
-        },
-
-        async cargarSeguridadSocial(item, file) {
-            if (!item?.id || !file) return;
-
-            const fileName = String(file.name || "");
-            const fileType = String(file.type || "").toLowerCase();
-            const isPdf = fileType === "application/pdf" || fileName.toLowerCase().endsWith(".pdf");
-            if (!isPdf) {
-                window.alert("Debe seleccionar un archivo PDF.");
-                return;
-            }
-
-            this.subiendoSeguridadId = item.id;
-            try {
-                const dataUrl = await this.leerArchivoComoDataUrl(file);
-                await axios.post(
-                    `${API}/cuentas-cobro/${item.id}/seguridad-social`,
-                    {
-                        seguridad_social_nombre: file.name,
-                        seguridad_social_base64: dataUrl
-                    },
-                    { headers: { "Content-Type": "application/json" } }
-                );
-                window.alert("Seguridad social cargada exitosamente.");
-                await this.cargarSoportes();
-            } catch (err) {
-                const msg =
-                    err?.response?.data?.error ||
-                    err?.message ||
-                    "Error al cargar la seguridad social. Intenta nuevamente.";
-                window.alert(msg);
-            } finally {
-                this.subiendoSeguridadId = null;
-            }
-        },
-
-        async forzarReinicioFirma(public_id) {
-            if (!public_id) return;
-            const ok = window.confirm(
-                "¿Estás seguro de reiniciar el proceso de firma de este usuario? Esto invalidará el enlace que se le envió anteriormente."
-            );
-            if (!ok) return;
-
-            this.forzandoFirmaId = public_id;
-            try {
-                const iniciarFirma = (forzarSinCancelacion = false) => axios.post(
-                    `${API}/cuentas-cobro/${public_id}/firma/iniciar`,
-                    {
-                        force: true,
-                        ...(forzarSinCancelacion ? { forzar_sin_cancelacion: true } : {})
-                    },
-                    { headers: { "Content-Type": "application/json" } }
-                );
-
-                let response;
-                try {
-                    response = await iniciarFirma();
-                } catch (err) {
-                    const motivo = err?.response?.data?.motivo;
-                    const cancelacionFallida = [
-                        "cancelacion_fallida",
-                        "sin_identificadores_cancelacion"
-                    ].includes(motivo);
-                    if (!cancelacionFallida) throw err;
-
-                    const forzar = window.confirm(
-                        "La firma anterior no existe o no se pudo cancelar en Click&Sign. " +
-                        "¿Deseas forzar el reinicio sin cancelación? Esta acción requiere rol Administrador y queda auditada."
-                    );
-                    if (!forzar) {
-                        window.alert(err?.response?.data?.error || "No se reinició la firma.");
-                        return;
-                    }
-                    response = await iniciarFirma(true);
-                }
-
-                const data = response?.data || {};
-                if (data.ya_firmada === true) {
-                    window.alert("La cuenta ya fue firmada; no requiere reinicio.");
-                    if (
-                        data.documento_firmado_url &&
-                        window.confirm("¿Deseas abrir el documento firmado?")
-                    ) {
-                        window.open(data.documento_firmado_url, "_blank", "noopener,noreferrer");
-                    }
-                    this.cerrarModalFirmasAtascadas();
-                    await this.cargarSoportes();
-                    return;
-                }
-                const notificacion = data.notificacion_enlace || {};
-                if (notificacion.enviado === true) {
-                    window.alert(`Se envió el nuevo enlace de firma a ${notificacion.destinatario}.`);
-                } else {
-                    window.prompt(
-                        "No se pudo enviar el correo. Copia y comparte este enlace con el consultor:",
-                        data.url_firma || ""
-                    );
-                }
-                this.cerrarModalFirmasAtascadas();
-                await this.cargarSoportes();
-            } catch (err) {
-                const msg =
-                    err?.response?.data?.error ||
-                    err?.message ||
-                    "Error al reiniciar la firma. Intenta nuevamente.";
-                window.alert(msg);
-            } finally {
-                this.forzandoFirmaId = null;
-            }
         }
     };
 };

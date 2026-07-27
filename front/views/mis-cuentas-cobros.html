@@ -76,9 +76,6 @@
                                 <button @click="descargarPDF(c)" class="p-2 text-red-600 hover:bg-red-50 rounded-lg tooltip" title="Descargar PDF">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
                                 </button>
-                                <button x-show="getUrlCuentaFirmada(c)" @click="abrirCuentaFirmada(c)" class="p-2 text-emerald-700 hover:bg-emerald-50 rounded-lg tooltip" title="Ver cuenta firmada">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 1.657-1.343 3-3 3s-3-1.343-3-3 1.343-3 3-3 3 1.343 3 3z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 11s3-6 9-6 9 6 9 6-3 6-9 6-9-6-9-6z"></path></svg>
-                                </button>
                                 <button x-show="getDocumentosSubidos(c).length" @click="verDocumentos(c)" class="p-2 text-violet-600 hover:bg-violet-50 rounded-lg tooltip" title="Ver documentos subidos">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6"></path></svg>
                                 </button>

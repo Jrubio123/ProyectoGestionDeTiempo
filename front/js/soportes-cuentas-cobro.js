@@ -18,6 +18,9 @@ window.soportesCuentasCobroApp = function () {
         errorSeguridadSearch: "",
         subiendoSeguridadId: null,
         modalCargarSeguridadOpen: false,
+        modalDocsOpen: false,
+        docsActuales: [],
+        docsCuentaId: "",
 
         async init() {
             await Promise.all([this.cargarConsultores(), this.cargarAprobadores(), this.cargarSoportes()]);
@@ -97,6 +100,39 @@ window.soportesCuentasCobroApp = function () {
                 return;
             }
             window.open(url, "_blank", "noopener,noreferrer");
+        },
+
+        getDocumentosDeItem(item) {
+            const soporte = item?.datos_adjuntos?.soportes || {};
+            const manuales = Array.isArray(soporte.documentos_manuales) ? soporte.documentos_manuales : [];
+            if (manuales.length) {
+                return manuales
+                    .filter((d) => d && d.url)
+                    .map((d, idx) => ({
+                        nombre: d.nombre || `Documento ${idx + 1}`,
+                        url: d.url,
+                        principal: Boolean(d.principal)
+                    }));
+            }
+            // Cuentas legacy (Click&Sign / carga previa): reconstruir desde soportes conocidos.
+            const docs = [];
+            const cuentaUrl = this.getSoporteUrl(item, "cuenta");
+            if (cuentaUrl) docs.push({ nombre: "Cuenta firmada", url: cuentaUrl, principal: true });
+            const seguridadUrl = this.getSoporteUrl(item, "seguridad");
+            if (seguridadUrl) docs.push({ nombre: "Seguridad social", url: seguridadUrl, principal: false });
+            return docs;
+        },
+
+        verDocumentos(item) {
+            this.docsActuales = this.getDocumentosDeItem(item);
+            this.docsCuentaId = this.cuentaCorta(item?.id);
+            this.modalDocsOpen = true;
+        },
+
+        cerrarModalDocs() {
+            this.modalDocsOpen = false;
+            this.docsActuales = [];
+            this.docsCuentaId = "";
         },
 
         formatDate(d) {

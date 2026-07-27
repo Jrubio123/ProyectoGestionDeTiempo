@@ -1062,6 +1062,29 @@ function buildCuentaCobroEmailAttachments({ cuenta, signedPdf = null, extraFiles
   return attachments;
 }
 
+function buildCuentaCobroMixedEmailAttachments({ files = [] } = {}) {
+  const maxAttachments = 4;
+  const maxFileBytes = 8 * 1024 * 1024;
+  const attachments = [];
+
+  for (const [index, file] of (Array.isArray(files) ? files : []).entries()) {
+    if (attachments.length >= maxAttachments) break;
+    if (!Buffer.isBuffer(file?.buffer) || file.buffer.length > maxFileBytes) continue;
+
+    const detectedType = detectUploadFileType(file.buffer);
+    if (!detectedType) continue;
+
+    const fallbackName = `Adjunto_${index + 1}.${detectedType.ext}`;
+    attachments.push({
+      filename: sanitizeUploadFileName(file.fileName || file.name || fallbackName, fallbackName, detectedType.ext),
+      contentType: detectedType.mime,
+      content: file.buffer
+    });
+  }
+
+  return attachments;
+}
+
 async function notifyCuentaCobroFirmadaToProveedores({
   cuenta,
   documentoFirmado,
@@ -5541,6 +5564,68 @@ function sanitizePdfFileName(value, fallback = "documento.pdf") {
   return safe;
 }
 
+function detectUploadFileType(buffer) {
+  if (!Buffer.isBuffer(buffer)) return null;
+  if (
+    buffer.length >= 4 &&
+    buffer[0] === 0x25 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x44 &&
+    buffer[3] === 0x46
+  ) {
+    return { ext: "pdf", mime: "application/pdf" };
+  }
+  if (
+    buffer.length >= 3 &&
+    buffer[0] === 0xff &&
+    buffer[1] === 0xd8 &&
+    buffer[2] === 0xff
+  ) {
+    return { ext: "jpg", mime: "image/jpeg" };
+  }
+  if (
+    buffer.length >= 8 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return { ext: "png", mime: "image/png" };
+  }
+  return null;
+}
+
+function parseUploadDataUrl(dataUrl) {
+  const raw = String(dataUrl || "");
+  const match = raw.match(
+    /^data:(application\/pdf|image\/jpeg|image\/png|image\/jpg|application\/octet-stream);base64,([A-Za-z0-9+/=]+)$/
+  );
+  if (!match) return null;
+
+  try {
+    const buffer = Buffer.from(match[2], "base64");
+    const detectedType = detectUploadFileType(buffer);
+    if (!detectedType) return null;
+    return { buffer, ...detectedType };
+  } catch (err) {
+    return null;
+  }
+}
+
+function sanitizeUploadFileName(value, fallback = "documento.pdf", ext = "pdf") {
+  const safeExt = ["pdf", "jpg", "png"].includes(String(ext || "").toLowerCase())
+    ? String(ext).toLowerCase()
+    : "pdf";
+  const fallbackName = String(fallback || `documento.${safeExt}`);
+  const safe = sanitizePathSegment(value || fallbackName, fallbackName).replace(/\.+/g, ".");
+  if (!safe.toLowerCase().endsWith(`.${safeExt}`)) return `${safe}.${safeExt}`;
+  return safe;
+}
+
 function sanitizeDownloadFileName(value, fallback = "documento.bin") {
   const safe = sanitizePathSegment(value || fallback, fallback).replace(/\.+/g, ".");
   return safe || fallback;
@@ -6442,6 +6527,53 @@ async function uploadSignedPdfToOneDrive(cuenta, pdfBuffer, fileName, { accessTo
   };
 }
 
+async function uploadCuentaCobroFilesToOneDrive(cuenta, files, { accessToken = "" } = {}) {
+  if (!ONEDRIVE_ENABLED) {
+    const err = new Error("ONEDRIVE_DISABLED");
+    err.code = "ONEDRIVE_DISABLED";
+    throw err;
+  }
+
+  let token = String(accessToken || "").trim();
+  if (!token) {
+    try {
+      token = await getGraphAccessToken();
+    } catch (err) {
+      const tokenErr = new Error(`No se pudo obtener token de Microsoft Graph: ${err?.message || err}`);
+      tokenErr.code = "GRAPH_TOKEN_ERROR";
+      throw tokenErr;
+    }
+  }
+
+  const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
+  await graphGet(`/v1.0/users/${encodedUser}/drive`, token);
+
+  const { consultorFolder, cuentaFolderName } = buildCuentaCobroFolderContext(cuenta);
+  let targetPath = sanitizePathSegment(ONEDRIVE_ROOT_FOLDER, "AdjuntosCuentasCobro");
+  targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, "", targetPath);
+  targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, consultorFolder);
+  targetPath = await ensureGraphFolder(token, ONEDRIVE_TARGET_USER, targetPath, cuentaFolderName);
+
+  const archivos = [];
+  for (const file of Array.isArray(files) ? files : []) {
+    const uploadPath = `/v1.0/users/${encodedUser}/drive/root:/${encodeGraphPath(`${targetPath}/${file.fileName}`)}:/content`;
+    const uploaded = await graphPutBinaryWithRetry(
+      uploadPath,
+      token,
+      file.buffer,
+      file.contentType || "application/octet-stream"
+    );
+    archivos.push({
+      id: uploaded.id || "",
+      nombre: uploaded.name || file.fileName,
+      url: uploaded.webUrl || "",
+      contentType: file.contentType || "application/octet-stream"
+    });
+  }
+
+  return { carpeta: targetPath, archivos };
+}
+
 async function resolveSignedPdfFromClickSign({ event, requestId, contractId, publicId, signatureId }) {
   const defaultName = sanitizePdfFileName(
     `CuentaCobroFirmada_${publicId || requestId || "documento"}.pdf`,
@@ -6925,68 +7057,56 @@ function isClickSignConfigured({ forContratos = false } = {}) {
   return Boolean(CLICKSIGN_API_KEY && CLICKSIGN_USER && Number(configId || 0) > 0);
 }
 
-async function getCuentaCobroEstadoEnFirma() {
-  if (estadoCuentaCobroEnFirmaCache) return estadoCuentaCobroEnFirmaCache;
-  try {
-    const result = await pool.query(
-      `
-      SELECT e.enumlabel
-      FROM pg_type t
-      JOIN pg_enum e ON t.oid = e.enumtypid
-      WHERE t.typname = 'tipo_estado_reporte'
-      ORDER BY e.enumsortorder
-      `
-    );
-    const labels = (result.rows || []).map((row) => String(row.enumlabel || "").trim()).filter(Boolean);
-    const byNorm = new Map(
-      labels.map((label) => [
-        normalizeEnumLabel(label),
-        label
-      ])
-    );
-    estadoCuentaCobroEnFirmaCache =
-      byNorm.get("enfirma") ||
-      byNorm.get("en_firma") ||
-      byNorm.get("revision") ||
-      byNorm.get("revisión") ||
-      labels[0] ||
-      "Pendiente";
-    return estadoCuentaCobroEnFirmaCache;
-  } catch (err) {
-    estadoCuentaCobroEnFirmaCache = "Pendiente";
-    return estadoCuentaCobroEnFirmaCache;
-  }
+function buildEstadoEnumUnresolvedError(estadoEsperado) {
+  const err = new Error(
+    `No se pudo resolver el estado "${estadoEsperado}" en el enum tipo_estado_reporte.`
+  );
+  err.code = "ESTADO_ENUM_UNRESOLVED";
+  return err;
 }
 
-async function getCuentaCobroEstadoAprobado() {
-  if (estadoCuentaCobroAprobadoCache) return estadoCuentaCobroAprobadoCache;
-  try {
-    const result = await pool.query(
-      `
-      SELECT e.enumlabel
-      FROM pg_type t
-      JOIN pg_enum e ON t.oid = e.enumtypid
-      WHERE t.typname = 'tipo_estado_reporte'
-      ORDER BY e.enumsortorder
-      `
-    );
-    const labels = (result.rows || []).map((row) => String(row.enumlabel || "").trim()).filter(Boolean);
-    const byNorm = new Map(labels.map((label) => [normalizeEnumLabel(label), label]));
-    estadoCuentaCobroAprobadoCache =
-      byNorm.get("aprobado") ||
-      byNorm.get("aprobada") ||
-      byNorm.get("finalizado") ||
-      byNorm.get("cerrado") ||
-      byNorm.get("pagado") ||
-      byNorm.get("enfirma") ||
-      byNorm.get("en_firma") ||
-      labels[0] ||
-      "Pendiente";
-    return estadoCuentaCobroAprobadoCache;
-  } catch (err) {
-    estadoCuentaCobroAprobadoCache = "Pendiente";
-    return estadoCuentaCobroAprobadoCache;
+async function getCuentaCobroEstadoEnFirma(dbPool = pool) {
+  const usarCache = dbPool === pool;
+  if (usarCache && estadoCuentaCobroEnFirmaCache) return estadoCuentaCobroEnFirmaCache;
+  const result = await dbPool.query(
+    `
+    SELECT e.enumlabel
+    FROM pg_type t
+    JOIN pg_enum e ON t.oid = e.enumtypid
+    WHERE t.typname = 'tipo_estado_reporte'
+    ORDER BY e.enumsortorder
+    `
+  );
+  const labels = (result.rows || []).map((row) => String(row.enumlabel || "").trim()).filter(Boolean);
+  const estadosValidos = new Set(["enfirma", "en_firma"]);
+  const estado = labels.find((label) => estadosValidos.has(normalizeEnumLabel(label)));
+  if (!estado) {
+    throw buildEstadoEnumUnresolvedError("En Firma");
   }
+  if (usarCache) estadoCuentaCobroEnFirmaCache = estado;
+  return estado;
+}
+
+async function getCuentaCobroEstadoAprobado(dbPool = pool) {
+  const usarCache = dbPool === pool;
+  if (usarCache && estadoCuentaCobroAprobadoCache) return estadoCuentaCobroAprobadoCache;
+  const result = await dbPool.query(
+    `
+    SELECT e.enumlabel
+    FROM pg_type t
+    JOIN pg_enum e ON t.oid = e.enumtypid
+    WHERE t.typname = 'tipo_estado_reporte'
+    ORDER BY e.enumsortorder
+    `
+  );
+  const labels = (result.rows || []).map((row) => String(row.enumlabel || "").trim()).filter(Boolean);
+  const estadosValidos = new Set(["aprobado", "aprobada"]);
+  const estado = labels.find((label) => estadosValidos.has(normalizeEnumLabel(label)));
+  if (!estado) {
+    throw buildEstadoEnumUnresolvedError("Aprobado");
+  }
+  if (usarCache) estadoCuentaCobroAprobadoCache = estado;
+  return estado;
 }
 
 function normalizeClickSignStatus(value) {
@@ -9446,18 +9566,6 @@ app.get("/admin/consultores/:id", requireAccess({ roles: ["Administrador", "Coor
         p.parentesco,
         p.tipo_contrato,
         p.modalidad,
-        p.tipo_trabajador,
-        p.cargo,
-        p.salario_mensual,
-        p.salario_moneda,
-        p.periodo_pago,
-        p.periodo_prueba,
-        p.jefe_inmediato,
-        p.caja_compensacion,
-        p.condiciones_especiales,
-        p.duracion_contrato,
-        p.fecha_inicio_labores,
-        p.lugar_celebracion,
         m.public_id                                             AS persona_modulo_id,
         m.titulo                                                AS persona_modulo,
         p.modulo_otro,
@@ -14683,6 +14791,7 @@ async function jobReconciliarCuentasEnFirma() {
         const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object" ? prevAdjuntos.firma : {};
         const resolution = await resolverFirmaCuentaVerificada({ cuenta, prevAdjuntos });
         const diagnostico = buildCuentaFirmaDiagnosticoFromResolution(resolution);
+        const expectedRequestId = resolution.requestId || diagnostico.request_id || prevFirma.request_id || "";
 
         if (resolution.signed) {
           const cierre = await cerrarCuentaCobroConFirmaResuelta({
@@ -14704,7 +14813,8 @@ async function jobReconciliarCuentasEnFirma() {
                   reason: "firmado_verificado_pendiente_cierre"
                 }
               },
-              origen: "reconciliar-job"
+              origen: "reconciliar-job",
+              expectedRequestId
             });
           }
           console.log("[reconciliar-job]", {
@@ -14740,7 +14850,8 @@ async function jobReconciliarCuentasEnFirma() {
           estadoEnFirma,
           status: resolution.normalizedStatus === "rejected" ? "rejected" : prevFirma.estado || "pending",
           resolution,
-          origen: "reconciliar-job"
+          origen: "reconciliar-job",
+          expectedRequestId
         });
         console.log("[reconciliar-job]", {
           public_id: cuenta.public_id || null,
@@ -15208,6 +15319,9 @@ module.exports = {
   encodeGraphPath,
   sanitizePathSegment,
   sanitizePdfFileName,
+  detectUploadFileType,
+  parseUploadDataUrl,
+  sanitizeUploadFileName,
   getOrCreateGraphSubfolder,
   parsePdfDataUrl,
   ensureGraphFolder,
@@ -15216,6 +15330,7 @@ module.exports = {
   getCuentaCobroPdfContext,
   writeCuentaCobroPdf,
   buildCuentaCobroEmailAttachments,
+  buildCuentaCobroMixedEmailAttachments,
   notifyCuentaCobroFirmadaToProveedores,
   notifySeguridadSocialProveedoresTardia,
   handleClickSignAnexoIndividualWebhook,
@@ -15258,6 +15373,7 @@ module.exports = {
   extractClickSignSignatureId,
   sameResourceUrl,
   uploadSignedPdfToOneDrive,
+  uploadCuentaCobroFilesToOneDrive,
   resolveClickSignArtifacts,
   uploadClickSignExtraFilesToOneDrive,
   isContratoBaseOneDriveDoc,

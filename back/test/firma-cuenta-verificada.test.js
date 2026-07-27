@@ -8,7 +8,8 @@ const {
 } = require("../src/services/clicksign-firma-verificada.service");
 const {
   cerrarCuentaCobroConFirmaResuelta,
-  cuentasFirmaAutocierreHabilitado
+  cuentasFirmaAutocierreHabilitado,
+  __private: cierrePrivate
 } = require("../src/services/cuenta-cobro-cierre.service");
 const {
   __private
@@ -67,9 +68,11 @@ function createHttpMock({ statusBody = {}, fileListBody = {}, fileBuffer = null 
   };
 }
 
-function createClosureDeps({ lockedEstado = "En Firma", lockedUrl = "", updateRowCount = 1 } = {}) {
+function createClosureDeps({ lockedEstado = "En Firma", lockedUrl = "", lockedRequestId = "REQ-1", updateRowCount = 1 } = {}) {
   const calls = {
     upload: 0,
+    uploadFileNames: [],
+    extraFileNames: [],
     notify: 0,
     queries: []
   };
@@ -87,6 +90,7 @@ function createClosureDeps({ lockedEstado = "En Firma", lockedUrl = "", updateRo
               datos_adjuntos: {
                 firma: {
                   estado: "pending",
+                  request_id: lockedRequestId || undefined,
                   documento_firmado: lockedUrl ? { url: lockedUrl } : {}
                 },
                 soportes: {
@@ -110,14 +114,18 @@ function createClosureDeps({ lockedEstado = "En Firma", lockedUrl = "", updateRo
       pool: { connect: async () => client },
       isPdfBuffer: (buffer) => Buffer.isBuffer(buffer) && buffer.slice(0, 4).toString("utf8") === "%PDF",
       buildCuentaCobroEmailAttachments: () => [{ filename: "firmado.pdf", content: PDF_BUFFER }],
-      uploadSignedPdfToOneDrive: async () => {
+      uploadSignedPdfToOneDrive: async (_cuenta, _buffer, fileName) => {
         calls.upload += 1;
+        calls.uploadFileNames.push(fileName);
         return {
           carpeta: "carpeta",
           archivo: { id: "onedrive-id", nombre: "firmado.pdf", url: "https://onedrive/firmado.pdf" }
         };
       },
-      uploadClickSignExtraFilesToOneDrive: async () => ({ uploaded: [] }),
+      uploadClickSignExtraFilesToOneDrive: async (_cuenta, files) => {
+        calls.extraFileNames.push(...files.map((file) => file.fileName));
+        return { uploaded: [] };
+      },
       sameResourceUrl: (a, b) => String(a || "") === String(b || ""),
       notifyCuentaCobroFirmadaToProveedores: async () => {
         calls.notify += 1;
@@ -304,7 +312,161 @@ test("raceLost no duplica notificacion", async (t) => {
 
   assert.equal(cierre.updated, false);
   assert.equal(cierre.raceLost, true);
+  assert.equal(cierre.reason, "firma_finalizada");
+  assert.equal(calls.upload, 0);
   assert.equal(calls.notify, 0);
+});
+
+test("cierre no aplica resolucion de una firma anterior", async (t) => {
+  const prev = process.env.CUENTAS_FIRMA_AUTOCIERRE;
+  process.env.CUENTAS_FIRMA_AUTOCIERRE = "true";
+  t.after(() => {
+    process.env.CUENTAS_FIRMA_AUTOCIERRE = prev;
+  });
+
+  const { deps, calls } = createClosureDeps({ lockedRequestId: "REQ-NUEVA" });
+  const cierre = await cerrarCuentaCobroConFirmaResuelta({
+    cuenta: cuentaBase(),
+    resolution: {
+      signed: true,
+      requestId: "REQ-ANTERIOR",
+      signedPdf: { buffer: PDF_BUFFER, fileName: "firmado.pdf" }
+    },
+    deps
+  });
+
+  assert.equal(cierre.updated, false);
+  assert.equal(cierre.reason, "firma_cambiada");
+  assert.equal(calls.upload, 0);
+  assert.equal(calls.notify, 0);
+  assert.equal(calls.queries.some(({ sql }) => String(sql).includes("UPDATE cuenta_cobro")), false);
+});
+
+test("cierre rechazado se detiene antes de subir a OneDrive", async (t) => {
+  const prev = process.env.CUENTAS_FIRMA_AUTOCIERRE;
+  process.env.CUENTAS_FIRMA_AUTOCIERRE = "true";
+  t.after(() => {
+    process.env.CUENTAS_FIRMA_AUTOCIERRE = prev;
+  });
+
+  const validacion = cierrePrivate.validarCuentaAntesDeCerrar({
+    cuenta: {
+      id: 1,
+      estado: "Rechazado",
+      datos_adjuntos: { firma: { request_id: "REQ-1" } }
+    },
+    expectedRequestId: "REQ-1",
+    estadoAprobado: "Aprobado",
+    estadoEnFirma: "En Firma"
+  });
+  assert.equal(validacion.ok, false);
+  assert.equal(validacion.reason, "no_en_firma");
+
+  const { deps, calls } = createClosureDeps({ lockedEstado: "Rechazado" });
+  const cierre = await cerrarCuentaCobroConFirmaResuelta({
+    cuenta: cuentaBase(),
+    resolution: {
+      signed: true,
+      requestId: "REQ-1",
+      signedPdf: { buffer: PDF_BUFFER, fileName: "firmado.pdf" }
+    },
+    deps
+  });
+
+  assert.equal(cierre.updated, false);
+  assert.equal(cierre.reason, "no_en_firma");
+  assert.equal(calls.upload, 0);
+  assert.equal(calls.notify, 0);
+});
+
+test("cierre usa nombres OneDrive unicos por intento", async (t) => {
+  const prev = process.env.CUENTAS_FIRMA_AUTOCIERRE;
+  process.env.CUENTAS_FIRMA_AUTOCIERRE = "true";
+  t.after(() => {
+    process.env.CUENTAS_FIRMA_AUTOCIERRE = prev;
+  });
+
+  const nombresFirmados = [];
+  const nombresExtras = [];
+  const pdfDistinto = Buffer.from("%PDF-1.4\nfirmado-distinto\n");
+  const casos = [
+    ["CC-test-r1", "REQ-1", PDF_BUFFER],
+    ["CC-test-r1", "REQ-1", PDF_BUFFER],
+    ["CC-test-r1", "REQ-1", pdfDistinto],
+    ["CC-test-r2", "REQ-2", PDF_BUFFER]
+  ];
+  for (const [contractId, requestId, buffer] of casos) {
+    const { deps, calls } = createClosureDeps({ lockedRequestId: requestId });
+    const cierre = await cerrarCuentaCobroConFirmaResuelta({
+      cuenta: {
+        ...cuentaBase(),
+        datos_adjuntos: { firma: { request_id: requestId, contract_id: contractId } }
+      },
+      resolution: {
+        signed: true,
+        requestId,
+        contractId,
+        signedPdf: { buffer, fileName: "firmado.pdf" },
+        extraFiles: [{
+          kind: "evidencia_firma",
+          fileName: "evidencia_firma.pdf",
+          buffer
+        }]
+      },
+      deps
+    });
+
+    assert.equal(cierre.updated, true);
+    nombresFirmados.push(calls.uploadFileNames[0]);
+    nombresExtras.push(calls.extraFileNames[0]);
+  }
+
+  const shaOriginal = cierrePrivate.getContentSha12(PDF_BUFFER);
+  const shaDistinto = cierrePrivate.getContentSha12(pdfDistinto);
+  assert.deepEqual(nombresFirmados, [
+    `CuentaCobroFirmada_CC-test-r1_${shaOriginal}.pdf`,
+    `CuentaCobroFirmada_CC-test-r1_${shaOriginal}.pdf`,
+    `CuentaCobroFirmada_CC-test-r1_${shaDistinto}.pdf`,
+    `CuentaCobroFirmada_CC-test-r2_${shaOriginal}.pdf`
+  ]);
+  assert.deepEqual(nombresExtras, [
+    `CC-test-r1_evidencia_firma_${shaOriginal}.pdf`,
+    `CC-test-r1_evidencia_firma_${shaOriginal}.pdf`,
+    `CC-test-r1_evidencia_firma_${shaDistinto}.pdf`,
+    `CC-test-r2_evidencia_firma_${shaOriginal}.pdf`
+  ]);
+  assert.equal(nombresFirmados[0], nombresFirmados[1]);
+  assert.equal(nombresExtras[0], nombresExtras[1]);
+  assert.notEqual(nombresFirmados[0], nombresFirmados[2]);
+  assert.notEqual(nombresExtras[0], nombresExtras[2]);
+  assert.notEqual(nombresFirmados[0], nombresFirmados[3]);
+  assert.notEqual(nombresExtras[0], nombresExtras[3]);
+
+  assert.equal(
+    cierrePrivate.getAttemptDiscriminator(
+      { requestId: "REQ/alterno:1" },
+      {}
+    ),
+    "REQ_alterno_1"
+  );
+
+  assert.deepEqual(
+    cierrePrivate.buildAttemptUploadFiles({
+      resolution: {
+        requestId: "REQ-1",
+        signedPdf: {}
+      },
+      extraFiles: [{ kind: "evidencia_firma" }]
+    }),
+    {
+      discriminator: "REQ-1",
+      signedFileName: "CuentaCobroFirmada_REQ-1.pdf",
+      prefixedExtraFiles: [{
+        kind: "evidencia_firma",
+        fileName: "REQ-1_evidencia_firma.pdf"
+      }]
+    }
+  );
 });
 
 test("reinicio aborta si cancelacion falla y override admin audita omision", async () => {
@@ -337,6 +499,48 @@ test("reinicio aborta si cancelacion falla y override admin audita omision", asy
   assert.equal(archivada.no_reconciliar, true);
   assert.equal(archivada.cancelada_en_clicksign, false);
   assert.equal(archivada.cancelacion_omitida_por.usuario_id, "admin-1");
+
+  const overrideSinIdentificadores = await __private.resolverCancelacionIntentoFirma({
+    firma: {},
+    req: {
+      body: { forzar_sin_cancelacion: true },
+      user: { rol: "Administrador", id: "admin-1", email: "admin@test.local" }
+    },
+    cancelarFn: async () => {
+      throw new Error("no debe llamar red");
+    }
+  });
+  assert.equal(overrideSinIdentificadores.ok, true);
+  assert.equal(overrideSinIdentificadores.omitida, true);
+});
+
+test("construye resultado persistible de la notificacion del enlace", () => {
+  const fecha = new Date("2026-07-22T12:30:00.000Z");
+  const enviada = __private.buildNotificacionEnlaceFirma({
+    enviado: true,
+    destinatario: "consultor@test.local",
+    fecha,
+    error: "ignorado"
+  });
+  const fallida = __private.buildNotificacionEnlaceFirma({
+    enviado: false,
+    destinatario: "consultor@test.local",
+    fecha,
+    error: "Graph no disponible"
+  });
+
+  assert.deepEqual(enviada, {
+    enviado: true,
+    destinatario: "consultor@test.local",
+    fecha: "2026-07-22T12:30:00.000Z",
+    error: null
+  });
+  assert.deepEqual(fallida, {
+    enviado: false,
+    destinatario: "consultor@test.local",
+    fecha: "2026-07-22T12:30:00.000Z",
+    error: "Graph no disponible"
+  });
 });
 
 test("webhook generico con cuenta delega al verificador estricto sin pipeline legacy", () => {

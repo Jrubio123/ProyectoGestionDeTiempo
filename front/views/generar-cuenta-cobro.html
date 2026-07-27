@@ -5,7 +5,7 @@
             <h1 class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 to-teal-500">
                 Generar Cuenta de Cobro
             </h1>
-            <p class="text-gray-500 text-sm mt-1">Selecciona los registros aprobados, genera la cuenta y firma digitalmente.</p>
+            <p class="text-gray-500 text-sm mt-1">Selecciona los registros aprobados, genera la cuenta y descárgala para firmarla.</p>
         </div>
 
         <div class="bg-emerald-50 px-6 py-3 rounded-2xl border border-emerald-100 text-right shadow-sm">
@@ -89,7 +89,7 @@
                     <button type="submit"
                         :disabled="!isValid"
                         class="w-full py-4 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold rounded-xl shadow-lg hover:shadow-emerald-500/30 transition-all hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2">
-                        <span>Generar y Firmar</span>
+                        <span>Generar Cuenta</span>
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
                     </button>
                 </div>
@@ -98,29 +98,28 @@
         </div>
     </div>
 
-    <div x-show="modalFirma.open" x-transition.opacity class="view-overlay bg-white/30 backdrop-blur-md" style="display: none;">
+    <div x-show="modalGenerada.open" x-transition.opacity class="view-overlay bg-white/30 backdrop-blur-md" style="display: none;">
         <div class="w-11/12 max-w-xl bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
             <div class="flex justify-between items-start mb-4 sticky top-0 bg-white z-10 pb-4 border-b border-gray-100">
                 <div>
-                    <h3 class="text-xl font-bold text-gray-800">Firmar Cuenta de Cobro #<span x-text="modalFirma.cuentaId"></span></h3>
-                    <p class="text-sm text-gray-500">Continua con el enlace seguro de firma digital.</p>
+                    <h3 class="text-xl font-bold text-gray-800">Cuenta de cobro generada</h3>
+                    <p class="text-sm text-gray-500">Cuenta #<span x-text="String(modalGenerada.cuentaId).split('-')[0]"></span></p>
                 </div>
-                <button @click="cerrarModalFirma" class="text-gray-400 hover:text-gray-600">
+                <button @click="cerrarModalGenerada" class="text-gray-400 hover:text-gray-600">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
 
             <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
-                <p x-text="modalFirma.mensaje"></p>
-                <template x-if="modalFirma.urlFirma">
-                    <p class="mt-2 break-all text-xs text-emerald-700" x-text="modalFirma.urlFirma"></p>
-                </template>
+                Tu cuenta de cobro se generó correctamente. Descárgala, imprímela y fírmala; luego súbela desde 'Historial de Cobros'.
             </div>
 
             <div class="mt-5 flex flex-wrap gap-2 justify-end">
-                <button @click="irHistorialCobros" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">Ir a Historial</button>
-                <button @click="copiarEnlaceFirma" :disabled="!modalFirma.urlFirma" class="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50">Copiar Enlace</button>
-                <button @click="window.open(modalFirma.urlFirma, '_blank', 'noopener')" :disabled="!modalFirma.urlFirma || modalFirma.loading" class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">Abrir Firma</button>
+                <button @click="cerrarModalGenerada" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">Cerrar</button>
+                <button @click="irHistorialCobros()" class="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700">Ir a Historial</button>
+                <button @click="descargarCuentaPdf(modalGenerada.cuentaId)" :disabled="modalGenerada.descargando" class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+                    <span x-text="modalGenerada.descargando ? 'Descargando...' : 'Descargar cuenta'"></span>
+                </button>
             </div>
         </div>
     </div>

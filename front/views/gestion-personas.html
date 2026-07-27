@@ -241,7 +241,7 @@
     </div>
   </div>
 
-  <div id="modalAddPersona" x-show="modalAddPersonaOpen" x-cloak @click.self="cerrarModalAgregar()" class="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/40">
+  <div id="modalAddPersona" x-show="modalAddPersonaOpen" x-cloak @click.self="cerrarModalAgregar()" style="margin-top: 0;" class="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/40">
     <form @submit.prevent="crearPersona()" class="w-full max-w-xl p-6 space-y-4 bg-white border border-gray-100 shadow-2xl rounded-2xl">
       <div class="flex items-center justify-between">
         <h2 class="text-lg font-bold text-gray-900">Agregar Persona</h2>

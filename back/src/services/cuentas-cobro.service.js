@@ -1,6 +1,10 @@
-﻿const { pool } = require("../db");
+const { pool } = require("../db");
 const { getGraphAccessToken } = require("../email");
-const { FIRMA_CUENTA_TIMEOUT_HOURS, marcarCuentaCobroFirmaExpirada } = require("./firma-cuenta-timeout.service");
+const {
+  FIRMA_CUENTA_TIMEOUT_HOURS,
+  isFirmaCuentaTimedOut,
+  marcarCuentaCobroFirmaExpirada
+} = require("./firma-cuenta-timeout.service");
 const {
   getDocumentoFirmadoUrl,
   buildCuentaFirmaDiagnosticoFromResolution,
@@ -10,9 +14,24 @@ const {
   resolverFirmaCuentaVerificada,
   cancelarFirmaClickSign
 } = require("./clicksign-firma-verificada.service");
+const crypto = require("node:crypto");
 const PDFDocument = require("pdfkit");
 
 const normalizeValue = (value) => String(value || "").toLowerCase().trim();
+const ESTADO_CUENTA_PENDIENTE = "Pendiente";
+const FIRMA_STARTING_MAX_AGE_MS = 3 * 60 * 1000;
+const FIRMA_ESTADOS_REUTILIZABLES = new Set(["pending", "in_progress", "en_firma", "started", "sent"]);
+const FIRMA_ESTADOS_TERMINALES = new Set([
+  "expired",
+  "rejected",
+  "cancelled",
+  "canceled",
+  "failed",
+  "error",
+  "rechazado",
+  "cancelado",
+  "expirado"
+]);
 const SQL_ERROR_TARIFA_HORAS = `
   NOT (
     LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%capacitacion%'
@@ -34,16 +53,167 @@ function asPlainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+function buildNotificacionEnlaceFirma({ enviado, destinatario, fecha = new Date(), error = null } = {}) {
+  const fechaValue = fecha instanceof Date ? fecha : new Date(fecha);
+  const fechaIso = Number.isFinite(fechaValue.getTime())
+    ? fechaValue.toISOString()
+    : new Date().toISOString();
+  const envioExitoso = enviado === true;
+  const errorNormalizado = String(error || "").trim();
+
+  return {
+    enviado: envioExitoso,
+    destinatario: String(destinatario || "").trim(),
+    fecha: fechaIso,
+    error: envioExitoso ? null : errorNormalizado || "No se pudo enviar el correo."
+  };
+}
+
+async function enviarNotificacionEnlaceFirma({ destinatario, payload, sendEmailFn } = {}) {
+  if (String(process.env.EMAIL_ENABLED || "true").toLowerCase() !== "true") {
+    return buildNotificacionEnlaceFirma({
+      enviado: false,
+      destinatario,
+      error: "Envío de correo deshabilitado (EMAIL_ENABLED=false)"
+    });
+  }
+
+  try {
+    const resultadoCorreo = await sendEmailFn(payload);
+    return buildNotificacionEnlaceFirma({
+      enviado: resultadoCorreo?.ok === true,
+      destinatario,
+      error: resultadoCorreo?.error || null
+    });
+  } catch (emailErr) {
+    return buildNotificacionEnlaceFirma({
+      enviado: false,
+      destinatario,
+      error: emailErr?.message || emailErr
+    });
+  }
+}
+
+async function persistirNotificacionEnlaceFirma({
+  cuentaId,
+  requestId,
+  notificacion,
+  dbPool = pool,
+  logger = console
+} = {}) {
+  try {
+    const result = await dbPool.query(
+      `
+      UPDATE cuenta_cobro
+      SET datos_adjuntos = jsonb_set(
+            COALESCE(datos_adjuntos, '{}'::jsonb),
+            '{firma,notificacion_enlace}',
+            $1::jsonb,
+            true
+          ),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+        AND datos_adjuntos->'firma'->>'request_id' = $3
+      `,
+      [JSON.stringify(notificacion), cuentaId, requestId]
+    );
+    return result.rowCount > 0;
+  } catch (err) {
+    logger.warn("No se pudo persistir la notificación del enlace de firma:", err?.message || err);
+    return false;
+  }
+}
+
+function tieneIntentoFirma(firma = {}) {
+  return Object.keys(asPlainObject(firma)).length > 0;
+}
+
+function esFirmaReutilizable(firma = {}, now = new Date()) {
+  return Boolean(
+    firma?.url_firma &&
+    !firma?.documento_firmado?.url &&
+    FIRMA_ESTADOS_REUTILIZABLES.has(normalizeValue(firma?.estado)) &&
+    !isFirmaCuentaTimedOut(firma, now)
+  );
+}
+
+function clasificarIntentoFirmaCuenta(firma = {}, now = new Date()) {
+  const firmaNormalizada = asPlainObject(firma);
+  const estado = normalizeValue(firmaNormalizada.estado);
+  const iniciadoMs = Date.parse(String(firmaNormalizada.iniciado_en || ""));
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now || ""));
+  const startingEnCurso = estado === "starting" &&
+    Number.isFinite(iniciadoMs) &&
+    Number.isFinite(nowMs) &&
+    nowMs - iniciadoMs < FIRMA_STARTING_MAX_AGE_MS;
+  const startingHuerfano = estado === "starting" && !startingEnCurso;
+  const signedSinDocumento = estado === "signed" && !firmaNormalizada.documento_firmado?.url;
+  const terminal = FIRMA_ESTADOS_TERMINALES.has(estado) ||
+    signedSinDocumento ||
+    isFirmaCuentaTimedOut(firmaNormalizada, now) ||
+    startingHuerfano;
+
+  return {
+    hasPreviousFirma: tieneIntentoFirma(firmaNormalizada),
+    reutilizable: !terminal && esFirmaReutilizable(firmaNormalizada, now),
+    startingEnCurso,
+    terminal
+  };
+}
+
+function obtenerSiguienteContractIdFirma({ contractToken, firmaActiva = {}, firmaReseteos = [] } = {}) {
+  const contractIds = [];
+  const agregar = (firma) => {
+    const value = String(asPlainObject(firma).contract_id || "").trim();
+    if (value) contractIds.push(value);
+  };
+
+  agregar(firmaActiva);
+  for (const reset of Array.isArray(firmaReseteos) ? firmaReseteos : []) {
+    agregar(reset);
+    agregar(asPlainObject(reset).firma_original);
+  }
+
+  let maxRetry = 0;
+  for (const contractId of contractIds) {
+    const match = contractId.match(/-r(\d+)$/i);
+    if (match) maxRetry = Math.max(maxRetry, Number(match[1]) || 0);
+  }
+
+  const token = String(contractToken || "").trim();
+  const tieneHistorial = contractIds.length > 0 ||
+    tieneIntentoFirma(firmaActiva) ||
+    (Array.isArray(firmaReseteos) && firmaReseteos.length > 0);
+  const retryNumber = tieneHistorial ? maxRetry + 1 : null;
+  return {
+    contractId: retryNumber ? `CC-${token}-r${retryNumber}` : `CC-${token}`,
+    retryNumber
+  };
+}
+
 function mapUploadedExtras(uploadedExtras = []) {
   return (Array.isArray(uploadedExtras) ? uploadedExtras : [])
     .map((item) => ({ kind: item.kind, nombre: item.nombre, url: item.url }));
 }
 
-async function persistirDiagnosticoFirmaCuenta({ cuentaId, estadoEnFirma, status, resolution, origen = "reconciliacion" } = {}) {
+async function persistirDiagnosticoFirmaCuenta({
+  cuentaId,
+  estadoEnFirma,
+  status,
+  resolution,
+  origen = "reconciliacion",
+  expectedRequestId = "",
+  expected = null,
+  deps = {}
+} = {}) {
   const nowIso = new Date().toISOString();
   const diagnostico = buildCuentaFirmaDiagnosticoFromResolution(resolution, nowIso);
   const requestedStatus = String(status || "").trim().toLowerCase();
-  const client = await pool.connect();
+  const expectedRequestIdNormalizado = String(
+    expectedRequestId || expected?.request_id || expected?.requestId || ""
+  ).trim();
+  const dbPool = deps.pool || pool;
+  const client = await dbPool.connect();
   try {
     await client.query("BEGIN");
     const result = await client.query(
@@ -63,12 +233,26 @@ async function persistirDiagnosticoFirmaCuenta({ cuentaId, estadoEnFirma, status
       throw err;
     }
     const prevAdjuntos = asPlainObject(cuenta.datos_adjuntos);
+    const prevFirma = asPlainObject(prevAdjuntos.firma);
+    const currentRequestId = String(prevFirma.request_id || "").trim();
+    if (
+      expectedRequestIdNormalizado &&
+      currentRequestId &&
+      currentRequestId !== expectedRequestIdNormalizado
+    ) {
+      await client.query("COMMIT");
+      return {
+        updated: false,
+        skipped: true,
+        reason: "firma_cambiada",
+        diagnostico,
+        estadoCuenta: cuenta.estado || null
+      };
+    }
     if (cuenta.estado !== estadoEnFirma || getDocumentoFirmadoUrl(prevAdjuntos)) {
       await client.query("COMMIT");
       return { updated: false, skipped: true, diagnostico, estadoCuenta: cuenta.estado || null };
     }
-
-    const prevFirma = asPlainObject(prevAdjuntos.firma);
     const prevEstadoFirmaSeguro = String(prevFirma.estado || "").trim().toLowerCase() === "signed"
       ? "pending"
       : prevFirma.estado || "pending";
@@ -155,15 +339,6 @@ function firmaTieneIdentificadoresCancelables(firma = {}) {
 }
 
 async function resolverCancelacionIntentoFirma({ firma, req, motivo = "reinicio manual", cancelarFn = cancelarFirmaClickSign } = {}) {
-  if (!firmaTieneIdentificadoresCancelables(firma)) {
-    return {
-      ok: false,
-      statusCode: 502,
-      reason: "sin_identificadores_cancelacion",
-      mensaje: "No se pudo cancelar la firma anterior en Click&Sign: faltan identificadores."
-    };
-  }
-
   const forzarSinCancelacion = parseBooleanInput(req?.body?.forzar_sin_cancelacion);
   if (forzarSinCancelacion) {
     if (!usuarioEsAdministrador(req)) {
@@ -187,6 +362,15 @@ async function resolverCancelacionIntentoFirma({ firma, req, motivo = "reinicio 
         rol: req?.user?.rol || null,
         fecha: new Date().toISOString()
       }
+    };
+  }
+
+  if (!firmaTieneIdentificadoresCancelables(firma)) {
+    return {
+      ok: false,
+      statusCode: 502,
+      reason: "sin_identificadores_cancelacion",
+      mensaje: "No se pudo cancelar la firma anterior en Click&Sign: faltan identificadores."
     };
   }
 
@@ -214,6 +398,66 @@ async function resolverCancelacionIntentoFirma({ firma, req, motivo = "reinicio 
   };
 }
 
+async function resolverCancelacionBestEffort({ firma, cancelarFn = cancelarFirmaClickSign } = {}) {
+  if (!firmaTieneIdentificadoresCancelables(firma)) {
+    return {
+      ok: true,
+      cancelada: false,
+      reason: "sin_identificadores_cancelacion",
+      mensaje: "No se pudo cancelar la firma anterior en Click&Sign: faltan identificadores."
+    };
+  }
+
+  try {
+    const cancelacion = await cancelarFn({
+      signatureId: firma.signature_id || "",
+      requestId: firma.request_id || "",
+      contractId: firma.contract_id || ""
+    });
+    if (!cancelacion?.ok) {
+      return {
+        ok: true,
+        cancelada: false,
+        reason: cancelacion?.reason || "cancelacion_fallida",
+        mensaje: cancelacion?.resumen?.message || "No se pudo cancelar la firma anterior en Click&Sign.",
+        cancelacion
+      };
+    }
+    return {
+      ok: true,
+      cancelada: cancelacion.cancelada === true,
+      omitida: false,
+      reason: cancelacion.reason || "cancelada",
+      resumen: cancelacion.resumen || null,
+      response: cancelacion.response || null
+    };
+  } catch (err) {
+    return {
+      ok: true,
+      cancelada: false,
+      reason: "cancelacion_fallida",
+      mensaje: err?.message || String(err),
+      cancelacion: {
+        resumen: { message: err?.message || String(err) }
+      }
+    };
+  }
+}
+
+async function resolverCancelacionParaNuevoIntentoFirma({
+  firma,
+  forceRestart = false,
+  terminal = false,
+  req,
+  motivo,
+  cancelarFn = cancelarFirmaClickSign
+} = {}) {
+  if (!forceRestart && terminal) {
+    return resolverCancelacionBestEffort({ firma, cancelarFn });
+  }
+  return resolverCancelacionIntentoFirma({ firma, req, motivo, cancelarFn });
+}
+
 function limpiarSoportesDerivadosFirma(soportes = {}) {
   const source = asPlainObject(soportes);
   const {
@@ -229,6 +473,16 @@ function limpiarSoportesDerivadosFirma(soportes = {}) {
 function buildFirmaArchivada(prevFirma = {}, { motivo = "reinicio manual", cancelacionResult = {}, nowIso = new Date().toISOString() } = {}) {
   const cancelada = cancelacionResult.cancelada === true;
   const omitida = cancelacionResult.omitida === true;
+  const cancelacionResumen = cancelacionResult.resumen || cancelacionResult.cancelacion?.resumen || null;
+  const cancelacionError = cancelada
+    ? null
+    : String(
+      cancelacionResult.mensaje ||
+      cancelacionResult.reason ||
+      cancelacionResult.cancelacion?.reason ||
+      cancelacionResumen?.message ||
+      "No se confirmó la cancelación en Click&Sign."
+    ).trim();
   const firmaBase = asPlainObject(prevFirma);
   const firmaOriginal = {
     ...firmaBase,
@@ -240,20 +494,74 @@ function buildFirmaArchivada(prevFirma = {}, { motivo = "reinicio manual", cance
     no_reconciliar: true,
     cancelada_en_clicksign: cancelada,
     cancelacion_omitida_por: omitida ? cancelacionResult.omitidaPor || null : null,
-    cancelacion_clicksign: cancelacionResult.resumen || null,
+    cancelacion_clicksign: cancelacionResumen,
+    cancelacion_error: cancelacionError,
     firma_original: firmaOriginal,
     reseteado_en: nowIso,
     motivo
   };
 }
 
-async function archivarIntentoFirmaCuenta({ cuentaId, motivo = "reinicio manual", cancelacionResult = {} } = {}) {
-  const client = await pool.connect();
+function firmaActualCoincideConEsperada(currentFirma = {}, expected = {}) {
+  const current = asPlainObject(currentFirma);
+  if (expected.hasPreviousFirma === false) return !tieneIntentoFirma(current);
+
+  const identificadoresFuertes = [
+    ["request_id", expected.request_id || expected.requestId],
+    ["contract_id", expected.contract_id || expected.contractId],
+    ["signature_id", expected.signature_id || expected.signatureId]
+  ];
+  const identificadoresPresentes = identificadoresFuertes
+    .filter(([, value]) => String(value || "").trim());
+  if (identificadoresPresentes.length === 0) {
+    if (expected.hasPreviousFirma !== true) return false;
+    return JSON.stringify(current) === JSON.stringify(asPlainObject(expected.snapshot));
+  }
+  return identificadoresPresentes.every(([key, value]) =>
+    String(current[key] || "").trim() === String(value || "").trim()
+  );
+}
+
+function esCuentaFirmaFinalizada(cuenta = {}, estadoAprobado = null) {
+  const cuentaActual = asPlainObject(cuenta);
+  return Boolean(
+    getDocumentoFirmadoUrl(asPlainObject(cuentaActual.datos_adjuntos)) ||
+    (estadoAprobado && cuentaActual.estado === estadoAprobado)
+  );
+}
+
+function buildRespuestaFirmaFinalizada({ archivoResult = {}, cuenta = {}, estadoAprobado = null } = {}) {
+  const adjuntosActuales = asPlainObject(archivoResult.adjuntosActuales);
+  return {
+    ok: true,
+    ya_firmada: true,
+    cuenta_id: String(cuenta.public_id || cuenta.id || archivoResult.cuenta?.public_id || ""),
+    estado_cuenta: archivoResult.cuenta?.estado || estadoAprobado || null,
+    documento_firmado_url: getDocumentoFirmadoUrl(adjuntosActuales) || null
+  };
+}
+
+function esCierreFirmaFinalizada(cierre = {}) {
+  return cierre.updated === true || Boolean(cierre.documentoFirmadoUrl);
+}
+
+async function archivarIntentoFirmaCuenta({
+  cuentaId,
+  motivo = "reinicio manual",
+  cancelacionResult = {},
+  expected = {},
+  archivarAnterior = true,
+  reserva = null,
+  estadoAprobado = null,
+  deps = {}
+} = {}) {
+  const dbPool = deps.pool || pool;
+  const client = await dbPool.connect();
   try {
     await client.query("BEGIN");
     const result = await client.query(
       `
-      SELECT id, public_id, datos_adjuntos
+      SELECT id, public_id, datos_adjuntos, estado
       FROM cuenta_cobro
       WHERE id = $1
       LIMIT 1
@@ -269,29 +577,67 @@ async function archivarIntentoFirmaCuenta({ cuentaId, motivo = "reinicio manual"
 
     const currentAdjuntos = asPlainObject(lockedCuenta.datos_adjuntos);
     const prevFirma = asPlainObject(currentAdjuntos.firma);
+    if (esCuentaFirmaFinalizada(lockedCuenta, estadoAprobado)) {
+      await client.query("ROLLBACK");
+      return {
+        updated: false,
+        raced: true,
+        reason: "firma_finalizada",
+        adjuntosActuales: currentAdjuntos,
+        cuenta: lockedCuenta
+      };
+    }
+    if (!firmaActualCoincideConEsperada(prevFirma, expected)) {
+      await client.query("ROLLBACK");
+      return {
+        updated: false,
+        raced: true,
+        reason: "firma_cambiada",
+        adjuntosActuales: currentAdjuntos,
+        cuenta: lockedCuenta
+      };
+    }
     const prevReseteos = Array.isArray(currentAdjuntos.firma_reseteos)
       ? currentAdjuntos.firma_reseteos
       : [];
     const { firma: _firmaOmitida, ...adjuntosSinFirma } = currentAdjuntos;
     const nowIso = new Date().toISOString();
-    const adjuntos = {
-      ...adjuntosSinFirma,
-      soportes: limpiarSoportesDerivadosFirma(currentAdjuntos.soportes),
-      firma_reseteos: [
+    const siguienteContrato = obtenerSiguienteContractIdFirma({
+      contractToken: reserva?.contractToken || String(lockedCuenta.public_id || lockedCuenta.id || "").split("-")[0],
+      firmaActiva: prevFirma,
+      firmaReseteos: prevReseteos
+    });
+    const firmaReseteos = archivarAnterior && tieneIntentoFirma(prevFirma)
+      ? [
         ...prevReseteos,
         buildFirmaArchivada(prevFirma, { motivo, cancelacionResult, nowIso })
       ]
+      : prevReseteos;
+    const placeholder = reserva
+      ? {
+        proveedor: "clicksign",
+        estado: "starting",
+        request_id: reserva.requestId,
+        contract_id: siguienteContrato.contractId,
+        iniciado_en: reserva.iniciadoEn || nowIso
+      }
+      : null;
+    const adjuntos = {
+      ...adjuntosSinFirma,
+      soportes: limpiarSoportesDerivadosFirma(currentAdjuntos.soportes),
+      firma_reseteos: firmaReseteos,
+      ...(placeholder ? { firma: placeholder } : {})
     };
 
     await client.query(
       `
       UPDATE cuenta_cobro
       SET datos_adjuntos = $1::jsonb,
-          estado = 'Pendiente'::tipo_estado_reporte,
+          estado = $2::tipo_estado_reporte,
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = $2
+      WHERE id = $3
       `,
-      [JSON.stringify(adjuntos), lockedCuenta.id]
+      [JSON.stringify(adjuntos), ESTADO_CUENTA_PENDIENTE, lockedCuenta.id]
     );
     await client.query("COMMIT");
 
@@ -299,7 +645,12 @@ async function archivarIntentoFirmaCuenta({ cuentaId, motivo = "reinicio manual"
       updated: true,
       cuenta: lockedCuenta,
       adjuntos,
-      firmaArchivada: adjuntos.firma_reseteos[adjuntos.firma_reseteos.length - 1]
+      firmaArchivada: archivarAnterior && tieneIntentoFirma(prevFirma)
+        ? firmaReseteos[firmaReseteos.length - 1]
+        : null,
+      contractId: siguienteContrato.contractId,
+      retryNumber: siguienteContrato.retryNumber,
+      placeholder
     };
   } catch (err) {
     try {
@@ -1219,7 +1570,135 @@ async function subirSeguridadSocialManual(req, res) {
   }
 }
 
-async function buscarSeguridadSocialClickSign(req, res) {
+async function marcarPlaceholderFirmaFallida({
+  cuentaId,
+  requestId,
+  error,
+  dbPool = pool,
+  logger = console
+} = {}) {
+  try {
+    const errorMessage = String(error?.message || error || "Error al iniciar firma en Click&Sign").trim();
+    const result = await dbPool.query(
+      `
+      UPDATE cuenta_cobro
+      SET datos_adjuntos = jsonb_set(
+            COALESCE(datos_adjuntos, '{}'::jsonb),
+            '{firma}',
+            COALESCE(datos_adjuntos->'firma', '{}'::jsonb) || $1::jsonb,
+            true
+          ),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+        AND datos_adjuntos->'firma'->>'request_id' = $3
+        AND datos_adjuntos->'firma'->>'estado' = 'starting'
+        AND estado = $4::tipo_estado_reporte
+        AND COALESCE(datos_adjuntos->'firma'->'documento_firmado'->>'url', '') = ''
+      `,
+      [
+        JSON.stringify({
+          estado: "failed",
+          actualizado_en: new Date().toISOString(),
+          ultimo_evento: "START_SIGNATURE_ERROR",
+          error: errorMessage
+        }),
+        cuentaId,
+        requestId,
+        ESTADO_CUENTA_PENDIENTE
+      ]
+    );
+    if (result.rowCount === 0) {
+      logger.warn("No se marcó placeholder de firma como fallido porque ya no está activo:", {
+        cuenta_id: cuentaId,
+        request_id: requestId
+      });
+    }
+    return result;
+  } catch (persistErr) {
+    logger.warn("No se pudo marcar placeholder de firma como fallido:", persistErr?.message || persistErr);
+    return { rowCount: 0 };
+  }
+}
+
+async function completarPlaceholderFirmaCuenta({
+  cuentaId,
+  firma,
+  estadoEnFirma,
+  estadoAprobado = null,
+  deps = {}
+} = {}) {
+  const dbPool = deps.pool || pool;
+  const firmaResult = await dbPool.query(
+    `
+    UPDATE cuenta_cobro
+    SET datos_adjuntos = jsonb_set(
+          COALESCE(datos_adjuntos, '{}'::jsonb),
+          '{firma}',
+          $1::jsonb,
+          true
+        ),
+        estado = $2::tipo_estado_reporte,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = $3
+      AND datos_adjuntos->'firma'->>'request_id' = $4
+      AND datos_adjuntos->'firma'->>'estado' = 'starting'
+      AND estado = $5::tipo_estado_reporte
+      AND COALESCE(datos_adjuntos->'firma'->'documento_firmado'->>'url', '') = ''
+    `,
+    [
+      JSON.stringify(firma),
+      estadoEnFirma,
+      cuentaId,
+      firma.request_id,
+      ESTADO_CUENTA_PENDIENTE
+    ]
+  );
+  if (firmaResult.rowCount > 0) return { updated: true };
+
+  const cuentaResult = await dbPool.query(
+    `
+    SELECT id, public_id, estado, datos_adjuntos
+    FROM cuenta_cobro
+    WHERE id = $1
+    LIMIT 1
+    `,
+    [cuentaId]
+  );
+  const cuentaActual = cuentaResult.rows[0] || null;
+  const cancelacionHuerfana = await resolverCancelacionBestEffort({
+    firma,
+    cancelarFn: deps.cancelarFn || cancelarFirmaClickSign
+  });
+  if (cancelacionHuerfana.cancelada !== true) {
+    (deps.logger || console).warn(
+      "No se pudo cancelar una firma iniciada después de perder la reserva activa:",
+      {
+        request_id: firma.request_id || null,
+        contract_id: firma.contract_id || null,
+        signature_id: firma.signature_id || null,
+        motivo: cancelacionHuerfana.mensaje || cancelacionHuerfana.reason || null
+      }
+    );
+  }
+
+  const finalizada = esCuentaFirmaFinalizada(cuentaActual, estadoAprobado);
+  return {
+    updated: false,
+    raced: true,
+    reason: finalizada ? "firma_finalizada" : "firma_cambiada",
+    cuenta: cuentaActual,
+    adjuntosActuales: asPlainObject(cuentaActual?.datos_adjuntos),
+    cancelacionHuerfana
+  };
+}
+
+async function buscarSeguridadSocialClickSign(req, res, deps = {}) {
+  const runtimeDeps = deps &&
+    typeof deps === "object" &&
+    !Array.isArray(deps)
+    ? deps
+    : {};
+  const dbPool = runtimeDeps.pool || pool;
   const {
     isClickSignConfigured,
     parseGraphErrorStatus,
@@ -1227,7 +1706,7 @@ async function buscarSeguridadSocialClickSign(req, res) {
     sameResourceUrl,
     uploadClickSignExtraFilesToOneDrive,
     notifySeguridadSocialProveedoresTardia
-  } = getIndexHelpers();
+  } = runtimeDeps.helpers || getIndexHelpers();
   const { id } = req.params;
   const reemplazar = parseBooleanInput(
     req.body?.forzar_reemplazo ??
@@ -1243,7 +1722,7 @@ async function buscarSeguridadSocialClickSign(req, res) {
   }
 
   try {
-    const cuentaResult = await pool.query(
+    const cuentaResult = await dbPool.query(
       `
       SELECT
         cc.id,
@@ -1318,7 +1797,7 @@ async function buscarSeguridadSocialClickSign(req, res) {
       });
     }
 
-    const lockedResult = await pool.query(
+    const lockedResult = await dbPool.query(
       `
       SELECT id, datos_adjuntos
       FROM cuenta_cobro
@@ -1375,7 +1854,7 @@ async function buscarSeguridadSocialClickSign(req, res) {
       soportes
     };
 
-    await pool.query(
+    await dbPool.query(
       `
       UPDATE cuenta_cobro
       SET datos_adjuntos = $1::jsonb,
@@ -1427,7 +1906,17 @@ async function buscarSeguridadSocialClickSign(req, res) {
   }
 }
 
-async function iniciarFirmaCuenta(req, res) {
+async function iniciarFirmaCuenta(req, res, deps = {}) {
+  const runtimeDeps = deps &&
+    typeof deps === "object" &&
+    !Array.isArray(deps)
+    ? deps
+    : {};
+  const dbPool = runtimeDeps.pool || pool;
+  const resolverFirmaCuenta = runtimeDeps.resolverFirmaCuentaVerificada ||
+    resolverFirmaCuentaVerificada;
+  const cerrarCuentaConFirma = runtimeDeps.cerrarCuentaCobroConFirmaResuelta ||
+    cerrarCuentaCobroConFirmaResuelta;
   const {
     isClickSignConfigured,
     assertCuentaCobroOwnerAccess,
@@ -1441,12 +1930,16 @@ async function iniciarFirmaCuenta(req, res) {
     extractClickSignSignatureId,
     getClickSignLandingUrl,
     getCuentaCobroEstadoEnFirma,
+    getCuentaCobroEstadoAprobado,
+    getGraphContext,
+    sendEmailSafe,
+    buildEmailLayout,
     CLICKSIGN_USER,
     CLICKSIGN_SIGNATURE_CB_URL,
     CLICKSIGN_SIGNATORY_CB_URL,
     CLICKSIGN_SIGNATORY_EMAIL_CB_URL,
     CLICKSIGN_WEBHOOK_TOKEN
-  } = getIndexHelpers();
+  } = runtimeDeps.helpers || getIndexHelpers();
   const CLICKSIGN_CONFIG_ID = Number(process.env.CLICKSIGN_CONFIG_ID || 0);
   const { id } = req.params;
   if (!isClickSignConfigured()) {
@@ -1456,7 +1949,7 @@ async function iniciarFirmaCuenta(req, res) {
   }
 
   try {
-    const meta = await pool.query("SELECT id, created_by FROM cuenta_cobro WHERE public_id = $1", [id]);
+    const meta = await dbPool.query("SELECT id, created_by FROM cuenta_cobro WHERE public_id = $1", [id]);
     if (!meta.rows.length) return res.status(404).json({ error: "Cuenta no encontrada" });
     const cuentaInternalId = meta.rows[0].id;
     if (!usuarioPuedeGestionarFirmasCuenta(req)) {
@@ -1465,6 +1958,17 @@ async function iniciarFirmaCuenta(req, res) {
 
     const { cuenta, detalles } = await getCuentaCobroPdfContext(cuentaInternalId);
     if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
+    const estadoAprobado = await getCuentaCobroEstadoAprobado();
+    if (esCuentaFirmaFinalizada(cuenta, estadoAprobado)) {
+      return res.json(buildRespuestaFirmaFinalizada({
+        archivoResult: {
+          cuenta,
+          adjuntosActuales: asPlainObject(cuenta.datos_adjuntos)
+        },
+        cuenta,
+        estadoAprobado
+      }));
+    }
     if (!cuenta.email) {
       return res.status(400).json({
         error: "El consultor no tiene correo para iniciar firma digital."
@@ -1478,26 +1982,15 @@ async function iniciarFirmaCuenta(req, res) {
         typeof cuenta.datos_adjuntos.firma === "object"
         ? cuenta.datos_adjuntos.firma
         : null;
-    const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object"
-      ? cuenta.datos_adjuntos
-      : {};
-    const prevReseteos = Array.isArray(prevAdjuntos.firma_reseteos)
-      ? prevAdjuntos.firma_reseteos
-      : [];
     const forceRestart = String(req.body?.force || "").toLowerCase() === "true" || req.body?.force === true;
-    const hasPreviousFirma = Boolean(
-      firmaExistente?.request_id ||
-      firmaExistente?.contract_id ||
-      firmaExistente?.signature_id ||
-      firmaExistente?.url_firma ||
-      firmaExistente?.iniciado_en
-    );
-    const firmaEstado = String(firmaExistente?.estado || "").toLowerCase().trim();
-    if (
-      !forceRestart &&
-      firmaExistente?.url_firma &&
-      ["pending", "in_progress", "en_firma", "started", "sent"].includes(firmaEstado)
-    ) {
+    const clasificacion = clasificarIntentoFirmaCuenta(firmaExistente);
+    const hasPreviousFirma = clasificacion.hasPreviousFirma;
+    if (clasificacion.startingEnCurso) {
+      return res.status(409).json({
+        error: "Otro reinicio está en curso. Recarga e intenta de nuevo."
+      });
+    }
+    if (!forceRestart && clasificacion.reutilizable) {
       return res.json({
         ok: true,
         reused: true,
@@ -1508,12 +2001,88 @@ async function iniciarFirmaCuenta(req, res) {
       });
     }
 
-    let adjuntosBaseNuevaFirma = prevAdjuntos;
-    if (forceRestart && hasPreviousFirma) {
-      const cancelacionResult = await resolverCancelacionIntentoFirma({
+    const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
+    if (hasPreviousFirma) {
+      const prevAdjuntos = asPlainObject(cuenta.datos_adjuntos);
+      const prevFirma = asPlainObject(prevAdjuntos.firma);
+      const resolution = await resolverFirmaCuenta({ cuenta, prevAdjuntos });
+      const diagnostico = buildCuentaFirmaDiagnosticoFromResolution(resolution);
+      const expectedRequestId = resolution.requestId ||
+        diagnostico.request_id ||
+        prevFirma.request_id ||
+        "";
+      if (resolution.signed) {
+        const cierre = await cerrarCuentaConFirma({
+          req,
+          cuenta,
+          resolution,
+          origen: "inicio"
+        });
+        if (cierre.updated !== true) {
+          await persistirDiagnosticoFirmaCuenta({
+            cuentaId: cuenta.id,
+            estadoEnFirma,
+            status: prevFirma.estado || "pending",
+            resolution: {
+              ...resolution,
+              signed: false,
+              reason: "firmado_verificado_pendiente_cierre",
+              diagnostico: {
+                ...diagnostico,
+                reason: "firmado_verificado_pendiente_cierre"
+              }
+            },
+            origen: "inicio",
+            expectedRequestId,
+            deps: { pool: dbPool }
+          });
+        }
+        if (!esCierreFirmaFinalizada(cierre)) {
+          return res.status(cierre.raceLost === true ? 409 : 503).json({
+            error: cierre.raceLost === true
+              ? "La cuenta cambió mientras se recuperaba la firma. Recarga e intenta nuevamente."
+              : "Click&Sign confirmó la firma, pero no fue posible cerrar la cuenta. El sistema la reintentará automáticamente.",
+            codigo: "FIRMA_VERIFICADA_PENDIENTE_CIERRE",
+            firma_verificada: true,
+            pendiente_cierre: true,
+            ya_firmada: false,
+            reconciliado: false,
+            omitido_por_carrera: cierre.raceLost === true,
+            motivo: cierre.reason || null
+          });
+        }
+        return res.json({
+          ok: true,
+          ya_firmada: esCierreFirmaFinalizada(cierre),
+          reconciliado: esCierreFirmaFinalizada(cierre),
+          omitido_por_carrera: cierre.raceLost === true,
+          cuenta_id: String(cuenta.public_id || cuenta.id || ""),
+          estado_cuenta: cierre.estadoCuenta || null,
+          documento_firmado_url: cierre.updated === true
+            ? cierre.documentoFirmado?.url || null
+            : cierre.documentoFirmadoUrl || null,
+          motivo: cierre.reason || null,
+          mensaje: "La firma ya estaba completada en Click&Sign; se intento cerrar la cuenta en lugar de reiniciar."
+        });
+      }
+    }
+
+    const pdfBuffer = await generateCuentaCobroPdfBuffer(cuenta, detalles);
+    const cuentaPublicId = String(cuenta.public_id || "");
+    const requestId = `CC-${cuentaPublicId || cuenta.id}-${Date.now()}`;
+    const contractToken = String(cuentaPublicId || cuenta.id || "").split("-")[0];
+    let cancelacionResult = {};
+    let motivoArchivo = "inicio firma";
+    if (hasPreviousFirma) {
+      motivoArchivo = forceRestart
+        ? "reinicio force"
+        : (clasificacion.terminal ? "reinicio intento terminal" : "reinicio intento no terminal");
+      cancelacionResult = await resolverCancelacionParaNuevoIntentoFirma({
         firma: firmaExistente,
+        forceRestart,
+        terminal: clasificacion.terminal,
         req,
-        motivo: "reinicio force"
+        motivo: motivoArchivo
       });
       if (!cancelacionResult.ok) {
         return res.status(cancelacionResult.statusCode || 502).json({
@@ -1521,25 +2090,56 @@ async function iniciarFirmaCuenta(req, res) {
           motivo: cancelacionResult.reason || "cancelacion_fallida"
         });
       }
-      const archivoResult = await archivarIntentoFirmaCuenta({
-        cuentaId: cuentaInternalId,
-        motivo: "reinicio force",
-        cancelacionResult
-      });
-      if (!archivoResult.updated) {
-        return res.status(404).json({ error: "Cuenta no encontrada" });
-      }
-      adjuntosBaseNuevaFirma = archivoResult.adjuntos || prevAdjuntos;
     }
 
-    const pdfBuffer = await generateCuentaCobroPdfBuffer(cuenta, detalles);
-    const cuentaPublicId = String(cuenta.public_id || "");
-    const requestId = `CC-${cuentaPublicId || cuenta.id}-${Date.now()}`;
-    const contractToken = String(cuentaPublicId || cuenta.id || "").split("-")[0];
-    const retryNumber = (prevReseteos.length || 0) + 1;
-    const contractId = (hasPreviousFirma || prevReseteos.length > 0)
-      ? `CC-${contractToken}-r${retryNumber}`
-      : `CC-${contractToken}`;
+    const archivoResult = await archivarIntentoFirmaCuenta({
+      cuentaId: cuentaInternalId,
+      motivo: motivoArchivo,
+      cancelacionResult,
+      expected: {
+        hasPreviousFirma,
+        request_id: firmaExistente?.request_id || "",
+        contract_id: firmaExistente?.contract_id || "",
+        signature_id: firmaExistente?.signature_id || "",
+        iniciado_en: firmaExistente?.iniciado_en || "",
+        snapshot: firmaExistente
+      },
+      archivarAnterior: hasPreviousFirma,
+      reserva: {
+        requestId,
+        contractToken,
+        iniciadoEn: new Date().toISOString()
+      },
+      estadoAprobado,
+      deps: { pool: dbPool }
+    });
+    if (archivoResult.raced) {
+      if (archivoResult.reason === "firma_finalizada") {
+        return res.json(buildRespuestaFirmaFinalizada({
+          archivoResult,
+          cuenta,
+          estadoAprobado
+        }));
+      }
+      const firmaActual = asPlainObject(archivoResult.adjuntosActuales?.firma);
+      if (esFirmaReutilizable(firmaActual)) {
+        return res.json({
+          ok: true,
+          reused: true,
+          cuenta_id: String(cuenta.public_id || cuenta.id || ""),
+          request_id: firmaActual.request_id || null,
+          contract_id: firmaActual.contract_id || null,
+          url_firma: firmaActual.url_firma
+        });
+      }
+      return res.status(409).json({
+        error: "Otro reinicio está en curso. Recarga e intenta de nuevo."
+      });
+    }
+    if (!archivoResult.updated) {
+      return res.status(404).json({ error: "Cuenta no encontrada" });
+    }
+    const contractId = archivoResult.contractId;
     const fileName = sanitizePdfFileName(
       `CuentaCobro_${cuentaPublicId || cuenta.id}.pdf`,
       `CuentaCobro_${cuenta.id}.pdf`
@@ -1605,27 +2205,40 @@ async function iniciarFirmaCuenta(req, res) {
     if (signatoryEmailCbUrl) {
       signaturePayload.signature.signatory_email_cb_url = signatoryEmailCbUrl;
     }
-    const clickSignRes = await jsonRequest({
-      method: "POST",
-      url: buildClickSignUrl("start_signature"),
-      headers: buildClickSignAuthHeaders(),
-      body: signaturePayload
-    });
+    let clickSignRes;
+    try {
+      clickSignRes = await jsonRequest({
+        method: "POST",
+        url: buildClickSignUrl("start_signature"),
+        headers: buildClickSignAuthHeaders(),
+        body: signaturePayload
+      });
+    } catch (startErr) {
+      await marcarPlaceholderFirmaFallida({
+        cuentaId: cuentaInternalId,
+        requestId,
+        error: startErr,
+        dbPool
+      });
+      throw startErr;
+    }
     const signatureId = extractClickSignSignatureId(clickSignRes.data);
     const urlFirma = getClickSignLandingUrl(clickSignRes.data);
     if (!urlFirma) {
+      await marcarPlaceholderFirmaFallida({
+        cuentaId: cuentaInternalId,
+        requestId,
+        error: "Click&Sign no devolvio URL de firma.",
+        dbPool
+      });
       return res.status(502).json({
         error: "Click&Sign no devolvio URL de firma.",
         detalle: clickSignRes.data
       });
     }
 
-    const prevFirma = adjuntosBaseNuevaFirma.firma && typeof adjuntosBaseNuevaFirma.firma === "object"
-      ? adjuntosBaseNuevaFirma.firma
-      : {};
     const ahoraIso = new Date().toISOString();
     const firma = {
-      ...prevFirma,
       proveedor: "clicksign",
       estado: "pending",
       request_id: requestId,
@@ -1636,21 +2249,60 @@ async function iniciarFirmaCuenta(req, res) {
       actualizado_en: ahoraIso,
       ultimo_evento: "START_SIGNATURE"
     };
-    const adjuntos = {
-      ...adjuntosBaseNuevaFirma,
-      firma
-    };
-    const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
-    await pool.query(
-      `
-      UPDATE cuenta_cobro
-      SET datos_adjuntos = $1::jsonb,
-          estado = $2::tipo_estado_reporte,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = $3
-      `,
-      [JSON.stringify(adjuntos), estadoEnFirma, cuentaInternalId]
-    );
+    const firmaResult = await completarPlaceholderFirmaCuenta({
+      cuentaId: cuentaInternalId,
+      firma,
+      estadoEnFirma,
+      estadoAprobado,
+      deps: { pool: dbPool }
+    });
+    if (!firmaResult.updated) {
+      if (firmaResult.reason === "firma_finalizada") {
+        return res.json(buildRespuestaFirmaFinalizada({
+          archivoResult: firmaResult,
+          cuenta: firmaResult.cuenta || cuenta,
+          estadoAprobado
+        }));
+      }
+      return res.status(409).json({
+        error: "Otro reinicio está en curso. Recarga e intenta de nuevo."
+      });
+    }
+
+    const nombreConsultor = String(cuenta.nombre_usuario || "").trim();
+    const saludo = nombreConsultor ? `Hola ${nombreConsultor},` : "Hola,";
+    const notificacionEnlace = await enviarNotificacionEnlaceFirma({
+      destinatario: cuenta.email,
+      sendEmailFn: sendEmailSafe,
+      payload: {
+        ...getGraphContext(req),
+        to: cuenta.email,
+        subject: "Firma pendiente de cuenta de cobro",
+        text:
+          `${saludo}\n\n` +
+          "Tu cuenta de cobro está pendiente de firma. Usa únicamente el siguiente enlace:\n" +
+          `${urlFirma}\n\n` +
+          "Usa únicamente este enlace e ignora cualquier enlace anterior.",
+        html: buildEmailLayout({
+          title: "Firma pendiente de cuenta de cobro",
+          intro: `${saludo} Tu cuenta de cobro está pendiente de firma. Usa únicamente el nuevo enlace disponible a continuación.`,
+          blocks: [
+            { label: "Cuenta de cobro", value: cuentaPublicId || String(cuenta.id || "") },
+            { label: "Importante", value: "Usa únicamente este enlace e ignora cualquier enlace anterior." }
+          ],
+          ctaLabel: "Firmar cuenta de cobro",
+          ctaUrl: urlFirma,
+          closing: "Silver Consulting"
+        })
+      }
+    });
+
+    const notificacionPersistida = await persistirNotificacionEnlaceFirma({
+      cuentaId: cuentaInternalId,
+      requestId,
+      notificacion: notificacionEnlace,
+      dbPool
+    });
 
     return res.json({
       ok: true,
@@ -1658,9 +2310,16 @@ async function iniciarFirmaCuenta(req, res) {
       request_id: requestId,
       contract_id: contractId,
       signature_id: signatureId || null,
-      url_firma: urlFirma
+      url_firma: urlFirma,
+      notificacion_enlace: notificacionEnlace,
+      notificacion_persistida: notificacionPersistida
     });
   } catch (err) {
+    if (err?.code === "ESTADO_ENUM_UNRESOLVED") {
+      return res.status(503).json({
+        error: "Estado de firma no disponible temporalmente."
+      });
+    }
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {
       return res.status(404).json({ error: "Cuenta no encontrada" });
     }
@@ -1986,6 +2645,11 @@ async function reconciliarFirmaCuentaLegacy(req, res) {
       extras_subidos: uploadedExtras.map((item) => ({ kind: item.kind, nombre: item.nombre, url: item.url }))
     });
   } catch (err) {
+    if (err?.code === "ESTADO_ENUM_UNRESOLVED") {
+      return res.status(503).json({
+        error: "Estado de firma no disponible temporalmente."
+      });
+    }
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {
       return res.status(404).json({ error: "Cuenta no encontrada" });
     }
@@ -2114,6 +2778,7 @@ async function reconciliarFirmaCuenta(req, res) {
     const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
     const resolution = await resolverFirmaCuentaVerificada({ cuenta, prevAdjuntos });
     const diagnostico = buildCuentaFirmaDiagnosticoFromResolution(resolution);
+    const expectedRequestId = resolution.requestId || diagnostico.request_id || prevFirma.request_id || "";
     const rawStatusFromRequest = String(req.body?.status || "").trim();
     const rawStatus = rawStatusFromRequest || resolution.rawStatus || diagnostico.rawStatus || prevFirma.ultimo_evento || prevFirma.estado || "pending";
     const status = resolution.signed
@@ -2142,7 +2807,8 @@ async function reconciliarFirmaCuenta(req, res) {
           estadoEnFirma,
           status: prevFirma.estado || "pending",
           resolution: resolutionDiagnostico,
-          origen: "reconciliacion"
+          origen: "reconciliacion",
+          expectedRequestId
         });
         return res.json({
           ok: true,
@@ -2217,7 +2883,8 @@ async function reconciliarFirmaCuenta(req, res) {
       estadoEnFirma,
       status,
       resolution,
-      origen: "reconciliacion"
+      origen: "reconciliacion",
+      expectedRequestId
     });
 
     if (resolution.reason === "sin_identificadores") {
@@ -2247,6 +2914,11 @@ async function reconciliarFirmaCuenta(req, res) {
       extras_subidos: []
     });
   } catch (err) {
+    if (err?.code === "ESTADO_ENUM_UNRESOLVED") {
+      return res.status(503).json({
+        error: "Estado de firma no disponible temporalmente."
+      });
+    }
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {
       return res.status(404).json({ error: "Cuenta no encontrada" });
     }
@@ -2278,12 +2950,24 @@ async function reconciliarFirmaCuenta(req, res) {
   }
 }
 
-async function reiniciarFirmaCuenta(req, res) {
+async function reiniciarFirmaCuenta(req, res, deps = {}) {
+  const runtimeDeps = deps &&
+    typeof deps === "object" &&
+    !Array.isArray(deps)
+    ? deps
+    : {};
+  const dbPool = runtimeDeps.pool || pool;
+  const resolverFirmaCuenta = runtimeDeps.resolverFirmaCuentaVerificada ||
+    resolverFirmaCuentaVerificada;
+  const cerrarCuentaConFirma = runtimeDeps.cerrarCuentaCobroConFirmaResuelta ||
+    cerrarCuentaCobroConFirmaResuelta;
+  const cancelarFn = runtimeDeps.cancelarFirmaClickSign || cancelarFirmaClickSign;
   const {
     isClickSignConfigured,
     getCuentaCobroEstadoEnFirma,
+    getCuentaCobroEstadoAprobado,
     parseGraphErrorStatus
-  } = getIndexHelpers();
+  } = runtimeDeps.helpers || getIndexHelpers();
   const { id } = req.params;
   if (!isClickSignConfigured()) {
     return res.status(503).json({
@@ -2292,11 +2976,12 @@ async function reiniciarFirmaCuenta(req, res) {
   }
 
   try {
-    const cuentaResult = await pool.query(
+    const cuentaResult = await dbPool.query(
       `
       SELECT
         cc.id,
         cc.public_id,
+        cc.estado,
         cc.created_by,
         cc.fecha_correspondiente,
         cc.created_at,
@@ -2316,9 +3001,30 @@ async function reiniciarFirmaCuenta(req, res) {
     const prevAdjuntos = asPlainObject(cuenta.datos_adjuntos);
     const prevFirma = asPlainObject(prevAdjuntos.firma);
     const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
-    const resolution = await resolverFirmaCuentaVerificada({ cuenta, prevAdjuntos });
+    const estadoAprobado = await getCuentaCobroEstadoAprobado();
+    if (esCuentaFirmaFinalizada(cuenta, estadoAprobado)) {
+      return res.json(buildRespuestaFirmaFinalizada({
+        archivoResult: {
+          cuenta,
+          adjuntosActuales: prevAdjuntos
+        },
+        cuenta,
+        estadoAprobado
+      }));
+    }
+    const clasificacion = clasificarIntentoFirmaCuenta(prevFirma);
+    if (clasificacion.startingEnCurso) {
+      return res.status(409).json({
+        error: "Otro reinicio está en curso. Recarga e intenta de nuevo."
+      });
+    }
+    const resolution = await resolverFirmaCuenta({ cuenta, prevAdjuntos });
+    const expectedRequestId = resolution.requestId ||
+      asPlainObject(resolution.diagnostico).request_id ||
+      prevFirma.request_id ||
+      "";
     if (resolution.signed) {
-      const cierre = await cerrarCuentaCobroConFirmaResuelta({
+      const cierre = await cerrarCuentaConFirma({
         req,
         cuenta,
         resolution,
@@ -2339,12 +3045,29 @@ async function reiniciarFirmaCuenta(req, res) {
               reason: "firmado_verificado_pendiente_cierre"
             }
           },
-          origen: "reinicio"
+          origen: "reinicio",
+          expectedRequestId,
+          deps: { pool: dbPool }
+        });
+      }
+      if (!esCierreFirmaFinalizada(cierre)) {
+        return res.status(cierre.raceLost === true ? 409 : 503).json({
+          error: cierre.raceLost === true
+            ? "La cuenta cambió mientras se recuperaba la firma. Recarga e intenta nuevamente."
+            : "Click&Sign confirmó la firma, pero no fue posible cerrar la cuenta. El sistema la reintentará automáticamente.",
+          codigo: "FIRMA_VERIFICADA_PENDIENTE_CIERRE",
+          firma_verificada: true,
+          pendiente_cierre: true,
+          ya_firmada: false,
+          reconciliado: false,
+          omitido_por_carrera: cierre.raceLost === true,
+          motivo: cierre.reason || null
         });
       }
       return res.json({
         ok: true,
-        reconciliado: cierre.updated === true || Boolean(cierre.documentoFirmadoUrl),
+        ya_firmada: esCierreFirmaFinalizada(cierre),
+        reconciliado: esCierreFirmaFinalizada(cierre),
         omitido_por_carrera: cierre.raceLost === true,
         cuenta_id: String(cuenta.public_id || cuenta.id || ""),
         estado_cuenta: cierre.estadoCuenta || null,
@@ -2359,7 +3082,8 @@ async function reiniciarFirmaCuenta(req, res) {
     const cancelacionResult = await resolverCancelacionIntentoFirma({
       firma: prevFirma,
       req,
-      motivo: "reinicio manual"
+      motivo: "reinicio manual",
+      cancelarFn
     });
     if (!cancelacionResult.ok) {
       return res.status(cancelacionResult.statusCode || 502).json({
@@ -2370,8 +3094,41 @@ async function reiniciarFirmaCuenta(req, res) {
     const archivoResult = await archivarIntentoFirmaCuenta({
       cuentaId: cuenta.id,
       motivo: "reinicio manual",
-      cancelacionResult
+      cancelacionResult,
+      expected: {
+        hasPreviousFirma: tieneIntentoFirma(prevFirma),
+        request_id: prevFirma.request_id || "",
+        contract_id: prevFirma.contract_id || "",
+        signature_id: prevFirma.signature_id || "",
+        iniciado_en: prevFirma.iniciado_en || "",
+        snapshot: prevFirma
+      },
+      estadoAprobado,
+      deps: { pool: dbPool }
     });
+    if (archivoResult.raced) {
+      if (archivoResult.reason === "firma_finalizada") {
+        return res.json(buildRespuestaFirmaFinalizada({
+          archivoResult,
+          cuenta,
+          estadoAprobado
+        }));
+      }
+      const firmaActual = asPlainObject(archivoResult.adjuntosActuales?.firma);
+      if (esFirmaReutilizable(firmaActual)) {
+        return res.json({
+          ok: true,
+          reused: true,
+          cuenta_id: String(cuenta.public_id || cuenta.id || ""),
+          request_id: firmaActual.request_id || null,
+          contract_id: firmaActual.contract_id || null,
+          url_firma: firmaActual.url_firma
+        });
+      }
+      return res.status(409).json({
+        error: "Otro reinicio está en curso. Recarga e intenta de nuevo."
+      });
+    }
     if (!archivoResult.updated) {
       return res.status(404).json({ error: "Cuenta no encontrada" });
     }
@@ -2384,6 +3141,11 @@ async function reiniciarFirmaCuenta(req, res) {
     });
 
   } catch (err) {
+    if (err?.code === "ESTADO_ENUM_UNRESOLVED") {
+      return res.status(503).json({
+        error: "Estado de firma no disponible temporalmente."
+      });
+    }
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {
       return res.status(404).json({ error: "Cuenta no encontrada" });
     }
@@ -2415,7 +3177,441 @@ async function reiniciarFirmaCuenta(req, res) {
   }
 }
 
-async function adjuntarFirmaCuenta(req, res) {
+function buildManualSignedPdfName({
+  requestedName,
+  defaultName,
+  pdfBuffer,
+  sanitizePdfFileName
+} = {}) {
+  const safeName = sanitizePdfFileName(requestedName || defaultName, defaultName);
+  const hash = crypto.createHash("sha256").update(pdfBuffer).digest("hex").slice(0, 12);
+  const baseName = safeName.replace(/\.pdf$/i, "");
+  const nameWithHash = baseName.endsWith(`_${hash}`)
+    ? `${baseName}.pdf`
+    : `${baseName}_${hash}.pdf`;
+  return sanitizePdfFileName(nameWithHash, defaultName);
+}
+
+async function persistirFirmaManualCuenta({
+  cuentaId,
+  expectedEstado = null,
+  expectedFirma = {},
+  documentoFirmado,
+  estadoAprobado,
+  nowIso = new Date().toISOString(),
+  extraSoportes,
+  deps = {}
+} = {}) {
+  if (!String(documentoFirmado?.url || "").trim()) {
+    const uploadResultError = new Error("OneDrive no devolvió la URL del PDF firmado.");
+    uploadResultError.code = "SIGNED_PDF_UPLOAD_URL_MISSING";
+    throw uploadResultError;
+  }
+  const dbPool = deps.pool || pool;
+  const client = await dbPool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `
+      SELECT id, public_id, estado, datos_adjuntos
+      FROM cuenta_cobro
+      WHERE id = $1
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [cuentaId]
+    );
+    const lockedCuenta = result.rows[0] || null;
+    if (!lockedCuenta) {
+      await client.query("ROLLBACK");
+      const err = new Error("Cuenta no encontrada");
+      err.code = "PUBLIC_ID_NOT_FOUND";
+      throw err;
+    }
+
+    const currentAdjuntos = asPlainObject(lockedCuenta.datos_adjuntos);
+    const currentFirma = asPlainObject(currentAdjuntos.firma);
+    const currentDocumentoUrl = getDocumentoFirmadoUrl(currentAdjuntos);
+    if (currentDocumentoUrl) {
+      await client.query("ROLLBACK");
+      return {
+        updated: false,
+        raced: true,
+        reason: "firma_finalizada",
+        cuenta: lockedCuenta,
+        adjuntosActuales: currentAdjuntos,
+        documentoFirmadoUrl: currentDocumentoUrl
+      };
+    }
+    if (expectedEstado && lockedCuenta.estado !== expectedEstado) {
+      await client.query("ROLLBACK");
+      return {
+        updated: false,
+        raced: true,
+        reason: "estado_cambiado",
+        cuenta: lockedCuenta,
+        adjuntosActuales: currentAdjuntos
+      };
+    }
+
+    const expected = {
+      hasPreviousFirma: tieneIntentoFirma(expectedFirma),
+      request_id: expectedFirma.request_id || "",
+      contract_id: expectedFirma.contract_id || "",
+      signature_id: expectedFirma.signature_id || "",
+      iniciado_en: expectedFirma.iniciado_en || "",
+      snapshot: expectedFirma
+    };
+    if (!firmaActualCoincideConEsperada(currentFirma, expected)) {
+      await client.query("ROLLBACK");
+      return {
+        updated: false,
+        raced: true,
+        reason: "firma_cambiada",
+        cuenta: lockedCuenta,
+        adjuntosActuales: currentAdjuntos
+      };
+    }
+
+    const currentSoportes = asPlainObject(currentAdjuntos.soportes);
+    const firma = {
+      ...currentFirma,
+      estado: "signed",
+      actualizado_en: nowIso,
+      ultimo_evento: Array.isArray(extraSoportes) ? "CARGA_MANUAL_DOCUMENTOS" : "MANUAL_UPLOAD",
+      documento_firmado: documentoFirmado,
+      documento_firmado_error: null
+    };
+    const adjuntos = {
+      ...currentAdjuntos,
+      firma,
+      soportes: {
+        ...currentSoportes,
+        carpeta: documentoFirmado.carpeta || currentSoportes.carpeta || "",
+        actualizado_en: nowIso,
+        cuenta_cobro_firmada: {
+          id: documentoFirmado.id || null,
+          nombre: documentoFirmado.nombre || "CuentaCobroFirmada.pdf",
+          url: documentoFirmado.url || ""
+        },
+        ...(Array.isArray(extraSoportes) ? { documentos_manuales: extraSoportes } : {})
+      }
+    };
+    const updateResult = await client.query(
+      `
+      UPDATE cuenta_cobro
+      SET datos_adjuntos = $1::jsonb,
+          estado = $2::tipo_estado_reporte,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3
+        AND estado = $4::tipo_estado_reporte
+        AND COALESCE(datos_adjuntos->'firma'->'documento_firmado'->>'url', '') = ''
+      `,
+      [JSON.stringify(adjuntos), estadoAprobado, lockedCuenta.id, expectedEstado || lockedCuenta.estado]
+    );
+    if (updateResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return {
+        updated: false,
+        raced: true,
+        reason: "firma_cambiada",
+        cuenta: lockedCuenta,
+        adjuntosActuales: currentAdjuntos
+      };
+    }
+    await client.query("COMMIT");
+
+    return {
+      updated: true,
+      cuenta: {
+        ...lockedCuenta,
+        estado: estadoAprobado,
+        datos_adjuntos: adjuntos
+      },
+      firma,
+      adjuntos,
+      prevNotificacionProveedores: asPlainObject(currentFirma.notificacion_proveedores)
+    };
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (_) { }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+function buildManualUploadFileName({
+  requestedName,
+  defaultName,
+  fallbackName,
+  buffer,
+  ext,
+  sanitizeUploadFileName
+} = {}) {
+  const hash = crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 12);
+  const safeName = sanitizeUploadFileName(requestedName || defaultName, fallbackName, ext);
+  const suffix = `.${ext}`;
+  const baseName = safeName.toLowerCase().endsWith(suffix)
+    ? safeName.slice(0, -suffix.length)
+    : safeName;
+  const nameWithHash = baseName.endsWith(`_${hash}`)
+    ? `${baseName}${suffix}`
+    : `${baseName}_${hash}${suffix}`;
+  return sanitizeUploadFileName(nameWithHash, fallbackName, ext);
+}
+
+async function subirDocumentosManualesCuenta(req, res, deps = {}) {
+  const runtimeDeps = deps &&
+    typeof deps === "object" &&
+    !Array.isArray(deps)
+    ? deps
+    : {};
+  const dbPool = runtimeDeps.pool || pool;
+  const logger = runtimeDeps.logger || console;
+  const helpers = runtimeDeps.helpers || getIndexHelpers();
+  const {
+    assertCuentaCobroOwnerAccess,
+    parseUploadDataUrl,
+    sanitizeUploadFileName,
+    uploadCuentaCobroFilesToOneDrive,
+    buildCuentaCobroMixedEmailAttachments,
+    notifyCuentaCobroFirmadaToProveedores,
+    getGraphContext,
+    getCuentaCobroEstadoAprobado,
+    parseGraphErrorStatus
+  } = helpers;
+  const onedriveEnabled = runtimeDeps.onedriveEnabled === undefined
+    ? String(process.env.ONEDRIVE_ENABLED || "true").toLowerCase() === "true"
+    : runtimeDeps.onedriveEnabled === true;
+  const { id } = req.params;
+  const archivosEntrada = req.body?.archivos ?? req.body?.documentos ?? req.body?.files;
+
+  if (!onedriveEnabled) {
+    return res.status(503).json({ error: "Servicio de carga no disponible temporalmente." });
+  }
+  if (!Array.isArray(archivosEntrada) || archivosEntrada.length < 2) {
+    return res.status(400).json({ error: "Debe adjuntar al menos 2 documentos (PDF, JPG o PNG)." });
+  }
+
+  try {
+    const cuentaResult = await dbPool.query(
+      `
+      SELECT
+        cc.id,
+        cc.public_id,
+        cc.estado,
+        cc.created_by,
+        cc.fecha_correspondiente,
+        cc.created_at,
+        cc.datos_adjuntos,
+        u.nombre_usuario,
+        u.email
+      FROM cuenta_cobro cc
+      LEFT JOIN usuarios u ON u.id = cc.created_by
+      WHERE cc.public_id = $1
+      LIMIT 1
+      `,
+      [id]
+    );
+
+    const cuenta = cuentaResult.rows[0] || null;
+    if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
+    await assertCuentaCobroOwnerAccess(cuenta.created_by, req);
+
+    const estadoAprobado = await getCuentaCobroEstadoAprobado();
+    const prevAdjuntos = asPlainObject(cuenta.datos_adjuntos);
+    const prevFirma = asPlainObject(prevAdjuntos.firma);
+    const soportes = asPlainObject(prevAdjuntos.soportes);
+    const documentoExistenteUrl = getDocumentoFirmadoUrl(prevAdjuntos);
+    if (documentoExistenteUrl) {
+      return res.json({
+        ok: true,
+        ya_registrada: true,
+        cuenta_id: String(cuenta.public_id || cuenta.id || ""),
+        estado_cuenta: cuenta.estado || estadoAprobado,
+        documento_firmado_url: documentoExistenteUrl,
+        documentos: Array.isArray(soportes.documentos_manuales) ? soportes.documentos_manuales : []
+      });
+    }
+
+    const parsedFiles = [];
+    for (const item of archivosEntrada) {
+      const base64 = item?.base64 ?? item?.archivo_base64 ?? item?.data ?? item?.contenido ?? "";
+      const parsed = parseUploadDataUrl(base64);
+      if (!parsed) {
+        return res.status(400).json({ error: "Uno de los archivos no es un PDF, JPG o PNG válido." });
+      }
+      if (parsed.buffer.length > 8 * 1024 * 1024) {
+        return res.status(400).json({ error: "Cada archivo debe pesar máximo 8MB." });
+      }
+      parsedFiles.push({
+        ...parsed,
+        nombre: item?.nombre ?? item?.archivo_nombre ?? item?.filename ?? item?.name ?? ""
+      });
+    }
+
+    const tokenCuenta = String(cuenta.public_id || cuenta.id || "cuenta").split("-")[0];
+    const files = parsedFiles.map((item, index) => {
+      const hash = crypto.createHash("sha256").update(item.buffer).digest("hex").slice(0, 12);
+      const principal = index === 0;
+      const defaultName = principal
+        ? `CuentaCobroFirmada_${tokenCuenta}_${hash}.${item.ext}`
+        : `Soporte${index}_${tokenCuenta}_${hash}.${item.ext}`;
+      const fallbackName = principal
+        ? `CuentaCobroFirmada_${tokenCuenta}.${item.ext}`
+        : `Soporte${index}_${tokenCuenta}.${item.ext}`;
+      return {
+        buffer: item.buffer,
+        fileName: buildManualUploadFileName({
+          requestedName: item.nombre,
+          defaultName,
+          fallbackName,
+          buffer: item.buffer,
+          ext: item.ext,
+          sanitizeUploadFileName
+        }),
+        contentType: item.mime
+      };
+    });
+
+    let uploadResult = null;
+    try {
+      uploadResult = await uploadCuentaCobroFilesToOneDrive(cuenta, files);
+    } catch (uploadErr) {
+      const delegatedGraphToken = String(req?.headers?.["x-graph-access-token"] || "").trim();
+      if (!delegatedGraphToken) throw uploadErr;
+      uploadResult = await uploadCuentaCobroFilesToOneDrive(
+        cuenta,
+        files,
+        { accessToken: delegatedGraphToken }
+      );
+    }
+
+    const nowIso = new Date().toISOString();
+    const archivosSubidos = Array.isArray(uploadResult?.archivos) ? uploadResult.archivos : [];
+    const principalSubido = asPlainObject(archivosSubidos[0]);
+    const documentoFirmado = {
+      ...principalSubido,
+      carpeta: uploadResult?.carpeta || "",
+      origen: "carga_manual",
+      actualizado_en: nowIso
+    };
+    if (!String(documentoFirmado.url || "").trim()) {
+      const uploadResultError = new Error("OneDrive no devolvió la URL del documento principal.");
+      uploadResultError.code = "SIGNED_PDF_UPLOAD_URL_MISSING";
+      throw uploadResultError;
+    }
+
+    const documentosManuales = archivosSubidos.map((archivo, index) => ({
+      id: archivo?.id || null,
+      nombre: archivo?.nombre || files[index]?.fileName || `Documento ${index + 1}`,
+      url: archivo?.url || "",
+      contentType: archivo?.contentType || files[index]?.contentType || null,
+      principal: index === 0
+    }));
+    const persistResult = await persistirFirmaManualCuenta({
+      cuentaId: cuenta.id,
+      expectedEstado: cuenta.estado,
+      expectedFirma: prevFirma,
+      documentoFirmado,
+      estadoAprobado,
+      nowIso,
+      deps: { pool: dbPool },
+      extraSoportes: documentosManuales
+    });
+    if (persistResult.raced) {
+      if (persistResult.reason === "firma_finalizada") {
+        return res.json(buildRespuestaFirmaFinalizada({
+          archivoResult: persistResult,
+          cuenta,
+          estadoAprobado
+        }));
+      }
+      return res.status(409).json({
+        error: "La firma cambió mientras se cargaban los documentos. Recarga e intenta de nuevo."
+      });
+    }
+
+    let notificacionProveedores = null;
+    try {
+      notificacionProveedores = await notifyCuentaCobroFirmadaToProveedores({
+        cuenta,
+        documentoFirmado,
+        attachments: buildCuentaCobroMixedEmailAttachments({ files }),
+        prevNotification: persistResult.prevNotificacionProveedores,
+        nowIso,
+        graphContext: getGraphContext(req)
+      });
+    } catch (notifyErr) {
+      logger.warn(
+        `No se pudo notificar la carga manual de ${cuenta.public_id || cuenta.id}:`,
+        notifyErr?.message || notifyErr
+      );
+    }
+
+    return res.json({
+      ok: true,
+      cuenta_id: String(cuenta.public_id || cuenta.id || ""),
+      estado_cuenta: estadoAprobado,
+      documento_firmado_url: documentoFirmado.url,
+      documentos: documentosManuales,
+      notificacion_proveedores: notificacionProveedores
+    });
+  } catch (err) {
+    if (err?.code === "ESTADO_ENUM_UNRESOLVED") {
+      return res.status(503).json({
+        error: "Estado de firma no disponible temporalmente."
+      });
+    }
+    if (err?.code === "PUBLIC_ID_NOT_FOUND") {
+      return res.status(404).json({ error: "Cuenta no encontrada" });
+    }
+    if (err?.code === "ACCESS_DENIED") {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+    if (err?.code === "GRAPH_TOKEN_ERROR") {
+      return res.status(502).json({
+        error: "No se pudo autenticar OneDrive (Microsoft Graph). Verifica credenciales y permisos."
+      });
+    }
+    if (err?.code === "ONEDRIVE_DISABLED") {
+      return res.status(503).json({ error: "Servicio de carga no disponible temporalmente." });
+    }
+    if (err?.code === "SIGNED_PDF_UPLOAD_URL_MISSING") {
+      return res.status(502).json({
+        error: "OneDrive no devolvió un enlace válido para el documento principal."
+      });
+    }
+    const status = parseGraphErrorStatus(err?.message || "");
+    if (status === 401 || status === 403) {
+      return res.status(502).json({
+        error: "Servicio de almacenamiento no autorizado. Verifica permisos de Graph/OneDrive."
+      });
+    }
+    if (status === 404) {
+      return res.status(502).json({
+        error: "No se encontró el repositorio de OneDrive configurado."
+      });
+    }
+    console.error("Error adjuntando documentos manuales:", err);
+    return res.status(500).json({
+      error: "Error adjuntando documentos manuales",
+      codigo: err?.code || null,
+      detalle: err?.message || null
+    });
+  }
+}
+
+async function adjuntarFirmaCuenta(req, res, deps = {}) {
+  const runtimeDeps = deps &&
+    typeof deps === "object" &&
+    !Array.isArray(deps)
+    ? deps
+    : {};
+  const dbPool = runtimeDeps.pool || pool;
+  const logger = runtimeDeps.logger || console;
   const {
     assertCuentaCobroOwnerAccess,
     parsePdfDataUrl,
@@ -2427,13 +3623,15 @@ async function adjuntarFirmaCuenta(req, res) {
     getGraphContext,
     getCuentaCobroEstadoAprobado,
     parseGraphErrorStatus
-  } = getIndexHelpers();
-  const ONEDRIVE_ENABLED = String(process.env.ONEDRIVE_ENABLED || "true").toLowerCase() === "true";
+  } = runtimeDeps.helpers || getIndexHelpers();
+  const onedriveEnabled = runtimeDeps.onedriveEnabled === undefined
+    ? String(process.env.ONEDRIVE_ENABLED || "true").toLowerCase() === "true"
+    : runtimeDeps.onedriveEnabled === true;
   const { id } = req.params;
   const cuentaPdfBase64 = req.body?.cuenta_pdf_base64 || req.body?.archivo_base64 || req.body?.signed_pdf_base64 || "";
   const cuentaPdfNombre = req.body?.cuenta_pdf_nombre || req.body?.archivo_nombre || req.body?.signed_pdf_nombre || "";
 
-  if (!ONEDRIVE_ENABLED) {
+  if (!onedriveEnabled) {
     return res.status(503).json({ error: "Servicio de carga no disponible temporalmente." });
   }
   if (!cuentaPdfBase64) {
@@ -2441,11 +3639,12 @@ async function adjuntarFirmaCuenta(req, res) {
   }
 
   try {
-    const cuentaResult = await pool.query(
+    const cuentaResult = await dbPool.query(
       `
       SELECT
         cc.id,
         cc.public_id,
+        cc.estado,
         cc.created_by,
         cc.fecha_correspondiente,
         cc.created_at,
@@ -2470,12 +3669,38 @@ async function adjuntarFirmaCuenta(req, res) {
       return res.status(400).json({ error: "El archivo firmado debe ser un PDF válido." });
     }
 
+    const estadoAprobado = await getCuentaCobroEstadoAprobado();
+    const prevAdjuntos = asPlainObject(cuenta.datos_adjuntos);
+    const prevFirma = asPlainObject(prevAdjuntos.firma);
+    const documentoExistenteUrl = getDocumentoFirmadoUrl(prevAdjuntos);
+    if (documentoExistenteUrl) {
+      return res.json({
+        ok: true,
+        ya_firmada: true,
+        cuenta_id: String(cuenta.public_id || cuenta.id || ""),
+        estado_cuenta: cuenta.estado || estadoAprobado,
+        documento_firmado_url: documentoExistenteUrl
+      });
+    }
+
     const defaultName = sanitizePdfFileName(
       `CuentaCobroFirmada_${String(cuenta.public_id || cuenta.id || "cuenta")}.pdf`,
       "CuentaCobroFirmada.pdf"
     );
     let uploadResult = null;
-    const uploadName = sanitizePdfFileName(cuentaPdfNombre || defaultName, defaultName);
+    const uploadName = buildManualSignedPdfName({
+      requestedName: cuentaPdfNombre,
+      defaultName,
+      pdfBuffer,
+      sanitizePdfFileName
+    });
+    const documentosAdjuntosCorreo = buildCuentaCobroEmailAttachments({
+      cuenta,
+      signedPdf: {
+        buffer: pdfBuffer,
+        fileName: uploadName
+      }
+    });
     try {
       uploadResult = await uploadSignedPdfToOneDrive(
         cuenta,
@@ -2493,91 +3718,74 @@ async function adjuntarFirmaCuenta(req, res) {
       );
     }
 
-    const prevAdjuntos = cuenta.datos_adjuntos && typeof cuenta.datos_adjuntos === "object"
-      ? cuenta.datos_adjuntos
-      : {};
-    const prevFirma = prevAdjuntos.firma && typeof prevAdjuntos.firma === "object"
-      ? prevAdjuntos.firma
-      : {};
-    const prevSoportes = prevAdjuntos.soportes && typeof prevAdjuntos.soportes === "object"
-      ? prevAdjuntos.soportes
-      : {};
     const nowIso = new Date().toISOString();
+    const uploadedArchivo = asPlainObject(uploadResult?.archivo);
+    if (!String(uploadedArchivo.url || "").trim()) {
+      const uploadResultError = new Error("OneDrive no devolvió la URL del PDF firmado.");
+      uploadResultError.code = "SIGNED_PDF_UPLOAD_URL_MISSING";
+      throw uploadResultError;
+    }
 
     const documentoFirmado = {
-      ...uploadResult.archivo,
+      ...uploadedArchivo,
       carpeta: uploadResult.carpeta,
       origen: "manual_upload",
       actualizado_en: nowIso
     };
-    const documentosAdjuntosCorreo = buildCuentaCobroEmailAttachments({
-      cuenta,
-      signedPdf: {
-        buffer: pdfBuffer,
-        fileName: uploadName
-      }
+    const persistResult = await persistirFirmaManualCuenta({
+      cuentaId: cuentaInternalId,
+      expectedEstado: cuenta.estado,
+      expectedFirma: prevFirma,
+      documentoFirmado,
+      estadoAprobado,
+      nowIso,
+      deps: { pool: dbPool }
     });
-    const firma = {
-      ...prevFirma,
-      estado: "signed",
-      actualizado_en: nowIso,
-      ultimo_evento: "MANUAL_UPLOAD",
-      documento_firmado: documentoFirmado,
-      documento_firmado_error: null
-    };
-    if (documentoFirmado?.url) {
-      const prevNotificacionProveedores =
-        prevFirma.notificacion_proveedores && typeof prevFirma.notificacion_proveedores === "object"
-          ? prevFirma.notificacion_proveedores
-          : {};
-      const notificacion = await notifyCuentaCobroFirmadaToProveedores({
-        cuenta,
-        documentoFirmado,
-        attachments: documentosAdjuntosCorreo,
-        prevNotification: prevNotificacionProveedores,
-        nowIso,
-        graphContext: getGraphContext(req)
+    if (persistResult.raced) {
+      if (persistResult.reason === "firma_finalizada") {
+        return res.json(buildRespuestaFirmaFinalizada({
+          archivoResult: persistResult,
+          cuenta,
+          estadoAprobado
+        }));
+      }
+      return res.status(409).json({
+        error: "La firma cambió mientras se cargaba el documento. Recarga e intenta de nuevo."
       });
-      // Evita pisar el estado fresco que notify() persistió: el UPDATE de abajo escribe
-      // datos_adjuntos completo, así que firma.notificacion_proveedores debe reflejar lo recién escrito.
-      if (notificacion && typeof notificacion === "object") {
-        firma.notificacion_proveedores = notificacion;
+    }
+
+    let notificacionProveedores = null;
+    if (documentoFirmado?.url) {
+      try {
+        notificacionProveedores = await notifyCuentaCobroFirmadaToProveedores({
+          cuenta,
+          documentoFirmado,
+          attachments: documentosAdjuntosCorreo,
+          prevNotification: persistResult.prevNotificacionProveedores,
+          nowIso,
+          graphContext: getGraphContext(req)
+        });
+      } catch (notifyErr) {
+        logger.warn(
+          `No se pudo notificar la firma manual de ${cuenta.public_id || cuenta.id}:`,
+          notifyErr?.message || notifyErr
+        );
       }
     }
-    const adjuntos = {
-      ...prevAdjuntos,
-      firma,
-      soportes: {
-        ...prevSoportes,
-        carpeta: uploadResult.carpeta || prevSoportes.carpeta || "",
-        actualizado_en: nowIso,
-        cuenta_cobro_firmada: {
-          id: documentoFirmado.id || null,
-          nombre: documentoFirmado.nombre || defaultName,
-          url: documentoFirmado.url || ""
-        }
-      }
-    };
-
-    const estadoAprobado = await getCuentaCobroEstadoAprobado();
-    await pool.query(
-      `
-      UPDATE cuenta_cobro
-      SET datos_adjuntos = $1::jsonb,
-          estado = $2::tipo_estado_reporte,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = $3
-      `,
-      [JSON.stringify(adjuntos), estadoAprobado, cuenta.id]
-    );
 
     return res.json({
       ok: true,
       cuenta_id: String(cuenta.public_id || cuenta.id || ""),
       estado_cuenta: estadoAprobado,
-      documento_firmado_url: documentoFirmado.url || null
+      documento_firmado_url: documentoFirmado.url || null,
+      notificacion_proveedores: notificacionProveedores
     });
   } catch (err) {
+    if (err?.code === "ESTADO_ENUM_UNRESOLVED") {
+      return res.status(503).json({
+        error: "Estado de firma no disponible temporalmente."
+      });
+    }
     if (err?.code === "PUBLIC_ID_NOT_FOUND") {
       return res.status(404).json({ error: "Cuenta no encontrada" });
     }
@@ -2587,6 +3795,11 @@ async function adjuntarFirmaCuenta(req, res) {
     if (err?.code === "GRAPH_TOKEN_ERROR") {
       return res.status(502).json({
         error: "No se pudo autenticar OneDrive (Microsoft Graph). Verifica credenciales y permisos."
+      });
+    }
+    if (err?.code === "SIGNED_PDF_UPLOAD_URL_MISSING") {
+      return res.status(502).json({
+        error: "OneDrive no devolvió un enlace válido para el PDF firmado."
       });
     }
     const status = parseGraphErrorStatus(err?.message || "");
@@ -2623,11 +3836,26 @@ module.exports = {
   iniciarFirmaCuenta,
   reconciliarFirmaCuenta,
   reiniciarFirmaCuenta,
+  subirDocumentosManualesCuenta,
   adjuntarFirmaCuenta,
   persistirDiagnosticoFirmaCuenta,
   __private: {
     resolverCancelacionIntentoFirma,
+    resolverCancelacionBestEffort,
+    resolverCancelacionParaNuevoIntentoFirma,
     limpiarSoportesDerivadosFirma,
-    buildFirmaArchivada
+    buildFirmaArchivada,
+    buildNotificacionEnlaceFirma,
+    enviarNotificacionEnlaceFirma,
+    persistirNotificacionEnlaceFirma,
+    esFirmaReutilizable,
+    clasificarIntentoFirmaCuenta,
+    obtenerSiguienteContractIdFirma,
+    archivarIntentoFirmaCuenta,
+    firmaActualCoincideConEsperada,
+    completarPlaceholderFirmaCuenta,
+    marcarPlaceholderFirmaFallida,
+    buildRespuestaFirmaFinalizada,
+    esCierreFirmaFinalizada
   }
 };

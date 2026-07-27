@@ -1,4 +1,5 @@
 const { pool: defaultPool } = require("../db");
+const crypto = require("node:crypto");
 
 function asPlainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -25,6 +26,118 @@ function buildCuentaFirmaDiagnosticoFromResolution(resolution = {}, nowIso = new
 
 function cuentasFirmaAutocierreHabilitado(value = process.env.CUENTAS_FIRMA_AUTOCIERRE) {
   return ["true", "1", "yes", "y", "si", "on"].includes(String(value || "").trim().toLowerCase());
+}
+
+function sanitizeAttemptDiscriminator(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/^[_\-.]+|[_\-.]+$/g, "")
+    .slice(0, 120);
+}
+
+function getAttemptDiscriminator(resolution = {}, cuenta = {}) {
+  const diagnostico = asPlainObject(resolution.diagnostico);
+  const firma = asPlainObject(asPlainObject(cuenta.datos_adjuntos).firma);
+  return sanitizeAttemptDiscriminator(
+    resolution.contractId ||
+    resolution.requestId ||
+    diagnostico.contract_id ||
+    diagnostico.request_id ||
+    firma.contract_id ||
+    firma.request_id ||
+    resolution.signatureId ||
+    diagnostico.signature_id
+  );
+}
+
+function getContentSha12(buffer) {
+  if (!Buffer.isBuffer(buffer)) return "";
+  return crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 12);
+}
+
+function buildAttemptUploadFiles({ resolution = {}, cuenta = {}, extraFiles = [] } = {}) {
+  const discriminator = getAttemptDiscriminator(resolution, cuenta);
+  if (!discriminator) {
+    return { discriminator: "", signedFileName: "", prefixedExtraFiles: [] };
+  }
+  const signedSha12 = getContentSha12(resolution?.signedPdf?.buffer);
+  const signedFileName = `CuentaCobroFirmada_${discriminator}${signedSha12 ? `_${signedSha12}` : ""}.pdf`;
+  const prefixedExtraFiles = (Array.isArray(extraFiles) ? extraFiles : []).map((file) => {
+    const kind = sanitizeAttemptDiscriminator(file?.kind || "archivo") || "archivo";
+    const sha12 = getContentSha12(file?.buffer);
+    return {
+      ...file,
+      fileName: `${discriminator}_${kind}${sha12 ? `_${sha12}` : ""}.pdf`
+    };
+  });
+  return { discriminator, signedFileName, prefixedExtraFiles };
+}
+
+function validarCuentaAntesDeCerrar({
+  cuenta,
+  expectedRequestId = "",
+  estadoAprobado = null,
+  estadoEnFirma = null
+} = {}) {
+  if (!cuenta) {
+    return { ok: false, reason: "firma_cambiada", estadoCuenta: null, documentoFirmadoUrl: null };
+  }
+  const adjuntos = asPlainObject(cuenta.datos_adjuntos);
+  const firma = asPlainObject(adjuntos.firma);
+  const documentoFirmadoUrl = getDocumentoFirmadoUrl(adjuntos);
+  if (
+    Boolean(documentoFirmadoUrl) ||
+    Boolean(estadoAprobado && cuenta.estado === estadoAprobado)
+  ) {
+    return {
+      ok: false,
+      reason: "firma_finalizada",
+      estadoCuenta: cuenta.estado || null,
+      documentoFirmadoUrl: documentoFirmadoUrl || null
+    };
+  }
+  if (cuenta.estado !== estadoEnFirma) {
+    return {
+      ok: false,
+      reason: "no_en_firma",
+      estadoCuenta: cuenta.estado || null,
+      documentoFirmadoUrl: documentoFirmadoUrl || null
+    };
+  }
+
+  const expected = String(expectedRequestId || "").trim();
+  const current = String(firma.request_id || "").trim();
+  if (expected && current !== expected) {
+    return {
+      ok: false,
+      reason: "firma_cambiada",
+      estadoCuenta: cuenta.estado || null,
+      documentoFirmadoUrl: documentoFirmadoUrl || null
+    };
+  }
+  return { ok: true, estadoCuenta: cuenta.estado || null, documentoFirmadoUrl: null };
+}
+
+async function leerCuentaParaPrecheck(pool, cuentaId) {
+  const sql = `
+    SELECT id, public_id, estado, datos_adjuntos
+    FROM cuenta_cobro
+    WHERE id = $1
+    LIMIT 1
+  `;
+  if (typeof pool.query === "function") {
+    const result = await pool.query(sql, [cuentaId]);
+    return result.rows[0] || null;
+  }
+  const client = await pool.connect();
+  try {
+    const result = await client.query(sql, [cuentaId]);
+    return result.rows[0] || null;
+  } finally {
+    client.release();
+  }
 }
 
 function getDefaultDeps() {
@@ -106,12 +219,51 @@ async function cerrarCuentaCobroConFirmaResuelta({
   const estadoAprobado = await getCuentaCobroEstadoAprobado();
   const nowIso = new Date().toISOString();
   const signedPdf = resolution.signedPdf;
+  const expectedRequestId = String(
+    resolution.requestId ||
+    asPlainObject(resolution.diagnostico).request_id ||
+    asPlainObject(asPlainObject(cuenta.datos_adjuntos).firma).request_id ||
+    ""
+  ).trim();
+  const precheckCuenta = await leerCuentaParaPrecheck(pool, cuenta.id);
+  const precheck = validarCuentaAntesDeCerrar({
+    cuenta: precheckCuenta,
+    expectedRequestId,
+    estadoAprobado,
+    estadoEnFirma
+  });
+  if (!precheck.ok) {
+    return {
+      updated: false,
+      raceLost: true,
+      reason: precheck.reason,
+      estadoCuenta: precheck.estadoCuenta,
+      documentoFirmadoUrl: precheck.documentoFirmadoUrl
+    };
+  }
+
+  const {
+    discriminator,
+    signedFileName,
+    prefixedExtraFiles
+  } = buildAttemptUploadFiles({
+    resolution,
+    cuenta,
+    extraFiles: resolution.extraFiles || []
+  });
+  if (!discriminator) {
+    return {
+      updated: false,
+      signed: false,
+      reason: "sin_identificador_intento"
+    };
+  }
   let seguridadEnAttachments = (resolution.extraFiles || [])
     .some((file) => file?.kind === "seguridad_social_firma" && isPdfBuffer(file.buffer));
   const uploadResult = await uploadSignedPdfToOneDrive(
     cuenta,
     signedPdf.buffer,
-    signedPdf.fileName
+    signedFileName
   );
   const documentoFirmado = {
     ...uploadResult.archivo,
@@ -124,7 +276,7 @@ async function cerrarCuentaCobroConFirmaResuelta({
   try {
     const extrasResult = await uploadClickSignExtraFilesToOneDrive(
       cuenta,
-      resolution.extraFiles || [],
+      prefixedExtraFiles,
       uploadResult.carpeta || ""
     );
     uploadedExtras = extrasResult.uploaded || [];
@@ -136,7 +288,7 @@ async function cerrarCuentaCobroConFirmaResuelta({
     cuenta,
     signedPdf: {
       buffer: signedPdf.buffer,
-      fileName: signedPdf.fileName || ""
+      fileName: signedFileName
     },
     extraFiles: resolution.extraFiles || []
   });
@@ -168,6 +320,24 @@ async function cerrarCuentaCobroConFirmaResuelta({
     const currentFirma = asPlainObject(currentAdjuntos.firma);
     prevNotificacionProveedores = asPlainObject(currentFirma.notificacion_proveedores);
     const currentDocumentoUrl = getDocumentoFirmadoUrl(currentAdjuntos);
+    const finalCheck = validarCuentaAntesDeCerrar({
+      cuenta: lockedCuenta,
+      expectedRequestId,
+      estadoAprobado,
+      estadoEnFirma
+    });
+    if (!finalCheck.ok) {
+      await client.query("COMMIT");
+      return {
+        updated: false,
+        raceLost: true,
+        reason: finalCheck.reason,
+        estadoCuenta: lockedCuenta.estado || null,
+        documentoFirmadoUrl: currentDocumentoUrl || null,
+        documentoFirmado,
+        uploadedExtras
+      };
+    }
     if (lockedCuenta.estado !== estadoEnFirma || currentDocumentoUrl) {
       await client.query("COMMIT");
       return {
@@ -343,5 +513,13 @@ module.exports = {
   getDocumentoFirmadoUrl,
   buildCuentaFirmaDiagnosticoFromResolution,
   cuentasFirmaAutocierreHabilitado,
-  cerrarCuentaCobroConFirmaResuelta
+  cerrarCuentaCobroConFirmaResuelta,
+  __private: {
+    sanitizeAttemptDiscriminator,
+    getAttemptDiscriminator,
+    getContentSha12,
+    buildAttemptUploadFiles,
+    validarCuentaAntesDeCerrar,
+    leerCuentaParaPrecheck
+  }
 };

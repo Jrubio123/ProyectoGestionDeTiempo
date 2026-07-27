@@ -231,12 +231,59 @@ window.soportesCuentasCobroApp = function () {
 
             this.forzandoFirmaId = public_id;
             try {
-                await axios.post(
+                const iniciarFirma = (forzarSinCancelacion = false) => axios.post(
                     `${API}/cuentas-cobro/${public_id}/firma/iniciar`,
-                    { force: true },
+                    {
+                        force: true,
+                        ...(forzarSinCancelacion ? { forzar_sin_cancelacion: true } : {})
+                    },
                     { headers: { "Content-Type": "application/json" } }
                 );
-                window.alert("Proceso de firma reiniciado correctamente. Se enviará un nuevo enlace al consultor.");
+
+                let response;
+                try {
+                    response = await iniciarFirma();
+                } catch (err) {
+                    const motivo = err?.response?.data?.motivo;
+                    const cancelacionFallida = [
+                        "cancelacion_fallida",
+                        "sin_identificadores_cancelacion"
+                    ].includes(motivo);
+                    if (!cancelacionFallida) throw err;
+
+                    const forzar = window.confirm(
+                        "La firma anterior no existe o no se pudo cancelar en Click&Sign. " +
+                        "¿Deseas forzar el reinicio sin cancelación? Esta acción requiere rol Administrador y queda auditada."
+                    );
+                    if (!forzar) {
+                        window.alert(err?.response?.data?.error || "No se reinició la firma.");
+                        return;
+                    }
+                    response = await iniciarFirma(true);
+                }
+
+                const data = response?.data || {};
+                if (data.ya_firmada === true) {
+                    window.alert("La cuenta ya fue firmada; no requiere reinicio.");
+                    if (
+                        data.documento_firmado_url &&
+                        window.confirm("¿Deseas abrir el documento firmado?")
+                    ) {
+                        window.open(data.documento_firmado_url, "_blank", "noopener,noreferrer");
+                    }
+                    this.cerrarModalFirmasAtascadas();
+                    await this.cargarSoportes();
+                    return;
+                }
+                const notificacion = data.notificacion_enlace || {};
+                if (notificacion.enviado === true) {
+                    window.alert(`Se envió el nuevo enlace de firma a ${notificacion.destinatario}.`);
+                } else {
+                    window.prompt(
+                        "No se pudo enviar el correo. Copia y comparte este enlace con el consultor:",
+                        data.url_firma || ""
+                    );
+                }
                 this.cerrarModalFirmasAtascadas();
                 await this.cargarSoportes();
             } catch (err) {

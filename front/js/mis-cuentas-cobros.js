@@ -7,6 +7,8 @@ window.misCuentasApp = function () {
         cuentas: [],
         filtros: { inicio: "", fin: "" },
         modal: { open: false, data: null, detalles: [] },
+        modalSubir: { open: false, cuenta: null, archivos: [], subiendo: false, error: "" },
+        modalDocs: { open: false, docs: [] },
         syncFirmas: {
             reconciling: false,
             lastRunAt: 0,
@@ -143,27 +145,125 @@ window.misCuentasApp = function () {
             }
         },
 
-        async iniciarFirma(cuenta) {
+        abrirSubir(cuenta) {
             if (!cuenta?.id) return;
-            const confirmar = confirm(`Se iniciara la firma digital de la cuenta #${cuenta.id.split("-")[0]}. Deseas continuar?`);
-            if (!confirmar) return;
+            this.modalSubir = {
+                open: true,
+                cuenta,
+                archivos: [],
+                subiendo: false,
+                error: ""
+            };
+        },
+
+        cerrarSubir() {
+            if (this.modalSubir.subiendo) return;
+            this.modalSubir = {
+                open: false,
+                cuenta: null,
+                archivos: [],
+                subiendo: false,
+                error: ""
+            };
+        },
+
+        async onSeleccionArchivos(event) {
+            const input = event?.target;
+            const seleccionados = Array.from(input?.files || []);
+            const extensionesPermitidas = new Set(["pdf", "jpg", "jpeg", "png"]);
+            const tiposPermitidos = new Set(["application/pdf", "image/jpeg", "image/jpg", "image/png"]);
+            const errores = [];
+            this.modalSubir.error = "";
 
             try {
-                const res = await axios.post(`${API}/cuentas-cobro/${cuenta.id}/firma/iniciar`);
-                const urlFirma = res?.data?.url_firma || "";
-                if (urlFirma) {
-                    window.open(urlFirma, "_blank", "noopener");
-                    alert("Proceso de firma iniciado. Completa la firma en la nueva pestana.");
-                    setTimeout(() => this.cargarHistorial({ reconciliar: true }), 10000);
-                    setTimeout(() => this.cargarHistorial({ reconciliar: true }), 25000);
-                } else {
-                    alert("Se inicio el proceso, pero no se recibio una URL de firma.");
+                for (const file of seleccionados) {
+                    const extension = String(file.name || "").toLowerCase().split(".").pop();
+                    const tipo = String(file.type || "").toLowerCase();
+                    if (!extensionesPermitidas.has(extension) || (tipo && !tiposPermitidos.has(tipo))) {
+                        errores.push(`${file.name}: formato no permitido.`);
+                        continue;
+                    }
+                    if (file.size > 8 * 1024 * 1024) {
+                        errores.push(`${file.name}: supera el máximo de 8MB.`);
+                        continue;
+                    }
+
+                    try {
+                        const base64 = await new Promise((resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(String(reader.result || ""));
+                            reader.onerror = () => reject(reader.error || new Error("No se pudo leer el archivo."));
+                            reader.readAsDataURL(file);
+                        });
+                        this.modalSubir.archivos.push({
+                            nombre: file.name,
+                            base64,
+                            size: file.size,
+                            tipo: file.type
+                        });
+                    } catch (e) {
+                        errores.push(`${file.name}: no se pudo leer.`);
+                    }
                 }
-                await this.cargarHistorial({ reconciliar: true });
-            } catch (e) {
-                const msg = e?.response?.data?.error || "No se pudo iniciar la firma digital.";
-                alert(msg);
+            } finally {
+                if (input) input.value = "";
             }
+
+            if (errores.length) {
+                this.modalSubir.error = errores.join(" ");
+            }
+        },
+
+        quitarArchivo(idx) {
+            this.modalSubir.archivos.splice(idx, 1);
+            this.modalSubir.error = "";
+        },
+
+        get puedeAceptarSubida() {
+            return this.modalSubir.archivos.length >= 2 && !this.modalSubir.subiendo;
+        },
+
+        async confirmarSubida() {
+            if (!this.puedeAceptarSubida || !this.modalSubir.cuenta?.id) return;
+            this.modalSubir.subiendo = true;
+            this.modalSubir.error = "";
+
+            try {
+                await axios.post(
+                    `${API}/cuentas-cobro/${this.modalSubir.cuenta.id}/documentos`,
+                    {
+                        archivos: this.modalSubir.archivos.map((archivo) => ({
+                            base64: archivo.base64,
+                            nombre: archivo.nombre
+                        }))
+                    }
+                );
+                this.modalSubir = {
+                    open: false,
+                    cuenta: null,
+                    archivos: [],
+                    subiendo: false,
+                    error: ""
+                };
+                await this.cargarHistorial({ reconciliar: false });
+                alert("Documentos subidos correctamente.");
+            } catch (e) {
+                this.modalSubir.error = e?.response?.data?.error || "No se pudieron subir los documentos.";
+            } finally {
+                this.modalSubir.subiendo = false;
+            }
+        },
+
+        getDocumentosSubidos(cuenta) {
+            const documentos = cuenta?.datos_adjuntos?.soportes?.documentos_manuales;
+            return Array.isArray(documentos) ? documentos : [];
+        },
+
+        verDocumentos(cuenta) {
+            this.modalDocs = {
+                open: true,
+                docs: this.getDocumentosSubidos(cuenta)
+            };
         },
 
         getUrlCuentaFirmada(cuenta) {
@@ -194,15 +294,13 @@ window.misCuentasApp = function () {
         },
 
         estadoFirma(cuenta) {
-            if (this.estaFirmada(cuenta)) return "Firmada";
+            if (this.estaFirmada(cuenta)) return "Registrada";
             const firmaEstado = String(cuenta?.datos_adjuntos?.firma?.estado || "").toLowerCase().trim();
-            if (["pending", "in_progress", "en_firma"].includes(firmaEstado)) return "En firma";
-            if (["rejected", "rechazado", "cancelado", "failed"].includes(firmaEstado)) return "Rechazada";
-            if (firmaEstado) return firmaEstado;
-            return String(cuenta?.estado || "Pendiente");
+            if (["pending", "in_progress", "en_firma", "started", "sent"].includes(firmaEstado)) return "En proceso";
+            return "Pendiente";
         },
 
-        puedeFirmar(cuenta) {
+        puedeSubir(cuenta) {
             return !this.estaFirmada(cuenta);
         },
 

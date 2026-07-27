@@ -1,6 +1,19 @@
 const { pool } = require("../db");
 
-const FIRMA_CUENTA_TIMEOUT_HOURS = 24;
+const FIRMA_CUENTA_TIMEOUT_DEFAULT_HOURS = 24;
+
+function parseFirmaCuentaTimeoutHours(value) {
+  const hours = Number(value);
+  return Number.isFinite(hours) && hours > 0
+    ? hours
+    : FIRMA_CUENTA_TIMEOUT_DEFAULT_HOURS;
+}
+
+function getFirmaCuentaTimeoutHours() {
+  return parseFirmaCuentaTimeoutHours(process.env.CUENTAS_FIRMA_TIMEOUT_HORAS);
+}
+
+const FIRMA_CUENTA_TIMEOUT_HOURS = getFirmaCuentaTimeoutHours();
 const FIRMA_CUENTA_TIMEOUT_EVENT = "SIGNATURE_TIMEOUT";
 const FIRMA_CUENTA_TIMEOUT_ESTADO = "expired";
 
@@ -21,22 +34,9 @@ function normalizeFirmaValue(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function normalizeEventoValue(value) {
-  return String(value || "").trim().toUpperCase();
-}
-
 function parseDateMs(value) {
   const ms = Date.parse(String(value || ""));
   return Number.isFinite(ms) ? ms : null;
-}
-
-function isStartSignatureEvent(value) {
-  return normalizeEventoValue(value) === "START_SIGNATURE";
-}
-
-function getLastFirmaEvent(firma) {
-  const eventos = Array.isArray(firma?.eventos) ? firma.eventos : [];
-  return eventos.length ? eventos[eventos.length - 1] : null;
 }
 
 function isFirmaCuentaTimedOut(firma, now = new Date(), timeoutHours = FIRMA_CUENTA_TIMEOUT_HOURS) {
@@ -46,24 +46,21 @@ function isFirmaCuentaTimedOut(firma, now = new Date(), timeoutHours = FIRMA_CUE
   const estado = normalizeFirmaValue(firma.estado || "pending");
   if (!PENDING_FIRMA_ESTADOS.has(estado)) return false;
 
-  const lastEvent = getLastFirmaEvent(firma);
-  const ultimoEvento = firma.ultimo_evento || "";
-  const lastEventStatus = lastEvent?.status || "";
-  if (!isStartSignatureEvent(ultimoEvento) && !isStartSignatureEvent(lastEventStatus)) return false;
-
   const iniciadoMs = parseDateMs(firma.iniciado_en);
   if (!iniciadoMs) return false;
 
   const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now || ""));
   if (!Number.isFinite(nowMs)) return false;
 
-  return nowMs - iniciadoMs > timeoutHours * 60 * 60 * 1000;
+  const effectiveTimeoutHours = parseFirmaCuentaTimeoutHours(timeoutHours);
+  return nowMs - iniciadoMs > effectiveTimeoutHours * 60 * 60 * 1000;
 }
 
 function buildFirmaCuentaTimeout(firma, { now = new Date(), timeoutHours = FIRMA_CUENTA_TIMEOUT_HOURS, origen = "reconciliar-job" } = {}) {
   const nowIso = now.toISOString();
   const eventosPrev = Array.isArray(firma?.eventos) ? firma.eventos.slice(-19) : [];
-  const detalle = `Firma expirada por timeout tras ${timeoutHours} horas sin documento firmado.`;
+  const effectiveTimeoutHours = parseFirmaCuentaTimeoutHours(timeoutHours);
+  const detalle = `Firma expirada por timeout tras ${effectiveTimeoutHours} horas sin documento firmado.`;
 
   return {
     ...firma,
@@ -166,6 +163,8 @@ module.exports = {
   FIRMA_CUENTA_TIMEOUT_HOURS,
   FIRMA_CUENTA_TIMEOUT_EVENT,
   FIRMA_CUENTA_TIMEOUT_ESTADO,
+  parseFirmaCuentaTimeoutHours,
+  getFirmaCuentaTimeoutHours,
   isFirmaCuentaTimedOut,
   buildFirmaCuentaTimeout,
   marcarCuentaCobroFirmaExpirada

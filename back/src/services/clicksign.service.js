@@ -46,6 +46,24 @@ function asPlainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+function getFirmaWebhookMismatch(prevFirma = {}, { requestId = "", contractId = "", signatureId = "" } = {}) {
+  const firma = asPlainObject(prevFirma);
+  const eventIds = {
+    request_id: String(requestId || "").trim(),
+    contract_id: String(contractId || "").trim(),
+    signature_id: String(signatureId || "").trim()
+  };
+  const activeIds = {
+    request_id: String(firma.request_id || "").trim(),
+    contract_id: String(firma.contract_id || "").trim(),
+    signature_id: String(firma.signature_id || "").trim()
+  };
+  const mismatch = Object.keys(eventIds).some((key) =>
+    eventIds[key] && activeIds[key] && eventIds[key] !== activeIds[key]
+  );
+  return { mismatch, eventIds, activeIds };
+}
+
 async function buscarCuentaCobroFirmaParaWebhook(client, { publicIdFromEvent = "", requestId = "", contractId = "" } = {}) {
   const CUENTA_COBRO_SELECT = `
         SELECT
@@ -94,11 +112,16 @@ async function registrarHintWebhookCuentaCobro({
   contractId = "",
   signatureId = "",
   rawStatus = "",
-  status = ""
+  status = "",
+  deps = {}
 } = {}) {
-  const { getCuentaCobroEstadoEnFirma } = getIndexHelpers();
+  const { getCuentaCobroEstadoEnFirma } = deps.getCuentaCobroEstadoEnFirma
+    ? deps
+    : getIndexHelpers();
   const estadoEnFirma = await getCuentaCobroEstadoEnFirma();
-  const client = await pool.connect();
+  const dbPool = deps.pool || pool;
+  const logger = deps.logger || console;
+  const client = await dbPool.connect();
   try {
     await client.query("BEGIN");
     const cuenta = await buscarCuentaCobroFirmaParaWebhook(client, { publicIdFromEvent, requestId, contractId });
@@ -109,6 +132,15 @@ async function registrarHintWebhookCuentaCobro({
 
     const prevAdjuntos = asPlainObject(cuenta.datos_adjuntos);
     const prevFirma = asPlainObject(prevAdjuntos.firma);
+    const identity = getFirmaWebhookMismatch(prevFirma, { requestId, contractId, signatureId });
+    if (identity.mismatch) {
+      logger.warn("Webhook Click&Sign de cuenta de cobro no coincide con la firma activa:", {
+        evento: identity.eventIds,
+        firma_activa: identity.activeIds
+      });
+      await client.query("ROLLBACK");
+      return { cuenta: null, estadoEnFirma, mismatch: true };
+    }
     const eventosPrev = Array.isArray(prevFirma.eventos) ? prevFirma.eventos.slice(-19) : [];
     const nowIso = new Date().toISOString();
     const estadoPrevioSeguro = String(prevFirma.estado || "").trim().toLowerCase() === "signed"
@@ -117,16 +149,16 @@ async function registrarHintWebhookCuentaCobro({
     const firma = {
       ...prevFirma,
       estado: estadoPrevioSeguro,
-      request_id: requestId || prevFirma.request_id || null,
-      contract_id: contractId || prevFirma.contract_id || null,
-      signature_id: signatureId || prevFirma.signature_id || null,
+      request_id: prevFirma.request_id || requestId || null,
+      contract_id: prevFirma.contract_id || contractId || null,
+      signature_id: prevFirma.signature_id || signatureId || null,
       actualizado_en: nowIso,
       ultimo_evento: rawStatus || status || "webhook",
       diagnostico: {
         ultimo_check_en: nowIso,
-        request_id: requestId || prevFirma.request_id || null,
-        contract_id: contractId || prevFirma.contract_id || null,
-        signature_id: signatureId || prevFirma.signature_id || null,
+        request_id: prevFirma.request_id || requestId || null,
+        contract_id: prevFirma.contract_id || contractId || null,
+        signature_id: prevFirma.signature_id || signatureId || null,
         rawStatus: rawStatus || null,
         normalizedStatus: status || null,
         catalogSource: null,
@@ -149,7 +181,7 @@ async function registrarHintWebhookCuentaCobro({
       ...prevAdjuntos,
       firma
     };
-    await client.query(
+    const updateResult = await client.query(
       `
       UPDATE cuenta_cobro
       SET datos_adjuntos = $1::jsonb,
@@ -160,6 +192,10 @@ async function registrarHintWebhookCuentaCobro({
       `,
       [JSON.stringify(adjuntos), cuenta.id, estadoEnFirma]
     );
+    if (updateResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return { cuenta: null, estadoEnFirma };
+    }
     await client.query("COMMIT");
 
     return {
@@ -212,6 +248,11 @@ async function procesarWebhookCuentaCobroEstricto({
     cuenta,
     prevAdjuntos: asPlainObject(cuenta.datos_adjuntos)
   });
+  const activeFirma = asPlainObject(asPlainObject(cuenta.datos_adjuntos).firma);
+  const expectedRequestId = resolution.requestId ||
+    asPlainObject(resolution.diagnostico).request_id ||
+    activeFirma.request_id ||
+    "";
 
   if (resolution.signed) {
     const cierre = await cerrarCuentaCobroConFirmaResuelta({
@@ -234,7 +275,8 @@ async function procesarWebhookCuentaCobroEstricto({
             reason: "firmado_verificado_pendiente_cierre"
           }
         },
-        origen: "webhook"
+        origen: "webhook",
+        expectedRequestId
       });
     }
     return;
@@ -245,7 +287,8 @@ async function procesarWebhookCuentaCobroEstricto({
     estadoEnFirma,
     status: resolution.normalizedStatus === "rejected" ? "rejected" : asPlainObject(asPlainObject(cuenta.datos_adjuntos).firma).estado || "pending",
     resolution,
-    origen: "webhook"
+    origen: "webhook",
+    expectedRequestId
   });
 
   if (cuentasFirmaAutocierreHabilitado() && resolution.normalizedStatus !== "rejected") {
@@ -294,6 +337,10 @@ async function reintentarCuentaCobroFirma(cuentaId) {
         cuenta: cuentaStrict,
         prevAdjuntos: prevAdjuntosStrict
       });
+      const expectedRequestId = resolution.requestId ||
+        asPlainObject(resolution.diagnostico).request_id ||
+        prevFirmaStrict.request_id ||
+        "";
       if (resolution.signed) {
         const cierre = await cerrarCuentaCobroConFirmaResuelta({
           cuenta: cuentaStrict,
@@ -315,7 +362,8 @@ async function reintentarCuentaCobroFirma(cuentaId) {
                 reason: "firmado_verificado_pendiente_cierre"
               }
             },
-            origen: "webhook-reintento"
+            origen: "webhook-reintento",
+            expectedRequestId
           });
         }
         return;
@@ -326,7 +374,8 @@ async function reintentarCuentaCobroFirma(cuentaId) {
         estadoEnFirma,
         status: resolution.normalizedStatus === "rejected" ? "rejected" : prevFirmaStrict.estado || "pending",
         resolution,
-        origen: "webhook-reintento"
+        origen: "webhook-reintento",
+        expectedRequestId
       });
     } catch (err) {
       console.error("Error en reintento diferido de cuenta cobro firmada:", err?.message || err);
@@ -567,5 +616,9 @@ async function processSignatureEvent(event) {
 
 module.exports = {
   processSignatureEvent,
-  reintentarCuentaCobroFirma
+  reintentarCuentaCobroFirma,
+  __private: {
+    getFirmaWebhookMismatch,
+    registrarHintWebhookCuentaCobro
+  }
 };

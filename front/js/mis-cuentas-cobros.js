@@ -75,6 +75,9 @@ window.misCuentasApp = function () {
         },
 
         async reconciliarFirmasPendientes() {
+            // Firma Click&Sign deshabilitada: la reconciliación automática ya no aplica (flujo de carga manual).
+            return;
+            /* eslint-disable no-unreachable */
             if (this.syncFirmas.reconciling) return;
             const now = Date.now();
             if (now - this.syncFirmas.lastRunAt < this.syncFirmas.cooldownMs) return;
@@ -301,7 +304,8 @@ window.misCuentasApp = function () {
         },
 
         puedeSubir(cuenta) {
-            return !this.estaFirmada(cuenta);
+            // Mostrar "Subir archivos" mientras no existan soportes manuales ni una cuenta ya firmada (Click&Sign legacy).
+            return this.getDocumentosSubidos(cuenta).length === 0 && !this.getUrlCuentaFirmada(cuenta);
         },
 
         limpiarFiltros() {

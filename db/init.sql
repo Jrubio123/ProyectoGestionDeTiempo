@@ -722,7 +722,7 @@ CREATE TABLE reporte_horas
 
     -- Información del reporte
     requerimiento TEXT,
-    perfil_fabrica VARCHAR(100),
+        perfil_fabrica VARCHAR(100),
     wricef VARCHAR(120),
     es_costo_total BOOLEAN DEFAULT false,
     nro_caso_int_ext TEXT,

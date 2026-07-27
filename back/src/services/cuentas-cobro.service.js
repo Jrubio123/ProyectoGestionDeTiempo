@@ -19,6 +19,14 @@ const PDFDocument = require("pdfkit");
 
 const normalizeValue = (value) => String(value || "").toLowerCase().trim();
 const ESTADO_CUENTA_PENDIENTE = "Pendiente";
+// Firma digital Click&Sign de CUENTAS DE COBRO: DESHABILITADA por costo (2026-07-27).
+// El flujo pasó a descarga de la cuenta + carga manual de soportes (POST /cuentas-cobro/:id/documentos).
+// El código Click&Sign se conserva intacto; se reactiva con CUENTAS_FIRMA_CLICKSIGN_HABILITADO=true.
+function cuentasFirmaClickSignHabilitado() {
+  return ["true", "1", "yes", "si", "on"].includes(
+    String(process.env.CUENTAS_FIRMA_CLICKSIGN_HABILITADO || "false").trim().toLowerCase()
+  );
+}
 const FIRMA_STARTING_MAX_AGE_MS = 3 * 60 * 1000;
 const FIRMA_ESTADOS_REUTILIZABLES = new Set(["pending", "in_progress", "en_firma", "started", "sent"]);
 const FIRMA_ESTADOS_TERMINALES = new Set([
@@ -1907,6 +1915,13 @@ async function buscarSeguridadSocialClickSign(req, res, deps = {}) {
 }
 
 async function iniciarFirmaCuenta(req, res, deps = {}) {
+  // Firma Click&Sign de cuentas de cobro deshabilitada: no se inicia firma ni se envían correos de enlace.
+  if (!cuentasFirmaClickSignHabilitado()) {
+    return res.status(410).json({
+      error: "La firma digital de cuentas de cobro está deshabilitada. Descarga la cuenta y sube los documentos firmados desde 'Historial de Cobros'.",
+      firma_clicksign_deshabilitada: true
+    });
+  }
   const runtimeDeps = deps &&
     typeof deps === "object" &&
     !Array.isArray(deps)
@@ -2737,6 +2752,13 @@ async function reiniciarFirmaCuentaLegacy(req, res) {
 }
 
 async function reconciliarFirmaCuenta(req, res) {
+  // Firma Click&Sign de cuentas de cobro deshabilitada: no se reconcilia contra Click&Sign.
+  if (!cuentasFirmaClickSignHabilitado()) {
+    return res.status(410).json({
+      error: "La firma digital de cuentas de cobro está deshabilitada.",
+      firma_clicksign_deshabilitada: true
+    });
+  }
   const {
     isClickSignConfigured,
     assertCuentaCobroOwnerAccess,
@@ -2951,6 +2973,13 @@ async function reconciliarFirmaCuenta(req, res) {
 }
 
 async function reiniciarFirmaCuenta(req, res, deps = {}) {
+  // Firma Click&Sign de cuentas de cobro deshabilitada: no se reinicia la firma.
+  if (!cuentasFirmaClickSignHabilitado()) {
+    return res.status(410).json({
+      error: "La firma digital de cuentas de cobro está deshabilitada.",
+      firma_clicksign_deshabilitada: true
+    });
+  }
   const runtimeDeps = deps &&
     typeof deps === "object" &&
     !Array.isArray(deps)

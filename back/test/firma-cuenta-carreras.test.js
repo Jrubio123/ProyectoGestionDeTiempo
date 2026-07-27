@@ -1,6 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
+// La firma Click&Sign de cuentas de cobro está deshabilitada por defecto en runtime,
+// pero su lógica se conserva y estas pruebas la ejercitan con el flag activado.
+process.env.CUENTAS_FIRMA_CLICKSIGN_HABILITADO = "true";
+
 const {
   buscarSeguridadSocialClickSign,
   iniciarFirmaCuenta,

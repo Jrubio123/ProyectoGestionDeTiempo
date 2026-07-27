@@ -15252,6 +15252,9 @@ let reconciliarContratosJobInterval = null;
 let reintentarCorreosJobInterval = null;
 setTimeout(() => {
   if (isShuttingDown) return;
+  // Firma Click&Sign de cuentas de cobro deshabilitada (flujo de carga manual).
+  // Reactivar el job de reconciliación con CUENTAS_FIRMA_CLICKSIGN_HABILITADO=true.
+  if (!["true", "1", "yes", "si", "on"].includes(String(process.env.CUENTAS_FIRMA_CLICKSIGN_HABILITADO || "false").trim().toLowerCase())) return;
   void jobReconciliarCuentasEnFirma();
   reconciliarJobInterval = setInterval(() => { void jobReconciliarCuentasEnFirma(); }, RECONCILIACION_JOB_INTERVAL_MS);
 }, 2 * 60 * 1000);

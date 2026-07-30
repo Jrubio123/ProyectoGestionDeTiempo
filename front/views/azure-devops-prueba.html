@@ -35,6 +35,7 @@
                 <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Proyecto</label>
                 <select
                     x-model="selectedProject"
+                    @change="loadCachedWorkItems()"
                     class="w-full p-2.5 border border-slate-300 rounded-lg text-sm bg-white">
                     <option value="">Selecciona un proyecto</option>
                     <option value="__all__">Todos los proyectos</option>
@@ -44,6 +45,7 @@
                 </select>
             </div>
             <button
+                x-show="loadedProject !== selectedProject"
                 type="button"
                 @click="loadWorkItems()"
                 :disabled="!selectedProject || loadingItems"
@@ -55,6 +57,24 @@
                             ? 'Consultar todos los proyectos'
                             : 'Consultar últimas 200 tareas')"></span>
             </button>
+            <button
+                x-show="loadedProject === selectedProject"
+                type="button"
+                @click="loadWorkItems(true)"
+                :disabled="loadingItems"
+                class="px-4 py-2.5 rounded-lg border border-indigo-300 text-indigo-700 text-sm font-semibold disabled:opacity-50">
+                Actualizar desde Azure DevOps
+            </button>
+        </div>
+        <div
+            x-show="lastLoadedAt"
+            class="mt-3 text-xs text-slate-500">
+            <span
+                class="font-semibold"
+                x-text="dataSource === 'cache'
+                    ? 'Datos reutilizados desde esta pestaña.'
+                    : 'Datos consultados en Azure DevOps.'"></span>
+            <span x-text="' Actualización: ' + formatLoadedAt() + '.'"></span>
         </div>
     </div>
 
@@ -62,7 +82,7 @@
         <div class="flex items-center justify-between gap-3 mb-4">
             <div>
                 <h2 class="font-bold text-slate-800">Filtros</h2>
-                <p class="text-xs text-slate-500">También puedes hacer clic sobre las gráficas.</p>
+                <p class="text-xs text-slate-500">Se aplican localmente sobre los datos de esta pestaña.</p>
             </div>
             <button
                 type="button"
@@ -77,7 +97,6 @@
                 <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Estado</label>
                 <select
                     x-model="filterState"
-                    @change="scheduleCharts()"
                     class="w-full p-2.5 border border-slate-300 rounded-lg text-sm bg-white">
                     <option value="">Todos</option>
                     <template x-for="state in stateOptions" :key="state">
@@ -90,7 +109,6 @@
                 <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Tipo</label>
                 <select
                     x-model="filterType"
-                    @change="scheduleCharts()"
                     class="w-full p-2.5 border border-slate-300 rounded-lg text-sm bg-white">
                     <option value="">Todos</option>
                     <template x-for="type in typeOptions" :key="type">
@@ -103,7 +121,6 @@
                 <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Responsable</label>
                 <select
                     x-model="filterAssignedTo"
-                    @change="scheduleCharts()"
                     class="w-full p-2.5 border border-slate-300 rounded-lg text-sm bg-white">
                     <option value="">Todos</option>
                     <template x-for="assignedTo in assignedToOptions" :key="assignedTo">
@@ -116,7 +133,6 @@
                 <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Prioridad</label>
                 <select
                     x-model="filterPriority"
-                    @change="scheduleCharts()"
                     class="w-full p-2.5 border border-slate-300 rounded-lg text-sm bg-white">
                     <option value="">Todas</option>
                     <template x-for="priority in priorityOptions" :key="priority">
@@ -125,38 +141,6 @@
                 </select>
             </div>
         </div>
-    </div>
-
-    <div x-show="workItems.length > 0" class="grid grid-cols-1 xl:grid-cols-2 gap-5">
-        <section class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-            <div class="mb-3">
-                <h2 class="font-bold text-slate-800">Registros por tipo de elemento</h2>
-                <p class="text-xs text-slate-500">Selecciona una porción para filtrar.</p>
-            </div>
-            <div class="relative h-80">
-                <canvas
-                    id="azure-devops-type-chart"
-                    role="img"
-                    aria-label="Gráfica de registros por tipo de elemento"></canvas>
-            </div>
-        </section>
-
-        <section class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-            <div class="mb-3">
-                <h2 class="font-bold text-slate-800">Registros por estado</h2>
-                <p class="text-xs text-slate-500">Selecciona una barra para filtrar.</p>
-            </div>
-            <div class="relative h-80">
-                <canvas
-                    id="azure-devops-state-chart"
-                    role="img"
-                    aria-label="Gráfica de registros por estado"></canvas>
-            </div>
-        </section>
-    </div>
-
-    <div x-show="chartError" class="p-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 text-sm">
-        <span x-text="chartError"></span>
     </div>
 
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -213,7 +197,10 @@
                     </template>
                     <tr x-show="!loadingItems && filteredWorkItems.length === 0">
                         <td colspan="9" class="px-4 py-10 text-center text-slate-400">
-                            No hay registros para los filtros seleccionados.
+                            <span
+                                x-text="loadedProject
+                                    ? 'No hay registros para los filtros seleccionados.'
+                                    : 'Consulta un proyecto para cargar sus datos.'"></span>
                         </td>
                     </tr>
                 </tbody>

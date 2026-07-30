@@ -61,6 +61,13 @@ window.auth = (function () {
         safeRemove(TOKEN_KEY);
         safeRemove(USER_KEY);
         safeRemove(GRAPH_TOKEN_KEY);
+        try {
+            Object.keys(sessionStorage)
+                .filter((key) => key.startsWith("azure-devops:"))
+                .forEach((key) => sessionStorage.removeItem(key));
+        } catch (e) {
+            // ignore
+        }
         if (window.axios) {
             delete window.axios.defaults.headers.common.Authorization;
         }

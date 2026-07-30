@@ -1,15 +1,7 @@
 window.azureDevOpsPruebaApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
-    const chartColors = [
-        "#4f46e5",
-        "#0ea5e9",
-        "#14b8a6",
-        "#f59e0b",
-        "#8b5cf6",
-        "#ef4444",
-        "#64748b",
-        "#ec4899"
-    ];
+    const CACHE_PREFIX = "azure-devops:work-items:v1";
+    const CACHE_TTL_MS = 15 * 60 * 1000;
 
     function authConfig() {
         const token = window.auth?.getToken?.() || localStorage.getItem("token");
@@ -31,30 +23,67 @@ window.azureDevOpsPruebaApp = function () {
             );
     }
 
-    function countBy(items, field) {
-        return items.reduce((counts, item) => {
-            const key = String(item?.[field] ?? "").trim() || "Sin definir";
-            counts.set(key, (counts.get(key) || 0) + 1);
-            return counts;
-        }, new Map());
+    function currentUserKey() {
+        const user = window.auth?.getUser?.() || {};
+        return String(user.id || user.email || "usuario").trim().toLowerCase();
+    }
+
+    function cacheKey(organization, project) {
+        return [
+            CACHE_PREFIX,
+            currentUserKey(),
+            String(organization || "").trim().toLowerCase(),
+            String(project || "").trim().toLowerCase()
+        ].join(":");
+    }
+
+    function readCache(organization, project) {
+        try {
+            const key = cacheKey(organization, project);
+            const raw = sessionStorage.getItem(key);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            const savedAt = Number(parsed?.savedAt || 0);
+            if (!savedAt || Date.now() - savedAt > CACHE_TTL_MS) {
+                sessionStorage.removeItem(key);
+                return null;
+            }
+            return parsed;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function writeCache(organization, project, data) {
+        try {
+            sessionStorage.setItem(
+                cacheKey(organization, project),
+                JSON.stringify({
+                    savedAt: Date.now(),
+                    data
+                })
+            );
+        } catch (error) {
+            // La memoria de la pestaña puede estar bloqueada o sin espacio.
+        }
     }
 
     return {
         loadingProjects: false,
         loadingItems: false,
         error: "",
-        chartError: "",
         organization: "",
         projects: [],
         selectedProject: "",
+        loadedProject: "",
         workItems: [],
         projectCount: 0,
+        dataSource: "",
+        lastLoadedAt: null,
         filterState: "",
         filterType: "",
         filterAssignedTo: "",
         filterPriority: "",
-        typeChart: null,
-        stateChart: null,
 
         async init() {
             await this.loadProjects();
@@ -66,9 +95,11 @@ window.azureDevOpsPruebaApp = function () {
             this.projects = [];
             this.workItems = [];
             this.selectedProject = "";
+            this.loadedProject = "";
             this.projectCount = 0;
-            this.resetFilters(false);
-            this.destroyCharts();
+            this.dataSource = "";
+            this.lastLoadedAt = null;
+            this.resetFilters();
 
             try {
                 const response = await axios.get(`${API}/azure-devops/projects`, authConfig());
@@ -76,6 +107,7 @@ window.azureDevOpsPruebaApp = function () {
                 this.projects = response.data?.projects || [];
                 if (this.projects.length > 0) {
                     this.selectedProject = "__all__";
+                    this.loadCachedWorkItems();
                 }
             } catch (error) {
                 this.error = errorMessage(error);
@@ -84,23 +116,75 @@ window.azureDevOpsPruebaApp = function () {
             }
         },
 
-        async loadWorkItems() {
+        applyWorkItemsData(data, project, source, savedAt) {
+            this.workItems = data?.workItems || [];
+            this.projectCount = Number(data?.projectCount || 1);
+            this.loadedProject = project;
+            this.dataSource = source;
+            this.lastLoadedAt = savedAt ? new Date(savedAt) : new Date();
+            this.resetFilters();
+        },
+
+        loadCachedWorkItems() {
+            this.error = "";
+            this.workItems = [];
+            this.loadedProject = "";
+            this.projectCount = 0;
+            this.dataSource = "";
+            this.lastLoadedAt = null;
+            this.resetFilters();
+
+            if (!this.selectedProject) return false;
+            const cached = readCache(this.organization, this.selectedProject);
+            if (!cached?.data) return false;
+            this.applyWorkItemsData(
+                cached.data,
+                this.selectedProject,
+                "cache",
+                cached.savedAt
+            );
+            return true;
+        },
+
+        async loadWorkItems(forceRefresh = false) {
             if (!this.selectedProject) return;
+            const requestedProject = this.selectedProject;
+
+            if (!forceRefresh) {
+                const cached = readCache(this.organization, requestedProject);
+                if (cached?.data) {
+                    this.applyWorkItemsData(
+                        cached.data,
+                        requestedProject,
+                        "cache",
+                        cached.savedAt
+                    );
+                    return;
+                }
+            }
+
             this.loadingItems = true;
             this.error = "";
             this.workItems = [];
+            this.loadedProject = "";
             this.projectCount = 0;
-            this.resetFilters(false);
-            this.destroyCharts();
+            this.dataSource = "";
+            this.lastLoadedAt = null;
+            this.resetFilters();
 
             try {
                 const response = await axios.get(`${API}/azure-devops/work-items`, {
                     ...authConfig(),
-                    params: { project: this.selectedProject }
+                    params: { project: requestedProject }
                 });
-                this.workItems = response.data?.workItems || [];
-                this.projectCount = Number(response.data?.projectCount || 1);
-                this.scheduleCharts();
+                if (this.selectedProject !== requestedProject) return;
+                writeCache(this.organization, requestedProject, response.data || {});
+                this.applyWorkItemsData(
+                    response.data || {},
+                    requestedProject,
+                    "azure",
+                    Date.now()
+                );
             } catch (error) {
                 this.error = errorMessage(error);
                 this.projectCount = 0;
@@ -151,137 +235,11 @@ window.azureDevOpsPruebaApp = function () {
             });
         },
 
-        resetFilters(render = true) {
+        resetFilters() {
             this.filterState = "";
             this.filterType = "";
             this.filterAssignedTo = "";
             this.filterPriority = "";
-            if (render) this.scheduleCharts();
-        },
-
-        scheduleCharts() {
-            window.setTimeout(() => this.renderCharts(), 0);
-        },
-
-        destroyCharts() {
-            if (this.typeChart) {
-                this.typeChart.destroy();
-                this.typeChart = null;
-            }
-            if (this.stateChart) {
-                this.stateChart.destroy();
-                this.stateChart = null;
-            }
-        },
-
-        renderCharts() {
-            const typeCanvas = document.getElementById("azure-devops-type-chart");
-            const stateCanvas = document.getElementById("azure-devops-state-chart");
-            if (!typeCanvas || !stateCanvas) return;
-
-            if (!window.Chart) {
-                this.chartError = "No se pudo cargar Chart.js.";
-                return;
-            }
-            this.chartError = "";
-
-            this.destroyCharts();
-            window.Chart.getChart(typeCanvas)?.destroy();
-            window.Chart.getChart(stateCanvas)?.destroy();
-
-            const filteredItems = this.filteredWorkItems;
-            const typeCounts = countBy(filteredItems, "type");
-            const stateCounts = countBy(filteredItems, "state");
-            const typeLabels = [...typeCounts.keys()];
-            const stateLabels = [...stateCounts.keys()];
-
-            this.typeChart = new window.Chart(typeCanvas, {
-                type: "doughnut",
-                data: {
-                    labels: typeLabels,
-                    datasets: [{
-                        data: typeLabels.map((label) => typeCounts.get(label)),
-                        backgroundColor: typeLabels.map(
-                            (_, index) => chartColors[index % chartColors.length]
-                        ),
-                        borderColor: "#ffffff",
-                        borderWidth: 3,
-                        hoverOffset: 8
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    cutout: "62%",
-                    animation: {
-                        duration: 900,
-                        animateRotate: true,
-                        animateScale: true
-                    },
-                    plugins: {
-                        legend: {
-                            position: "bottom",
-                            labels: {
-                                usePointStyle: true,
-                                boxWidth: 8,
-                                padding: 16
-                            }
-                        }
-                    },
-                    onClick: (_event, elements) => {
-                        const index = elements?.[0]?.index;
-                        if (index === undefined) return;
-                        const value = typeLabels[index] === "Sin definir" ? "" : typeLabels[index];
-                        this.filterType = this.filterType === value ? "" : value;
-                        this.scheduleCharts();
-                    }
-                }
-            });
-
-            this.stateChart = new window.Chart(stateCanvas, {
-                type: "bar",
-                data: {
-                    labels: stateLabels,
-                    datasets: [{
-                        label: "Registros",
-                        data: stateLabels.map((label) => stateCounts.get(label)),
-                        backgroundColor: stateLabels.map(
-                            (_, index) => chartColors[index % chartColors.length]
-                        ),
-                        borderRadius: 7,
-                        borderSkipped: false
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    animation: {
-                        duration: 900,
-                        delay: (context) =>
-                            context.type === "data" ? context.dataIndex * 70 : 0
-                    },
-                    scales: {
-                        x: {
-                            grid: { display: false }
-                        },
-                        y: {
-                            beginAtZero: true,
-                            ticks: { precision: 0 },
-                            grid: { color: "rgba(148, 163, 184, 0.18)" }
-                        }
-                    },
-                    plugins: {
-                        legend: { display: false }
-                    },
-                    onClick: (_event, elements) => {
-                        const index = elements?.[0]?.index;
-                        if (index === undefined) return;
-                        const value = stateLabels[index] === "Sin definir" ? "" : stateLabels[index];
-                        this.filterState = this.filterState === value ? "" : value;
-                        this.scheduleCharts();
-                    }
-                }
-            });
         },
 
         formatDate(value) {
@@ -290,6 +248,14 @@ window.azureDevOpsPruebaApp = function () {
                 dateStyle: "short",
                 timeStyle: "short"
             }).format(new Date(value));
+        },
+
+        formatLoadedAt() {
+            if (!this.lastLoadedAt) return "";
+            return new Intl.DateTimeFormat("es-CO", {
+                dateStyle: "short",
+                timeStyle: "short"
+            }).format(this.lastLoadedAt);
         }
     };
 };

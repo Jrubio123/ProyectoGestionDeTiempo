@@ -198,14 +198,18 @@ async function listProjects() {
   return {
     organization,
     count: Number(data.count || 0),
-    projects: (data.value || []).map((project) => ({
-      id: project.id,
-      name: project.name,
-      description: project.description || "",
-      state: project.state,
-      visibility: project.visibility,
-      lastUpdateTime: project.lastUpdateTime || null
-    }))
+    projects: (data.value || [])
+      .map((project) => ({
+        id: project.id,
+        name: project.name,
+        description: project.description || "",
+        state: project.state,
+        visibility: project.visibility,
+        lastUpdateTime: project.lastUpdateTime || null
+      }))
+      .sort((left, right) =>
+        left.name.localeCompare(right.name, "es", { sensitivity: "base" })
+      )
   };
 }
 

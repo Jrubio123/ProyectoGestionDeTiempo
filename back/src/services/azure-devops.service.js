@@ -203,12 +203,12 @@ async function listRecentWorkItems(projectName) {
   const org = encodeURIComponent(organization);
   const encodedProject = encodeURIComponent(project);
   const wiql = await azureDevOpsRequest(
-    `/${org}/${encodedProject}/_apis/wit/wiql?api-version=7.1`,
+    `/${org}/${encodedProject}/_apis/wit/wiql?$top=50&api-version=7.1`,
     {
       method: "POST",
       body: {
         query:
-          "SELECT TOP 50 [System.Id] FROM WorkItems " +
+          "SELECT [System.Id] FROM WorkItems " +
           "WHERE [System.TeamProject] = @project " +
           "ORDER BY [System.ChangedDate] DESC"
       }

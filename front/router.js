@@ -17,6 +17,7 @@ const viewScripts = {
     "asignacion-fabrica-mesa-servicio": "/js/asignacion-fabrica-mesa-servicio.js",
     "catalogos-admin":                "/js/catalogos-admin.js",
     "gestion-licencias-admin":        "/js/gestion-licencias-admin.js",
+    "azure-devops-prueba":            "/js/azure-devops-prueba.js",
     "gestion-personas":               "/js/gestion-personas.js",
     "gestion-consultores":            "/js/gestion-consultores.js",
     "firma-contratos-admin":          "/js/firma-contratos-admin.js",
@@ -104,6 +105,7 @@ const routes = {
     "asignacion-fabrica-mesa-servicio": "asignacion-fabrica-mesa-servicio",
     "catalogos-admin": "catalogos-admin",
     "gestion-licencias-admin": "gestion-licencias-admin",
+    "azure-devops-prueba": "azure-devops-prueba",
     "gestion-personas": "gestion-personas",
     "gestion-consultores": "gestion-consultores",
     "firma-contratos-admin": "firma-contratos-admin",
@@ -124,7 +126,7 @@ function router() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin", "gestion-personas", "gestion-consultores"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "azure-devops-prueba", "firma-contratos-admin", "gestion-personas", "gestion-consultores"],
         coordinador: [
             "inicio",
             "asignacion-consultor",

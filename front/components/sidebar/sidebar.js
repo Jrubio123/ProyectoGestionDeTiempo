@@ -77,7 +77,7 @@ function initSidebar() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin", "gestion-personas", "gestion-consultores"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "azure-devops-prueba", "firma-contratos-admin", "gestion-personas", "gestion-consultores"],
         coordinador: [
             "inicio",
             "asignacion-consultor",

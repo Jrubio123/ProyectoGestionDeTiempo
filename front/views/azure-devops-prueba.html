@@ -1,0 +1,102 @@
+<div x-data="azureDevOpsPruebaApp()" x-init="init()" class="max-w-7xl mx-auto space-y-5">
+    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+                <h1 class="text-2xl font-bold text-slate-800">Prueba Azure DevOps</h1>
+                <p class="text-sm text-slate-500 mt-1">
+                    Consulta de solo lectura usando la aplicación actual de Entra ID.
+                </p>
+            </div>
+            <button
+                type="button"
+                @click="loadProjects()"
+                :disabled="loadingProjects"
+                class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold disabled:opacity-50">
+                <span x-text="loadingProjects ? 'Consultando...' : 'Probar conexión'"></span>
+            </button>
+        </div>
+
+        <div x-show="error" class="mt-4 p-4 rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm">
+            <p class="font-semibold">La prueba no pudo completarse</p>
+            <p class="mt-1" x-text="error"></p>
+        </div>
+
+        <div x-show="!error && organization" class="mt-4 p-3 rounded-xl bg-emerald-50 text-emerald-700 text-sm">
+            Conexión correcta con
+            <span class="font-bold" x-text="organization"></span>.
+            Proyectos visibles:
+            <span class="font-bold" x-text="projects.length"></span>.
+        </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <div class="flex flex-col md:flex-row md:items-end gap-3">
+            <div class="flex-1">
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Proyecto</label>
+                <select
+                    x-model="selectedProject"
+                    class="w-full p-2.5 border border-slate-300 rounded-lg text-sm bg-white">
+                    <option value="">Selecciona un proyecto</option>
+                    <template x-for="project in projects" :key="project.id">
+                        <option :value="project.name" x-text="project.name"></option>
+                    </template>
+                </select>
+            </div>
+            <button
+                type="button"
+                @click="loadWorkItems()"
+                :disabled="!selectedProject || loadingItems"
+                class="px-4 py-2.5 rounded-lg bg-slate-800 text-white text-sm font-semibold disabled:opacity-50">
+                <span x-text="loadingItems ? 'Cargando...' : 'Consultar últimas 50 tareas'"></span>
+            </button>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-200">
+            <h2 class="font-bold text-slate-800">
+                Elementos encontrados:
+                <span x-text="workItems.length"></span>
+            </h2>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
+                    <tr>
+                        <th class="px-4 py-3 text-left">ID</th>
+                        <th class="px-4 py-3 text-left">Tipo</th>
+                        <th class="px-4 py-3 text-left">Título</th>
+                        <th class="px-4 py-3 text-left">Estado</th>
+                        <th class="px-4 py-3 text-left">Responsable</th>
+                        <th class="px-4 py-3 text-left">Actualización</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    <template x-for="item in workItems" :key="item.id">
+                        <tr class="hover:bg-slate-50">
+                            <td class="px-4 py-3">
+                                <a
+                                    :href="item.url"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="font-semibold text-indigo-600 hover:underline"
+                                    x-text="item.id"></a>
+                            </td>
+                            <td class="px-4 py-3 text-slate-600" x-text="item.type"></td>
+                            <td class="px-4 py-3 font-medium text-slate-800" x-text="item.title"></td>
+                            <td class="px-4 py-3 text-slate-600" x-text="item.state"></td>
+                            <td class="px-4 py-3 text-slate-600" x-text="item.assignedTo || 'Sin asignar'"></td>
+                            <td class="px-4 py-3 text-slate-500" x-text="formatDate(item.changedDate)"></td>
+                        </tr>
+                    </template>
+                    <tr x-show="!loadingItems && workItems.length === 0">
+                        <td colspan="6" class="px-4 py-10 text-center text-slate-400">
+                            Selecciona un proyecto para consultar sus tareas.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>

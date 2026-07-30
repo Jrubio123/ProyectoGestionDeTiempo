@@ -37,6 +37,7 @@
                     x-model="selectedProject"
                     class="w-full p-2.5 border border-slate-300 rounded-lg text-sm bg-white">
                     <option value="">Selecciona un proyecto</option>
+                    <option value="__all__">Todos los proyectos</option>
                     <template x-for="project in projects" :key="project.id">
                         <option :value="project.name" x-text="project.name"></option>
                     </template>
@@ -47,7 +48,12 @@
                 @click="loadWorkItems()"
                 :disabled="!selectedProject || loadingItems"
                 class="px-4 py-2.5 rounded-lg bg-slate-800 text-white text-sm font-semibold disabled:opacity-50">
-                <span x-text="loadingItems ? 'Cargando...' : 'Consultar últimas 50 tareas'"></span>
+                <span
+                    x-text="loadingItems
+                        ? 'Cargando...'
+                        : (selectedProject === '__all__'
+                            ? 'Consultar todos los proyectos'
+                            : 'Consultar últimas 200 tareas')"></span>
             </button>
         </div>
     </div>
@@ -57,6 +63,10 @@
             <h2 class="font-bold text-slate-800">
                 Elementos encontrados:
                 <span x-text="workItems.length"></span>
+                <span
+                    x-show="selectedProject === '__all__' && projectCount"
+                    class="text-sm font-normal text-slate-500"
+                    x-text="'en ' + projectCount + ' proyectos'"></span>
             </h2>
         </div>
 
@@ -65,6 +75,7 @@
                 <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
                     <tr>
                         <th class="px-4 py-3 text-left">ID</th>
+                        <th class="px-4 py-3 text-left">Proyecto</th>
                         <th class="px-4 py-3 text-left">Tipo</th>
                         <th class="px-4 py-3 text-left">Título</th>
                         <th class="px-4 py-3 text-left">Estado</th>
@@ -85,6 +96,7 @@
                                     class="font-semibold text-indigo-600 hover:underline"
                                     x-text="item.id"></a>
                             </td>
+                            <td class="px-4 py-3 text-slate-600" x-text="item.project"></td>
                             <td class="px-4 py-3 text-slate-600" x-text="item.type"></td>
                             <td class="px-4 py-3 font-medium text-slate-800" x-text="item.title"></td>
                             <td class="px-4 py-3 text-slate-600" x-text="item.state"></td>
@@ -95,7 +107,7 @@
                         </tr>
                     </template>
                     <tr x-show="!loadingItems && workItems.length === 0">
-                        <td colspan="8" class="px-4 py-10 text-center text-slate-400">
+                        <td colspan="9" class="px-4 py-10 text-center text-slate-400">
                             Selecciona un proyecto para consultar sus tareas.
                         </td>
                     </tr>

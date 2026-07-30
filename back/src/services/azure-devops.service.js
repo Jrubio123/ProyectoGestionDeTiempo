@@ -1,6 +1,22 @@
 const https = require("https");
 
 const AZURE_DEVOPS_SCOPE = "499b84ac-1321-427f-aa17-267ca6975798/.default";
+const WORK_ITEMS_LIMIT = 200;
+const WORK_ITEMS_ORGANIZATION_LIMIT = 20000;
+const WORK_ITEM_FIELDS = [
+  "System.Id",
+  "System.TeamProject",
+  "System.Title",
+  "System.WorkItemType",
+  "System.State",
+  "System.AssignedTo",
+  "Microsoft.VSTS.Scheduling.Effort",
+  "Microsoft.VSTS.Common.Priority",
+  "System.AreaPath",
+  "System.IterationPath",
+  "System.CreatedDate",
+  "System.ChangedDate"
+];
 const tokenCache = {
   accessToken: null,
   expiresAt: 0
@@ -193,6 +209,34 @@ async function listProjects() {
   };
 }
 
+function mapWorkItem(item, organization, fallbackProject = "") {
+  const assignedTo = item.fields?.["System.AssignedTo"];
+  const project =
+    item.fields?.["System.TeamProject"] ||
+    fallbackProject ||
+    "";
+  const encodedProject = encodeURIComponent(project);
+
+  return {
+    id: item.id,
+    project,
+    title: item.fields?.["System.Title"] || "",
+    type: item.fields?.["System.WorkItemType"] || "",
+    state: item.fields?.["System.State"] || "",
+    effort: item.fields?.["Microsoft.VSTS.Scheduling.Effort"] ?? null,
+    priority: item.fields?.["Microsoft.VSTS.Common.Priority"] ?? null,
+    assignedTo:
+      assignedTo?.displayName ||
+      assignedTo?.uniqueName ||
+      (typeof assignedTo === "string" ? assignedTo : ""),
+    areaPath: item.fields?.["System.AreaPath"] || "",
+    iterationPath: item.fields?.["System.IterationPath"] || "",
+    createdDate: item.fields?.["System.CreatedDate"] || null,
+    changedDate: item.fields?.["System.ChangedDate"] || null,
+    url: `https://dev.azure.com/${encodeURIComponent(organization)}/${encodedProject}/_workitems/edit/${item.id}`
+  };
+}
+
 async function listRecentWorkItems(projectName) {
   const project = String(projectName || "").trim();
   if (!project) {
@@ -203,7 +247,7 @@ async function listRecentWorkItems(projectName) {
   const org = encodeURIComponent(organization);
   const encodedProject = encodeURIComponent(project);
   const wiql = await azureDevOpsRequest(
-    `/${org}/${encodedProject}/_apis/wit/wiql?$top=50&api-version=7.1`,
+    `/${org}/${encodedProject}/_apis/wit/wiql?$top=${WORK_ITEMS_LIMIT}&api-version=7.1`,
     {
       method: "POST",
       body: {
@@ -220,19 +264,7 @@ async function listRecentWorkItems(projectName) {
     return { organization, project, count: 0, workItems: [] };
   }
 
-  const fields = [
-    "System.Id",
-    "System.Title",
-    "System.WorkItemType",
-    "System.State",
-    "System.AssignedTo",
-    "Microsoft.VSTS.Scheduling.Effort",
-    "Microsoft.VSTS.Common.Priority",
-    "System.AreaPath",
-    "System.IterationPath",
-    "System.CreatedDate",
-    "System.ChangedDate"
-  ].join(",");
+  const fields = WORK_ITEM_FIELDS.join(",");
 
   const detail = await azureDevOpsRequest(
     `/${org}/${encodedProject}/_apis/wit/workitems?ids=${ids.join(",")}` +
@@ -243,26 +275,90 @@ async function listRecentWorkItems(projectName) {
     organization,
     project,
     count: Number(detail.count || 0),
-    workItems: (detail.value || []).map((item) => {
-      const assignedTo = item.fields?.["System.AssignedTo"];
-      return {
-        id: item.id,
-        title: item.fields?.["System.Title"] || "",
-        type: item.fields?.["System.WorkItemType"] || "",
-        state: item.fields?.["System.State"] || "",
-        effort: item.fields?.["Microsoft.VSTS.Scheduling.Effort"] ?? null,
-        priority: item.fields?.["Microsoft.VSTS.Common.Priority"] ?? null,
-        assignedTo:
-          assignedTo?.displayName ||
-          assignedTo?.uniqueName ||
-          (typeof assignedTo === "string" ? assignedTo : ""),
-        areaPath: item.fields?.["System.AreaPath"] || "",
-        iterationPath: item.fields?.["System.IterationPath"] || "",
-        createdDate: item.fields?.["System.CreatedDate"] || null,
-        changedDate: item.fields?.["System.ChangedDate"] || null,
-        url: `https://dev.azure.com/${encodeURIComponent(organization)}/${encodedProject}/_workitems/edit/${item.id}`
-      };
-    })
+    workItems: (detail.value || []).map((item) =>
+      mapWorkItem(item, organization, project)
+    )
+  };
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
+async function listRecentWorkItemsAllProjects() {
+  const projectData = await listProjects();
+  if (projectData.projects.length === 0) {
+    return {
+      organization: projectData.organization,
+      project: "__all__",
+      projectCount: 0,
+      count: 0,
+      workItems: []
+    };
+  }
+
+  const { organization } = projectData;
+  const org = encodeURIComponent(organization);
+  const organizationLimit = Math.min(
+    WORK_ITEMS_LIMIT * projectData.projects.length,
+    WORK_ITEMS_ORGANIZATION_LIMIT
+  );
+  const wiql = await azureDevOpsRequest(
+    `/${org}/_apis/wit/wiql?$top=${organizationLimit}&api-version=7.1`,
+    {
+      method: "POST",
+      body: {
+        query:
+          "SELECT [System.Id] FROM WorkItems " +
+          "ORDER BY [System.ChangedDate] DESC"
+      }
+    }
+  );
+
+  const ids = (wiql.workItems || []).map((item) => item.id).filter(Boolean);
+  const batches = [];
+  for (let index = 0; index < ids.length; index += WORK_ITEMS_LIMIT) {
+    batches.push(ids.slice(index, index + WORK_ITEMS_LIMIT));
+  }
+
+  const fields = WORK_ITEM_FIELDS.join(",");
+  const detailResults = await mapWithConcurrency(
+    batches,
+    4,
+    (batch) =>
+      azureDevOpsRequest(
+        `/${org}/_apis/wit/workitems?ids=${batch.join(",")}` +
+          `&fields=${encodeURIComponent(fields)}&errorPolicy=omit&api-version=7.1`
+      )
+  );
+  const workItems = detailResults
+    .flatMap((result) => result.value || [])
+    .map((item) => mapWorkItem(item, organization))
+    .sort((left, right) => {
+      const leftDate = left.changedDate ? new Date(left.changedDate).getTime() : 0;
+      const rightDate = right.changedDate ? new Date(right.changedDate).getTime() : 0;
+      return rightDate - leftDate;
+    });
+
+  return {
+    organization: projectData.organization,
+    project: "__all__",
+    projectCount: projectData.projects.length,
+    count: workItems.length,
+    workItems
   };
 }
 
@@ -279,7 +375,12 @@ async function getProjects(req, res) {
 
 async function getRecentWorkItems(req, res) {
   try {
-    return res.json(await listRecentWorkItems(req.query?.project));
+    const project = String(req.query?.project || "").trim();
+    const data =
+      project === "__all__"
+        ? await listRecentWorkItemsAllProjects()
+        : await listRecentWorkItems(project);
+    return res.json(data);
   } catch (error) {
     console.error("Error consultando tareas Azure DevOps:", error.message);
     return res.status(error.statusCode || 500).json({
@@ -292,5 +393,6 @@ module.exports = {
   getProjects,
   getRecentWorkItems,
   listProjects,
-  listRecentWorkItems
+  listRecentWorkItems,
+  listRecentWorkItemsAllProjects
 };

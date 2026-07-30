@@ -22,6 +22,7 @@ window.azureDevOpsPruebaApp = function () {
         projects: [],
         selectedProject: "",
         workItems: [],
+        projectCount: 0,
 
         async init() {
             await this.loadProjects();
@@ -32,13 +33,15 @@ window.azureDevOpsPruebaApp = function () {
             this.error = "";
             this.projects = [];
             this.workItems = [];
+            this.selectedProject = "";
+            this.projectCount = 0;
 
             try {
                 const response = await axios.get(`${API}/azure-devops/projects`, authConfig());
                 this.organization = response.data?.organization || "";
                 this.projects = response.data?.projects || [];
                 if (this.projects.length > 0) {
-                    this.selectedProject = this.projects[0].name;
+                    this.selectedProject = "__all__";
                 }
             } catch (error) {
                 this.error = errorMessage(error);
@@ -52,6 +55,7 @@ window.azureDevOpsPruebaApp = function () {
             this.loadingItems = true;
             this.error = "";
             this.workItems = [];
+            this.projectCount = 0;
 
             try {
                 const response = await axios.get(`${API}/azure-devops/work-items`, {
@@ -59,8 +63,10 @@ window.azureDevOpsPruebaApp = function () {
                     params: { project: this.selectedProject }
                 });
                 this.workItems = response.data?.workItems || [];
+                this.projectCount = Number(response.data?.projectCount || 1);
             } catch (error) {
                 this.error = errorMessage(error);
+                this.projectCount = 0;
             } finally {
                 this.loadingItems = false;
             }

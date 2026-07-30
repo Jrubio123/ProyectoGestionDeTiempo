@@ -58,11 +58,116 @@
         </div>
     </div>
 
+    <div x-show="workItems.length > 0" class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <div class="flex items-center justify-between gap-3 mb-4">
+            <div>
+                <h2 class="font-bold text-slate-800">Filtros</h2>
+                <p class="text-xs text-slate-500">También puedes hacer clic sobre las gráficas.</p>
+            </div>
+            <button
+                type="button"
+                @click="resetFilters()"
+                class="px-3 py-2 rounded-lg border border-slate-300 text-slate-600 text-sm font-semibold hover:bg-slate-50">
+                Limpiar filtros
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Estado</label>
+                <select
+                    x-model="filterState"
+                    @change="scheduleCharts()"
+                    class="w-full p-2.5 border border-slate-300 rounded-lg text-sm bg-white">
+                    <option value="">Todos</option>
+                    <template x-for="state in stateOptions" :key="state">
+                        <option :value="state" x-text="state"></option>
+                    </template>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Tipo</label>
+                <select
+                    x-model="filterType"
+                    @change="scheduleCharts()"
+                    class="w-full p-2.5 border border-slate-300 rounded-lg text-sm bg-white">
+                    <option value="">Todos</option>
+                    <template x-for="type in typeOptions" :key="type">
+                        <option :value="type" x-text="type"></option>
+                    </template>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Responsable</label>
+                <select
+                    x-model="filterAssignedTo"
+                    @change="scheduleCharts()"
+                    class="w-full p-2.5 border border-slate-300 rounded-lg text-sm bg-white">
+                    <option value="">Todos</option>
+                    <template x-for="assignedTo in assignedToOptions" :key="assignedTo">
+                        <option :value="assignedTo" x-text="assignedTo"></option>
+                    </template>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Prioridad</label>
+                <select
+                    x-model="filterPriority"
+                    @change="scheduleCharts()"
+                    class="w-full p-2.5 border border-slate-300 rounded-lg text-sm bg-white">
+                    <option value="">Todas</option>
+                    <template x-for="priority in priorityOptions" :key="priority">
+                        <option :value="priority" x-text="priority"></option>
+                    </template>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="workItems.length > 0" class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+        <section class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+            <div class="mb-3">
+                <h2 class="font-bold text-slate-800">Registros por tipo de elemento</h2>
+                <p class="text-xs text-slate-500">Selecciona una porción para filtrar.</p>
+            </div>
+            <div class="relative h-80">
+                <canvas
+                    id="azure-devops-type-chart"
+                    role="img"
+                    aria-label="Gráfica de registros por tipo de elemento"></canvas>
+            </div>
+        </section>
+
+        <section class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+            <div class="mb-3">
+                <h2 class="font-bold text-slate-800">Registros por estado</h2>
+                <p class="text-xs text-slate-500">Selecciona una barra para filtrar.</p>
+            </div>
+            <div class="relative h-80">
+                <canvas
+                    id="azure-devops-state-chart"
+                    role="img"
+                    aria-label="Gráfica de registros por estado"></canvas>
+            </div>
+        </section>
+    </div>
+
+    <div x-show="chartError" class="p-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 text-sm">
+        <span x-text="chartError"></span>
+    </div>
+
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div class="px-6 py-4 border-b border-slate-200">
             <h2 class="font-bold text-slate-800">
                 Elementos encontrados:
-                <span x-text="workItems.length"></span>
+                <span x-text="filteredWorkItems.length"></span>
+                <span
+                    x-show="filteredWorkItems.length !== workItems.length"
+                    class="text-sm font-normal text-slate-500"
+                    x-text="'de ' + workItems.length"></span>
                 <span
                     x-show="selectedProject === '__all__' && projectCount"
                     class="text-sm font-normal text-slate-500"
@@ -86,7 +191,7 @@
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
-                    <template x-for="item in workItems" :key="item.id">
+                    <template x-for="item in filteredWorkItems" :key="item.id">
                         <tr class="hover:bg-slate-50">
                             <td class="px-4 py-3">
                                 <a
@@ -106,9 +211,9 @@
                             <td class="px-4 py-3 text-slate-500" x-text="formatDate(item.changedDate)"></td>
                         </tr>
                     </template>
-                    <tr x-show="!loadingItems && workItems.length === 0">
+                    <tr x-show="!loadingItems && filteredWorkItems.length === 0">
                         <td colspan="9" class="px-4 py-10 text-center text-slate-400">
-                            Selecciona un proyecto para consultar sus tareas.
+                            No hay registros para los filtros seleccionados.
                         </td>
                     </tr>
                 </tbody>

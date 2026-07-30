@@ -68,6 +68,8 @@
                         <th class="px-4 py-3 text-left">Tipo</th>
                         <th class="px-4 py-3 text-left">Título</th>
                         <th class="px-4 py-3 text-left">Estado</th>
+                        <th class="px-4 py-3 text-right">Effort</th>
+                        <th class="px-4 py-3 text-center">Prioridad</th>
                         <th class="px-4 py-3 text-left">Responsable</th>
                         <th class="px-4 py-3 text-left">Actualización</th>
                     </tr>
@@ -86,12 +88,14 @@
                             <td class="px-4 py-3 text-slate-600" x-text="item.type"></td>
                             <td class="px-4 py-3 font-medium text-slate-800" x-text="item.title"></td>
                             <td class="px-4 py-3 text-slate-600" x-text="item.state"></td>
+                            <td class="px-4 py-3 text-right font-semibold text-slate-700" x-text="item.effort ?? '—'"></td>
+                            <td class="px-4 py-3 text-center text-slate-600" x-text="item.priority ?? '—'"></td>
                             <td class="px-4 py-3 text-slate-600" x-text="item.assignedTo || 'Sin asignar'"></td>
                             <td class="px-4 py-3 text-slate-500" x-text="formatDate(item.changedDate)"></td>
                         </tr>
                     </template>
                     <tr x-show="!loadingItems && workItems.length === 0">
-                        <td colspan="6" class="px-4 py-10 text-center text-slate-400">
+                        <td colspan="8" class="px-4 py-10 text-center text-slate-400">
                             Selecciona un proyecto para consultar sus tareas.
                         </td>
                     </tr>

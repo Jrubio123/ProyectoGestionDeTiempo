@@ -226,6 +226,8 @@ async function listRecentWorkItems(projectName) {
     "System.WorkItemType",
     "System.State",
     "System.AssignedTo",
+    "Microsoft.VSTS.Scheduling.Effort",
+    "Microsoft.VSTS.Common.Priority",
     "System.AreaPath",
     "System.IterationPath",
     "System.CreatedDate",
@@ -248,6 +250,8 @@ async function listRecentWorkItems(projectName) {
         title: item.fields?.["System.Title"] || "",
         type: item.fields?.["System.WorkItemType"] || "",
         state: item.fields?.["System.State"] || "",
+        effort: item.fields?.["Microsoft.VSTS.Scheduling.Effort"] ?? null,
+        priority: item.fields?.["Microsoft.VSTS.Common.Priority"] ?? null,
         assignedTo:
           assignedTo?.displayName ||
           assignedTo?.uniqueName ||

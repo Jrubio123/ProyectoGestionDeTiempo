@@ -7673,11 +7673,22 @@ function fitSingleLineText(doc, value, maxWidth, { fontName = "Helvetica", fontS
   return `${current}${suffix}`;
 }
 
-// Alto que ocupa un texto al envolverse dentro del ancho de una celda
-function wrappedTextHeight(doc, value, maxWidth, { fontName = "Helvetica", fontSize = 8 } = {}) {
+// Envuelve un texto en varias líneas dentro del ancho de una celda y devuelve el alto que ocupará.
+// Solo recorta si ni siquiera envuelto cabe en maxHeight; así lo dibujado coincide con lo medido.
+function fitWrappedText(doc, value, maxWidth, maxHeight, { fontName = "Helvetica", fontSize = 8 } = {}) {
   const base = String(value ?? "-").replace(/\s+/g, " ").trim() || "-";
   doc.font(fontName).fontSize(fontSize);
-  return doc.heightOfString(base, { width: maxWidth });
+
+  const alto = doc.heightOfString(base, { width: maxWidth });
+  if (alto <= maxHeight) return { texto: base, alto };
+
+  const suffix = "...";
+  let current = base;
+  while (current.length > 1 && doc.heightOfString(`${current}${suffix}`, { width: maxWidth }) > maxHeight) {
+    current = current.slice(0, -1);
+  }
+  const texto = `${current}${suffix}`;
+  return { texto, alto: doc.heightOfString(texto, { width: maxWidth }) };
 }
 
 function writeCuentaCobroPdf(doc, cuenta, detalles) {
@@ -7874,15 +7885,22 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
       _total: formatCuentaCobroCurrency(d.total_cobrar),
     };
 
-    // Las columnas de texto envuelven en varias líneas: la fila crece según el valor más largo
-    const altoTexto = Math.max(
-      ...cols
-        .filter((c) => !esColumnaNumerica(c))
-        .map((c) => wrappedTextHeight(doc, vals[c.key], c.w - 8))
-    );
-    const rowH = Math.min(
-      MAX_ROW_H,
-      Math.max(ROW_H, Math.ceil(altoTexto) + CELL_PAD_TOP + CELL_PAD_BOTTOM)
+    // Las columnas de texto envuelven en varias líneas; la fila crece según el valor más largo.
+    // El texto se ajusta aquí (no con el recorte de PDFKit) para que lo dibujado sea lo medido.
+    const altoTextoMax = MAX_ROW_H - CELL_PAD_TOP - CELL_PAD_BOTTOM;
+    const celdas = cols.map((c) => {
+      const numerica = esColumnaNumerica(c);
+      const fontName = numerica ? "Helvetica-Bold" : "Helvetica";
+      if (numerica) {
+        return { c, fontName, numerica, texto: fitSingleLineText(doc, vals[c.key], c.w - 8, { fontName, fontSize: 8 }), alto: 0 };
+      }
+      const { texto, alto } = fitWrappedText(doc, vals[c.key], c.w - 8, altoTextoMax, { fontName, fontSize: 8 });
+      return { c, fontName, numerica, texto, alto };
+    });
+
+    const rowH = Math.max(
+      ROW_H,
+      Math.ceil(Math.max(...celdas.map((x) => x.alto))) + CELL_PAD_TOP + CELL_PAD_BOTTOM
     );
 
     if (curY + rowH > doc.page.height - MARGIN.bottom) {
@@ -7894,25 +7912,13 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
     if (i % 2 === 0) fillRect(doc, ML, curY, PW, rowH, COLOR.grisClaro);
     hLine(doc, ML, curY + rowH, PW);
 
-    cols.forEach(c => {
-      const numerica = esColumnaNumerica(c);
-      const fontName = numerica ? "Helvetica-Bold" : "Helvetica";
-      doc.fontSize(8).font(fontName).fillColor(COLOR.textoPrin);
-
-      if (numerica) {
-        const fitted = fitSingleLineText(doc, vals[c.key], c.w - 8, { fontName, fontSize: 8 });
-        doc.text(fitted, c.x + 4, curY + CELL_PAD_TOP,
-          { width: c.w - 8, align: c.align || "left", lineBreak: false });
-        return;
-      }
-
-      const texto = String(vals[c.key] ?? "-").replace(/\s+/g, " ").trim() || "-";
-      doc.text(texto, c.x + 4, curY + CELL_PAD_TOP, {
-        width: c.w - 8,
-        align: c.align || "left",
-        height: rowH - CELL_PAD_TOP - CELL_PAD_BOTTOM,
-        ellipsis: true
-      });
+    celdas.forEach(({ c, fontName, numerica, texto }) => {
+      doc.fontSize(8).font(fontName).fillColor(COLOR.textoPrin)
+        .text(texto, c.x + 4, curY + CELL_PAD_TOP, {
+          width: c.w - 8,
+          align: c.align || "left",
+          lineBreak: !numerica
+        });
     });
 
     curY += rowH;

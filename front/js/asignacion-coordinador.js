@@ -42,7 +42,11 @@ window.asignacionCoordApp = function () {
 
                 this.cat.clientes = resCli.data || [];
                 this.cat.coordinadores = resCoord.data || [];
-                this.cat.tipos = resTipos.data || [];
+                this.cat.tipos = [...(resTipos.data || [])].sort((a, b) =>
+                    String(a.titulo || "").localeCompare(String(b.titulo || ""), "es", {
+                        sensitivity: "base"
+                    })
+                );
             } catch (e) {
                 console.error("Error cargando catálogos", e);
                 this.cat.clientes = [];

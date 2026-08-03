@@ -551,6 +551,17 @@ function isTipoAsignacionHorasPorDemanda(value) {
   return norm.includes("horas por demanda") || compact.includes("horaspordemanda");
 }
 
+function isTipoAsignacionHoraExtra(value) {
+  const norm = normalizeTipoAsignacionTitulo(value);
+  const compact = compactTipoAsignacionTitulo(value);
+  return (
+    norm.includes("hora adicional") ||
+    norm.includes("hora extra") ||
+    compact.includes("horaadicional") ||
+    compact.includes("horaextra")
+  );
+}
+
 function isTipoAsignacionMesa(value) {
   const norm = normalizeTipoAsignacionTitulo(value);
   const compact = compactTipoAsignacionTitulo(value);
@@ -7662,6 +7673,13 @@ function fitSingleLineText(doc, value, maxWidth, { fontName = "Helvetica", fontS
   return `${current}${suffix}`;
 }
 
+// Alto que ocupa un texto al envolverse dentro del ancho de una celda
+function wrappedTextHeight(doc, value, maxWidth, { fontName = "Helvetica", fontSize = 8 } = {}) {
+  const base = String(value ?? "-").replace(/\s+/g, " ").trim() || "-";
+  doc.font(fontName).fontSize(fontSize);
+  return doc.heightOfString(base, { width: maxWidth });
+}
+
 function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const PW = pageWidth(doc);
   const ML = MARGIN.left;
@@ -7808,7 +7826,7 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
   const cols = [
     { label: "Cliente", key: "cliente", w: 110 },
     { label: "Consultor", key: "consultor_responsable", w: 102 },
-    { label: "Tipo", key: "tipo_asignacion", w: 78 },
+    { label: "Tipo", key: "tipo_asignacion", w: 104 },
     { label: "Caso / Req.", key: "nro_caso_int_ext", w: 96 },
     { label: "Cant.", key: "_cant", w: 40, align: "right" },
     { label: "Total", key: "_total", w: 64, align: "right" },
@@ -7825,6 +7843,9 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   const ROW_H = 16;
   const HEADER_H = 18;
+  const CELL_PAD_TOP = 4;
+  const CELL_PAD_BOTTOM = 2;
+  const MAX_ROW_H = 46; // tope (~4 líneas) para que un dato anómalo no desarme la tabla
 
   function drawTableHeader(y) {
     fillRect(doc, ML, y, PW, HEADER_H, COLOR.azulOscuro);
@@ -7837,16 +7858,9 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
 
   curY = drawTableHeader(curY);
 
+  const esColumnaNumerica = (c) => c.key === "_cant" || c.key === "_total";
+
   (detalles || []).forEach((d, i) => {
-    if (curY + ROW_H > doc.page.height - MARGIN.bottom) {
-      doc.addPage();
-      curY = MARGIN.top;
-      curY = drawTableHeader(curY);
-    }
-
-    if (i % 2 === 0) fillRect(doc, ML, curY, PW, ROW_H, COLOR.grisClaro);
-    hLine(doc, ML, curY + ROW_H, PW);
-
     const cant = Number(d.cantidad_dias_reportados || 0) > 0
       ? `${d.cantidad_dias_reportados} D`
       : `${Number(d.horas_reportadas || 0)} H`;
@@ -7860,15 +7874,48 @@ function writeCuentaCobroPdf(doc, cuenta, detalles) {
       _total: formatCuentaCobroCurrency(d.total_cobrar),
     };
 
+    // Las columnas de texto envuelven en varias líneas: la fila crece según el valor más largo
+    const altoTexto = Math.max(
+      ...cols
+        .filter((c) => !esColumnaNumerica(c))
+        .map((c) => wrappedTextHeight(doc, vals[c.key], c.w - 8))
+    );
+    const rowH = Math.min(
+      MAX_ROW_H,
+      Math.max(ROW_H, Math.ceil(altoTexto) + CELL_PAD_TOP + CELL_PAD_BOTTOM)
+    );
+
+    if (curY + rowH > doc.page.height - MARGIN.bottom) {
+      doc.addPage();
+      curY = MARGIN.top;
+      curY = drawTableHeader(curY);
+    }
+
+    if (i % 2 === 0) fillRect(doc, ML, curY, PW, rowH, COLOR.grisClaro);
+    hLine(doc, ML, curY + rowH, PW);
+
     cols.forEach(c => {
-      const isNumericCol = c.key === "_cant" || c.key === "_total";
-      const fontName = isNumericCol ? "Helvetica-Bold" : "Helvetica";
-      const fitted = fitSingleLineText(doc, vals[c.key], c.w - 8, { fontName, fontSize: 8 });
-      doc.fontSize(8).font(fontName).fillColor(COLOR.textoPrin)
-        .text(fitted, c.x + 4, curY + 4, { width: c.w - 8, align: c.align || "left", lineBreak: false });
+      const numerica = esColumnaNumerica(c);
+      const fontName = numerica ? "Helvetica-Bold" : "Helvetica";
+      doc.fontSize(8).font(fontName).fillColor(COLOR.textoPrin);
+
+      if (numerica) {
+        const fitted = fitSingleLineText(doc, vals[c.key], c.w - 8, { fontName, fontSize: 8 });
+        doc.text(fitted, c.x + 4, curY + CELL_PAD_TOP,
+          { width: c.w - 8, align: c.align || "left", lineBreak: false });
+        return;
+      }
+
+      const texto = String(vals[c.key] ?? "-").replace(/\s+/g, " ").trim() || "-";
+      doc.text(texto, c.x + 4, curY + CELL_PAD_TOP, {
+        width: c.w - 8,
+        align: c.align || "left",
+        height: rowH - CELL_PAD_TOP - CELL_PAD_BOTTOM,
+        ellipsis: true
+      });
     });
 
-    curY += ROW_H;
+    curY += rowH;
   });
 
   // Borde inferior tabla
@@ -13214,6 +13261,10 @@ app.get("/registro-horas-asignaciones", requireAccess({ roles: ["Consultor", "Co
         AND (
           LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%horas por demanda%'
           OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%horaspordemanda%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%hora adicional%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%horaadicional%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%hora extra%'
+          OR LOWER(TRIM(COALESCE(ta.titulo, ''))) LIKE '%horaextra%'
           OR (
             COALESCE(ra.es_costo_total, false) = true
             AND (
@@ -15398,6 +15449,7 @@ module.exports = {
   getMesaFabricaScope,
   buildReporteResumen,
   isAsignacionReportableEstado,
+  isTipoAsignacionHoraExtra,
   isTipoAsignacionHorasPorDemanda,
   isTipoAsignacionMensual,
   isTipoAsignacionTiempoCostoFijo,

@@ -420,6 +420,14 @@
                         <option value="Natural">Natural</option>
                         <option value="Juridica">Juridica</option>
                     </select>
+                    <div class="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3"
+                        x-show="normalizar(formS3.tipo_persona) === 'juridica'" x-cloak>
+                        <input class="prereg-input md:col-span-2" x-model="formS3.razon_social" :disabled="!seccion3Editable" placeholder="Razon social *">
+                        <input class="prereg-input" x-model="formS3.nit_empresa" :disabled="!seccion3Editable" placeholder="NIT de la empresa *">
+                        <input class="prereg-input" x-model="formS3.representante_legal" :disabled="!seccion3Editable" placeholder="Representante legal *">
+                        <input class="prereg-input" x-model="formS3.tipo_documento_representante" :disabled="!seccion3Editable" placeholder="Tipo documento representante *">
+                        <input class="prereg-input" x-model="formS3.numero_documento_representante" :disabled="!seccion3Editable" placeholder="Numero documento representante *">
+                    </div>
                     <select class="prereg-input" x-model="formS3.banco_id" :disabled="!seccion3Editable">
                         <option value="">Banco *</option>
                         <template x-for="b in bancos" :key="b.id">
@@ -431,7 +439,8 @@
                         <option value="Corriente">Corriente</option>
                     </select>
                     <input class="prereg-input" x-model="formS3.numero_cuenta" :disabled="!seccion3Editable" placeholder="Numero de cuenta *">
-                    <input id="thCorreoSilver" class="prereg-input md:col-span-2" x-model="formS3.correo_silver" :disabled="!seccion3Editable" placeholder="Correo Silver (requerido para aprobar)">
+                    <input id="thCorreoSilver" class="prereg-input md:col-span-2" x-model="formS3.correo_silver" :disabled="!seccion3Editable"
+                        :placeholder="itemActivo?.crear_usuario_sistema === false ? 'Correo Silver (no requerido: sin usuario)' : 'Correo Silver (requerido para aprobar)'">
                 </div>
             </section>
 

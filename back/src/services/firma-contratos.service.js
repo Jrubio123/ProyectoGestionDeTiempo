@@ -162,6 +162,30 @@ function normalizeTipoContratacionFirma(value) {
   return ["vinculado", "todosilver"].includes(normalized) ? normalized : null;
 }
 
+function resolveTipoContratoPersona(tipoContratacion, personaContext) {
+  if (tipoContratacion === "vinculado") return "Vinculado";
+  const modalidad = String(personaContext?.modalidad_contrato || "").trim().toLowerCase();
+  const tipoAsignacion = String(personaContext?.datos_extra?.tipo_asignacion || "").trim().toLowerCase();
+  if (modalidad === "por horas" || ["horas", "capacitacion"].includes(tipoAsignacion)) return "Por horas";
+  return "Full time";
+}
+
+function getPersonaJuridicaMissingFields(personaContext) {
+  const tipoPersona = String(personaContext?.tipoPersona || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (tipoPersona !== "juridica") return [];
+  return [
+    ["razón social", personaContext?.razonSocial],
+    ["NIT", personaContext?.nitEmpresa],
+    ["representante legal", personaContext?.representanteLegalContratista],
+    ["tipo de documento del representante", personaContext?.tipoDocumentoRepresentante],
+    ["número de documento del representante", personaContext?.numeroDocumentoRepresentante]
+  ].filter(([, value]) => !String(value || "").trim()).map(([label]) => label);
+}
+
 /**
  * Obtiene la lista de tokens generados para procesos de firma de contratos
  */
@@ -338,6 +362,7 @@ async function generarTokenFirma(req, res) {
     resolveContratoPersonaContext,
     hasContratoBaseFirmado,
     buildDocsFirmaPlan,
+    isContratoDocPersonaJuridicaCompatible,
     requirePersistedAnexoFromProceso,
     getCamposLaboralesFaltantes,
     CONTRATOS_TOKEN_EXPIRY_HOURS,
@@ -403,6 +428,40 @@ async function generarTokenFirma(req, res) {
       return res.status(400).json({ error: "No se pudo resolver nombre_persona o correo_personal del proceso" });
     }
 
+    const juridicaMissing = getPersonaJuridicaMissingFields(personaContext);
+    const esPersonaJuridica = String(personaContext?.tipoPersona || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toLowerCase() === "juridica";
+    if (juridicaMissing.length) {
+      return res.status(422).json({
+        error: `Faltan datos de la persona jurídica: ${juridicaMissing.join(", ")}`,
+        missing: juridicaMissing
+      });
+    }
+    if (esPersonaJuridica) {
+      const tieneContratoBase = await hasContratoBaseFirmado({
+        correoPersonal: correoFinal || toNullableTrimmedString(personaContext?.correoPersonal),
+        numeroDocumento: personaContext?.numeroDocumento || null
+      });
+      const planJuridico = buildDocsFirmaPlan({
+        hasContratoBase: tieneContratoBase,
+        facturaEnColombia: personaContext?.facturaEnColombia ?? null,
+        tipoContratacion
+      });
+      const incompatibles = planJuridico.filter(
+        (doc) => !isContratoDocPersonaJuridicaCompatible(doc)
+      );
+      if (incompatibles.length) {
+        const plantillasPendientes = incompatibles.map((doc) => doc.template_file);
+        return res.status(422).json({
+          error: `No se generó el enlace: estas plantillas aún no identifican correctamente a una persona jurídica: ${plantillasPendientes.join(", ")}`,
+          plantillas_pendientes: plantillasPendientes
+        });
+      }
+    }
+
     if (correoIngresado) {
       await syncPersonaCorreoElectronico({
         personaContext,
@@ -411,6 +470,15 @@ async function generarTokenFirma(req, res) {
         preregistroId: preId
       });
       if (personaContext) personaContext.correoPersonal = correoIngresado;
+    }
+
+    if (personaContext?.persona_id) {
+      const tipoContratoPersona = resolveTipoContratoPersona(tipoContratacion, personaContext);
+      await pool.query(
+        "UPDATE personas SET tipo_contrato = $1::tipo_contrato, updated_at = NOW() WHERE id = $2",
+        [tipoContratoPersona, personaContext.persona_id]
+      );
+      personaContext.tipoContrato = tipoContratoPersona;
     }
 
     if (tipoContratacion === "vinculado" || personaContext?.tipoContrato === "Vinculado") {

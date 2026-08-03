@@ -122,7 +122,10 @@ async function searchAnexoIndividualUsuarios(req, res) {
           EXISTS (
             SELECT 1
             FROM tokens_firma_anexo_individual t
-            WHERE t.usuario_id = u.id
+            WHERE (
+                t.usuario_id = u.id
+                OR (p.id IS NOT NULL AND t.persona_id = p.id)
+              )
               AND t.estado = 'enviado'
           ) AS envio_pendiente,
           'usuario' AS source
@@ -153,7 +156,12 @@ async function searchAnexoIndividualUsuarios(req, res) {
               AND p.numero_documento IS NOT NULL
               AND ati.numero_documento = p.numero_documento
           ) AS tiene_items_activos,
-          false AS envio_pendiente,
+          EXISTS (
+            SELECT 1
+            FROM tokens_firma_anexo_individual t
+            WHERE t.persona_id = p.id
+              AND t.estado = 'enviado'
+          ) AS envio_pendiente,
           'persona' AS source
         FROM personas p
         WHERE NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.persona_id = p.id)
@@ -267,6 +275,7 @@ async function createAnexoIndividualItem(req, res) {
         cliente_id,
         cliente_nombre,
         modulo_id,
+        modulo_nombre,
         moneda,
         valor_tarifa,
         fecha_inicio,
@@ -283,7 +292,7 @@ async function createAnexoIndividualItem(req, res) {
       VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-        $21, $22
+        $21, $22, $23
       )
       RETURNING id
       `,
@@ -298,6 +307,7 @@ async function createAnexoIndividualItem(req, res) {
         payload.cliente_id,
         payload.cliente_nombre,
         payload.modulo_id,
+        payload.modulo_nombre,
         payload.moneda,
         payload.valor_tarifa,
         payload.fecha_inicio,
@@ -375,15 +385,16 @@ async function updateAnexoIndividualItem(req, res) {
         cliente_id = $6,
         cliente_nombre = $7,
         modulo_id = $8,
-        moneda = $9,
-        valor_tarifa = $10,
-        fecha_inicio = $11,
-        fecha_fin = $12,
-        fecha_fin_calculada = $13,
-        estado_firma = $14,
-        updated_by = $15,
+        modulo_nombre = $9,
+        moneda = $10,
+        valor_tarifa = $11,
+        fecha_inicio = $12,
+        fecha_fin = $13,
+        fecha_fin_calculada = $14,
+        estado_firma = $15,
+        updated_by = $16,
         updated_at = NOW()
-      WHERE id = $16
+      WHERE id = $17
       `,
       [
         payload.usuario_id,
@@ -394,6 +405,7 @@ async function updateAnexoIndividualItem(req, res) {
         payload.cliente_id,
         payload.cliente_nombre,
         payload.modulo_id,
+        payload.modulo_nombre,
         payload.moneda,
         payload.valor_tarifa,
         payload.fecha_inicio,
@@ -503,7 +515,10 @@ async function previewAnexoIndividualPdf(req, res) {
     console.error("Error descargando preview de anexo individual:", err);
     const status = Number(err?.status || 0);
     if (status >= 400 && status < 500) {
-      return res.status(status).json({ error: err.message || "No fue posible generar la vista previa" });
+      return res.status(status).json({
+        error: err.message || "No fue posible generar la vista previa",
+        missing: Array.isArray(err?.missing) ? err.missing : undefined
+      });
     }
     if (isAnexoIndividualInfraError(err)) {
       return res.status(503).json(buildAnexoIndividualInfraErrorPayload());
@@ -578,13 +593,16 @@ async function iniciarFirmaAnexoIndividual(req, res) {
         `
         SELECT *
         FROM tokens_firma_anexo_individual
-        WHERE usuario_id = $1
+        WHERE (
+            ($1::int IS NOT NULL AND usuario_id = $1)
+            OR ($2::int IS NOT NULL AND persona_id = $2)
+          )
           AND estado = 'enviado'
         ORDER BY created_at DESC
         LIMIT 1
         FOR UPDATE
         `,
-        [userRow.id]
+        [Number(userRow.id) > 0 ? Number(userRow.id) : null, userRow.persona_id || null]
       );
       if (activeToken.rowCount > 0) {
         await client.query("ROLLBACK");
@@ -600,7 +618,7 @@ async function iniciarFirmaAnexoIndividual(req, res) {
         facturaEnColombia,
         clicksignDocumentType
       } = await collectAnexoIndividualSignatureContext({
-        userInput: userRow.id,
+        userInput: usuarioInput,
         correoFirmante,
         requestedItemIds: req.body?.item_ids || [],
         client,
@@ -616,7 +634,7 @@ async function iniciarFirmaAnexoIndividual(req, res) {
       const token = crypto.randomBytes(32).toString("hex");
       const requestId = `ANX-${token.slice(0, 12)}-${Date.now()}`;
       const contractId = `anexo_individual_${String(userRow.public_id || userRow.id || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 24)}_${Date.now()}`;
-      const signatoryExternalId = String(userRow.id || Date.now());
+      const signatoryExternalId = String(userRow.public_id || userRow.id || Date.now());
       const documentType = clicksignDocumentType || "AnexoTecnico";
       const clicksignConfigId = getAnexoTecnicoClickSignConfigId();
       const clicksignPayload = {
@@ -720,6 +738,7 @@ async function iniciarFirmaAnexoIndividual(req, res) {
         INSERT INTO tokens_firma_anexo_individual (
           token,
           usuario_id,
+          persona_id,
           anexo_item_ids,
           correo_firmante,
           nombre_persona,
@@ -731,13 +750,14 @@ async function iniciarFirmaAnexoIndividual(req, res) {
           generado_por
         )
         VALUES (
-          $1, $2, $3::int[], $4, $5, 'enviado', $6, $7, $8, $9, $10
+          $1, $2, $3, $4::int[], $5, $6, 'enviado', $7, $8, $9, $10, $11
         )
         RETURNING *
         `,
         [
           token,
-          userRow.id,
+          Number(userRow.id) > 0 ? Number(userRow.id) : null,
+          userRow.persona_id || null,
           items.map((item) => Number(item.id)).filter(Number.isInteger),
           correoFinal,
           userRow.nombre_usuario || "",
@@ -777,7 +797,10 @@ async function iniciarFirmaAnexoIndividual(req, res) {
     console.error("Error iniciando firma de anexo individual:", err);
     const status = Number(err?.status || 0);
     if (status >= 400 && status < 500) {
-      return res.status(status).json({ error: err.message || "No fue posible iniciar la firma" });
+      return res.status(status).json({
+        error: err.message || "No fue posible iniciar la firma",
+        missing: Array.isArray(err?.missing) ? err.missing : undefined
+      });
     }
     if (isAnexoIndividualInfraError(err)) {
       return res.status(503).json(buildAnexoIndividualInfraErrorPayload());

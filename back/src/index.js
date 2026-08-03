@@ -34,6 +34,7 @@ const {
   buildCuentaFirmaDiagnosticoFromResolution
 } = require("./services/cuenta-cobro-cierre.service");
 const { persistirDiagnosticoFirmaCuenta } = require("./services/cuentas-cobro.service");
+const { buildAnexoIndividualDocumentContext } = require("./services/anexo-individual-documento.service");
 const { env } = require("./config/env");
 const { requireAccess, requireAuthenticated, hasAccess } = require("./middlewares/access");
 const registerPreregistroRoutes = require("./preregistro-routes");
@@ -2476,18 +2477,23 @@ async function resolveContratoPersonaContext(proceso) {
     null;
 
   const razonSocial =
+    toNullableTrimmedString(personaBase?.razon_social) ||
     toNullableTrimmedString(preregistro?.razon_social) ||
     null;
   const nitEmpresa =
+    toNullableTrimmedString(personaBase?.nit_empresa) ||
     toNullableTrimmedString(preregistro?.nit_empresa) ||
     null;
   const representanteLegalContratista =
+    toNullableTrimmedString(personaBase?.representante_legal) ||
     toNullableTrimmedString(preregistro?.representante_legal) ||
     null;
   const tipoDocumentoRepresentante =
+    toNullableTrimmedString(personaBase?.tipo_documento_representante) ||
     toNullableTrimmedString(preregistro?.tipo_documento_representante) ||
     null;
   const numeroDocumentoRepresentante =
+    toNullableTrimmedString(personaBase?.numero_documento_representante) ||
     toNullableTrimmedString(preregistro?.numero_documento_representante) ||
     null;
 
@@ -2566,6 +2572,7 @@ async function resolveContratoPersonaContext(proceso) {
       toNullableTrimmedString(personaBase?.modulo_otro) ||
       toNullableTrimmedString(parseJsonObject(solicitud?.datos_extra || {})?.modulo_nombre) ||
       toNullableTrimmedString(parseJsonObject(solicitud?.datos_extra || {})?.modulo) ||
+      toNullableTrimmedString(solicitud?.perfil) ||
       preregistro?.modulo_titulo ||
       "",
     modalidad_contrato: solicitud?.modalidad_contrato || null,
@@ -2616,7 +2623,8 @@ async function listActiveAnexoItemsForPersonaContext(personaContext, { lockRows 
         ati.cliente_id,
         COALESCE(c.titulo, ati.cliente_nombre) AS cliente_nombre,
         ati.modulo_id,
-        m.titulo AS modulo_titulo,
+        ati.modulo_nombre,
+        COALESCE(m.titulo, ati.modulo_nombre) AS modulo_titulo,
         ati.moneda,
         ati.valor_tarifa,
         ati.fecha_inicio,
@@ -2657,10 +2665,17 @@ async function listActiveAnexoItemsForPersonaContext(personaContext, { lockRows 
 
 function anexoAssignmentMatchesPayload(item, payload) {
   if (!item || !payload) return false;
+  const itemModuloId = toNullableInteger(item.modulo_id) || null;
+  const payloadModuloId = toNullableInteger(payload.modulo_id) || null;
+  const moduloCoincide =
+    itemModuloId === payloadModuloId &&
+    (itemModuloId !== null ||
+      String(toNullableTrimmedString(item.modulo_nombre) || "").toLowerCase() ===
+        String(toNullableTrimmedString(payload.modulo_nombre) || "").toLowerCase());
   return (
     normalizeAnexoTipoInput(item.tipo_asignacion) === normalizeAnexoTipoInput(payload.tipo_asignacion) &&
     (toNullableInteger(item.cliente_id) || null) === (toNullableInteger(payload.cliente_id) || null) &&
-    (toNullableInteger(item.modulo_id) || null) === (toNullableInteger(payload.modulo_id) || null)
+    moduloCoincide
   );
 }
 
@@ -2733,6 +2748,11 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
       fecha_fin_calculada: fechaFinCalculadaTarget,
       moneda: personaContext?.moneda,
       modulo_id: personaContext?.modulo_id || baseItem?.modulo_id || null,
+      modulo_nombre:
+        personaContext?.modulo_nombre ||
+        personaContext?.perfilSolicitud ||
+        baseItem?.modulo_nombre ||
+        null,
       nombre_persona: personaContext?.nombreCompleto,
       numero_documento: personaContext?.numeroDocumento,
       correo_personal: personaContext?.correoPersonal
@@ -2821,19 +2841,20 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
       cliente_id = $8,
       cliente_nombre = $9,
       modulo_id = $10,
-      moneda = $11,
-      valor_tarifa = $12,
-      fecha_inicio = $13,
-      fecha_fin = $14,
-      fecha_fin_calculada = $15,
-      origen = $16,
+      modulo_nombre = $11,
+      moneda = $12,
+      valor_tarifa = $13,
+      fecha_inicio = $14,
+      fecha_fin = $15,
+      fecha_fin_calculada = $16,
+      origen = $17,
       estado = 'activo',
-      estado_firma = $17,
-      updated_by = $18,
-      solicitante_id = COALESCE($19, solicitante_id),
-      rol_solicitante = COALESCE($20, rol_solicitante),
+      estado_firma = $18,
+      updated_by = $19,
+      solicitante_id = COALESCE($20, solicitante_id),
+      rol_solicitante = COALESCE($21, rol_solicitante),
       updated_at = NOW()
-    WHERE id = $21
+    WHERE id = $22
     RETURNING *
     `,
     [
@@ -2847,6 +2868,7 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
       payload.cliente_id,
       payload.cliente_nombre,
       payload.modulo_id,
+      payload.modulo_nombre,
       payload.moneda,
       payload.valor_tarifa,
       payload.fecha_inicio,
@@ -2866,17 +2888,19 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
 function buildAnexoItemForTemplateRow(item) {
   const tipo = normalizeAnexoTipoInput(item?.tipo_asignacion) || "full_time";
   const moneda = normalizeMonedaContrato(item?.moneda) || "COP";
+  const modulo =
+    toNullableTrimmedString(item?.modulo_titulo) ||
+    toNullableTrimmedString(item?.modulo_nombre) ||
+    "";
+  const tipoLabel = ANEXO_TIPO_LABELS[tipo] || ANEXO_TIPO_LABELS.full_time;
   let valorTarifa = formatCurrencyForTemplate(item?.valor_tarifa, moneda);
   if (tipo === "horas") valorTarifa = valorTarifa ? `${valorTarifa} / hora` : "";
   if (tipo === "full_time" || tipo === "medio_tiempo") valorTarifa = valorTarifa ? `${valorTarifa} / mes` : "";
   if (tipo === "proyecto") valorTarifa = valorTarifa ? `${valorTarifa} (proyecto)` : "";
   return {
-    tipo: ANEXO_TIPO_LABELS[tipo] || ANEXO_TIPO_LABELS.full_time,
+    tipo: modulo ? `${tipoLabel} - Módulo: ${modulo}` : tipoLabel,
     cliente: toNullableTrimmedString(item?.cliente_nombre) || "",
-    modulo:
-      toNullableTrimmedString(item?.modulo_titulo) ||
-      toNullableTrimmedString(item?.modulo_nombre) ||
-      "",
+    modulo,
     valorTarifa,
     fechaInicio: formatDateForTemplate(item?.fecha_inicio),
     fechaFin: formatDateForTemplate(item?.fecha_fin)
@@ -2936,7 +2960,8 @@ async function listAnexoTecnicoItems({ solicitudId = null, preregistroId = null,
       COALESCE(c.titulo, ati.cliente_nombre) AS cliente_nombre,
       ati.modulo_id,
       m.public_id AS modulo_public_id,
-      m.titulo AS modulo_titulo,
+      ati.modulo_nombre,
+      COALESCE(m.titulo, ati.modulo_nombre) AS modulo_titulo,
       ati.moneda,
       ati.valor_tarifa,
       ati.fecha_inicio,
@@ -2987,7 +3012,8 @@ async function getAnexoTecnicoItemByInternalId(internalId) {
       COALESCE(c.titulo, ati.cliente_nombre) AS cliente_nombre,
       ati.modulo_id,
       m.public_id AS modulo_public_id,
-      m.titulo AS modulo_titulo,
+      ati.modulo_nombre,
+      COALESCE(m.titulo, ati.modulo_nombre) AS modulo_titulo,
       ati.moneda,
       ati.valor_tarifa,
       ati.fecha_inicio,
@@ -3089,6 +3115,21 @@ function buildAnexoInsertPayload({
     throw err;
   }
 
+  const resolvedModuloId = toNullableInteger(input?.modulo_id) || toNullableInteger(personaContext?.modulo_id) || null;
+  const resolvedModuloNombre = resolvedModuloId
+    ? null
+    : (
+        toNullableTrimmedString(input?.modulo_nombre) ||
+        toNullableTrimmedString(input?.modulo_otro) ||
+        toNullableTrimmedString(input?.perfil) ||
+        toNullableTrimmedString(personaContext?.modulo_nombre) ||
+        toNullableTrimmedString(personaContext?.perfilSolicitud) ||
+        toNullableTrimmedString(personaContext?.datos_extra?.modulo_nombre) ||
+        toNullableTrimmedString(personaContext?.datos_extra?.modulo_otro) ||
+        toNullableTrimmedString(personaContext?.datos_extra?.modulo) ||
+        null
+      );
+
   return {
     solicitud_contratacion_id: solicitudId || null,
     preregistro_id: preregistroId || null,
@@ -3099,7 +3140,8 @@ function buildAnexoInsertPayload({
     tipo_asignacion: tipoAsignacion,
     cliente_id: resolvedClienteId || null,
     cliente_nombre: resolvedClienteNombre || "",
-    modulo_id: toNullableInteger(input?.modulo_id) || personaContext?.modulo_id || null,
+    modulo_id: resolvedModuloId,
+    modulo_nombre: resolvedModuloNombre,
     moneda: normalizeMonedaContrato(input?.moneda || personaContext?.moneda || "COP") || "COP",
     valor_tarifa: valorTarifa,
     fecha_inicio: fechaInicio,
@@ -3150,10 +3192,11 @@ async function findAnexoDuplicate(payload) {
       AND tipo_asignacion = $5
       AND COALESCE(cliente_id, 0) = COALESCE($6, 0)
       AND COALESCE(modulo_id, 0) = COALESCE($7, 0)
-      AND COALESCE(moneda, 'COP') = COALESCE($8, 'COP')
-      AND valor_tarifa = $9
-      AND fecha_inicio = $10
-      AND fecha_fin = $11
+      AND COALESCE(LOWER(modulo_nombre), '') = COALESCE(LOWER($8), '')
+      AND COALESCE(moneda, 'COP') = COALESCE($9, 'COP')
+      AND valor_tarifa = $10
+      AND fecha_inicio = $11
+      AND fecha_fin = $12
     LIMIT 1
     `,
     [
@@ -3164,6 +3207,7 @@ async function findAnexoDuplicate(payload) {
       payload.tipo_asignacion,
       payload.cliente_id || null,
       payload.modulo_id || null,
+      payload.modulo_nombre || null,
       payload.moneda || null,
       payload.valor_tarifa,
       payload.fecha_inicio,
@@ -3190,20 +3234,21 @@ async function insertAnexoTecnicoItem(payload) {
         cliente_id = $8,
         cliente_nombre = $9,
         modulo_id = $10,
-        moneda = $11,
-        valor_tarifa = $12,
-        fecha_inicio = $13,
-        fecha_fin = $14,
-        fecha_fin_calculada = $15,
-        origen = $16,
-        estado = $17,
-        estado_firma = COALESCE($18, estado_firma, 'pendiente'),
-        creado_por = COALESCE($19, creado_por),
-        updated_by = COALESCE($20, updated_by),
-        solicitante_id = COALESCE($22, solicitante_id),
-        rol_solicitante = COALESCE($23, rol_solicitante),
+        modulo_nombre = $11,
+        moneda = $12,
+        valor_tarifa = $13,
+        fecha_inicio = $14,
+        fecha_fin = $15,
+        fecha_fin_calculada = $16,
+        origen = $17,
+        estado = $18,
+        estado_firma = COALESCE($19, estado_firma, 'pendiente'),
+        creado_por = COALESCE($20, creado_por),
+        updated_by = COALESCE($21, updated_by),
+        solicitante_id = COALESCE($23, solicitante_id),
+        rol_solicitante = COALESCE($24, rol_solicitante),
         updated_at = NOW()
-      WHERE id = $21
+      WHERE id = $22
       RETURNING *
       `,
       [
@@ -3217,6 +3262,7 @@ async function insertAnexoTecnicoItem(payload) {
         payload.cliente_id,
         payload.cliente_nombre,
         payload.modulo_id,
+        payload.modulo_nombre,
         payload.moneda,
         payload.valor_tarifa,
         payload.fecha_inicio,
@@ -3254,6 +3300,7 @@ async function insertAnexoTecnicoItem(payload) {
       cliente_id,
       cliente_nombre,
       modulo_id,
+      modulo_nombre,
       moneda,
       valor_tarifa,
       fecha_inicio,
@@ -3270,7 +3317,7 @@ async function insertAnexoTecnicoItem(payload) {
     VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8,
       $9, $10, $11, $12, $13, $14, $15, $16,
-      $17, $18, $19, $20, $21, $22
+      $17, $18, $19, $20, $21, $22, $23
     )
     RETURNING *
     `,
@@ -3285,6 +3332,7 @@ async function insertAnexoTecnicoItem(payload) {
       payload.cliente_id,
       payload.cliente_nombre,
       payload.modulo_id,
+      payload.modulo_nombre,
       payload.moneda,
       payload.valor_tarifa,
       payload.fecha_inicio,
@@ -3427,7 +3475,7 @@ function toAnexoApiRow(row) {
     cliente_id: row.cliente_public_id || null,
     cliente_nombre: row.cliente_nombre || "",
     modulo_id: row.modulo_public_id || null,
-    modulo_nombre: row.modulo_titulo || "",
+    modulo_nombre: row.modulo_titulo || row.modulo_nombre || "",
     moneda: row.moneda || "COP",
     valor_tarifa: row.valor_tarifa === null ? null : Number(row.valor_tarifa),
     fecha_inicio: row.fecha_inicio || null,
@@ -3452,6 +3500,7 @@ function mapAnexoIndividualTokenRow(row) {
   return {
     id: row.public_id || row.id,
     usuario_id: row.usuario_public_id || null,
+    persona_id: row.persona_public_id || null,
     estado: row.estado || "enviado",
     correo_firmante: row.correo_firmante || null,
     nombre_persona: row.nombre_persona || "",
@@ -3476,6 +3525,7 @@ async function getUsuarioAnexoIndividualById(userInput) {
       SELECT
         u.id,
         u.public_id,
+        p.id AS persona_id,
         u.nombre_usuario,
         u.email,
         COALESCE(p.numero_documento, u.cedula)       AS cedula,
@@ -3509,6 +3559,7 @@ async function getUsuarioAnexoIndividualById(userInput) {
     SELECT
       -p.id AS id,
       p.public_id,
+      p.id AS persona_id,
       TRIM(CONCAT(COALESCE(p.nombre, ''), ' ', COALESCE(p.apellidos, ''))) AS nombre_usuario,
       p.correo_electronico AS email,
       p.numero_documento AS cedula,
@@ -3538,13 +3589,16 @@ async function resolveSuggestedAnexoFirmanteEmailForUser(userRow) {
     `
     SELECT correo_firmante AS email
     FROM tokens_firma_anexo_individual
-    WHERE usuario_id = $1
+    WHERE (
+        usuario_id = $1
+        OR ($2::int IS NOT NULL AND persona_id = $2)
+      )
       AND correo_firmante IS NOT NULL
       AND TRIM(correo_firmante) <> ''
     ORDER BY created_at DESC
     LIMIT 1
     `,
-    [userRow.id]
+    [Number(userRow.id) > 0 ? Number(userRow.id) : null, userRow.persona_id || null]
   );
   if (fromToken.rowCount > 0) return toNullableTrimmedString(fromToken.rows[0]?.email);
 
@@ -3626,7 +3680,8 @@ async function listAnexoItemsForUsuario(userRow, { includeFinalizados = false, c
       COALESCE(c.titulo, ati.cliente_nombre) AS cliente_nombre,
       ati.modulo_id,
       m.public_id AS modulo_public_id,
-      m.titulo AS modulo_titulo,
+      ati.modulo_nombre,
+      COALESCE(m.titulo, ati.modulo_nombre) AS modulo_titulo,
       ati.moneda,
       ati.valor_tarifa,
       ati.fecha_inicio,
@@ -3703,7 +3758,8 @@ async function getAnexoIndividualItemByInput(itemInput) {
       COALESCE(c.titulo, ati.cliente_nombre) AS cliente_nombre,
       ati.modulo_id,
       m.public_id AS modulo_public_id,
-      m.titulo AS modulo_titulo,
+      ati.modulo_nombre,
+      COALESCE(m.titulo, ati.modulo_nombre) AS modulo_titulo,
       ati.moneda,
       ati.valor_tarifa,
       ati.fecha_inicio,
@@ -3746,22 +3802,38 @@ async function buildAnexoIndividualItemPayload({ input, userRow, existingRow = n
     throw err;
   }
 
-  const moduloInput = input?.modulo_id || existingRow?.modulo_public_id || existingRow?.modulo_id || null;
-  const moduloId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.modulo, moduloInput);
-  if (!moduloId) {
-    const err = new Error("modulo_id es obligatorio");
-    err.status = 400;
-    throw err;
+  const hasModuloIdInput = Object.prototype.hasOwnProperty.call(input || {}, "modulo_id");
+  const hasModuloNombreInput = Object.prototype.hasOwnProperty.call(input || {}, "modulo_nombre");
+  const moduloInput = hasModuloIdInput
+    ? input?.modulo_id
+    : (existingRow?.modulo_public_id || existingRow?.modulo_id || null);
+  let moduloId = null;
+  let moduloCatalogoNombre = "";
+  if (moduloInput) {
+    moduloId = await resolveInternalIdFromPublicIdOrId(pool, ID_TABLES.modulo, moduloInput);
+    if (!moduloId) {
+      const err = new Error("Modulo no encontrado");
+      err.status = 404;
+      throw err;
+    }
+    const moduloRes = await pool.query(
+      "SELECT id, public_id, titulo FROM modulo WHERE id = $1 AND activo = true LIMIT 1",
+      [moduloId]
+    );
+    if (moduloRes.rowCount === 0) {
+      const err = new Error("Modulo no encontrado");
+      err.status = 404;
+      throw err;
+    }
+    moduloCatalogoNombre = moduloRes.rows[0]?.titulo || "";
   }
-  const moduloRes = await pool.query(
-    "SELECT id, public_id, titulo FROM modulo WHERE id = $1 AND activo = true LIMIT 1",
-    [moduloId]
-  );
-  if (moduloRes.rowCount === 0) {
-    const err = new Error("Modulo no encontrado");
-    err.status = 404;
-    throw err;
-  }
+  const moduloNombreLibre = moduloId
+    ? null
+    : (
+        hasModuloNombreInput
+          ? toNullableTrimmedString(input?.modulo_nombre)
+          : toNullableTrimmedString(existingRow?.modulo_nombre)
+      );
 
   let clienteId = null;
   let clienteNombre = "";
@@ -3796,13 +3868,13 @@ async function buildAnexoIndividualItemPayload({ input, userRow, existingRow = n
     null;
 
   const personaContext = {
-    usuario_id: userRow.id,
+    usuario_id: Number(userRow.id) > 0 ? Number(userRow.id) : null,
     nombreCompleto: userRow.nombre_usuario,
     numeroDocumento: userRow.cedula,
     correoPersonal: suggestedEmail,
     moneda: userRow.moneda_cobro || existingRow?.moneda || "COP",
     modulo_id: moduloId,
-    modulo_nombre: moduloRes.rows[0]?.titulo || ""
+    modulo_nombre: moduloCatalogoNombre || moduloNombreLibre || ""
   };
 
   const payload = buildAnexoInsertPayload({
@@ -3810,7 +3882,8 @@ async function buildAnexoIndividualItemPayload({ input, userRow, existingRow = n
       ...input,
       tipo_asignacion: tipoAsignacion,
       correo_personal: suggestedEmail,
-      modulo_id: moduloId
+      modulo_id: moduloId,
+      modulo_nombre: moduloNombreLibre
     },
     personaContext,
     solicitudId: existingRow?.solicitud_contratacion_id || null,
@@ -3823,8 +3896,9 @@ async function buildAnexoIndividualItemPayload({ input, userRow, existingRow = n
 
   return {
     ...payload,
-    usuario_id: userRow.id,
+    usuario_id: Number(userRow.id) > 0 ? Number(userRow.id) : null,
     modulo_id: moduloId,
+    modulo_nombre: moduloNombreLibre,
     estado_firma:
       existingRow?.estado_firma === "firmado"
         ? "pendiente"
@@ -3834,39 +3908,55 @@ async function buildAnexoIndividualItemPayload({ input, userRow, existingRow = n
 }
 
 async function getActiveAnexoIndividualTokenByUser(userId) {
-  if (!userId) return null;
+  const userRow = userId && typeof userId === "object" ? userId : { id: userId };
+  const usuarioId = Number(userRow.id) > 0 ? Number(userRow.id) : null;
+  const personaId = Number(userRow.persona_id) > 0 ? Number(userRow.persona_id) : null;
+  if (!usuarioId && !personaId) return null;
   const r = await pool.query(
     `
     SELECT
       t.*,
-      u.public_id AS usuario_public_id
+      u.public_id AS usuario_public_id,
+      p.public_id AS persona_public_id
     FROM tokens_firma_anexo_individual t
     LEFT JOIN usuarios u ON u.id = t.usuario_id
-    WHERE t.usuario_id = $1
+    LEFT JOIN personas p ON p.id = t.persona_id
+    WHERE (
+        ($1::int IS NOT NULL AND t.usuario_id = $1)
+        OR ($2::int IS NOT NULL AND t.persona_id = $2)
+      )
       AND t.estado = 'enviado'
     ORDER BY t.created_at DESC
     LIMIT 1
     `,
-    [userId]
+    [usuarioId, personaId]
   );
   return r.rows[0] || null;
 }
 
 async function getLastSignedAnexoIndividualTokenByUser(userId) {
-  if (!userId) return null;
+  const userRow = userId && typeof userId === "object" ? userId : { id: userId };
+  const usuarioId = Number(userRow.id) > 0 ? Number(userRow.id) : null;
+  const personaId = Number(userRow.persona_id) > 0 ? Number(userRow.persona_id) : null;
+  if (!usuarioId && !personaId) return null;
   const r = await pool.query(
     `
     SELECT
       t.*,
-      u.public_id AS usuario_public_id
+      u.public_id AS usuario_public_id,
+      p.public_id AS persona_public_id
     FROM tokens_firma_anexo_individual t
     LEFT JOIN usuarios u ON u.id = t.usuario_id
-    WHERE t.usuario_id = $1
+    LEFT JOIN personas p ON p.id = t.persona_id
+    WHERE (
+        ($1::int IS NOT NULL AND t.usuario_id = $1)
+        OR ($2::int IS NOT NULL AND t.persona_id = $2)
+      )
       AND t.estado = 'firmado'
     ORDER BY t.firmado_at DESC NULLS LAST, t.created_at DESC
     LIMIT 1
     `,
-    [userId]
+    [usuarioId, personaId]
   );
   return r.rows[0] || null;
 }
@@ -3879,8 +3969,8 @@ async function buildAnexoIndividualDashboardPayload(userRow, { includeFinalizado
   });
   const activos = items.filter((item) => item.estado === "activo");
   const finalizados = items.filter((item) => item.estado === "finalizado");
-  const tokenActivo = await getActiveAnexoIndividualTokenByUser(userRow.id);
-  const ultimoFirmado = await getLastSignedAnexoIndividualTokenByUser(userRow.id);
+  const tokenActivo = await getActiveAnexoIndividualTokenByUser(userRow);
+  const ultimoFirmado = await getLastSignedAnexoIndividualTokenByUser(userRow);
   const firmadoAt = ultimoFirmado?.firmado_at ? new Date(ultimoFirmado.firmado_at).getTime() : 0;
   const tieneCambiosDesdeUltimaFirma = Boolean(
     firmadoAt &&
@@ -4784,13 +4874,20 @@ async function convertDocxBufferToPdfBuffer(docxBuffer, fileBaseName) {
   throw lastError || new Error("No se pudo convertir DOCX a PDF con Adobe PDF Services");
 }
 
+function isContratoPersonaJuridica(personaContext) {
+  const normalized = String(personaContext?.tipoPersona || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return normalized === "juridica";
+}
+
 function buildContratistaComparecencia(personaContext) {
   const nombre = String(personaContext?.nombreCompleto || "").toUpperCase();
   const tipoDoc = personaContext?.tipoDocumento || "";
   const numDoc = personaContext?.numeroDocumento || "";
-  const tipoPersona = personaContext?.tipoPersona || "Natural";
-
-  if (tipoPersona === "Jurídica" || tipoPersona === "Juridica") {
+  if (isContratoPersonaJuridica(personaContext)) {
     const razonSocial = String(personaContext?.razonSocial || nombre).toUpperCase();
     const nitEmpresa = personaContext?.nitEmpresa || "";
     const repLegal = String(personaContext?.representanteLegalContratista || nombre).toUpperCase();
@@ -4805,8 +4902,7 @@ function buildContratistaComparecencia(personaContext) {
 }
 
 function buildContratistaFirmaPayload(personaContext) {
-  const tipoPersona = personaContext?.tipoPersona || "Natural";
-  const isJuridica = tipoPersona === "Jurídica" || tipoPersona === "Juridica";
+  const isJuridica = isContratoPersonaJuridica(personaContext);
   const nombreBase = isJuridica
     ? (personaContext?.representanteLegalContratista || personaContext?.nombreCompleto || "")
     : (personaContext?.nombreCompleto || "");
@@ -4866,7 +4962,7 @@ function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correo
     personaContext?.fechaInicioLabores ||
     personaContext?.solicitud?.fecha_inicio ||
     personaContext?.solicitud?.fecha_extension_desde ||
-    personaContext?.preregistro?.fecha_fin ||
+    personaContext?.created_at ||
     null;
   const fechaInicioValue = fechaInicioRaw
     ? `${String(fechaInicioRaw).slice(0, 10)}T12:00:00.000Z`
@@ -4883,6 +4979,13 @@ function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correo
   );
   const contratistaFirma = buildContratistaFirmaPayload(personaContext);
   const nombreCompleto = String(personaContext?.nombreCompleto || proceso?.nombre_persona || "").toUpperCase();
+  const esPersonaJuridica = isContratoPersonaJuridica(personaContext);
+  const contratistaNombreLegal = String(
+    esPersonaJuridica ? (personaContext?.razonSocial || "") : nombreCompleto
+  ).toUpperCase();
+  const contratistaDocumentoLegal = esPersonaJuridica
+    ? (personaContext?.nitEmpresa || "")
+    : (personaContext?.numeroDocumento || "");
   const salarioMensual = toNullableNumber(personaContext?.salarioMensual);
   const salarioMoneda = personaContext?.salarioMoneda || "COP";
 
@@ -4904,6 +5007,14 @@ function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correo
     FechaInicioContrato: fechaInicioContrato,
     Direccion: personaContext?.direccion || "",
     ContratistaComparecencia: buildContratistaComparecencia(personaContext),
+    ContratistaNombreLegal: contratistaNombreLegal,
+    ContratistaDocumentoEtiqueta: esPersonaJuridica ? "NIT" : (personaContext?.tipoDocumento || "Documento"),
+    ContratistaDocumentoLegal: contratistaDocumentoLegal,
+    ContratistaRazonSocial: personaContext?.razonSocial || "",
+    ContratistaNit: personaContext?.nitEmpresa || "",
+    ContratistaRepresentanteLegal: personaContext?.representanteLegalContratista || "",
+    ContratistaTipoDocumentoRepresentante: personaContext?.tipoDocumentoRepresentante || "",
+    ContratistaNumeroDocumentoRepresentante: personaContext?.numeroDocumentoRepresentante || "",
     // Tags de empresa contratante (genéricos, compatibles Silver y Capital)
     EmpresaRazonSocial: empresa.razonSocial,
     EmpresaRepresentanteLegal: empresa.representanteLegal,
@@ -5024,6 +5135,17 @@ async function updatePersonaDatosLaborales(client, personaId, body = {}) {
 }
 
 async function buildContratoTemplatePayload({ docDefinition, personaContext, proceso }) {
+  if (isContratoPersonaJuridica(personaContext)) {
+    if (!isContratoDocPersonaJuridicaCompatible(docDefinition)) {
+      const err = new Error(
+        `La plantilla ${docDefinition?.template_file || "seleccionada"} todavía no identifica correctamente a una persona jurídica. ` +
+        "Actualiza el Word con ContratistaComparecencia o los marcadores ContratistaNombreLegal/ContratistaDocumentoEtiqueta/ContratistaDocumentoLegal antes de firmar."
+      );
+      err.status = 422;
+      err.code = "PLANTILLA_PERSONA_JURIDICA_INCOMPATIBLE";
+      throw err;
+    }
+  }
   const payload = buildContratoBaseTemplatePayload({ personaContext, proceso });
 
   if (docDefinition?.doc_key === "anexo_tecnico") {
@@ -5032,6 +5154,20 @@ async function buildContratoTemplatePayload({ docDefinition, personaContext, pro
   }
 
   return payload;
+}
+
+function isContratoDocPersonaJuridicaCompatible(docDefinition) {
+  if (!docDefinition?.template_file || !PizZip) return false;
+  const binary = getDocxTemplateBinary(docDefinition.template_file, docDefinition.folder);
+  const zip = new PizZip(binary);
+  const documentXml = zip.file("word/document.xml")?.asText() || "";
+  const markerText = documentXml.replace(/<[^>]+>/g, "");
+  if (markerText.includes("ContratistaComparecencia")) return true;
+  return [
+    "ContratistaNombreLegal",
+    "ContratistaDocumentoEtiqueta",
+    "ContratistaDocumentoLegal"
+  ].every((marker) => markerText.includes(marker));
 }
 
 async function generateContratoPdfFromTemplate({ docDefinition, personaContext, proceso, fileBaseName }) {
@@ -5046,79 +5182,39 @@ async function generateContratoPdfFromTemplate({ docDefinition, personaContext, 
 
 async function generateAnexoIndividualPdfFromItems({ userRow, items, correoFirmante, facturaEnColombia = null }) {
   const facturaContext = normalizeNullableBooleanInput(facturaEnColombia ?? userRow?.factura_en_colombia);
-  const empresa = resolveEmpresaContratoConfig(facturaContext);
-  const nombreContratista = String(userRow?.nombre_usuario || "").toUpperCase();
-  const tipoDocumento = userRow?.tipo_documento_codigo || userRow?.tipo_documento_titulo || "";
-  const numeroDocumento = userRow?.cedula || "";
-  const correo = correoFirmante || userRow?.email || "";
-  const direccion = userRow?.direccion || "";
-  const ciudad = userRow?.ciudad || CONTRATOS_CIUDAD_SILVER;
+  const documentContext = buildAnexoIndividualDocumentContext({
+    userRow,
+    items,
+    correoFirmante
+  });
+  documentContext.personaContext.facturaEnColombia = facturaContext;
+
+  const docDefinition = getContratoDocDefinition("anexo_tecnico", facturaContext);
+  if (!docDefinition?.template_file) {
+    throw new Error("No se encontró la plantilla DOCX del anexo técnico");
+  }
+
+  const templatePayload = buildContratoBaseTemplatePayload({
+    personaContext: documentContext.personaContext,
+    proceso: documentContext.proceso,
+    correoOverride: documentContext.personaContext.correoPersonal
+  });
+  templatePayload.items = documentContext.items.map(buildAnexoItemForTemplateRow);
+
+  const docxBuffer = renderDocxTemplateToBuffer({
+    templateFile: docDefinition.template_file,
+    folder: docDefinition.folder,
+    data: templatePayload
+  });
   const personaSlug = sanitizePathSegment(
     String(userRow?.nombre_usuario || "Persona").replace(/\s+/g, "_"),
     "Persona"
   );
   const fecha = new Date().toISOString().slice(0, 10);
-  const pdfBuffer = await new Promise((resolve, reject) => {
-    const chunks = [];
-    const doc = new PDFDocument({ margin: 40 });
-    doc.on("data", (chunk) => chunks.push(chunk));
-    doc.on("end", () => resolve(Buffer.concat(chunks)));
-    doc.on("error", reject);
-
-    const PW = pageWidth(doc);
-    const ML = MARGIN.left;
-    const PW_TOTAL = doc.page.width;
-    const headerH = 76;
-
-    fillRect(doc, 0, 0, PW_TOTAL, headerH, COLOR.azulMedio);
-    doc.fontSize(15).font("Helvetica-Bold").fillColor(COLOR.blanco)
-      .text("ANEXO TÉCNICO INDIVIDUAL", ML, 18, { width: PW / 2, lineBreak: false });
-    doc.fontSize(8).font("Helvetica").fillColor(COLOR.blanco)
-      .text("IDENTIFICACIÓN DE LAS PARTES", ML, 38, { width: PW / 2, lineBreak: false });
-    doc.fontSize(8).font("Helvetica").fillColor(COLOR.blanco)
-      .text(fmtFecha(fecha), ML + PW / 2, 26, { width: PW / 2, align: "right", lineBreak: false });
-    fillRect(doc, 0, headerH, PW_TOTAL, 4, COLOR.naranjaSilver);
-
-    let curY = headerH + 22;
-    curY = sectionTitle(doc, "IDENTIFICACIÓN DE LAS PARTES", curY);
-
-    const cardPad = 12;
-    const rowH = 17;
-    const labelW = 126;
-    const valueW = PW - (cardPad * 2) - labelW;
-
-    doc.save()
-      .roundedRect(ML, curY, PW, 126, 5)
-      .strokeColor(COLOR.grisLinea).lineWidth(0.8).stroke()
-      .restore();
-    doc.fontSize(9).font("Helvetica-Bold").fillColor(COLOR.azulOscuro)
-      .text("EMPRESA CONTRATANTE", ML + cardPad, curY + 11, { width: PW - (cardPad * 2), lineBreak: false });
-
-    let ry = curY + 32;
-    infoRow(doc, ML + cardPad, ry, "Razón social:", empresa.razonSocial, labelW, valueW); ry += rowH;
-    infoRow(doc, ML + cardPad, ry, "NIT:", empresa.nit, labelW, valueW); ry += rowH;
-    infoRow(doc, ML + cardPad, ry, "Representante legal:", empresa.representanteLegal, labelW, valueW); ry += rowH;
-    infoRow(doc, ML + cardPad, ry, "Cédula representante:", empresa.cedulaRepresentante, labelW, valueW); ry += rowH;
-    infoRow(doc, ML + cardPad, ry, "Domicilio:", empresa.domicilio, labelW, valueW); ry += rowH;
-    infoRow(doc, ML + cardPad, ry, "Ciudad:", empresa.ciudad, labelW, valueW);
-
-    curY += 142;
-    doc.save()
-      .roundedRect(ML, curY, PW, 112, 5)
-      .strokeColor(COLOR.grisLinea).lineWidth(0.8).stroke()
-      .restore();
-    doc.fontSize(9).font("Helvetica-Bold").fillColor(COLOR.azulOscuro)
-      .text("EL CONTRATISTA", ML + cardPad, curY + 11, { width: PW - (cardPad * 2), lineBreak: false });
-
-    ry = curY + 32;
-    infoRow(doc, ML + cardPad, ry, "Nombre completo:", nombreContratista, labelW, valueW); ry += rowH;
-    infoRow(doc, ML + cardPad, ry, "Documento:", [tipoDocumento, numeroDocumento].filter(Boolean).join(" "), labelW, valueW); ry += rowH;
-    infoRow(doc, ML + cardPad, ry, "Correo:", correo, labelW, valueW); ry += rowH;
-    infoRow(doc, ML + cardPad, ry, "Domicilio/Dirección:", direccion, labelW, valueW); ry += rowH;
-    infoRow(doc, ML + cardPad, ry, "Ciudad:", ciudad, labelW, valueW);
-
-    doc.end();
-  });
+  const pdfBuffer = await convertDocxBufferToPdfBuffer(
+    docxBuffer,
+    `AnexoTecnico_${personaSlug}_${fecha}`
+  );
   const fileName = sanitizePdfFileName(
     `AnexoTecnico_${personaSlug}_${fecha}.pdf`,
     "AnexoTecnico.pdf"
@@ -5167,6 +5263,8 @@ async function collectAnexoIndividualSignatureContext({
       ati.origen,
       ati.estado,
       ati.estado_firma,
+      ati.modulo_id,
+      ati.modulo_nombre,
       COALESCE(
         CASE
           WHEN LOWER(BTRIM(sc.datos_extra->>'factura_en_colombia')) IN ('true', 't', '1', 'yes', 'y', 'on', 'si') THEN true
@@ -5176,7 +5274,7 @@ async function collectAnexoIndividualSignatureContext({
         pp.factura_en_colombia,
         $4::boolean
       ) AS factura_en_colombia,
-      m.titulo AS modulo_titulo
+      COALESCE(m.titulo, ati.modulo_nombre) AS modulo_titulo
     FROM anexo_tecnico_items ati
     LEFT JOIN solicitudes_contratacion sc ON sc.id = ati.solicitud_contratacion_id
     LEFT JOIN preregistro_personas pp ON pp.id = ati.preregistro_id
@@ -5259,6 +5357,7 @@ function isAnexoIndividualInfraError(err) {
     "anexo_tecnico_items",
     "estado_firma",
     "usuario_id",
+    "persona_id",
     "modulo_id",
     "public_id",
     "update_tokens_firma_anexo_individual_updated_at"
@@ -5269,7 +5368,7 @@ function buildAnexoIndividualInfraErrorPayload() {
   return {
     error: "El flujo de anexo tecnico individual no esta completamente habilitado en la base de datos.",
     detalle:
-      "Aplica las migraciones 2026-03-24-anexo-individual-th.sql, 2026-03-25-anexo-individual-check-usuario.sql y 2026-03-25-anexo-individual-firma-hardening.sql."
+      "Aplica las migraciones de anexo individual, incluida 2026-08-03-anexo-firma-por-persona.sql."
   };
 }
 
@@ -11331,6 +11430,11 @@ async function getContratoPersonaBaseRecord(db, {
       p.titulo_profesional,
       p.tipo_persona,
       p.factura_en_colombia,
+      p.razon_social,
+      p.nit_empresa,
+      p.representante_legal,
+      p.tipo_documento_representante,
+      p.numero_documento_representante,
       p.nombre_contacto_emergencia,
       p.telefono_contacto_emergencia,
       p.parentesco,
@@ -15410,6 +15514,7 @@ module.exports = {
   buildAnexoInsertPayload,
   buildContratoEmailHtml,
   buildDocsFirmaPlan,
+  isContratoDocPersonaJuridicaCompatible,
   getUsuarioAnexoIndividualById,
   getAnexoIndividualItemByInput,
   buildAnexoIndividualItemPayload,

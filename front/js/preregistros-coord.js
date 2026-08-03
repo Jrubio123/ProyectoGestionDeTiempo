@@ -28,6 +28,7 @@ window.preregistrosCoordApp = function () {
         grupo_usuario_otro: "",     // libre cuando grupo_usuario === "Otro"
         grupo_distribucion_todos_silver: false,
         grupo_distribucion_vinculados: false,
+        crear_usuario_sistema: true,
         // Legacy (Extension/Retiro)
         grupo_app_tiempos: "",
         grupo_distribucion: "",
@@ -496,6 +497,7 @@ window.preregistrosCoordApp = function () {
                 grupo_usuario_otro: item?.grupo_usuario_otro || "",
                 grupo_distribucion_todos_silver: gd.includes("Todos Silver"),
                 grupo_distribucion_vinculados: gd.includes("Vinculados"),
+                crear_usuario_sistema: item?.crear_usuario_sistema !== false,
                 grupo_app_tiempos: item?.grupo_app_tiempos || "",
                 grupo_distribucion: item?.grupo_distribucion || "",
                 moneda: item?.moneda || "COP",
@@ -735,11 +737,20 @@ window.preregistrosCoordApp = function () {
 
             if (this.tipoModal === "Nuevo") {
                 const esProspecto = this.form.cliente_id === "__prospecto__";
+                if (!String(this.form.tipo_documento_id || "").trim()) errors.push("Tipo de documento");
+                if (!String(this.form.numero_documento || "").trim()) errors.push("Numero de documento");
+                if (!String(this.form.correo_personal || "").trim()) errors.push("Correo personal");
                 if (!String(this.form.cliente_id || "").trim()) errors.push("Cliente");
                 if (esProspecto && !String(this.form.cliente_nombre_prospecto || "").trim()) errors.push("Nombre del cliente prospecto");
                 if (!String(this.form.moneda || "").trim()) errors.push("Moneda");
                 if (!["true", "false"].includes(String(this.form.factura_en_colombia || "").trim())) errors.push("Factura en Colombia");
                 if (!String(this.form.fecha_inicio || "").trim()) errors.push("Fecha inicio");
+                if (!String(this.form.modulo_id || "").trim() && !String(this.form.perfil || "").trim()) {
+                    errors.push("Perfil / Modulo");
+                }
+                if (this.form.crear_usuario_sistema !== false && !String(this.form.grupo_usuario || "").trim()) {
+                    errors.push("Grupo de usuario");
+                }
                 const alguna = [
                     this.form.tarifa_hora,
                     this.form.tarifa_mes,
@@ -867,11 +878,10 @@ window.preregistrosCoordApp = function () {
             const perfil = this.perfilFormularioActual();
             const moneda = String(this.form.moneda || "").trim().toUpperCase();
             const datosExtra = { ...(this.datosExtraBase || {}) };
-            const chkCrearUsuario = document.getElementById("crear_usuario_sistema");
-            const crearUsuarioSistema = chkCrearUsuario ? chkCrearUsuario.checked : true;
-
             if (moduloId) datosExtra.modulo_id = moduloId;
             else delete datosExtra.modulo_id;
+            if (perfil) datosExtra.modulo_nombre = perfil;
+            else delete datosExtra.modulo_nombre;
 
             const base = {
                 ...this.form,
@@ -879,7 +889,7 @@ window.preregistrosCoordApp = function () {
                 perfil,
                 moneda,
                 tipo_solicitud: this.tipoModal,
-                crear_usuario_sistema: crearUsuarioSistema,
+                crear_usuario_sistema: this.form.crear_usuario_sistema !== false,
                 enviar_correos: true,
                 datos_extra: datosExtra
             };

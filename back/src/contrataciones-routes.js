@@ -1,3 +1,5 @@
+const { findCorreoPersonaConflict } = require("./services/persona-identidad.service");
+
 module.exports = function registerContratacionesRoutes(deps) {
   const {
     app,
@@ -26,6 +28,7 @@ module.exports = function registerContratacionesRoutes(deps) {
   const TIPO_NUEVO = "Nuevo";
   const TIPO_EXTENSION = "Extension";
   const TIPO_RETIRO = "Retiro";
+  const TIPOS_CUENTA = new Set(["Ahorros", "Corriente"]);
 
   const DESTINOS_MESA = parseEmailList(
     process.env.CONTRATACIONES_DESTINO_MESA ||
@@ -196,6 +199,15 @@ module.exports = function registerContratacionesRoutes(deps) {
     return null;
   }
 
+  function normalizeBooleanFlag(value, fallback = true) {
+    if (value === undefined || value === null || value === "") return fallback;
+    if (typeof value === "boolean") return value;
+    const raw = String(value).trim().toLowerCase();
+    if (["true", "1", "si", "sí", "yes", "on"].includes(raw)) return true;
+    if (["false", "0", "no", "off"].includes(raw)) return false;
+    return null;
+  }
+
   function isUuid(value) {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       String(value || "").trim()
@@ -263,7 +275,12 @@ module.exports = function registerContratacionesRoutes(deps) {
         COALESCE(bp.public_id, bu.public_id) AS banco_id,
         COALESCE(bp.titulo, bu.titulo) AS banco_nombre,
         COALESCE(tcp.titulo, tcu.titulo) AS tipo_cuenta,
-        COALESCE(p.numero_cuenta, u.nro_cuenta_bancaria) AS numero_cuenta
+        COALESCE(p.numero_cuenta, u.nro_cuenta_bancaria) AS numero_cuenta,
+        p.razon_social,
+        p.nit_empresa,
+        p.representante_legal,
+        p.tipo_documento_representante,
+        p.numero_documento_representante
       FROM usuario_base u
       FULL JOIN persona_base p ON TRUE
       LEFT JOIN bancos bp ON bp.id = p.banco_id
@@ -294,6 +311,15 @@ module.exports = function registerContratacionesRoutes(deps) {
     if (!next.banco_nombre && legalContext.banco_nombre) next.banco_nombre = legalContext.banco_nombre;
     if (!next.tipo_cuenta && legalContext.tipo_cuenta) next.tipo_cuenta = legalContext.tipo_cuenta;
     if (!next.numero_cuenta && legalContext.numero_cuenta) next.numero_cuenta = legalContext.numero_cuenta;
+    if (!next.razon_social && legalContext.razon_social) next.razon_social = legalContext.razon_social;
+    if (!next.nit_empresa && legalContext.nit_empresa) next.nit_empresa = legalContext.nit_empresa;
+    if (!next.representante_legal && legalContext.representante_legal) next.representante_legal = legalContext.representante_legal;
+    if (!next.tipo_documento_representante && legalContext.tipo_documento_representante) {
+      next.tipo_documento_representante = legalContext.tipo_documento_representante;
+    }
+    if (!next.numero_documento_representante && legalContext.numero_documento_representante) {
+      next.numero_documento_representante = legalContext.numero_documento_representante;
+    }
     return next;
   }
 
@@ -306,11 +332,15 @@ module.exports = function registerContratacionesRoutes(deps) {
       .toLowerCase();
     if (ascii.includes("jur")) return "Juridica";
     if (ascii === "natural") return "Natural";
-    return raw;
+    return null;
   }
 
   function isValidSilverEmail(value) {
     return /^[^\s@]+@silverconsulting\.com\.co$/i.test(String(value || "").trim());
+  }
+
+  function isValidEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
   }
 
   function normalizeTipoPersonaForUsuarios(value) {
@@ -405,14 +435,16 @@ module.exports = function registerContratacionesRoutes(deps) {
       sets.push(`correo_silver = COALESCE($${idx++}, correo_silver)`);
       values.push(correoSilver);
     }
+    sets.push(`crear_usuario_sistema = $${idx++}`);
+    values.push(solicitudRow.crear_usuario_sistema !== false);
 
-    if (solicitudRow.vpn_corona !== undefined) {
+    if (Object.prototype.hasOwnProperty.call(datosExtra, "vpn_corona")) {
       sets.push(`vpn_corona = $${idx++}`);
-      values.push(Boolean(solicitudRow.vpn_corona));
+      values.push(Boolean(datosExtra.vpn_corona));
     }
-    if (solicitudRow.necesita_s_user !== undefined) {
+    if (Object.prototype.hasOwnProperty.call(datosExtra, "necesita_s_user")) {
       sets.push(`necesita_s_user = $${idx++}`);
-      values.push(Boolean(solicitudRow.necesita_s_user));
+      values.push(Boolean(datosExtra.necesita_s_user));
     }
     if (solicitudRow.grupo_usuario_otro !== undefined && solicitudRow.grupo_usuario_otro !== null) {
       sets.push(`grupo_usuario_otro = $${idx++}`);
@@ -420,15 +452,17 @@ module.exports = function registerContratacionesRoutes(deps) {
     }
 
     const VALID_GRUPO_USUARIO = ["ADMIN", "COORDINADOR", "CONSULTOR", "CONTABILIDAD", "COMERCIAL", "Otro"];
-    if (solicitudRow.grupo_app_tiempos && VALID_GRUPO_USUARIO.includes(solicitudRow.grupo_app_tiempos)) {
+    const grupoUsuario = toNullableString(datosExtra.grupo_usuario || solicitudRow.grupo_app_tiempos);
+    if (grupoUsuario && VALID_GRUPO_USUARIO.includes(grupoUsuario)) {
       sets.push(`grupo_usuario = $${idx++}`);
-      values.push(solicitudRow.grupo_app_tiempos);
+      values.push(grupoUsuario);
     }
 
     const VALID_GRUPO_DISTRIBUCION = ["Todos Silver", "Vinculados", "Responsable"];
-    if (solicitudRow.grupo_distribucion && VALID_GRUPO_DISTRIBUCION.includes(solicitudRow.grupo_distribucion)) {
+    const grupoDistribucion = toNullableString(datosExtra.grupo_distribucion || solicitudRow.grupo_distribucion);
+    if (grupoDistribucion && VALID_GRUPO_DISTRIBUCION.includes(grupoDistribucion)) {
       sets.push(`grupo_distribucion = $${idx++}`);
-      values.push(solicitudRow.grupo_distribucion);
+      values.push(grupoDistribucion);
     }
 
     if (solicitudRow.ubicacion) {
@@ -643,7 +677,8 @@ module.exports = function registerContratacionesRoutes(deps) {
         COALESCE(c.titulo, ati.cliente_nombre) AS cliente_nombre,
         ati.modulo_id,
         m.public_id AS modulo_public_id,
-        m.titulo AS modulo_titulo,
+        ati.modulo_nombre,
+        COALESCE(m.titulo, ati.modulo_nombre) AS modulo_titulo,
         ati.moneda,
         ati.valor_tarifa,
         ati.fecha_inicio,
@@ -692,7 +727,8 @@ module.exports = function registerContratacionesRoutes(deps) {
         COALESCE(c.titulo, ati.cliente_nombre) AS cliente_nombre,
         ati.modulo_id,
         m.public_id AS modulo_public_id,
-        m.titulo AS modulo_titulo,
+        ati.modulo_nombre,
+        COALESCE(m.titulo, ati.modulo_nombre) AS modulo_titulo,
         ati.moneda,
         ati.valor_tarifa,
         ati.fecha_inicio,
@@ -1054,10 +1090,12 @@ module.exports = function registerContratacionesRoutes(deps) {
 
   function formatRow(row) {
     if (!row) return null;
+    const datosExtra = toObjectOrEmpty(row.datos_extra);
     return {
       id: row.public_id,
       tipo_solicitud: row.tipo_solicitud,
       estado: row.estado,
+      crear_usuario_sistema: row.crear_usuario_sistema !== false,
       origen_flujo: row.origen_flujo || "coordinacion",
       coordinador: row.coordinador_public_id
         ? {
@@ -1104,10 +1142,14 @@ module.exports = function registerContratacionesRoutes(deps) {
       correo_empresarial: row.correo_empresarial || null,
       telefono: row.telefono || null,
       ubicacion: row.ubicacion || null,
-      grupo_app_tiempos: row.grupo_app_tiempos || null,
-      grupo_distribucion: row.grupo_distribucion || null,
-      vpn_corona: Boolean(row.vpn_corona),
-      necesita_s_user: Boolean(row.necesita_s_user),
+      grupo_app_tiempos: datosExtra.grupo_usuario || row.grupo_app_tiempos || null,
+      grupo_distribucion: datosExtra.grupo_distribucion || row.grupo_distribucion || null,
+      vpn_corona: Object.prototype.hasOwnProperty.call(datosExtra, "vpn_corona")
+        ? Boolean(datosExtra.vpn_corona)
+        : Boolean(row.vpn_corona),
+      necesita_s_user: Object.prototype.hasOwnProperty.call(datosExtra, "necesita_s_user")
+        ? Boolean(datosExtra.necesita_s_user)
+        : Boolean(row.necesita_s_user),
       grupo_usuario_otro: row.grupo_usuario_otro || null,
       moneda: row.moneda || null,
       tarifa_hora: row.tarifa_hora === null ? null : Number(row.tarifa_hora),
@@ -1122,7 +1164,7 @@ module.exports = function registerContratacionesRoutes(deps) {
       fecha_retiro: row.fecha_retiro || null,
       necesidad_ti: row.necesidad_ti || null,
       observaciones: row.observaciones || null,
-      datos_extra: row.datos_extra || {},
+      datos_extra: datosExtra,
       requiere_confirmacion_cliente: Boolean(row.requiere_confirmacion_cliente),
       correo_enviado_mesa: Boolean(row.correo_enviado_mesa),
       correo_enviado_th: Boolean(row.correo_enviado_th),
@@ -1159,6 +1201,125 @@ module.exports = function registerContratacionesRoutes(deps) {
     return normalizeMoneda(r.rows[0]?.moneda_cobro || null);
   }
 
+  async function syncPersonaSnapshotDesdeExtension(db, solicitudRow) {
+    if (
+      !solicitudRow ||
+      solicitudRow.tipo_solicitud !== TIPO_EXTENSION ||
+      solicitudRow.estado !== ESTADOS.completado
+    ) return null;
+    const datosExtra = toObjectOrEmpty(solicitudRow.datos_extra);
+    const moduloRef = toNullableString(datosExtra.modulo_id);
+    let moduloId = null;
+    if (moduloRef && (isUuid(moduloRef) || /^\d+$/.test(moduloRef))) {
+      const moduloResult = await db.query(
+        isUuid(moduloRef)
+          ? "SELECT id FROM modulo WHERE public_id = $1 LIMIT 1"
+          : "SELECT id FROM modulo WHERE id = $1::int LIMIT 1",
+        [moduloRef]
+      );
+      moduloId = moduloResult.rows[0]?.id || null;
+    }
+
+    const clienteOtro = solicitudRow.cliente_id
+      ? null
+      : toNullableString(datosExtra.cliente_nombre);
+    const moduloOtro = moduloId
+      ? null
+      : toNullableString(
+          datosExtra.modulo_nombre ||
+          datosExtra.modulo_otro ||
+          datosExtra.modulo ||
+          solicitudRow.perfil
+        );
+    const modalidad = normalizeModalidad(solicitudRow.modalidad_contrato);
+    const tipoContrato = modalidad === "Por horas" ? "Por horas" : (modalidad ? "Full time" : null);
+
+    const result = await db.query(
+      `
+      UPDATE personas p
+      SET
+        cliente_id = CASE
+          WHEN $2::text IS NOT NULL THEN NULL
+          ELSE COALESCE($1, p.cliente_id)
+        END,
+        cliente_otro = CASE
+          WHEN $1::int IS NOT NULL THEN NULL
+          ELSE COALESCE($2, p.cliente_otro)
+        END,
+        modulo_id = CASE
+          WHEN $4::text IS NOT NULL THEN NULL
+          ELSE COALESCE($3, p.modulo_id)
+        END,
+        modulo_otro = CASE
+          WHEN $3::int IS NOT NULL THEN NULL
+          ELSE COALESCE($4, p.modulo_otro)
+        END,
+        modalidad = COALESCE($5, p.modalidad),
+        tipo_contrato = CASE
+          WHEN p.tipo_contrato = 'Vinculado'::tipo_contrato THEN p.tipo_contrato
+          ELSE COALESCE($6::tipo_contrato, p.tipo_contrato)
+        END,
+        estado = 'activo',
+        updated_at = NOW()
+      WHERE p.id = COALESCE(
+        (SELECT u.persona_id FROM usuarios u WHERE u.id = $7 AND u.persona_id IS NOT NULL LIMIT 1),
+        (SELECT px.id FROM personas px WHERE NULLIF(BTRIM(px.numero_documento), '') = $8 LIMIT 1)
+      )
+      RETURNING p.id
+      `,
+      [
+        solicitudRow.cliente_id || null,
+        clienteOtro,
+        moduloId,
+        moduloOtro,
+        modalidad,
+        tipoContrato,
+        solicitudRow.persona_usuario_id || null,
+        toNullableString(solicitudRow.numero_documento)
+      ]
+    );
+    return result.rows[0] || null;
+  }
+
+  async function revocarAccesoInternoPorRetiroTotal(db, solicitudRow) {
+    if (!solicitudRow) return { usuarioDesactivado: false, personaDesactivada: false };
+    const personaObjetivo = await db.query(
+      `
+      SELECT COALESCE(
+        (SELECT u.persona_id FROM usuarios u WHERE u.id = $1 AND u.persona_id IS NOT NULL LIMIT 1),
+        (SELECT p.id FROM personas p WHERE NULLIF(BTRIM(p.numero_documento), '') = $2 LIMIT 1)
+      ) AS id
+      `,
+      [solicitudRow.persona_usuario_id || null, toNullableString(solicitudRow.numero_documento)]
+    );
+    const personaId = personaObjetivo.rows[0]?.id || null;
+    const usuarioResult = await db.query(
+      `
+      UPDATE usuarios u
+      SET activo = false, updated_at = NOW()
+      FROM roles r
+      WHERE (u.id = $1 OR ($2::int IS NOT NULL AND u.persona_id = $2))
+        AND r.id = u.rol_usuario_id
+        AND LOWER(r.titulo) LIKE 'consultor%'
+      RETURNING u.id, u.persona_id
+      `,
+      [solicitudRow.persona_usuario_id || null, personaId]
+    );
+    const personaResult = await db.query(
+      `
+      UPDATE personas p
+      SET estado = 'inactivo', updated_at = NOW()
+      WHERE p.id = $1
+      RETURNING p.id
+      `,
+      [personaId]
+    );
+    return {
+      usuarioDesactivado: usuarioResult.rowCount > 0,
+      personaDesactivada: Boolean(personaResult.rows[0]?.id)
+    };
+  }
+
   async function syncAnexoDesdeSolicitud(internalId, userId = null) {
     const row = await getByInternalId(pool, internalId);
     if (!row) return row;
@@ -1177,6 +1338,13 @@ module.exports = function registerContratacionesRoutes(deps) {
       });
     } catch (err) {
       console.warn("No se pudo persistir anexo tecnico desde solicitud:", err?.message || err);
+    }
+    if (row.tipo_solicitud === TIPO_EXTENSION) {
+      try {
+        await syncPersonaSnapshotDesdeExtension(pool, row);
+      } catch (err) {
+        console.warn("No se pudo sincronizar la ficha de persona desde la extension:", err?.message || err);
+      }
     }
     return row;
   }
@@ -1434,6 +1602,7 @@ module.exports = function registerContratacionesRoutes(deps) {
       th: false,
       coordinador: false
     };
+    let retiroTotalPendienteRevocacion = false;
 
     if (solicitud.tipo_solicitud === TIPO_NUEVO) {
       const mesaResult = await sendMail(graphContext, DESTINOS_MESA, buildMailMesaNuevo(solicitud));
@@ -1521,6 +1690,9 @@ module.exports = function registerContratacionesRoutes(deps) {
             [anexoRetiroPublicId, rawSolicitud.persona_usuario_id || null, rawSolicitud.numero_documento || null]
           );
           remainingCount = countRes.rows[0]?.count || 0;
+          if (remainingCount === 0) {
+            retiroTotalPendienteRevocacion = true;
+          }
         }
       }
       const retiroCtx = { selectedAnexo, remainingCount };
@@ -1537,6 +1709,10 @@ module.exports = function registerContratacionesRoutes(deps) {
       requiereConfirmacionCliente,
       mailResults
     });
+
+    if (retiroTotalPendienteRevocacion && estadoFinal === ESTADOS.completado) {
+      await revocarAccesoInternoPorRetiroTotal(pool, rawSolicitud);
+    }
 
     await pool.query(
       `
@@ -1792,6 +1968,11 @@ module.exports = function registerContratacionesRoutes(deps) {
       const necesidadTi = toNullableString(payload.necesidad_ti);
       const observaciones = toNullableString(payload.observaciones);
       const enviarCorreos = payload.enviar_correos !== false;
+      const crearUsuarioSistema = normalizeBooleanFlag(payload.crear_usuario_sistema, true);
+
+      if (crearUsuarioSistema === null) {
+        return res.status(400).json({ error: "crear_usuario_sistema debe ser booleano" });
+      }
 
       if (!nombre || !apellidos) {
         return res.status(400).json({ error: "nombre y apellidos son obligatorios" });
@@ -1840,6 +2021,39 @@ module.exports = function registerContratacionesRoutes(deps) {
         return res.status(400).json({ error: "fecha_retiro invalida" });
       }
 
+      if (correoPersonal && !isValidEmail(correoPersonal)) {
+        return res.status(400).json({ error: "correo_personal no tiene un formato valido" });
+      }
+      if (correoEmpresarial && !isValidEmail(correoEmpresarial)) {
+        return res.status(400).json({ error: "correo_empresarial no tiene un formato valido" });
+      }
+      if (enviarCorreos && tipoSolicitud === TIPO_NUEVO) {
+        const missing = [];
+        const factura = normalizeFacturaEnColombiaInput(payload.factura_en_colombia);
+        const tieneTarifa = [
+          payload.tarifa_hora,
+          payload.tarifa_mes,
+          payload.tarifa_medio_tiempo,
+          payload.tarifa_capacitacion
+        ].some((value) => Number.isFinite(Number(value)) && Number(value) > 0);
+        if (!numeroDocumento) missing.push("numero_documento");
+        if (!payload.tipo_documento_id) missing.push("tipo_documento_id");
+        if (!correoPersonal) missing.push("correo_personal");
+        if (!perfil && !payload.modulo_id) missing.push("perfil o modulo_id");
+        if (!fechaInicio) missing.push("fecha_inicio");
+        if (!moneda) missing.push("moneda");
+        if (factura === null) missing.push("factura_en_colombia");
+        if (!tieneTarifa) missing.push("tarifa");
+        if (crearUsuarioSistema && !grupoAppTiempos) missing.push("grupo_app_tiempos");
+        if (!grupoDistribucion) missing.push("grupo_distribucion");
+        if (missing.length) {
+          return res.status(422).json({
+            error: `Faltan datos obligatorios para contratar: ${missing.join(", ")}`,
+            missing
+          });
+        }
+      }
+
       try {
         const refsRes = await pool.query(
           `
@@ -1880,15 +2094,12 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
 
         // Validar que correo_personal no este registrado para otra persona (diferente documento)
-        if (tipoSolicitud === TIPO_NUEVO && correoPersonal && numeroDocumento) {
-          const dupCheck = await pool.query(
-            `SELECT 1 FROM preregistro_personas
-             WHERE LOWER(correo_personal) = LOWER($1)
-               AND COALESCE(numero_documento,'') <> $2
-             LIMIT 1`,
-            [correoPersonal, numeroDocumento]
-          );
-          if (dupCheck.rows.length) {
+        if (tipoSolicitud === TIPO_NUEVO && correoPersonal) {
+          const dupCheck = await findCorreoPersonaConflict(pool, {
+            correo: correoPersonal,
+            numeroDocumento
+          });
+          if (dupCheck) {
             return res.status(422).json({
               error: "El correo personal ya está registrado para otra persona en el sistema. Cada persona debe tener un correo personal único."
             });
@@ -1935,6 +2146,10 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (payload.factura_en_colombia !== undefined) {
           datosExtra.factura_en_colombia = normalizeFacturaEnColombiaInput(payload.factura_en_colombia);
         }
+        if (payload.vpn_corona !== undefined) datosExtra.vpn_corona = vpnCorona;
+        if (payload.necesita_s_user !== undefined) datosExtra.necesita_s_user = necesitaSUser;
+        if (payload.grupo_app_tiempos !== undefined) datosExtra.grupo_usuario = grupoAppTiempos;
+        if (payload.grupo_distribucion !== undefined) datosExtra.grupo_distribucion = grupoDistribucion;
 
         if (tipoSolicitud === TIPO_NUEVO && (personaUsuarioId || numeroDocumento)) {
           const legalContext = await fetchPersonaLegalContext(pool, { personaUsuarioId, numeroDocumento });
@@ -2035,6 +2250,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             necesidad_ti,
             observaciones,
             datos_extra,
+            crear_usuario_sistema,
             requiere_confirmacion_cliente,
             correo_enviado_mesa,
             correo_enviado_th,
@@ -2044,7 +2260,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             $1,  $2,  $3,  $4,  $5,  $6,  $7,  $8,  $9,  $10,
             $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
             $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-            $31, $32, $33, $34, $35, $36, $37, false, false, false
+            $31, $32, $33, $34, $35, $36, $37, $38, false, false, false
           )
           RETURNING id
           `,
@@ -2085,6 +2301,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             necesidadTi,
             observaciones,
             JSON.stringify(datosExtra),
+            crearUsuarioSistema,
             requiereConfirmacionCliente
           ]
         );
@@ -2163,6 +2380,13 @@ module.exports = function registerContratacionesRoutes(deps) {
         const necesidadTi =
           payload.necesidad_ti !== undefined ? toNullableString(payload.necesidad_ti) : current.necesidad_ti;
         const observaciones = payload.observaciones !== undefined ? toNullableString(payload.observaciones) : current.observaciones;
+        const crearUsuarioSistema = payload.crear_usuario_sistema !== undefined
+          ? normalizeBooleanFlag(payload.crear_usuario_sistema, true)
+          : current.crear_usuario_sistema !== false;
+
+        if (crearUsuarioSistema === null) {
+          return res.status(400).json({ error: "crear_usuario_sistema debe ser booleano" });
+        }
 
         if (!nombre || !apellidos) {
           return res.status(400).json({ error: "nombre y apellidos son obligatorios" });
@@ -2217,6 +2441,44 @@ module.exports = function registerContratacionesRoutes(deps) {
           return res.status(400).json({ error: "fecha_retiro invalida" });
         }
 
+        if (correoPersonal && !isValidEmail(correoPersonal)) {
+          return res.status(400).json({ error: "correo_personal no tiene un formato valido" });
+        }
+        if (correoEmpresarial && !isValidEmail(correoEmpresarial)) {
+          return res.status(400).json({ error: "correo_empresarial no tiene un formato valido" });
+        }
+        if (tipoSolicitud === TIPO_NUEVO) {
+          const currentExtra = toObjectOrEmpty(current.datos_extra);
+          const incomingExtra = toObjectOrEmpty(payload.datos_extra);
+          const factura = normalizeFacturaEnColombiaInput(
+            payload.factura_en_colombia ?? incomingExtra.factura_en_colombia ?? currentExtra.factura_en_colombia
+          );
+          const tieneTarifa = [
+            payload.tarifa_hora !== undefined ? payload.tarifa_hora : current.tarifa_hora,
+            payload.tarifa_mes !== undefined ? payload.tarifa_mes : current.tarifa_mes,
+            payload.tarifa_medio_tiempo !== undefined ? payload.tarifa_medio_tiempo : current.tarifa_medio_tiempo,
+            payload.tarifa_capacitacion !== undefined ? payload.tarifa_capacitacion : current.tarifa_capacitacion
+          ].some((value) => Number.isFinite(Number(value)) && Number(value) > 0);
+          const moduloRef = payload.modulo_id || incomingExtra.modulo_id || currentExtra.modulo_id;
+          const missing = [];
+          if (!numeroDocumento) missing.push("numero_documento");
+          if (!(payload.tipo_documento_id || current.tipo_documento_public_id)) missing.push("tipo_documento_id");
+          if (!correoPersonal) missing.push("correo_personal");
+          if (!perfil && !moduloRef) missing.push("perfil o modulo_id");
+          if (!fechaInicio) missing.push("fecha_inicio");
+          if (!moneda) missing.push("moneda");
+          if (factura === null) missing.push("factura_en_colombia");
+          if (!tieneTarifa) missing.push("tarifa");
+          if (crearUsuarioSistema && !grupoAppTiempos) missing.push("grupo_app_tiempos");
+          if (!grupoDistribucion) missing.push("grupo_distribucion");
+          if (missing.length) {
+            return res.status(422).json({
+              error: `Faltan datos obligatorios para contratar: ${missing.join(", ")}`,
+              missing
+            });
+          }
+        }
+
         const personaPublicId =
           payload.persona_usuario_id !== undefined ? toNullableString(payload.persona_usuario_id) : current.persona_public_id;
         const supervisorPublicId =
@@ -2260,6 +2522,20 @@ module.exports = function registerContratacionesRoutes(deps) {
           return res.status(400).json({
             error: "Para Extension se requiere al menos un correo de referencia de la persona a modificar"
           });
+        }
+
+        if (tipoSolicitud === TIPO_NUEVO && correoPersonal) {
+          const correoConflict = await findCorreoPersonaConflict(pool, {
+            correo: correoPersonal,
+            numeroDocumento,
+            excludeSolicitudId: internalId,
+            excludePreregistroId: current.preregistro_id || null
+          });
+          if (correoConflict) {
+            return res.status(422).json({
+              error: "El correo personal ya pertenece a otra persona. Verifica el documento antes de continuar."
+            });
+          }
         }
 
         const clienteNombreProspectoCompletar = toNullableString(
@@ -2310,6 +2586,10 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (payload.factura_en_colombia !== undefined) {
           datosExtra.factura_en_colombia = normalizeFacturaEnColombiaInput(payload.factura_en_colombia);
         }
+        if (payload.vpn_corona !== undefined) datosExtra.vpn_corona = vpnCorona;
+        if (payload.necesita_s_user !== undefined) datosExtra.necesita_s_user = necesitaSUser;
+        if (payload.grupo_app_tiempos !== undefined) datosExtra.grupo_usuario = grupoAppTiempos;
+        if (payload.grupo_distribucion !== undefined) datosExtra.grupo_distribucion = grupoDistribucion;
 
         if (tipoSolicitud === TIPO_NUEVO && (personaUsuarioId || numeroDocumento)) {
           const legalContext = await fetchPersonaLegalContext(pool, { personaUsuarioId, numeroDocumento });
@@ -2391,14 +2671,15 @@ module.exports = function registerContratacionesRoutes(deps) {
             necesidad_ti = $30,
             observaciones = $31,
             datos_extra = $32::jsonb,
-            requiere_confirmacion_cliente = $33,
+            crear_usuario_sistema = $33,
+            requiere_confirmacion_cliente = $34,
             correo_enviado_mesa = false,
             correo_enviado_th = false,
             correo_confirmacion_coordinador = false,
             revisado_th_por = NULL,
             fecha_revision_th = NULL,
             observaciones_th = NULL
-          WHERE id = $34
+          WHERE id = $35
           `,
           [
             ESTADOS.enProceso,
@@ -2437,6 +2718,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             necesidadTi,
             observaciones,
             JSON.stringify(datosExtra),
+            crearUsuarioSistema,
             requiereConfirmacionCliente,
             internalId
           ]
@@ -2563,15 +2845,42 @@ module.exports = function registerContratacionesRoutes(deps) {
         const tipoCuenta  = toNullableString(req.body?.tipo_cuenta);
         const numeroCuenta = toNullableString(req.body?.numero_cuenta);
         const direccion   = toNullableString(req.body?.direccion);
-        const tipoPersona = toNullableString(req.body?.tipo_persona);
+        const tipoPersona = normalizeTipoPersonaForForm(req.body?.tipo_persona);
         const correoSilver = toNullableString(req.body?.correo_silver);
+        const razonSocial = toNullableString(req.body?.razon_social);
+        const nitEmpresa = toNullableString(req.body?.nit_empresa);
+        const representanteLegal = toNullableString(req.body?.representante_legal);
+        const tipoDocumentoRepresentante = toNullableString(req.body?.tipo_documento_representante);
+        const numeroDocumentoRepresentante = toNullableString(req.body?.numero_documento_representante);
 
         if (!bancoId) {
           return res.status(400).json({ error: "Banco no válido" });
         }
+        if (!direccion || !tipoPersona || !TIPOS_CUENTA.has(tipoCuenta) || !numeroCuenta) {
+          return res.status(400).json({
+            error: "Completa direccion, tipo de persona, tipo de cuenta y numero de cuenta"
+          });
+        }
+        if (
+          tipoPersona === "Juridica" &&
+          (!razonSocial || !nitEmpresa || !representanteLegal ||
+            !tipoDocumentoRepresentante || !numeroDocumentoRepresentante)
+        ) {
+          return res.status(400).json({
+            error: "Para persona juridica son obligatorios razon social, NIT y datos del representante legal"
+          });
+        }
+        if (correoSilver && !isValidSilverEmail(correoSilver)) {
+          return res.status(400).json({
+            error: "El correo Silver debe pertenecer al dominio @silverconsulting.com.co"
+          });
+        }
 
         const bancoPublicId = await resolveBancoPublicId(pool, bancoId);
-        const nextEstado = correoSilver ? ESTADOS.pendienteRevisionTh : ESTADOS.pendienteCorreoSilver;
+        const debeCrearUsuario = row.crear_usuario_sistema !== false;
+        const nextEstado = correoSilver || !debeCrearUsuario
+          ? ESTADOS.pendienteRevisionTh
+          : ESTADOS.pendienteCorreoSilver;
 
         // Guarda datos bancarios en datos_extra y correo silver en correo_empresarial
         await pool.query(
@@ -2591,7 +2900,12 @@ module.exports = function registerContratacionesRoutes(deps) {
               tipo_cuenta:   tipoCuenta,
               numero_cuenta: numeroCuenta,
               direccion:     direccion,
-              tipo_persona:  tipoPersona
+              tipo_persona:  tipoPersona,
+              razon_social: razonSocial,
+              nit_empresa: nitEmpresa,
+              representante_legal: representanteLegal,
+              tipo_documento_representante: tipoDocumentoRepresentante,
+              numero_documento_representante: numeroDocumentoRepresentante
             }),
             nextEstado,
             internalId
@@ -2657,6 +2971,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         const tipoCuenta = toNullableString(datosExtra.tipo_cuenta);
         const numeroCuenta = toNullableString(datosExtra.numero_cuenta);
         const tipoPersona = normalizeTipoPersonaForUsuarios(datosExtra.tipo_persona);
+        const clienteOtroContrat = row.cliente_id ? null : toNullableString(datosExtra.cliente_nombre);
         const facturaEnColombia =
           datosExtra.factura_en_colombia === true || datosExtra.factura_en_colombia === "true"
             ? true
@@ -2674,6 +2989,15 @@ module.exports = function registerContratacionesRoutes(deps) {
           return res.status(422).json({
             error:
               "Faltan datos de la sección 3. Completa dirección, tipo persona, banco, tipo de cuenta y número de cuenta."
+          });
+        }
+        if (
+          tipoPersona === "Juridica" &&
+          (!razonSocialContrat || !nitEmpresaContrat || !repLegalContrat || !tipoDocRepContrat || !numDocRepContrat)
+        ) {
+          await client.query("ROLLBACK");
+          return res.status(422).json({
+            error: "Para persona juridica son obligatorios razon social, NIT y datos del representante legal"
           });
         }
 
@@ -2700,11 +3024,11 @@ module.exports = function registerContratacionesRoutes(deps) {
             numero_contacto, correo_electronico, direccion_residencia, ciudad_residencia,
             tipo_persona, factura_en_colombia,
             banco_id, tipo_cuenta_id, numero_cuenta,
-            modulo_id, modulo_otro, cliente_id,
+            modulo_id, modulo_otro, cliente_id, cliente_otro,
             razon_social, nit_empresa, representante_legal,
             tipo_documento_representante, numero_documento_representante,
             created_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
           ON CONFLICT (numero_documento) DO UPDATE SET
             nombre                         = COALESCE(EXCLUDED.nombre, personas.nombre),
             apellidos                      = COALESCE(EXCLUDED.apellidos, personas.apellidos),
@@ -2720,6 +3044,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             modulo_id                      = COALESCE(EXCLUDED.modulo_id, personas.modulo_id),
             modulo_otro                    = COALESCE(EXCLUDED.modulo_otro, personas.modulo_otro),
             cliente_id                     = COALESCE(EXCLUDED.cliente_id, personas.cliente_id),
+            cliente_otro                   = COALESCE(EXCLUDED.cliente_otro, personas.cliente_otro),
             razon_social                   = COALESCE(EXCLUDED.razon_social, personas.razon_social),
             nit_empresa                    = COALESCE(EXCLUDED.nit_empresa, personas.nit_empresa),
             representante_legal            = COALESCE(EXCLUDED.representante_legal, personas.representante_legal),
@@ -2744,6 +3069,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             moduloInternoIdContrat,
             moduloOtroContrat,
             row.cliente_id || null,
+            clienteOtroContrat,
             razonSocialContrat,
             nitEmpresaContrat,
             repLegalContrat,

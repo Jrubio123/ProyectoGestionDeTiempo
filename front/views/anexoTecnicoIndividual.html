@@ -330,14 +330,20 @@
                         </div>
 
                         <div class="space-y-2">
-                            <label class="text-sm font-semibold text-slate-700">Modulo</label>
+                            <label class="text-sm font-semibold text-slate-700">Modulo (opcional)</label>
                             <select class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-cyan-500"
                                 x-model="anexoModalItem.form.modulo_id">
-                                <option value="">Selecciona un modulo</option>
+                                <option value="">Sin modulo de catalogo</option>
                                 <template x-for="modulo in anexoCatalogos.modulos" :key="modulo.id">
                                     <option :value="String(modulo.id)" x-text="modulo.titulo"></option>
                                 </template>
                             </select>
+                            <input x-show="!anexoModalItem.form.modulo_id"
+                                type="text"
+                                maxlength="200"
+                                class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-cyan-500"
+                                x-model="anexoModalItem.form.modulo_nombre"
+                                placeholder="Nombre libre del modulo (opcional)">
                         </div>
 
                         <template x-if="tipoAnexoRequiereCliente(anexoModalItem.form.tipo_asignacion)">

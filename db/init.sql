@@ -1105,6 +1105,7 @@ CREATE TABLE anexo_tecnico_items (
     cliente_id INT REFERENCES clientes(id) ON DELETE SET NULL,
     cliente_nombre VARCHAR(200),
     modulo_id INT REFERENCES modulo(id) ON DELETE SET NULL,
+    modulo_nombre VARCHAR(200),
 
     moneda VARCHAR(10) CHECK (moneda IN ('COP', 'USD', 'EUR')),
     valor_tarifa NUMERIC(15,2) NOT NULL CHECK (valor_tarifa >= 0),
@@ -1158,6 +1159,7 @@ CREATE INDEX idx_anexo_tecnico_items_fecha ON anexo_tecnico_items(fecha_inicio, 
 
 COMMENT ON TABLE anexo_tecnico_items IS 'Historial acumulado de filas del Anexo Tecnico por persona';
 COMMENT ON COLUMN anexo_tecnico_items.tipo_asignacion IS 'full_time, medio_tiempo, horas, capacitacion o proyecto';
+COMMENT ON COLUMN anexo_tecnico_items.modulo_nombre IS 'Nombre libre del modulo cuando no existe en el catalogo';
 COMMENT ON COLUMN anexo_tecnico_items.fecha_fin_calculada IS 'true cuando la fecha_fin se calculó automáticamente (31 de diciembre)';
 
 CREATE TABLE tokens_firma_anexo_individual (
@@ -1165,7 +1167,8 @@ CREATE TABLE tokens_firma_anexo_individual (
     public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     token VARCHAR(64) UNIQUE NOT NULL,
 
-    usuario_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    usuario_id INT REFERENCES usuarios(id) ON DELETE CASCADE,
+    persona_id INT REFERENCES personas(id) ON DELETE CASCADE,
     anexo_item_ids INT[] NOT NULL,
 
     correo_firmante VARCHAR(255) NOT NULL,
@@ -1193,19 +1196,26 @@ CREATE TABLE tokens_firma_anexo_individual (
     generado_por INT REFERENCES usuarios(id) ON DELETE SET NULL,
 
     created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+    updated_at TIMESTAMP DEFAULT NOW(),
+
+    CONSTRAINT tokens_firma_anexo_identidad_check
+      CHECK (usuario_id IS NOT NULL OR persona_id IS NOT NULL)
 );
 
 CREATE INDEX idx_tokens_firma_anexo_token ON tokens_firma_anexo_individual(token);
 CREATE INDEX idx_tokens_firma_anexo_usuario ON tokens_firma_anexo_individual(usuario_id);
+CREATE INDEX idx_tokens_firma_anexo_persona ON tokens_firma_anexo_individual(persona_id);
 CREATE INDEX idx_tokens_firma_anexo_estado ON tokens_firma_anexo_individual(estado);
 CREATE INDEX idx_tokens_firma_anexo_request ON tokens_firma_anexo_individual(request_id) WHERE request_id IS NOT NULL;
 CREATE INDEX idx_tokens_firma_anexo_contract ON tokens_firma_anexo_individual(contract_id) WHERE contract_id IS NOT NULL;
 CREATE INDEX idx_tokens_firma_anexo_usuario_enviado
     ON tokens_firma_anexo_individual(usuario_id, estado)
     WHERE estado = 'enviado';
+CREATE INDEX idx_tokens_firma_anexo_persona_enviado
+    ON tokens_firma_anexo_individual(persona_id, estado)
+    WHERE persona_id IS NOT NULL AND estado = 'enviado';
 
-COMMENT ON TABLE tokens_firma_anexo_individual IS 'Procesos de firma individual para anexos tecnicos por usuario';
+COMMENT ON TABLE tokens_firma_anexo_individual IS 'Procesos de firma individual para anexos tecnicos por usuario o persona';
 
 -- ============================================================================
 -- COMPAT: PUBLIC ID FOR EXISTING DATABASES

@@ -33,6 +33,11 @@ window.onboardingThApp = function () {
         banco_id: "",
         tipo_cuenta: "Ahorros",
         numero_cuenta: "",
+        razon_social: "",
+        nit_empresa: "",
+        representante_legal: "",
+        tipo_documento_representante: "",
+        numero_documento_representante: "",
         correo_silver: ""
     });
 
@@ -49,6 +54,7 @@ window.onboardingThApp = function () {
         tipo_asignacion: "full_time",
         cliente_id: "",
         modulo_id: "",
+        modulo_nombre: "",
         moneda: "COP",
         valor_tarifa: "",
         fecha_inicio: todayYmd(),
@@ -327,6 +333,12 @@ window.onboardingThApp = function () {
                 observaciones: item?.observaciones || preregistro?.observaciones || null,
                 direccion: item?.datos_extra?.direccion || preregistro?.direccion || null,
                 tipo_persona: item?.datos_extra?.tipo_persona || preregistro?.tipo_persona || "Natural",
+                razon_social: item?.datos_extra?.razon_social || preregistro?.razon_social || null,
+                nit_empresa: item?.datos_extra?.nit_empresa || preregistro?.nit_empresa || null,
+                representante_legal: item?.datos_extra?.representante_legal || preregistro?.representante_legal || null,
+                tipo_documento_representante: item?.datos_extra?.tipo_documento_representante || preregistro?.tipo_documento_representante || null,
+                numero_documento_representante: item?.datos_extra?.numero_documento_representante || preregistro?.numero_documento_representante || null,
+                crear_usuario_sistema: item?.crear_usuario_sistema !== false && preregistro?.crear_usuario_sistema !== false,
                 banco: item?.datos_extra?.banco_id
                     ? { id: item.datos_extra.banco_id, nombre: preregistroBanco?.nombre || null }
                     : (preregistroBanco || null),
@@ -499,6 +511,11 @@ window.onboardingThApp = function () {
                 banco_id: rawBancoId !== "" && rawBancoId !== null ? String(rawBancoId) : "",
                 tipo_cuenta: item?.tipo_cuenta || "Ahorros",
                 numero_cuenta: item?.numero_cuenta || "",
+                razon_social: item?.razon_social || "",
+                nit_empresa: item?.nit_empresa || "",
+                representante_legal: item?.representante_legal || "",
+                tipo_documento_representante: item?.tipo_documento_representante || "",
+                numero_documento_representante: item?.numero_documento_representante || "",
                 correo_silver: item?.correo_silver || ""
             };
             this.observacionesRevisionTh = item?.observaciones_th || "";
@@ -534,21 +551,46 @@ window.onboardingThApp = function () {
 
         get s3BaseValida() {
             const form = this.formS3;
-            return !!String(form.direccion || "").trim()
+            const baseValida = !!String(form.direccion || "").trim()
                 && !!String(form.tipo_persona || "").trim()
                 && !!String(form.banco_id || "").trim()
                 && !!String(form.tipo_cuenta || "").trim()
                 && !!String(form.numero_cuenta || "").trim();
+            if (!baseValida) return false;
+            if (this.normalizar(form.tipo_persona) !== "juridica") return true;
+            return !!String(form.razon_social || "").trim()
+                && !!String(form.nit_empresa || "").trim()
+                && !!String(form.representante_legal || "").trim()
+                && !!String(form.tipo_documento_representante || "").trim()
+                && !!String(form.numero_documento_representante || "").trim();
         },
 
         get puedeAprobar() {
             if (!this.seccion3Editable || !this.s3BaseValida) return false;
+            if (this.itemActivo?.crear_usuario_sistema === false) return true;
             return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(this.formS3.correo_silver || "").trim());
         },
 
         bancoIdPayload() {
             const raw = String(this.formS3.banco_id || "").trim();
             return raw || null;
+        },
+
+        buildS3Payload() {
+            const juridica = this.normalizar(this.formS3.tipo_persona) === "juridica";
+            return {
+                direccion: String(this.formS3.direccion || "").trim(),
+                tipo_persona: String(this.formS3.tipo_persona || "").trim(),
+                banco_id: this.bancoIdPayload(),
+                tipo_cuenta: String(this.formS3.tipo_cuenta || "").trim(),
+                numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
+                correo_silver: String(this.formS3.correo_silver || "").trim() || null,
+                razon_social: juridica ? String(this.formS3.razon_social || "").trim() : null,
+                nit_empresa: juridica ? String(this.formS3.nit_empresa || "").trim() : null,
+                representante_legal: juridica ? String(this.formS3.representante_legal || "").trim() : null,
+                tipo_documento_representante: juridica ? String(this.formS3.tipo_documento_representante || "").trim() : null,
+                numero_documento_representante: juridica ? String(this.formS3.numero_documento_representante || "").trim() : null
+            };
         },
 
         modalidadContratoDetalle() {
@@ -590,6 +632,7 @@ window.onboardingThApp = function () {
         get puedeCompletarContratacion() {
             if (this.itemActivo?.origen_flujo !== "contratacion") return false;
             if (!this.seccion3Editable) return false;
+            if (this.itemActivo?.crear_usuario_sistema === false) return this.s3BaseValida;
             return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(this.formS3.correo_silver || "").trim());
         },
 
@@ -607,14 +650,7 @@ window.onboardingThApp = function () {
             }
             this.guardandoS3 = true;
             try {
-                const payload = {
-                    direccion: String(this.formS3.direccion || "").trim(),
-                    tipo_persona: String(this.formS3.tipo_persona || "").trim(),
-                    banco_id: this.bancoIdPayload(),
-                    tipo_cuenta: String(this.formS3.tipo_cuenta || "").trim(),
-                    numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
-                    correo_silver: String(this.formS3.correo_silver || "").trim() || null
-                };
+                const payload = this.buildS3Payload();
                 if (this.itemActivo.origen_flujo === "contratacion") {
                     await axios.patch(
                         `${API}/contrataciones/solicitudes/${this.itemActivo.id}/seccion-3`,
@@ -640,14 +676,7 @@ window.onboardingThApp = function () {
             try {
                 await axios.patch(
                     `${API}/contrataciones/solicitudes/${this.itemActivo.id}/seccion-3`,
-                    {
-                        direccion: String(this.formS3.direccion || "").trim(),
-                        tipo_persona: String(this.formS3.tipo_persona || "").trim(),
-                        banco_id: this.bancoIdPayload(),
-                        tipo_cuenta: String(this.formS3.tipo_cuenta || "").trim(),
-                        numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
-                        correo_silver: String(this.formS3.correo_silver || "").trim() || null
-                    },
+                    this.buildS3Payload(),
                     this.getAuthConfig()
                 );
                 await axios.patch(
@@ -992,6 +1021,7 @@ window.onboardingThApp = function () {
                     tipo_asignacion: data.tipo_asignacion || "full_time",
                     cliente_id: data.cliente_id || "",
                     modulo_id: data.modulo_id || "",
+                    modulo_nombre: data.modulo_id ? "" : (data.modulo_nombre || ""),
                     moneda: data.moneda || "COP",
                     valor_tarifa: data.valor_tarifa ?? "",
                     fecha_inicio: this.toDateInput(data.fecha_inicio),
@@ -1037,7 +1067,6 @@ window.onboardingThApp = function () {
             const form = this.anexoModalItem.form;
             if (!form.tipo_asignacion) return "Selecciona el tipo de asignacion.";
             if (this.tipoAnexoRequiereCliente(form.tipo_asignacion) && !form.cliente_id) return "Selecciona el cliente.";
-            if (!form.modulo_id) return "Selecciona el modulo.";
             if (!form.moneda) return "Selecciona la moneda.";
             if (form.valor_tarifa === "" || form.valor_tarifa === null || Number(form.valor_tarifa) < 0) {
                 return "Ingresa un valor valido para la tarifa.";
@@ -1064,6 +1093,7 @@ window.onboardingThApp = function () {
                 tipo_asignacion: form.tipo_asignacion,
                 cliente_id: this.tipoAnexoRequiereCliente(form.tipo_asignacion) ? form.cliente_id || null : null,
                 modulo_id: form.modulo_id || null,
+                modulo_nombre: form.modulo_id ? null : (String(form.modulo_nombre || "").trim() || null),
                 moneda: form.moneda,
                 valor_tarifa: Number(form.valor_tarifa),
                 fecha_inicio: form.fecha_inicio,

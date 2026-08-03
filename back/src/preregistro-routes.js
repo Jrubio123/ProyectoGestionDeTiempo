@@ -1,3 +1,5 @@
+const { findCorreoPersonaConflict } = require("./services/persona-identidad.service");
+
 module.exports = function registerPreregistroRoutes(deps) {
   const {
     app,
@@ -212,6 +214,8 @@ module.exports = function registerPreregistroRoutes(deps) {
       p.tarifa_hora, p.tarifa_mes, p.tarifa_medio_tiempo, p.tarifa_capacitacion,
       p.vpn_corona, p.necesita_s_user, p.grupo_usuario, p.grupo_distribucion,
       p.observaciones, p.direccion, p.tipo_persona, p.banco_id,
+      p.razon_social, p.nit_empresa, p.representante_legal,
+      p.tipo_documento_representante, p.numero_documento_representante,
       b.titulo AS banco_nombre,
       p.tipo_cuenta, p.numero_cuenta, p.correo_silver, p.estado, p.crear_usuario_sistema,
       p.creado_por, creador.public_id AS creado_por_public_id, creador.nombre_usuario AS creado_por_nombre,
@@ -226,7 +230,9 @@ module.exports = function registerPreregistroRoutes(deps) {
       s.perfil, s.nivel, s.tiempo, s.ubicacion, s.modalidad, s.fecha_inicio_esperada,
       s.tipo_proyecto, s.experiencia, s.presupuesto, s.descripcion, s.informacion_adicional,
       s.prioridad, s.observaciones_rrhh,
-      c.public_id AS cliente_public_id, c.titulo AS cliente_nombre,
+      c.public_id AS cliente_public_id,
+      COALESCE(c.titulo, s.cliente_nombre_otro) AS cliente_nombre,
+      s.cliente_nombre_otro,
       m.public_id AS modulo_public_id, m.titulo AS modulo_nombre,
       su.public_id AS coordinador_public_id, su.nombre_usuario AS coordinador_nombre, su.email AS coordinador_email,
       rsol.titulo AS solicitante_rol_titulo
@@ -294,10 +300,16 @@ module.exports = function registerPreregistroRoutes(deps) {
       observaciones: row.observaciones,
       direccion: row.direccion,
       tipo_persona: row.tipo_persona,
+      razon_social: row.razon_social,
+      nit_empresa: row.nit_empresa,
+      representante_legal: row.representante_legal,
+      tipo_documento_representante: row.tipo_documento_representante,
+      numero_documento_representante: row.numero_documento_representante,
       banco: row.banco_id ? { id: row.banco_id, nombre: row.banco_nombre } : null,
       tipo_cuenta: row.tipo_cuenta,
       numero_cuenta: row.numero_cuenta,
       correo_silver: row.correo_silver,
+      crear_usuario_sistema: row.crear_usuario_sistema !== false,
       estado: row.estado,
       creado_por: row.creado_por_public_id,
       creado_por_nombre: row.creado_por_nombre || null,
@@ -365,6 +377,13 @@ module.exports = function registerPreregistroRoutes(deps) {
       banco_id: preregistroRow.banco_id || existingDatosExtra.banco_id || null,
       tipo_cuenta: preregistroRow.tipo_cuenta || existingDatosExtra.tipo_cuenta || null,
       numero_cuenta: preregistroRow.numero_cuenta || existingDatosExtra.numero_cuenta || null,
+      razon_social: preregistroRow.razon_social || existingDatosExtra.razon_social || null,
+      nit_empresa: preregistroRow.nit_empresa || existingDatosExtra.nit_empresa || null,
+      representante_legal: preregistroRow.representante_legal || existingDatosExtra.representante_legal || null,
+      tipo_documento_representante:
+        preregistroRow.tipo_documento_representante || existingDatosExtra.tipo_documento_representante || null,
+      numero_documento_representante:
+        preregistroRow.numero_documento_representante || existingDatosExtra.numero_documento_representante || null,
       vpn_corona: preregistroRow.vpn_corona === null || preregistroRow.vpn_corona === undefined
         ? (existingDatosExtra.vpn_corona ?? null)
         : Boolean(preregistroRow.vpn_corona),
@@ -403,9 +422,10 @@ module.exports = function registerPreregistroRoutes(deps) {
         fecha_fin = COALESCE($15, fecha_fin),
         datos_extra = COALESCE(datos_extra, '{}'::jsonb) || $16::jsonb,
         persona_usuario_id = COALESCE($17, persona_usuario_id),
-        estado = COALESCE($18, estado),
+        crear_usuario_sistema = $18,
+        estado = COALESCE($19, estado),
         updated_at = NOW()
-      WHERE id = $19
+      WHERE id = $20
       `,
       [
         preregistroRow.id,
@@ -425,6 +445,7 @@ module.exports = function registerPreregistroRoutes(deps) {
         preregistroRow.fecha_fin || null,
         JSON.stringify(mergedDatosExtra),
         personaUsuarioId || preregistroRow.id_usuario_creado || null,
+        preregistroRow.crear_usuario_sistema !== false,
         nextEstado || null,
         linked.id
       ]
@@ -485,14 +506,11 @@ module.exports = function registerPreregistroRoutes(deps) {
     }
 
     // Validar que correo_personal no este registrado para otra persona (diferente documento)
-    const dupCheckRrhh = await pool.query(
-      `SELECT 1 FROM preregistro_personas
-       WHERE LOWER(correo_personal) = LOWER($1)
-         AND COALESCE(numero_documento,'') <> $2
-       LIMIT 1`,
-      [correo_personal, String(numero_documento || "").trim()]
-    );
-    if (dupCheckRrhh.rows.length) {
+    const dupCheckRrhh = await findCorreoPersonaConflict(pool, {
+      correo: correo_personal,
+      numeroDocumento: numero_documento
+    });
+    if (dupCheckRrhh) {
       return res.status(422).json({
         error: "El correo personal ya está registrado para otra persona en el sistema. Cada persona debe tener un correo personal único."
       });
@@ -503,10 +521,10 @@ module.exports = function registerPreregistroRoutes(deps) {
       await client.query("BEGIN");
       const solicitudRes = await client.query(
         `SELECT s.id, s.estado, su.email AS coordinador_email, su.nombre_usuario AS coordinador_nombre, rsol.titulo AS solicitante_rol_titulo, s.perfil
-              , s.public_id AS solicitud_public_id, s.coordinador_id, s.cliente_id, s.modulo_id
+              , s.public_id AS solicitud_public_id, s.coordinador_id, s.cliente_id, s.cliente_nombre_otro, s.modulo_id
               , c.public_id AS cliente_public_id, m.public_id AS modulo_public_id
               , s.modalidad, s.ubicacion, s.fecha_inicio_esperada, s.descripcion, s.informacion_adicional, s.observaciones_rrhh
-              , c.titulo AS cliente_nombre, m.titulo AS modulo_nombre
+              , COALESCE(c.titulo, s.cliente_nombre_otro) AS cliente_nombre, m.titulo AS modulo_nombre
          FROM solicitudes_rrhh s
          LEFT JOIN clientes c ON c.id = s.cliente_id
          LEFT JOIN modulo m ON m.id = s.modulo_id
@@ -822,6 +840,21 @@ module.exports = function registerPreregistroRoutes(deps) {
         }
       }
 
+      if (req.body?.correo_personal !== undefined || req.body?.numero_documento !== undefined) {
+        const nextCorreo = req.body?.correo_personal ?? current.correo_personal;
+        const nextDocumento = req.body?.numero_documento ?? current.numero_documento;
+        const correoConflict = await findCorreoPersonaConflict(client, {
+          correo: nextCorreo,
+          numeroDocumento: nextDocumento,
+          excludePreregistroId: id
+        });
+        if (correoConflict) {
+          return res.status(422).json({
+            error: "El correo personal ya pertenece a otra persona. Verifica el documento antes de continuar."
+          });
+        }
+      }
+
       const sets = [];
       const vals = [];
       let idx = 1;
@@ -1074,6 +1107,15 @@ module.exports = function registerPreregistroRoutes(deps) {
     if (!TIPOS_CUENTA.has(String(tipo_cuenta || "").trim())) {
       return res.status(400).json({ error: "tipo_cuenta no valido" });
     }
+    if (
+      normalizeValue(tipo_persona) === "juridica" &&
+      (!razon_social || !nit_empresa || !representante_legal ||
+        !tipo_documento_representante || !numero_documento_representante)
+    ) {
+      return res.status(400).json({
+        error: "Para persona juridica son obligatorios razon social, NIT y datos del representante legal"
+      });
+    }
     if (correo_silver && !isValidSilverEmail(correo_silver)) {
       return res.status(400).json({ error: "correo_silver debe pertenecer al dominio @silverconsulting.com.co" });
     }
@@ -1100,7 +1142,10 @@ module.exports = function registerPreregistroRoutes(deps) {
         }
       }
 
-      const nextState = correoSilverNorm ? ESTADOS.pendienteRevisionTh : ESTADOS.pendienteCorreoSilver;
+      const debeCrearUsuario = current.crear_usuario_sistema !== false;
+      const nextState = correoSilverNorm || !debeCrearUsuario
+        ? ESTADOS.pendienteRevisionTh
+        : ESTADOS.pendienteCorreoSilver;
       const tipoPersonaNorm = normalizeTipoPersonaForPreregistro(tipo_persona);
       await client.query(
         `UPDATE preregistro_personas
@@ -1246,6 +1291,9 @@ module.exports = function registerPreregistroRoutes(deps) {
         const cliRes = await client.query(`SELECT id FROM clientes WHERE public_id::text = $1::text LIMIT 1`, [clienteUuidPreregistro]);
         clienteInternoIdPreregistro = cliRes.rows[0]?.id || null;
       }
+      const clienteOtroPreregistro = clienteInternoIdPreregistro
+        ? null
+        : (solicitudDatosExtra.cliente_nombre || null);
 
       const tipoPersonaParaPersonas = normalizeTipoPersonaForUsuarios(current.tipo_persona) || null;
 
@@ -1255,11 +1303,11 @@ module.exports = function registerPreregistroRoutes(deps) {
           numero_contacto, correo_electronico, direccion_residencia, ciudad_residencia,
           tipo_persona, factura_en_colombia,
           banco_id, tipo_cuenta_id, numero_cuenta,
-          modulo_id, modulo_otro, cliente_id,
+          modulo_id, modulo_otro, cliente_id, cliente_otro,
           razon_social, nit_empresa, representante_legal,
           tipo_documento_representante, numero_documento_representante,
           preregistro_id, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
         ON CONFLICT (numero_documento) DO UPDATE SET
           nombre                         = COALESCE(EXCLUDED.nombre, personas.nombre),
           apellidos                      = COALESCE(EXCLUDED.apellidos, personas.apellidos),
@@ -1275,6 +1323,7 @@ module.exports = function registerPreregistroRoutes(deps) {
           modulo_id                      = COALESCE(EXCLUDED.modulo_id, personas.modulo_id),
           modulo_otro                    = COALESCE(EXCLUDED.modulo_otro, personas.modulo_otro),
           cliente_id                     = COALESCE(EXCLUDED.cliente_id, personas.cliente_id),
+          cliente_otro                   = COALESCE(EXCLUDED.cliente_otro, personas.cliente_otro),
           razon_social                   = COALESCE(EXCLUDED.razon_social, personas.razon_social),
           nit_empresa                    = COALESCE(EXCLUDED.nit_empresa, personas.nit_empresa),
           representante_legal            = COALESCE(EXCLUDED.representante_legal, personas.representante_legal),
@@ -1300,6 +1349,7 @@ module.exports = function registerPreregistroRoutes(deps) {
           moduloInternoIdPreregistro,
           moduloOtroPreregistro,
           clienteInternoIdPreregistro,
+          clienteOtroPreregistro,
           current.razon_social || null,
           current.nit_empresa || null,
           current.representante_legal || null,

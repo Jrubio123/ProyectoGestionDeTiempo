@@ -19,6 +19,20 @@ test("la edición de Mesa/Fábrica fuerza la tarifa vigente en el backend", () =
   );
 });
 
+test("editar la tarifa propaga el valor a Mesa/Fábrica abiertas o en proceso", () => {
+  const source = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  const start = source.indexOf("// Recalcular asignaciones activas que usan una tarifa administrada por consultor.");
+  const end = source.indexOf("const result = await pool.query", start);
+  const propagacion = source.slice(start, end);
+
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  assert.match(propagacion, /ra\.estado IN \('Abierto', 'Proceso'\)/);
+  assert.match(propagacion, /LOWER\(ta\.titulo\) LIKE '%mesa%'/);
+  assert.match(propagacion, /LOWER\(ta\.titulo\) LIKE '%fabrica%'/);
+  assert.match(propagacion, /ELSE ra\.total_pagar/);
+});
+
 test("el modal consulta la tarifa vigente al abrir la asignación", async (t) => {
   const frontPath = path.resolve(__dirname, "../../front/js/mis-asignaciones-coordinador.js");
   const previousWindow = global.window;

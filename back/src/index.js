@@ -12958,13 +12958,18 @@ app.put("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador", 
       return res.status(409).json({ error: "Ya existe una tarifa vigente para esta combinación de consultor, cliente, módulo y tipo de asignación." });
     }
 
-    // Recalcular asignaciones activas de tipo Full time / Part Time que usen esta tarifa
+    // Recalcular asignaciones activas que usan una tarifa administrada por consultor.
     await pool.query(
       `UPDATE registro_asignaciones ra
        SET valor_hora  = $1,
-           valor_dia   = $1 / 20.0,
+           valor_dia   = CASE
+             WHEN LOWER(ta.titulo) IN ('full time', 'part time') THEN $1 / 20.0
+             ELSE NULL
+           END,
            total_pagar = CASE
-             WHEN ra.cantidad_dias IS NOT NULL AND ra.cantidad_dias > 0
+             WHEN LOWER(ta.titulo) IN ('full time', 'part time')
+               AND ra.cantidad_dias IS NOT NULL
+               AND ra.cantidad_dias > 0
                THEN ($1 / 20.0) * ra.cantidad_dias
              ELSE ra.total_pagar
            END,
@@ -12975,10 +12980,17 @@ app.put("/tarifas/:id", requireAccess({ roles: ["Administrador", "Coordinador", 
          AND con.id_cliente              = $2
          AND ra.consultor_responsable_id = $3
          AND (($4::int IS NULL AND ra.id_modulo IS NULL) OR ra.id_modulo = $4)
-         AND con.id_tipo_asignacion      = $5
-         AND ra.estado IN ('Abierto', 'Proceso')
-         AND ra.es_costo_total           = false
-         AND LOWER(ta.titulo) IN ('full time', 'part time')`,
+          AND con.id_tipo_asignacion      = $5
+          AND ra.estado IN ('Abierto', 'Proceso')
+          AND ra.es_costo_total           = false
+          AND (
+            LOWER(ta.titulo) IN ('full time', 'part time')
+            OR LOWER(ta.titulo) LIKE '%mesa%'
+            OR LOWER(ta.titulo) LIKE '%service desk%'
+            OR LOWER(ta.titulo) LIKE '%servicedesk%'
+            OR LOWER(ta.titulo) LIKE '%fabrica%'
+            OR LOWER(ta.titulo) LIKE '%fábrica%'
+          )`,
       [valor, clienteInternalId, consultorInternalId, moduloInternalId, tipoAsignacionInternalId]
     );
 

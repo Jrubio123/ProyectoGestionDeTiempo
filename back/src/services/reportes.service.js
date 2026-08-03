@@ -703,8 +703,10 @@ async function actualizarAprobacion(req, res) {
         const tarifaInfo = tarifaMeta.rows[0];
         const requiereTarifaHoras =
           tarifaInfo &&
-          isModalidadHorasConTarifa(tarifaInfo.tipo_asignacion_titulo) &&
-          !isTipoAsignacionMesaOFabrica(tarifaInfo.tipo_asignacion_titulo);
+          (
+            isModalidadHorasConTarifa(tarifaInfo.tipo_asignacion_titulo) ||
+            isTipoAsignacionMesaOFabrica(tarifaInfo.tipo_asignacion_titulo)
+          );
 
         if (requiereTarifaHoras) {
           const tarifa = toNullableNumber(tarifaInfo.tarifa_consultor);

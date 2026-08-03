@@ -109,7 +109,7 @@ window.misAsignacionesApp = function () {
             this.asignacionSeleccionada = asignacion;
         },
 
-        editarAsignacion(asignacion) {
+        async editarAsignacion(asignacion) {
             this.asignacionSeleccionada = asignacion;
             this.consultoriaInfo = {
                 cliente: asignacion.cliente || "",
@@ -139,6 +139,9 @@ window.misAsignacionesApp = function () {
 
             this.tarifaEncontrada = true;
             this.mostrarModal = true;
+            if (this.esMesaOFabrica(asignacion)) {
+                await this.validarTarifa();
+            }
         },
 
         cerrarModal() {

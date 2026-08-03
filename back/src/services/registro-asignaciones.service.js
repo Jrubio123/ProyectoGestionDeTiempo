@@ -198,6 +198,14 @@ async function actualizarRegistroAsignacion(req, res) {
           SELECT
             CASE WHEN m.n_tipo LIKE '%tiempo y costo fijo%' OR m.n_tipo LIKE '%costo fijo%' THEN true ELSE false END AS es_t_c_fijo,
             CASE
+              WHEN m.n_tipo LIKE '%mesa%'
+                OR m.n_tipo LIKE '%service desk%'
+                OR m.n_tipo LIKE '%servicedesk%'
+                OR m.n_tipo LIKE '%fabrica%'
+                OR m.n_tipo LIKE '%fábrica%' THEN true
+              ELSE false
+            END AS es_mesa_fabrica,
+            CASE
               WHEN m.n_tipo LIKE '%hora adicional%'
                 OR m.n_tipo LIKE '%hora extra%'
                 OR REPLACE(REPLACE(m.n_tipo, ' ', ''), '_', '') LIKE '%horaadicional%'
@@ -212,14 +220,15 @@ async function actualizarRegistroAsignacion(req, res) {
         c_valores AS (
           SELECT
             c.es_t_c_fijo,
+            c.es_mesa_fabrica,
             c.es_h_extra,
             c.es_modalidad_horas,
             c.tarifa_calculada,
             -- Aplicamos regla de costo total; horas también se nullifican en modo costo total TCF
             CASE WHEN c.es_h_extra OR (c.es_t_c_fijo AND $13::boolean) THEN null ELSE $16::numeric END AS out_horas,
             CASE WHEN c.es_h_extra OR (c.es_t_c_fijo AND $13::boolean) THEN null ELSE $4::int END AS out_dias,
-            CASE WHEN c.es_modalidad_horas THEN c.tarifa_calculada WHEN c.es_t_c_fijo AND $13::boolean THEN null ELSE $5::numeric END AS out_v_hora,
-            CASE WHEN c.es_h_extra OR (c.es_t_c_fijo AND $13::boolean) THEN null ELSE $6::numeric END AS out_v_dia,
+            CASE WHEN c.es_mesa_fabrica OR c.es_modalidad_horas THEN c.tarifa_calculada WHEN c.es_t_c_fijo AND $13::boolean THEN null ELSE $5::numeric END AS out_v_hora,
+            CASE WHEN c.es_mesa_fabrica OR c.es_h_extra OR (c.es_t_c_fijo AND $13::boolean) THEN null ELSE $6::numeric END AS out_v_dia,
             CASE WHEN c.es_h_extra THEN 0 ELSE $15::numeric END AS out_t_pagar
           FROM c_calc c
         ),
@@ -243,7 +252,7 @@ async function actualizarRegistroAsignacion(req, res) {
               es_costo_total = (SELECT es_t_c_fijo FROM c_valores) AND $13::boolean
           WHERE id = (SELECT id FROM c_asignacion)
             AND (NOT ((SELECT es_t_c_fijo FROM c_valores) AND $13::boolean) OR $15::numeric > 0)
-            AND (NOT (SELECT es_modalidad_horas FROM c_valores) OR (SELECT tarifa_calculada FROM c_valores) > 0)
+            AND (NOT ((SELECT es_mesa_fabrica FROM c_valores) OR (SELECT es_modalidad_horas FROM c_valores)) OR (SELECT tarifa_calculada FROM c_valores) > 0)
             AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM c_consultor))
             AND ($3::text IS NULL OR EXISTS (SELECT 1 FROM c_modulo))
             AND NOT EXISTS (SELECT 1 FROM c_dup)
@@ -259,6 +268,7 @@ async function actualizarRegistroAsignacion(req, res) {
         (SELECT id FROM c_modulo) AS diag_modulo,
         (SELECT id FROM c_dup) AS diag_dup,
         (SELECT es_t_c_fijo FROM c_calc) AS diag_es_tcf,
+        (SELECT es_mesa_fabrica FROM c_calc) AS diag_es_mesa_fabrica,
         (SELECT es_modalidad_horas FROM c_tarifa) AS diag_es_modalidad_horas,
         (SELECT tarifa_calculada FROM c_tarifa) AS diag_tarifa_calc
       FROM upd u RIGHT JOIN c_asignacion ON true
@@ -313,7 +323,7 @@ async function actualizarRegistroAsignacion(req, res) {
         });
       }
 
-      if (row.diag_es_modalidad_horas && !(Number(row.diag_tarifa_calc) > 0)) {
+      if ((row.diag_es_mesa_fabrica || row.diag_es_modalidad_horas) && !(Number(row.diag_tarifa_calc) > 0)) {
         return res.status(400).json({ error: ERROR_TARIFA_HORAS });
       }
       if (row.diag_es_tcf && esCostoTotalInput && !(Number(totalPagarNum) > 0)) {
@@ -327,6 +337,7 @@ async function actualizarRegistroAsignacion(req, res) {
     delete row.diag_modulo;
     delete row.diag_dup;
     delete row.diag_es_tcf;
+    delete row.diag_es_mesa_fabrica;
     delete row.diag_es_modalidad_horas;
     delete row.diag_tarifa_calc;
 
@@ -566,7 +577,8 @@ async function crearRegistroAsignacion(req, res) {
               WHEN m.n_tipo LIKE '%mesa%'
                 OR m.n_tipo LIKE '%service desk%'
                 OR m.n_tipo LIKE '%servicedesk%'
-                OR m.n_tipo LIKE '%fabrica%' THEN true
+                OR m.n_tipo LIKE '%fabrica%'
+                OR m.n_tipo LIKE '%fábrica%' THEN true
               ELSE false
             END AS es_mesa_fabrica,
             CASE 

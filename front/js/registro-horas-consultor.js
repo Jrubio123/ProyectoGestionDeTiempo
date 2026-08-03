@@ -167,7 +167,9 @@ window.registroHorasApp = function () {
                 const disponible = Number(item?.dias_disponibles ?? item?.cantidad_dias ?? 0);
                 return `${this.formatearCantidad(disponible)} Dias`;
             }
-            const disponible = Number(item?.horas_disponibles ?? item?.horas_asignadas ?? 0);
+            const disponibleRaw = item?.horas_disponibles ?? item?.horas_asignadas;
+            if (disponibleRaw === null || disponibleRaw === undefined) return "Sin tope";
+            const disponible = Number(disponibleRaw);
             return `${this.formatearCantidad(disponible)} Hrs`;
         },
 

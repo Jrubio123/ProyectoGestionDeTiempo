@@ -43,6 +43,7 @@ async function reportarHoras(req, res) {
     isTipoAsignacionMensual,
     isTipoAsignacionTiempoCostoFijo,
     toBooleanInput,
+    isTipoAsignacionHoraExtra,
     isTipoAsignacionHorasPorDemanda,
     buildPortalUrl,
     sendEmailSafe,
@@ -153,6 +154,7 @@ async function reportarHoras(req, res) {
     const esTiempoCostoFijo = isTipoAsignacionTiempoCostoFijo(tipoAsignacionTitulo);
     const permitirParcialesAcumulados = esTiempoCostoFijo;
     const esCostoTotal = esTiempoCostoFijo && toBooleanInput(info.es_costo_total, false);
+    const esHoraExtra = isTipoAsignacionHoraExtra(tipoAsignacionTitulo);
     const esHorasPorDemanda = isTipoAsignacionHorasPorDemanda(tipoAsignacionTitulo);
     const ultimoReporteId = Number(info.ultimo_reporte_id || 0) || null;
     const ultimoReporteEstado = String(info.ultimo_reporte_estado || "").trim() || null;
@@ -201,7 +203,7 @@ async function reportarHoras(req, res) {
       }
     }
 
-    if (!esHorasPorDemanda) {
+    if (!esHorasPorDemanda && !esHoraExtra) {
       const uso = await pool.query(
         `
         SELECT
@@ -615,6 +617,7 @@ async function actualizarAprobacion(req, res) {
     isTipoAsignacionMensual,
     isTipoAsignacionTiempoCostoFijo,
     toBooleanInput,
+    isTipoAsignacionHoraExtra,
     isTipoAsignacionHorasPorDemanda,
     toNullableNumber,
     buildReporteResumen,
@@ -774,8 +777,12 @@ async function actualizarAprobacion(req, res) {
             const esMensual = isTipoAsignacionMensual(tipoNorm);
             const esTiempoCostoFijo = isTipoAsignacionTiempoCostoFijo(tipoNorm);
             const esCostoTotal = esTiempoCostoFijo && toBooleanInput(meta.es_costo_total, false);
+            const esHoraExtra = isTipoAsignacionHoraExtra(tipoNorm);
             const esHorasPorDemanda = isTipoAsignacionHorasPorDemanda(tipoNorm);
-            if (esHorasPorDemanda) {
+            if (esHoraExtra) {
+              // Las horas extra permanecen disponibles durante todo el periodo de vigencia.
+              estadoAprobadoDestino = estados.proceso;
+            } else if (esHorasPorDemanda) {
               // Para horas por demanda se cierra al aprobar para evitar reprocesos
               // del mismo bloque antes de pasar a cuenta de cobro.
               estadoAprobadoDestino = estados.cerrado || estados.proceso;

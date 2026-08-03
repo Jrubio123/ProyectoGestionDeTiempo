@@ -128,12 +128,12 @@
                         </div>
 
                         <div x-show="!esMesaServicio" class="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-                            <div>
+                            <div x-show="!esHoraExtra">
                                 <label class="text-xs font-bold text-gray-500 uppercase">Días Calc.</label>
                                 <input type="number" x-model="form.cantidad_dias" readonly class="w-full mt-1 p-2 bg-gray-100 border rounded-lg text-sm font-mono text-gray-600">
                             </div>
                             
-                            <div x-show="esPorHora && !esHorasPorDemanda && !esCostoTotalModo">
+                            <div x-show="esPorHora && !esHorasPorDemanda && !esHoraExtra && !esCostoTotalModo">
                                 <label class="text-xs font-bold text-gray-500 uppercase">Horas Asignadas</label>
                                 <input type="number" x-model="form.horas_asignadas" class="w-full mt-1 p-2 border rounded-lg text-sm font-mono focus:border-indigo-500 outline-none">
                             </div>
@@ -149,10 +149,16 @@
                                 </div>
                             </div>
 
+                            <div x-show="esHoraExtra" class="col-span-1 sm:col-span-2">
+                                <div class="p-2 mt-6 text-xs rounded-lg border border-blue-200 bg-blue-50 text-blue-700">
+                                    El consultor reportará las horas extra realmente trabajadas. Esta asignación no tiene un tope de horas.
+                                </div>
+                            </div>
+
                             <div class="col-span-1" :class="esPorHora ? '' : 'col-span-2'">
                                 <label class="text-xs font-bold text-gray-500 uppercase">Total Estimado</label>
                                 <div class="w-full mt-1 p-2 bg-indigo-50 border border-indigo-100 rounded-lg text-sm font-bold text-indigo-700 text-right" 
-                                     x-text="calcularTotal()"></div>
+                                     x-text="esHoraExtra ? 'Según horas reportadas' : calcularTotal()"></div>
                             </div>
                         </div>
                     </div>

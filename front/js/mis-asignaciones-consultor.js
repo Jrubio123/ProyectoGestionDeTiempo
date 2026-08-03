@@ -56,6 +56,22 @@ window.misAsignacionesConsultorApp = function () {
             );
         },
 
+        esTipoHoraExtra(tipoAsignacion) {
+            const tipo = String(tipoAsignacion || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .replace(/\s+/g, " ")
+                .trim();
+            const compacto = tipo.replace(/\s+/g, "");
+            return (
+                tipo.includes("hora adicional") ||
+                tipo.includes("hora extra") ||
+                compacto.includes("horaadicional") ||
+                compacto.includes("horaextra")
+            );
+        },
+
         tarifaMostrar(asignacion) {
             const esMensual = this.esTipoMensual(asignacion?.nombre_tipo_asignacion || "");
             if (esMensual) {
@@ -67,6 +83,7 @@ window.misAsignacionesConsultorApp = function () {
         },
 
         totalMostrar(asignacion) {
+            if (this.esTipoHoraExtra(asignacion?.nombre_tipo_asignacion)) return 0;
             const tipo = String(asignacion?.nombre_tipo_asignacion || "")
                 .normalize("NFD")
                 .replace(/[\u0300-\u036f]/g, "")
@@ -97,6 +114,13 @@ window.misAsignacionesConsultorApp = function () {
             if (horas > 0) return tarifa * horas;
             if (dias > 0) return tarifa * dias;
             return esMensual ? tarifa : 0;
+        },
+
+        textoTotal(asignacion) {
+            if (this.esTipoHoraExtra(asignacion?.nombre_tipo_asignacion)) {
+                return "Según horas reportadas";
+            }
+            return this.formatearDinero(this.totalMostrar(asignacion));
         },
 
         formatearDinero(valor) {

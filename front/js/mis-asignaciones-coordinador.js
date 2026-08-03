@@ -193,6 +193,17 @@ window.misAsignacionesApp = function () {
                 .trim();
         },
 
+        esHoraExtraTipo() {
+            const tipo = this.normalizarTipoAsignacion(this.consultoriaInfo.tipo_asignacion || "");
+            const compacto = tipo.replace(/\s+/g, "");
+            return (
+                tipo.includes("hora adicional") ||
+                tipo.includes("hora extra") ||
+                compacto.includes("horaadicional") ||
+                compacto.includes("horaextra")
+            );
+        },
+
         parseLocalDate(value) {
             if (!value) return null;
             const [y, m, d] = String(value).split("-").map(Number);
@@ -201,6 +212,10 @@ window.misAsignacionesApp = function () {
         },
 
         calcularDias() {
+            if (this.esHoraExtraTipo()) {
+                this.form.cantidad_dias = 0;
+                return;
+            }
             if (!this.form.fecha_inicio || !this.form.fecha_fin) return;
             if (this.esMensualTipo()) {
                 const dias = this.calcularDiasMensual(this.form.fecha_inicio, this.form.fecha_fin);
@@ -218,6 +233,7 @@ window.misAsignacionesApp = function () {
         },
 
         calcularTotalPagar() {
+            if (this.esHoraExtraTipo()) return 0;
             if (this.esCostoTotalTipo()) {
                 return Number(this.form.total_pagar || 0);
             }
@@ -318,16 +334,18 @@ window.misAsignacionesApp = function () {
                 const valorDia = this.form.valor_dia === "" || this.form.valor_dia === null || this.form.valor_dia === undefined
                     ? null
                     : Number(this.form.valor_dia);
-                const totalPagar = Number(this.calcularTotalPagar());
+                const esHoraExtra = this.esHoraExtraTipo();
+                const totalPagar = esHoraExtra ? 0 : Number(this.calcularTotalPagar());
                 const esCostoTotal = this.esCostoTotalTipo();
                 const payload = {
                     consultor_responsable_id: this.form.consultor_responsable_id,
                     id_modulo: this.form.id_modulo,
                     fecha_inicio: this.form.fecha_inicio || null,
                     fecha_fin: this.form.fecha_fin || null,
-                    cantidad_dias: esCostoTotal ? null : (Number.isFinite(cantidadDias) ? cantidadDias : null),
+                    cantidad_dias: esCostoTotal || esHoraExtra ? null : (Number.isFinite(cantidadDias) ? cantidadDias : null),
+                    horas_asignadas: esHoraExtra ? null : undefined,
                     valor_hora: esCostoTotal ? null : (Number.isFinite(valorHora) ? valorHora : null),
-                    valor_dia: esCostoTotal ? null : (Number.isFinite(valorDia) ? valorDia : null),
+                    valor_dia: esCostoTotal || esHoraExtra ? null : (Number.isFinite(valorDia) ? valorDia : null),
                     nro_caso_interno: this.form.nro_caso_interno || null,
                     nro_caso_cliente: this.form.nro_caso_cliente || null,
                     tipo_servicio: this.form.tipo_servicio || null,

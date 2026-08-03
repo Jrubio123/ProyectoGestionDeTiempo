@@ -278,6 +278,17 @@ window.asignacionConsultorApp = function () {
             return t.includes("horas por demanda") || compacto.includes("horaspordemanda");
         },
 
+        get esHoraExtra() {
+            const t = this.normalizeTipo(this.proyectoSelected?.tipo_asignacion || "");
+            const compacto = t.replace(/\s+/g, "");
+            return (
+                t.includes("hora adicional") ||
+                t.includes("hora extra") ||
+                compacto.includes("horaadicional") ||
+                compacto.includes("horaextra")
+            );
+        },
+
         get esMesaServicio() {
             const t = this.normalizeTipo(this.proyectoSelected?.tipo_asignacion || "");
             const compacto = t.replace(/\s+/g, "");
@@ -306,7 +317,7 @@ window.asignacionConsultorApp = function () {
             if (!this.form.consultor_id || !this.form.modulo_id) return false;
             if (!this.esCostoTotalModo && !(this.alertaTarifa.valor > 0)) return false;
             if (this.esMesaServicio) return true;
-            if (this.esHorasPorDemanda) return true;
+            if (this.esHorasPorDemanda || this.esHoraExtra) return true;
             if (this.esCostoTotalModo) return Number(this.form.presupuesto_total || 0) > 0;
             if (this.esPorHora) {
                 return (this.form.horas_asignadas || 0) > 0;
@@ -317,7 +328,7 @@ window.asignacionConsultorApp = function () {
         calcularTotal() {
             const tarifa = this.alertaTarifa.valor || 0;
             let total = 0;
-            if (this.esMesaServicio || this.esHorasPorDemanda) {
+            if (this.esMesaServicio || this.esHorasPorDemanda || this.esHoraExtra) {
                 total = 0;
             } else if (this.esCostoTotalModo) {
                 total = Number(this.form.presupuesto_total || 0);
@@ -339,6 +350,7 @@ window.asignacionConsultorApp = function () {
             const tarifa = this.alertaTarifa.valor || 0;
             const esMesaOFabrica = this.esMesaServicio;
             const esHorasDemanda = this.esHorasPorDemanda;
+            const esHoraExtra = this.esHoraExtra;
             const esCostoTotal = this.esCostoTotalModo;
             const diasMensual = this.esMensual
                 ? this.calcularDiasMensual(this.form.fecha_inicio, this.form.fecha_fin) || 20
@@ -346,7 +358,7 @@ window.asignacionConsultorApp = function () {
             const meses = this.esMensual ? (diasMensual / 20) : 0;
             const total = esMesaOFabrica
                 ? null
-                : esHorasDemanda
+                : esHorasDemanda || esHoraExtra
                     ? 0
                     : esCostoTotal
                         ? Number(this.form.presupuesto_total || 0)
@@ -360,8 +372,8 @@ window.asignacionConsultorApp = function () {
                 consultor_responsable_id: this.form.consultor_id,
                 fecha_inicio: esMesaOFabrica ? null : (this.form.fecha_inicio || null),
                 fecha_fin: esMesaOFabrica ? null : (this.form.fecha_fin || null),
-                cantidad_dias: esMesaOFabrica ? null : (this.esMensual ? diasMensual : (this.form.cantidad_dias || null)),
-                horas_asignadas: esMesaOFabrica ? null : (this.esMensual || esHorasDemanda || esCostoTotal ? null : (this.form.horas_asignadas || null)),
+                cantidad_dias: esMesaOFabrica || esHoraExtra ? null : (this.esMensual ? diasMensual : (this.form.cantidad_dias || null)),
+                horas_asignadas: esMesaOFabrica ? null : (this.esMensual || esHorasDemanda || esHoraExtra || esCostoTotal ? null : (this.form.horas_asignadas || null)),
                 valor_hora: esMesaOFabrica ? tarifa || null : ((this.esMensual || esCostoTotal) ? null : tarifa || null),
                 valor_dia: valorDia,
                 total_pagar: total,

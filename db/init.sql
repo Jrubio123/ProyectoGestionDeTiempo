@@ -1341,7 +1341,12 @@ VALUES
     ('Tiempo y costo fijo', 'Proyectos con tiempo y costo definidos desde el inicio', true),
     ('Horas por demanda', 'Horas asignadas según demanda del cliente', true),
     ('Mesa de servicio', 'Soporte continuo por mesa de servicio/service desk', true),
-    ('Fábrica', 'Modelo de fábrica para desarrollo y soporte', true);
+    ('Fábrica', 'Modelo de fábrica para desarrollo y soporte', true),
+    ('Hora Adicional Diurna', 'Horas adicionales trabajadas en jornada diurna', true),
+    ('Hora Adicional Nocturna', 'Horas adicionales trabajadas en jornada nocturna', true),
+    ('Hora Adicional Nocturna Dominical/Festivo', 'Horas adicionales nocturnas trabajadas en domingo o festivo', true),
+    ('Hora Adicional Diurna Dominical/Festivo', 'Horas adicionales diurnas trabajadas en domingo o festivo', true)
+ON CONFLICT (titulo) DO NOTHING;
 
 -- ============================================================================
 -- VISTAS ÚTILES

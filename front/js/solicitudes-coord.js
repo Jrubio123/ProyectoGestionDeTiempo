@@ -8,6 +8,7 @@ window.solicitudesCoordApp = function () {
         modulos: [],
         modalNueva: false,
         touched: false,
+        enviando: false,
         form: {
             cliente_id: "",
             cliente_nombre_otro: "",
@@ -87,6 +88,7 @@ window.solicitudesCoordApp = function () {
         },
 
         async enviarSolicitud() {
+            if (this.enviando) return;
             this.touched = true;
             if (!this.formValido) {
                 alert("Faltan campos obligatorios por completar.");
@@ -127,6 +129,7 @@ window.solicitudesCoordApp = function () {
                 informacion_adicional: this.form.informacion_adicional,
                 prioridad: this.form.prioridad || "Media"
             };
+            this.enviando = true;
             try {
                 await axios.post(`${API}/rrhh/solicitudes`, payload, this.getAuthConfig());
                 this.modalNueva = false;
@@ -135,6 +138,8 @@ window.solicitudesCoordApp = function () {
             } catch (e) {
                 const msg = e?.response?.data?.error || "Error al enviar solicitud";
                 alert(msg);
+            } finally {
+                this.enviando = false;
             }
         },
 

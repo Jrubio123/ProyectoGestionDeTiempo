@@ -171,7 +171,9 @@
 
                 <div class="mt-8 flex justify-end gap-3">
                     <button type="button" @click="modalNueva = false; resetForm()" class="px-6 py-2.5 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100 transition-all">Cancelar</button>
-                    <button type="submit" class="bg-indigo-600 text-white px-8 py-2.5 rounded-xl text-sm font-semibold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all">Enviar a RRHH</button>
+                    <button type="submit" :disabled="enviando" :class="enviando ? 'opacity-60 cursor-not-allowed' : 'hover:bg-indigo-700'" class="bg-indigo-600 text-white px-8 py-2.5 rounded-xl text-sm font-semibold shadow-lg shadow-indigo-200 transition-all">
+                        <span x-text="enviando ? 'Enviando...' : 'Enviar a RRHH'"></span>
+                    </button>
                 </div>
             </form>
         </div>

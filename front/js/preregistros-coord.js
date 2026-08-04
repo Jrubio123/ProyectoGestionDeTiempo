@@ -77,6 +77,8 @@ window.preregistrosCoordApp = function () {
         anexoSeleccionadoId: "",
         mostrarSugerenciasPersona: false,
         buscandoPersonas: false,
+        guardandoSolicitud: false,
+        enviandoTh: false,
         debounceBusquedaPersona: null,
 
         erroresFormulario: [],
@@ -938,11 +940,13 @@ window.preregistrosCoordApp = function () {
         },
 
         async guardarSolicitud() {
+            if (this.guardandoSolicitud) return;
             this.erroresFormulario = this.validarFormulario();
             if (this.erroresFormulario.length) return;
 
             const payload = this.construirPayload();
 
+            this.guardandoSolicitud = true;
             try {
                 if (this.modoEdicion && this.solicitudEditId) {
                     await axios.post(
@@ -958,12 +962,16 @@ window.preregistrosCoordApp = function () {
             } catch (e) {
                 const msg = e?.response?.data?.error || (this.modoEdicion ? "Error completando solicitud" : "Error creando solicitud");
                 alert(msg);
+            } finally {
+                this.guardandoSolicitud = false;
             }
         },
 
         async enviarATH(item) {
             if (!item?.id) return;
+            if (this.enviandoTh) return;
             if (!confirm("Se enviara esta solicitud a Talento Humano. Deseas continuar?")) return;
+            this.enviandoTh = true;
             try {
                 await axios.post(`${API}/contrataciones/solicitudes/${item.id}/enviar-th`, {}, this.getAuthConfig());
                 await this.cargarSolicitudes();
@@ -974,6 +982,8 @@ window.preregistrosCoordApp = function () {
             } catch (e) {
                 const msg = e?.response?.data?.error || "Error enviando a Talento Humano";
                 alert(msg);
+            } finally {
+                this.enviandoTh = false;
             }
         },
 

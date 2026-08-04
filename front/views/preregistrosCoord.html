@@ -76,7 +76,7 @@
                             <td class="py-3 text-right space-x-2">
                                 <button type="button" @click="abrirDetalle(item)" class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">Ver</button>
                                 <button type="button" x-show="puedeContinuar(item)" @click="abrirModalDesdeSolicitud(item)" class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Continuar</button>
-                                <button type="button" x-show="puedeEnviarTH(item)" @click="enviarATH(item)" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Enviar a TH</button>
+                                <button type="button" x-show="puedeEnviarTH(item)" @click="enviarATH(item)" :disabled="enviandoTh" :class="enviandoTh ? 'opacity-60 cursor-not-allowed' : 'hover:bg-indigo-700'" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white" x-text="enviandoTh ? 'Enviando...' : 'Enviar a TH'"></button>
                             </td>
                         </tr>
                     </template>
@@ -462,7 +462,7 @@
 
                 <div class="flex justify-end gap-2 pt-2">
                     <button type="button" @click="cerrarModal" class="px-4 py-2 rounded-xl border border-slate-200 text-slate-700">Cancelar</button>
-                    <button type="submit" class="px-4 py-2 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700" x-text="modoEdicion ? 'Guardar y Enviar Flujo' : 'Enviar Solicitud'"></button>
+                    <button type="submit" :disabled="guardandoSolicitud" :class="guardandoSolicitud ? 'opacity-60 cursor-not-allowed' : 'hover:bg-indigo-700'" class="px-4 py-2 rounded-xl bg-indigo-600 text-white font-semibold" x-text="guardandoSolicitud ? 'Enviando...' : (modoEdicion ? 'Guardar y Enviar Flujo' : 'Enviar Solicitud')"></button>
                 </div>
             </form>
             </div><!-- fin scroll body -->
@@ -520,7 +520,7 @@
 
             <div class="flex justify-end gap-2 mt-4">
                 <button type="button" x-show="puedeContinuar(detalle)" @click="abrirModalDesdeSolicitud(detalle)" class="px-4 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700">Continuar flujo</button>
-                <button type="button" x-show="puedeEnviarTH(detalle)" @click="enviarATH(detalle)" class="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700">Enviar a TH</button>
+                <button type="button" x-show="puedeEnviarTH(detalle)" @click="enviarATH(detalle)" :disabled="enviandoTh" :class="enviandoTh ? 'opacity-60 cursor-not-allowed' : 'hover:bg-indigo-700'" class="px-4 py-2 rounded-xl bg-indigo-600 text-white" x-text="enviandoTh ? 'Enviando...' : 'Enviar a TH'"></button>
                 <button type="button" @click="cerrarDetalle" class="px-4 py-2 rounded-xl border border-slate-200 text-slate-700">Cerrar</button>
             </div>
             </div><!-- fin scroll body detalle -->

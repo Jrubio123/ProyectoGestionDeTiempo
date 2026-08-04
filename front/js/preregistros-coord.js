@@ -26,12 +26,10 @@ window.preregistrosCoordApp = function () {
         necesita_s_user: false,
         grupo_usuario: "",          // enum: ADMIN/COORDINADOR/CONSULTOR/CONTABILIDAD/COMERCIAL/Otro
         grupo_usuario_otro: "",     // libre cuando grupo_usuario === "Otro"
-        grupo_distribucion_todos_silver: false,
-        grupo_distribucion_vinculados: false,
+        grupo_distribucion: "",
         crear_usuario_sistema: true,
         // Legacy (Extension/Retiro)
         grupo_app_tiempos: "",
-        grupo_distribucion: "",
         moneda: "COP",
         factura_en_colombia: "",
         tarifa_hora: "",
@@ -475,7 +473,6 @@ window.preregistrosCoordApp = function () {
                 moduloId: item?.datos_extra?.modulo_id || "",
                 perfil: item?.perfil || item?.datos_extra?.modulo || ""
             });
-            const gd = String(item?.grupo_distribucion || "");
             return {
                 persona_usuario_id: item?.persona?.id || "",
                 tipo_documento_id: item?.tipo_documento?.id || "",
@@ -495,11 +492,9 @@ window.preregistrosCoordApp = function () {
                 necesita_s_user: Boolean(item?.necesita_s_user),
                 grupo_usuario: item?.grupo_app_tiempos || "",
                 grupo_usuario_otro: item?.grupo_usuario_otro || "",
-                grupo_distribucion_todos_silver: gd.includes("Todos Silver"),
-                grupo_distribucion_vinculados: gd.includes("Vinculados"),
+                grupo_distribucion: item?.grupo_distribucion || "",
                 crear_usuario_sistema: item?.crear_usuario_sistema !== false,
                 grupo_app_tiempos: item?.grupo_app_tiempos || "",
-                grupo_distribucion: item?.grupo_distribucion || "",
                 moneda: item?.moneda || "COP",
                 factura_en_colombia:
                     item?.factura_en_colombia === true || item?.datos_extra?.factura_en_colombia === true ? "true" :
@@ -764,7 +759,7 @@ window.preregistrosCoordApp = function () {
                 if (this.form.grupo_usuario === "Otro" && !String(this.form.grupo_usuario_otro || "").trim()) {
                     errors.push("Especifique el grupo de usuario");
                 }
-                if (!this.form.grupo_distribucion_todos_silver && !this.form.grupo_distribucion_vinculados) {
+                if (!["Todos Silver", "Vinculados"].includes(String(this.form.grupo_distribucion || "").trim())) {
                     errors.push("Grupo de distribución (Todos Silver o Vinculados)");
                 }
             }
@@ -822,6 +817,16 @@ window.preregistrosCoordApp = function () {
 
         get grupoUsuarioEsOtro() {
             return this.tipoModal === "Nuevo" && this.form.grupo_usuario === "Otro";
+        },
+
+        get grupoDistribucionEsVinculado() {
+            return this.tipoModal === "Nuevo" && this.form.grupo_distribucion === "Vinculados";
+        },
+
+        onGrupoDistribucionChange() {
+            if (!this.grupoDistribucionEsVinculado) return;
+            this.form.vpn_corona = false;
+            this.form.necesita_s_user = false;
         },
 
         get monedasDisponibles() {
@@ -918,18 +923,15 @@ window.preregistrosCoordApp = function () {
                 if (this.form.tipo_asignacion) datosExtra.tipo_asignacion = this.form.tipo_asignacion;
                 base.datos_extra = datosExtra;
                 // Campos técnicos del nuevo modal
-                base.vpn_corona       = Boolean(this.form.vpn_corona);
-                base.necesita_s_user  = Boolean(this.form.necesita_s_user);
+                const esVinculado = this.form.grupo_distribucion === "Vinculados";
+                base.vpn_corona       = esVinculado ? false : Boolean(this.form.vpn_corona);
+                base.necesita_s_user  = esVinculado ? false : Boolean(this.form.necesita_s_user);
                 base.ubicacion        = String(this.form.pais_ubicacion || "").trim() || null;
                 base.grupo_app_tiempos = this.form.grupo_usuario || null;
                 base.grupo_usuario_otro = this.form.grupo_usuario === "Otro"
                     ? (String(this.form.grupo_usuario_otro || "").trim() || null)
                     : null;
-                // Grupo distribución: combinar checkboxes en string
-                const gdArr = [];
-                if (this.form.grupo_distribucion_todos_silver) gdArr.push("Todos Silver");
-                if (this.form.grupo_distribucion_vinculados)   gdArr.push("Vinculados");
-                base.grupo_distribucion = gdArr.join(", ") || null;
+                base.grupo_distribucion = String(this.form.grupo_distribucion || "").trim() || null;
             }
 
             return base;

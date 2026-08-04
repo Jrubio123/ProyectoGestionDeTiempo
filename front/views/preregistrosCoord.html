@@ -278,7 +278,8 @@
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <!-- VPN Corona -->
-                        <div class="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2">
+                        <div x-show="!grupoDistribucionEsVinculado" style="display:none"
+                            class="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2">
                             <span class="text-sm text-slate-700">VPN Corona</span>
                             <div class="flex gap-2">
                                 <button type="button" @click="form.vpn_corona = true"
@@ -290,7 +291,8 @@
                             </div>
                         </div>
                         <!-- Necesita S-User -->
-                        <div class="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2">
+                        <div x-show="!grupoDistribucionEsVinculado" style="display:none"
+                            class="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2">
                             <span class="text-sm text-slate-700">Necesita S-User</span>
                             <div class="flex gap-2">
                                 <button type="button" @click="form.necesita_s_user = true"
@@ -316,16 +318,14 @@
                                 class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Especifica el grupo *" style="display:none">
                         </div>
                         <!-- Grupo distribución -->
-                        <div class="rounded-xl border border-slate-200 px-3 py-2 space-y-1">
-                            <p class="text-xs text-slate-500 mb-1">Grupo de distribución * <span class="text-slate-400">(selecciona al menos uno)</span></p>
-                            <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                                <input type="checkbox" x-model="form.grupo_distribucion_todos_silver" class="rounded">
-                                Todos Silver
-                            </label>
-                            <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                                <input type="checkbox" x-model="form.grupo_distribucion_vinculados" class="rounded">
-                                Vinculados
-                            </label>
+                        <div class="space-y-1">
+                            <label class="text-xs text-slate-500">Grupo de distribución (define el tipo de contratación) *</label>
+                            <select x-model="form.grupo_distribucion" @change="onGrupoDistribucionChange()"
+                                class="w-full px-3 py-2 rounded-xl border border-slate-200">
+                                <option value="">Seleccionar...</option>
+                                <option value="Todos Silver">Todos Silver</option>
+                                <option value="Vinculados">Vinculados</option>
+                            </select>
                         </div>
                     </div>
 

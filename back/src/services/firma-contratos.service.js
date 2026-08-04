@@ -116,44 +116,48 @@ function resolveTipoContratacionSugerido(personaContext) {
 
 function buildDatosLaboralesResponse(personaContext, getCamposLaboralesFaltantes) {
   const tipoContratacionSugerido = resolveTipoContratacionSugerido(personaContext);
-
-  if (!personaContext?.persona_id) {
-    return {
-      persona_id: null,
-      tipo_contrato: null,
-      tipo_contratacion_sugerido: tipoContratacionSugerido,
-      requiere_laboral: false,
-      datos: {},
-      faltantes: []
-    };
-  }
-
   const requiereLaboral =
     tipoContratacionSugerido === "vinculado" ||
     personaContext?.tipoContrato === "Vinculado";
+  const tieneSalarioGuardado =
+    personaContext?.salarioMensual !== null &&
+    personaContext?.salarioMensual !== undefined;
+  const datos = {
+    tipo_trabajador: personaContext?.tipoTrabajador || null,
+    cargo: personaContext?.cargo || personaContext?.perfilSolicitud || null,
+    salario_mensual: tieneSalarioGuardado
+      ? personaContext.salarioMensual
+      : (personaContext?.tarifaMes ?? null),
+    salario_moneda: tieneSalarioGuardado
+      ? (personaContext?.salarioMoneda || "COP")
+      : (personaContext?.moneda || "COP"),
+    periodo_pago: personaContext?.periodoPago || "Quincenal",
+    periodo_prueba: personaContext?.periodoPrueba || "2 meses",
+    jefe_inmediato: personaContext?.jefeInmediato || personaContext?.supervisorNombre || null,
+    caja_compensacion: personaContext?.cajaCompensacion || "Comfama",
+    condiciones_especiales: personaContext?.condicionesEspeciales || null,
+    duracion_contrato: personaContext?.duracionContrato || "Indefinida",
+    fecha_inicio_labores: personaContext?.fechaInicioLabores || personaContext?.fecha_inicio || null,
+    lugar_celebracion: personaContext?.lugarCelebracion || personaContext?.ciudad || null,
+    eps: personaContext?.eps || null,
+    afp: personaContext?.afp || null,
+    arl: personaContext?.arl || "Sura"
+  };
+  const contextoValidacion = {
+    ...(personaContext || {}),
+    tipo_contrato: requiereLaboral ? "Vinculado" : (personaContext?.tipoContrato || null),
+    ...datos
+  };
+
   return {
-    persona_id: personaContext.persona_id,
-    tipo_contrato: personaContext.tipoContrato || null,
+    persona_id: personaContext?.persona_id || null,
+    tipo_contrato: personaContext?.tipoContrato || null,
     tipo_contratacion_sugerido: tipoContratacionSugerido,
     requiere_laboral: requiereLaboral,
-    datos: {
-      tipo_trabajador: personaContext.tipoTrabajador || null,
-      cargo: personaContext.cargo || personaContext.perfilSolicitud || null,
-      salario_mensual: personaContext.salarioMensual ?? personaContext.tarifaMes ?? null,
-      salario_moneda: personaContext.salarioMoneda || "COP",
-      periodo_pago: personaContext.periodoPago || "Quincenal",
-      periodo_prueba: personaContext.periodoPrueba || "2 meses",
-      jefe_inmediato: personaContext.jefeInmediato || personaContext.supervisorNombre || null,
-      caja_compensacion: personaContext.cajaCompensacion || "Comfama",
-      condiciones_especiales: personaContext.condicionesEspeciales || null,
-      duracion_contrato: personaContext.duracionContrato || "Indefinida",
-      fecha_inicio_labores: personaContext.fechaInicioLabores || null,
-      lugar_celebracion: personaContext.lugarCelebracion || null,
-      eps: personaContext.eps || null,
-      afp: personaContext.afp || null,
-      arl: personaContext.arl || "Sura"
-    },
-    faltantes: requiereLaboral ? getCamposLaboralesFaltantes(personaContext, { forzarVinculado: true }) : []
+    datos,
+    faltantes: requiereLaboral
+      ? getCamposLaboralesFaltantes(contextoValidacion, { forzarVinculado: true })
+      : []
   };
 }
 
@@ -799,6 +803,8 @@ async function deleteFirmaContrato(req, res) {
 }
 
 module.exports = {
+  buildDatosLaboralesResponse,
+  resolveTipoContratacionSugerido,
   listFirmaContratos,
   listCandidatos,
   generarTokenFirma,

@@ -56,6 +56,7 @@ module.exports = function registerPreregistroRoutes(deps) {
   const TIPOS_CUENTA = new Set(["Ahorros", "Corriente"]);
   const TIPOS_PERSONA = new Set(["Natural", "Juridica", "Jurídica"]);
   const MONEDAS = new Set(["COP", "USD", "EUR"]);
+  const GRUPOS_DISTRIBUCION_CONTRATACION = new Set(["Todos Silver", "Vinculados"]);
 
   function normalizeEnumKey(value) {
     return String(value || "")
@@ -179,7 +180,6 @@ module.exports = function registerPreregistroRoutes(deps) {
     const key = normalizeEnumKey(raw);
     if (["todossilver", "todos", "all"].includes(key)) return "Todos Silver";
     if (["vinculado", "vinculados"].includes(key)) return "Vinculados";
-    if (["responsable", "responsables"].includes(key)) return "Responsable";
     return null;
   }
 
@@ -1029,6 +1029,12 @@ module.exports = function registerPreregistroRoutes(deps) {
       }
       const grupoUsuarioNorm = normalizeGrupoUsuarioInput(grupo_usuario);
       const grupoDistribucionNorm = normalizeGrupoDistribucionInput(grupo_distribucion);
+      if (!grupoDistribucionNorm || !GRUPOS_DISTRIBUCION_CONTRATACION.has(grupoDistribucionNorm)) {
+        return res.status(400).json({ error: "grupo_distribucion debe ser Todos Silver o Vinculados" });
+      }
+      const esVinculado = grupoDistribucionNorm === "Vinculados";
+      const vpnCoronaFinal = esVinculado ? false : vpn_corona;
+      const necesitaSUserFinal = esVinculado ? false : necesita_s_user;
 
       await client.query(
         `UPDATE preregistro_personas
@@ -1054,7 +1060,7 @@ module.exports = function registerPreregistroRoutes(deps) {
           tarifaMesParsed.value,
           tarifaMedioParsed.value,
           tarifaCapParsed.value,
-          vpn_corona, necesita_s_user, grupoUsuarioNorm, grupoDistribucionNorm, observaciones || null,
+          vpnCoronaFinal, necesitaSUserFinal, grupoUsuarioNorm, grupoDistribucionNorm, observaciones || null,
           ESTADOS.pendienteRevisionTh, req.user?.id, id
         ]
       );
@@ -1121,16 +1127,30 @@ module.exports = function registerPreregistroRoutes(deps) {
         return res.status(403).json({ error: "No eres el coordinador dueno de esta solicitud" });
       }
 
+      const body = { ...(req.body || {}) };
+      const grupoDistribucionNorm = normalizeGrupoDistribucionInput(
+        body.grupo_distribucion !== undefined
+          ? body.grupo_distribucion
+          : current.grupo_distribucion
+      );
+      if (!grupoDistribucionNorm || !GRUPOS_DISTRIBUCION_CONTRATACION.has(grupoDistribucionNorm)) {
+        return res.status(400).json({ error: "grupo_distribucion debe ser Todos Silver o Vinculados" });
+      }
+      if (grupoDistribucionNorm === "Vinculados") {
+        body.vpn_corona = false;
+        body.necesita_s_user = false;
+      }
+
       const sets = [];
       const vals = [];
       let idx = 1;
       for (const field of editable) {
-        if (req.body?.[field] === undefined) continue;
-        if (field === "moneda" && !MONEDAS.has(String(req.body[field] || "").trim())) {
+        if (body[field] === undefined) continue;
+        if (field === "moneda" && !MONEDAS.has(String(body[field] || "").trim())) {
           return res.status(400).json({ error: "moneda no valida" });
         }
         if (field.startsWith("tarifa_")) {
-          const parsed = parseTarifaInput(req.body[field], field);
+          const parsed = parseTarifaInput(body[field], field);
           if (parsed.error) {
             return res.status(400).json({ error: parsed.error });
           }
@@ -1140,16 +1160,16 @@ module.exports = function registerPreregistroRoutes(deps) {
         }
         if (field === "grupo_usuario") {
           sets.push(`${field} = $${idx++}`);
-          vals.push(normalizeGrupoUsuarioInput(req.body[field]));
+          vals.push(normalizeGrupoUsuarioInput(body[field]));
           continue;
         }
         if (field === "grupo_distribucion") {
           sets.push(`${field} = $${idx++}`);
-          vals.push(normalizeGrupoDistribucionInput(req.body[field]));
+          vals.push(grupoDistribucionNorm);
           continue;
         }
         sets.push(`${field} = $${idx++}`);
-        vals.push(req.body[field]);
+        vals.push(body[field]);
       }
       if (!sets.length) return res.status(400).json({ error: "No hay campos para actualizar" });
       vals.push(id);

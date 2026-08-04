@@ -30,6 +30,7 @@ module.exports = function registerContratacionesRoutes(deps) {
   const TIPO_EXTENSION = "Extension";
   const TIPO_RETIRO = "Retiro";
   const TIPOS_CUENTA = new Set(["Ahorros", "Corriente"]);
+  const GRUPOS_DISTRIBUCION_CONTRATACION = new Set(["Todos Silver", "Vinculados"]);
 
   const DESTINOS_MESA = parseEmailList(
     process.env.CONTRATACIONES_DESTINO_MESA ||
@@ -524,9 +525,8 @@ module.exports = function registerContratacionesRoutes(deps) {
       values.push(grupoUsuario);
     }
 
-    const VALID_GRUPO_DISTRIBUCION = ["Todos Silver", "Vinculados", "Responsable"];
     const grupoDistribucion = toNullableString(datosExtra.grupo_distribucion || solicitudRow.grupo_distribucion);
-    if (grupoDistribucion && VALID_GRUPO_DISTRIBUCION.includes(grupoDistribucion)) {
+    if (grupoDistribucion && GRUPOS_DISTRIBUCION_CONTRATACION.has(grupoDistribucion)) {
       sets.push(`grupo_distribucion = $${idx++}`);
       values.push(grupoDistribucion);
     }
@@ -2028,8 +2028,8 @@ module.exports = function registerContratacionesRoutes(deps) {
       const ubicacion = toNullableString(payload.ubicacion);
       const grupoAppTiempos = toNullableString(payload.grupo_app_tiempos);
       const grupoDistribucion = toNullableString(payload.grupo_distribucion);
-      const vpnCorona = payload.vpn_corona === true || payload.vpn_corona === "true" || payload.vpn_corona === 1;
-      const necesitaSUser = payload.necesita_s_user === true || payload.necesita_s_user === "true" || payload.necesita_s_user === 1;
+      let vpnCorona = payload.vpn_corona === true || payload.vpn_corona === "true" || payload.vpn_corona === 1;
+      let necesitaSUser = payload.necesita_s_user === true || payload.necesita_s_user === "true" || payload.necesita_s_user === 1;
       const grupoUsuarioOtro = toNullableString(payload.grupo_usuario_otro);
       const necesidadTi = toNullableString(payload.necesidad_ti);
       const observaciones = toNullableString(payload.observaciones);
@@ -2038,6 +2038,13 @@ module.exports = function registerContratacionesRoutes(deps) {
 
       if (crearUsuarioSistema === null) {
         return res.status(400).json({ error: "crear_usuario_sistema debe ser booleano" });
+      }
+      if (tipoSolicitud === TIPO_NUEVO && !GRUPOS_DISTRIBUCION_CONTRATACION.has(grupoDistribucion)) {
+        return res.status(400).json({ error: "grupo_distribucion debe ser Todos Silver o Vinculados" });
+      }
+      if (tipoSolicitud === TIPO_NUEVO && grupoDistribucion === "Vinculados") {
+        vpnCorona = false;
+        necesitaSUser = false;
       }
 
       if (!nombre || !apellidos) {
@@ -2212,8 +2219,13 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (payload.factura_en_colombia !== undefined) {
           datosExtra.factura_en_colombia = normalizeFacturaEnColombiaInput(payload.factura_en_colombia);
         }
-        if (payload.vpn_corona !== undefined) datosExtra.vpn_corona = vpnCorona;
-        if (payload.necesita_s_user !== undefined) datosExtra.necesita_s_user = necesitaSUser;
+        if (grupoDistribucion === "Vinculados") {
+          datosExtra.vpn_corona = false;
+          datosExtra.necesita_s_user = false;
+        } else {
+          if (payload.vpn_corona !== undefined) datosExtra.vpn_corona = vpnCorona;
+          if (payload.necesita_s_user !== undefined) datosExtra.necesita_s_user = necesitaSUser;
+        }
         if (payload.grupo_app_tiempos !== undefined) datosExtra.grupo_usuario = grupoAppTiempos;
         if (payload.grupo_distribucion !== undefined) datosExtra.grupo_distribucion = grupoDistribucion;
 
@@ -2433,11 +2445,11 @@ module.exports = function registerContratacionesRoutes(deps) {
           payload.grupo_app_tiempos !== undefined ? toNullableString(payload.grupo_app_tiempos) : current.grupo_app_tiempos;
         const grupoDistribucion =
           payload.grupo_distribucion !== undefined ? toNullableString(payload.grupo_distribucion) : current.grupo_distribucion;
-        const vpnCorona =
+        let vpnCorona =
           payload.vpn_corona !== undefined
             ? (payload.vpn_corona === true || payload.vpn_corona === "true" || payload.vpn_corona === 1)
             : Boolean(current.vpn_corona);
-        const necesitaSUser =
+        let necesitaSUser =
           payload.necesita_s_user !== undefined
             ? (payload.necesita_s_user === true || payload.necesita_s_user === "true" || payload.necesita_s_user === 1)
             : Boolean(current.necesita_s_user);
@@ -2452,6 +2464,13 @@ module.exports = function registerContratacionesRoutes(deps) {
 
         if (crearUsuarioSistema === null) {
           return res.status(400).json({ error: "crear_usuario_sistema debe ser booleano" });
+        }
+        if (tipoSolicitud === TIPO_NUEVO && !GRUPOS_DISTRIBUCION_CONTRATACION.has(grupoDistribucion)) {
+          return res.status(400).json({ error: "grupo_distribucion debe ser Todos Silver o Vinculados" });
+        }
+        if (tipoSolicitud === TIPO_NUEVO && grupoDistribucion === "Vinculados") {
+          vpnCorona = false;
+          necesitaSUser = false;
         }
 
         if (!nombre || !apellidos) {
@@ -2652,8 +2671,13 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (payload.factura_en_colombia !== undefined) {
           datosExtra.factura_en_colombia = normalizeFacturaEnColombiaInput(payload.factura_en_colombia);
         }
-        if (payload.vpn_corona !== undefined) datosExtra.vpn_corona = vpnCorona;
-        if (payload.necesita_s_user !== undefined) datosExtra.necesita_s_user = necesitaSUser;
+        if (grupoDistribucion === "Vinculados") {
+          datosExtra.vpn_corona = false;
+          datosExtra.necesita_s_user = false;
+        } else {
+          if (payload.vpn_corona !== undefined) datosExtra.vpn_corona = vpnCorona;
+          if (payload.necesita_s_user !== undefined) datosExtra.necesita_s_user = necesitaSUser;
+        }
         if (payload.grupo_app_tiempos !== undefined) datosExtra.grupo_usuario = grupoAppTiempos;
         if (payload.grupo_distribucion !== undefined) datosExtra.grupo_distribucion = grupoDistribucion;
 

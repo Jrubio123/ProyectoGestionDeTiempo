@@ -1,4 +1,5 @@
 const { findCorreoPersonaConflict } = require("./services/persona-identidad.service");
+const { upsertPersonaDesdeContratacion } = require("./services/persona-contratacion.service");
 
 module.exports = function registerPreregistroRoutes(deps) {
   const {
@@ -200,6 +201,79 @@ module.exports = function registerPreregistroRoutes(deps) {
     if (raw === "natural") return "Natural";
     if (raw === "juridica") return "Jurídica";
     return null;
+  }
+
+  async function resolveProcesoCatalogId(db, tableName, value) {
+    if (!value) return null;
+    const allowedTables = new Set(["modulo", "clientes"]);
+    if (!allowedTables.has(tableName)) throw new Error("Catalogo no permitido");
+
+    const numeric = Number(value);
+    if (Number.isInteger(numeric) && numeric > 0) {
+      const result = await db.query(`SELECT id FROM ${tableName} WHERE id = $1 LIMIT 1`, [numeric]);
+      return result.rows[0]?.id || null;
+    }
+
+    if (!isUuid(value)) return null;
+    const result = await db.query(
+      `SELECT id FROM ${tableName} WHERE public_id::text = $1::text LIMIT 1`,
+      [String(value).trim()]
+    );
+    return result.rows[0]?.id || null;
+  }
+
+  async function materializePersonaDesdePreregistro(db, current, actorUserId = null) {
+    const [linkedSolicitud, tipoCuentaResult] = await Promise.all([
+      db.query(
+        `SELECT datos_extra
+         FROM solicitudes_contratacion
+         WHERE preregistro_id = $1 AND estado <> 'Cancelado'
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+        [current.id]
+      ),
+      db.query(
+        `SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) LIMIT 1`,
+        [`${current.tipo_cuenta || ""}%`]
+      )
+    ]);
+    const datosExtra = linkedSolicitud.rows[0]?.datos_extra || {};
+    const [moduloId, clienteId] = await Promise.all([
+      resolveProcesoCatalogId(db, "modulo", datosExtra.modulo_id),
+      resolveProcesoCatalogId(db, "clientes", datosExtra.cliente_id)
+    ]);
+
+    return upsertPersonaDesdeContratacion(db, {
+      numero_documento: current.numero_documento,
+      tipo_documento_id: current.tipo_documento_id,
+      nombre: current.nombre,
+      apellidos: current.apellidos,
+      numero_contacto: current.telefono,
+      correo_electronico: current.correo_personal,
+      direccion_residencia: current.direccion,
+      ciudad_residencia: current.ciudad,
+      tipo_persona: normalizeTipoPersonaForUsuarios(current.tipo_persona),
+      factura_en_colombia:
+        current.factura_en_colombia === null || current.factura_en_colombia === undefined
+          ? null
+          : Boolean(current.factura_en_colombia),
+      banco_id: current.banco_id,
+      tipo_cuenta_id: tipoCuentaResult.rows[0]?.id || null,
+      numero_cuenta: current.numero_cuenta,
+      modulo_id: moduloId,
+      modulo_otro: moduloId
+        ? null
+        : datosExtra.modulo_nombre || datosExtra.modulo_otro || datosExtra.modulo || current.perfil || null,
+      cliente_id: clienteId,
+      cliente_otro: clienteId ? null : datosExtra.cliente_nombre || null,
+      razon_social: current.razon_social,
+      nit_empresa: current.nit_empresa,
+      representante_legal: current.representante_legal,
+      tipo_documento_representante: current.tipo_documento_representante,
+      numero_documento_representante: current.numero_documento_representante,
+      preregistro_id: current.id,
+      created_by: actorUserId
+    });
   }
 
   const BASE_SELECT = `
@@ -1121,6 +1195,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     }
 
     const client = await pool.connect();
+    let transactionStarted = false;
     try {
       const current = await getByPublicId(client, req.params.public_id);
       if (!current) return res.status(404).json({ error: "Preregistro no encontrado" });
@@ -1147,6 +1222,8 @@ module.exports = function registerPreregistroRoutes(deps) {
         ? ESTADOS.pendienteRevisionTh
         : ESTADOS.pendienteCorreoSilver;
       const tipoPersonaNorm = normalizeTipoPersonaForPreregistro(tipo_persona);
+      await client.query("BEGIN");
+      transactionStarted = true;
       await client.query(
         `UPDATE preregistro_personas
          SET direccion = $1, tipo_persona = $2, banco_id = $3, tipo_cuenta = $4, numero_cuenta = $5,
@@ -1167,10 +1244,31 @@ module.exports = function registerPreregistroRoutes(deps) {
       );
 
       const updated = await getByInternalId(client, id);
-      await syncSolicitudYAnexoDesdePreregistro(client, updated, req.user?.id);
+      await materializePersonaDesdePreregistro(client, updated, req.user?.id || null);
+      const solicitudId = await syncSolicitudContratacionFromPreregistro(client, updated);
+      await client.query("COMMIT");
+      transactionStarted = false;
+      try {
+        await ensurePersistedAnexoFromProceso({
+          solicitudId: solicitudId || null,
+          preregistroId: id,
+          createdBy: req.user?.id || null,
+          strict: false
+        });
+      } catch (err) {
+        console.warn("No se pudo sincronizar anexo tecnico desde preregistro:", err?.message || err);
+      }
       return res.json(formatRow(updated));
     } catch (err) {
+      if (transactionStarted) {
+        try {
+          await client.query("ROLLBACK");
+        } catch (_) {}
+      }
       if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.status(400).json({ error: "Preregistro o banco no encontrado" });
+      if (err?.code === "PERSONA_DOCUMENTO_REQUIRED") {
+        return res.status(err.statusCode || 422).json({ error: err.message });
+      }
       console.error(err);
       return res.status(500).json({ error: "Error completando seccion 3" });
     } finally {
@@ -1283,7 +1381,9 @@ module.exports = function registerPreregistroRoutes(deps) {
         const modRes = await client.query(`SELECT id FROM modulo WHERE public_id::text = $1::text LIMIT 1`, [moduloUuidPreregistro]);
         moduloInternoIdPreregistro = modRes.rows[0]?.id || null;
       }
-      const moduloOtroPreregistro = !moduloInternoIdPreregistro ? (solicitudDatosExtra.modulo || current.perfil || null) : null;
+      const moduloOtroPreregistro = !moduloInternoIdPreregistro
+        ? (solicitudDatosExtra.modulo_nombre || solicitudDatosExtra.modulo_otro || solicitudDatosExtra.modulo || current.perfil || null)
+        : null;
 
       const clienteUuidPreregistro = solicitudDatosExtra.cliente_id || null;
       let clienteInternoIdPreregistro = null;
@@ -1512,6 +1612,15 @@ module.exports = function registerPreregistroRoutes(deps) {
       }
 
       await pool.query(`UPDATE preregistro_personas SET estado = $1, motivo_anulacion = $2, anulado_por = $3, fecha_anulacion = NOW() WHERE id = $4`, [ESTADOS.anulado, motivo, req.user?.id, id]);
+      await pool.query(
+        `UPDATE personas p
+         SET estado = 'inactivo', updated_at = NOW()
+         WHERE p.preregistro_id = $1
+           AND NOT EXISTS (
+             SELECT 1 FROM usuarios u WHERE u.persona_id = p.id AND u.activo = true
+           )`,
+        [id]
+      );
       const updated = await getByInternalId(pool, id);
       await syncSolicitudContratacionFromPreregistro(pool, updated, { estado: "Cancelado" });
 

@@ -1,4 +1,5 @@
 const { findCorreoPersonaConflict } = require("./services/persona-identidad.service");
+const { upsertPersonaDesdeContratacion } = require("./services/persona-contratacion.service");
 
 module.exports = function registerContratacionesRoutes(deps) {
   const {
@@ -368,6 +369,71 @@ module.exports = function registerContratacionesRoutes(deps) {
       return value;
     }
     return {};
+  }
+
+  async function resolveModuloInternalId(db, value) {
+    if (!value) return null;
+    const numeric = Number(value);
+    if (Number.isInteger(numeric) && numeric > 0) {
+      const result = await db.query(`SELECT id FROM modulo WHERE id = $1 LIMIT 1`, [numeric]);
+      return result.rows[0]?.id || null;
+    }
+    if (!isUuid(value)) return null;
+    const result = await db.query(
+      `SELECT id FROM modulo WHERE public_id::text = $1::text LIMIT 1`,
+      [String(value).trim()]
+    );
+    return result.rows[0]?.id || null;
+  }
+
+  async function materializePersonaDesdeSolicitud(db, solicitudRow, actorUserId = null) {
+    const datosExtra = toObjectOrEmpty(solicitudRow.datos_extra);
+    const tipoCuenta = toNullableString(datosExtra.tipo_cuenta);
+    const [bancoId, moduloId, tipoCuentaResult] = await Promise.all([
+      resolveBancoInternalId(db, datosExtra.banco_id),
+      resolveModuloInternalId(db, datosExtra.modulo_id),
+      db.query(
+        `SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) LIMIT 1`,
+        [`${tipoCuenta || ""}%`]
+      )
+    ]);
+    const facturaEnColombia =
+      datosExtra.factura_en_colombia === true || datosExtra.factura_en_colombia === "true"
+        ? true
+        : datosExtra.factura_en_colombia === false || datosExtra.factura_en_colombia === "false"
+          ? false
+          : null;
+
+    return upsertPersonaDesdeContratacion(db, {
+      numero_documento: solicitudRow.numero_documento,
+      tipo_documento_id: solicitudRow.tipo_documento_id,
+      nombre: solicitudRow.nombre,
+      apellidos: solicitudRow.apellidos,
+      numero_contacto: solicitudRow.telefono,
+      correo_electronico: solicitudRow.correo_personal,
+      direccion_residencia: toNullableString(datosExtra.direccion),
+      ciudad_residencia: solicitudRow.ubicacion,
+      tipo_persona: normalizeTipoPersonaForUsuarios(datosExtra.tipo_persona),
+      factura_en_colombia: facturaEnColombia,
+      banco_id: bancoId,
+      tipo_cuenta_id: tipoCuentaResult.rows[0]?.id || null,
+      numero_cuenta: toNullableString(datosExtra.numero_cuenta),
+      modulo_id: moduloId,
+      modulo_otro: moduloId
+        ? null
+        : toNullableString(
+            datosExtra.modulo_nombre || datosExtra.modulo_otro || datosExtra.modulo || solicitudRow.perfil
+          ),
+      cliente_id: solicitudRow.cliente_id || null,
+      cliente_otro: solicitudRow.cliente_id ? null : toNullableString(datosExtra.cliente_nombre),
+      razon_social: toNullableString(datosExtra.razon_social),
+      nit_empresa: toNullableString(datosExtra.nit_empresa),
+      representante_legal: toNullableString(datosExtra.representante_legal),
+      tipo_documento_representante: toNullableString(datosExtra.tipo_documento_representante),
+      numero_documento_representante: toNullableString(datosExtra.numero_documento_representante),
+      preregistro_id: solicitudRow.preregistro_id || null,
+      created_by: actorUserId
+    });
   }
 
   function isSolicitudRrhh(row) {
@@ -2830,8 +2896,10 @@ module.exports = function registerContratacionesRoutes(deps) {
     "/contrataciones/solicitudes/:id/seccion-3",
     requireAccess({ roles: ["Administrador", "Talento Humano"] }),
     async (req, res) => {
+      const client = await pool.connect();
+      let transactionStarted = false;
       try {
-        const row = await getByPublicId(pool, req.params.id);
+        const row = await getByPublicId(client, req.params.id);
         if (!row) return res.status(404).json({ error: "Solicitud no encontrada" });
         const internalId = row.id;
 
@@ -2841,7 +2909,7 @@ module.exports = function registerContratacionesRoutes(deps) {
           });
         }
 
-        const bancoId     = await resolveBancoInternalId(pool, req.body?.banco_id);
+        const bancoId     = await resolveBancoInternalId(client, req.body?.banco_id);
         const tipoCuenta  = toNullableString(req.body?.tipo_cuenta);
         const numeroCuenta = toNullableString(req.body?.numero_cuenta);
         const direccion   = toNullableString(req.body?.direccion);
@@ -2876,14 +2944,16 @@ module.exports = function registerContratacionesRoutes(deps) {
           });
         }
 
-        const bancoPublicId = await resolveBancoPublicId(pool, bancoId);
+        const bancoPublicId = await resolveBancoPublicId(client, bancoId);
         const debeCrearUsuario = row.crear_usuario_sistema !== false;
         const nextEstado = correoSilver || !debeCrearUsuario
           ? ESTADOS.pendienteRevisionTh
           : ESTADOS.pendienteCorreoSilver;
 
         // Guarda datos bancarios en datos_extra y correo silver en correo_empresarial
-        await pool.query(
+        await client.query("BEGIN");
+        transactionStarted = true;
+        await client.query(
           `
           UPDATE solicitudes_contratacion
           SET
@@ -2912,16 +2982,29 @@ module.exports = function registerContratacionesRoutes(deps) {
           ]
         );
 
-        const rowAfterSection3 = await getByInternalId(pool, internalId);
-        await syncLinkedPreregistroFromSolicitud(pool, rowAfterSection3, {
+        const rowAfterSection3 = await getByInternalId(client, internalId);
+        await materializePersonaDesdeSolicitud(client, rowAfterSection3, req.user?.id || null);
+        await syncLinkedPreregistroFromSolicitud(client, rowAfterSection3, {
           actorUserId: req.user?.id || null,
           markThCompletion: true
         });
+        await client.query("COMMIT");
+        transactionStarted = false;
         const updated = await syncAnexoDesdeSolicitud(internalId, req.user?.id);
         return res.json(formatRow(updated));
       } catch (err) {
+        if (transactionStarted) {
+          try {
+            await client.query("ROLLBACK");
+          } catch (_) {}
+        }
+        if (err?.code === "PERSONA_DOCUMENTO_REQUIRED") {
+          return res.status(err.statusCode || 422).json({ error: err.message });
+        }
         console.error(err);
         return res.status(500).json({ error: "Error guardando sección 3 de contratación" });
+      } finally {
+        client.release();
       }
     }
   );
@@ -3011,7 +3094,9 @@ module.exports = function registerContratacionesRoutes(deps) {
           const modRes = await client.query(`SELECT id FROM modulo WHERE public_id::text = $1::text LIMIT 1`, [moduloUuidContrat]);
           moduloInternoIdContrat = modRes.rows[0]?.id || null;
         }
-        const moduloOtroContrat = !moduloInternoIdContrat ? (datosExtra.modulo || row.perfil || null) : null;
+        const moduloOtroContrat = !moduloInternoIdContrat
+          ? (datosExtra.modulo_nombre || datosExtra.modulo_otro || datosExtra.modulo || row.perfil || null)
+          : null;
 
         const tipoCuentaResPersona = await client.query(
           `SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) LIMIT 1`,

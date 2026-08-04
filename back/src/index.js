@@ -4964,9 +4964,8 @@ function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correo
     personaContext?.solicitud?.fecha_extension_desde ||
     personaContext?.created_at ||
     null;
-  const fechaInicioValue = fechaInicioRaw
-    ? `${String(fechaInicioRaw).slice(0, 10)}T12:00:00.000Z`
-    : now;
+  const fechaInicioYmd = normalizeDateOnlyInput(fechaInicioRaw) || normalizeDateOnlyInput(now);
+  const fechaInicioValue = `${fechaInicioYmd}T12:00:00.000Z`;
   const fechaInicioDia = safeFmtDate(fechaInicioValue, "es-CO", { day: "2-digit", timeZone: "America/Bogota" });
   const fechaInicioAnio = safeFmtDate(fechaInicioValue, "es-CO", { year: "numeric", timeZone: "America/Bogota" });
   const fechaInicioMesTexto = safeFmtDate(fechaInicioValue, "es-CO", { month: "long", timeZone: "America/Bogota" }).toLowerCase();
@@ -12374,6 +12373,10 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       ["pending", "sent", "en_proceso"].includes(estadoActualDoc) &&
       !isClickSignInvalidSignatureReference(docExistente)
     ) {
+      scheduleContratoReconciliation(tokenId, idx, {
+        delayMs: 60 * 1000,
+        reason: "firma_link_reabierto"
+      });
       return res.json({
         url_firma: docExistente.url_firma,
         request_id: docExistente.request_id || null,
@@ -12560,6 +12563,10 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       `UPDATE tokens_firma_contrato SET docs_firma = $1::jsonb, updated_at = NOW() WHERE id = $2`,
       [JSON.stringify(nuevaLista), tokenId]
     );
+    scheduleContratoReconciliation(tokenId, idx, {
+      delayMs: 60 * 1000,
+      reason: "firma_link_iniciado"
+    });
 
     res.json({
       url_firma: urlFirma || null,
@@ -14649,19 +14656,46 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
   };
 }
 
-function scheduleContratoWebhookRetry(procesoId, docIndex) {
+const contratoReconciliationTimers = new Map();
+
+function scheduleContratoReconciliation(
+  procesoId,
+  docIndex,
+  { delayMs = 60 * 1000, reason = "programado" } = {}
+) {
   if (!procesoId) return;
-  setTimeout(async () => {
+  const key = `${procesoId}:${docIndex || "todos"}`;
+  const safeDelayMs = Math.max(Number(delayMs) || 0, 1000);
+  const runAt = Date.now() + safeDelayMs;
+  const scheduled = contratoReconciliationTimers.get(key);
+  if (scheduled?.runAt && scheduled.runAt <= runAt) return;
+  if (scheduled?.timer) clearTimeout(scheduled.timer);
+
+  const timer = setTimeout(async () => {
+    contratoReconciliationTimers.delete(key);
     try {
       const r = await pool.query(
-        `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at FROM tokens_firma_contrato WHERE id = $1 LIMIT 1`,
+        `SELECT id, public_id, nombre_persona, correo_personal, estado, docs_firma,
+                solicitud_id, preregistro_id, created_at
+         FROM tokens_firma_contrato
+         WHERE id = $1 AND estado = 'en_proceso'
+         LIMIT 1`,
         [procesoId]
       );
-      if (r.rows[0]) await reconcileContratoDocsForProcess(r.rows[0], { docIndex, reason: "webhook_retry" });
+      if (r.rows[0]) await reconcileContratoDocsForProcess(r.rows[0], { docIndex, reason });
     } catch (retryErr) {
       console.error("Error en reconcile diferido de contrato:", retryErr?.message || retryErr);
     }
-  }, 30000);
+  }, safeDelayMs);
+  timer.unref?.();
+  contratoReconciliationTimers.set(key, { timer, runAt });
+}
+
+function scheduleContratoWebhookRetry(procesoId, docIndex) {
+  scheduleContratoReconciliation(procesoId, docIndex, {
+    delayMs: 30 * 1000,
+    reason: "webhook_retry"
+  });
 }
 
 async function handleClickSignContratoWebhook({ event, requestId, contractId, signatureId = "", status, rawStatus }) {
@@ -14921,9 +14955,9 @@ const server = app.listen(port, "0.0.0.0", () => {
 const RECONCILIACION_JOB_INTERVAL_MS = 10 * 60 * 1000; // cada 10 minutos
 const RECONCILIACION_MIN_EDAD_MIN = 20; // solo cuentas con más de 20 min sin actualizar
 const RECONCILIACION_BATCH = 10; // máximo por ciclo
-const RECONCILIACION_CONTRATOS_INTERVAL_MS = 10 * 60 * 1000; // cada 10 minutos
-const RECONCILIACION_CONTRATOS_MIN_EDAD_MIN = 20; // solo procesos con más de 20 min sin actualizar
-const RECONCILIACION_CONTRATOS_BATCH = 10; // máximo por ciclo
+const RECONCILIACION_CONTRATOS_INTERVAL_MS = 2 * 60 * 1000; // respaldo cada 2 minutos
+const RECONCILIACION_CONTRATOS_MIN_EDAD_MIN = 1; // procesos sin cambios durante al menos 1 minuto
+const RECONCILIACION_CONTRATOS_BATCH = 20; // máximo por ciclo
 const RECONCILIACION_CONTRATOS_EXPIRAR_HORAS = CONTRATOS_TOKEN_EXPIRY_HOURS;
 const REVALIDACION_SOPORTES_INTERVAL_MS = 30 * 60 * 1000; // cada 30 min
 const REVALIDACION_SOPORTES_MIN_EDAD_MIN = 20; // cuentas con >20 min sin update
@@ -15457,6 +15491,10 @@ async function gracefulShutdown(signal) {
   if (revalidarSoportesJobInterval) clearInterval(revalidarSoportesJobInterval);
   if (reconciliarContratosJobInterval) clearInterval(reconciliarContratosJobInterval);
   if (reintentarCorreosJobInterval) clearInterval(reintentarCorreosJobInterval);
+  for (const scheduled of contratoReconciliationTimers.values()) {
+    if (scheduled?.timer) clearTimeout(scheduled.timer);
+  }
+  contratoReconciliationTimers.clear();
   console.log(`[shutdown] Se?al recibida: ${signal}. Cerrando API...`);
 
   const forceExitTimeout = setTimeout(() => {

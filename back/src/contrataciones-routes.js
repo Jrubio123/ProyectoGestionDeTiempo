@@ -536,6 +536,15 @@ module.exports = function registerContratacionesRoutes(deps) {
       values.push(solicitudRow.ubicacion);
     }
 
+    const supervisorNombre =
+      toNullableString(solicitudRow.supervisor_nombre) || toNullableString(datosExtra.supervisor_nombre);
+    if (solicitudRow.supervisor_id || supervisorNombre) {
+      sets.push(`responsable_supervisor_id = $${idx++}`);
+      values.push(solicitudRow.supervisor_id || null);
+      sets.push(`responsable_supervisor = $${idx++}`);
+      values.push(supervisorNombre);
+    }
+
     if (markCoordinadorCompletion && actorUserId) {
       sets.push(`completado_coordinador_por = COALESCE(completado_coordinador_por, $${idx++})`);
       values.push(actorUserId);
@@ -680,7 +689,7 @@ module.exports = function registerContratacionesRoutes(deps) {
     if (!internalId) return null;
     const result = await pool.query(
       `
-      SELECT id, public_id, nombre_usuario, email
+      SELECT id, public_id, nombre_usuario, email, azure_oid
       FROM usuarios
       WHERE id = $1
       LIMIT 1
@@ -846,11 +855,12 @@ module.exports = function registerContratacionesRoutes(deps) {
         sc.datos_extra,
         sc.supervisor_id,
         sup.public_id AS supervisor_public_id,
-        sup.nombre_usuario AS supervisor_nombre,
-        sup.email AS supervisor_email,
+        COALESCE(sup.nombre_usuario, sc.datos_extra->>'supervisor_nombre') AS supervisor_nombre,
+        COALESCE(sup.email, sc.datos_extra->>'supervisor_email') AS supervisor_email,
+        sc.datos_extra->>'supervisor_azure_oid' AS supervisor_azure_oid,
         sc.cliente_id,
         c.public_id AS cliente_public_id,
-        c.titulo AS cliente_nombre
+        COALESCE(c.titulo, sc.datos_extra->>'cliente_nombre') AS cliente_nombre
       FROM solicitudes_contratacion sc
       LEFT JOIN usuarios sup ON sup.id = sc.supervisor_id
       LEFT JOIN clientes c ON c.id = sc.cliente_id
@@ -887,7 +897,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         m.titulo AS modulo_titulo,
         sr.cliente_id,
         c.public_id AS cliente_public_id,
-        c.titulo AS cliente_nombre
+        COALESCE(c.titulo, sr.cliente_nombre_otro) AS cliente_nombre
       FROM preregistro_personas pp
       LEFT JOIN solicitudes_rrhh sr ON sr.id = pp.id_solicitud_rrhh
       LEFT JOIN modulo m ON m.id = sr.modulo_id
@@ -973,6 +983,7 @@ module.exports = function registerContratacionesRoutes(deps) {
       supervisor_id: solicitudActual?.supervisor_public_id || null,
       supervisor_nombre: solicitudActual?.supervisor_nombre || null,
       supervisor_email: solicitudActual?.supervisor_email || null,
+      supervisor_azure_oid: solicitudActual?.supervisor_azure_oid || null,
       perfil: pickFirst(anexoActivo?.modulo_titulo, solicitudActual?.perfil, preregistroActual?.modulo_titulo),
       modulo_id: pickFirst(anexoActivo?.modulo_public_id, preregistroActual?.modulo_public_id),
       modulo_nombre: pickFirst(anexoActivo?.modulo_titulo, preregistroActual?.modulo_titulo, solicitudActual?.perfil),
@@ -1042,6 +1053,7 @@ module.exports = function registerContratacionesRoutes(deps) {
           cliente_nombre: currentContext.cliente_nombre || null,
           supervisor_id: currentContext.supervisor_id || null,
           supervisor_nombre: currentContext.supervisor_nombre || null,
+          supervisor_azure_oid: currentContext.supervisor_azure_oid || null,
           perfil: currentContext.perfil || null,
           modulo_id: currentContext.modulo_id || null,
           modulo_nombre: currentContext.modulo_nombre || null,
@@ -1072,11 +1084,9 @@ module.exports = function registerContratacionesRoutes(deps) {
     ) {
       changes.push(`Cliente: ${currentContext?.cliente_nombre || "Sin cliente"} -> ${requestedValues.cliente_nombre}`);
     }
-    if (
-      requestedValues?.supervisor_id &&
-      requestedValues.supervisor_id !== currentContext?.supervisor_id &&
-      requestedValues?.supervisor_nombre
-    ) {
+    const requestedSupervisorRef = requestedValues?.supervisor_id || requestedValues?.supervisor_azure_oid || null;
+    const currentSupervisorRef = currentContext?.supervisor_id || currentContext?.supervisor_azure_oid || null;
+    if (requestedSupervisorRef && requestedSupervisorRef !== currentSupervisorRef && requestedValues?.supervisor_nombre) {
       changes.push(
         `Responsable: ${currentContext?.supervisor_nombre || "Sin responsable"} -> ${requestedValues.supervisor_nombre}`
       );
@@ -1157,6 +1167,11 @@ module.exports = function registerContratacionesRoutes(deps) {
   function formatRow(row) {
     if (!row) return null;
     const datosExtra = toObjectOrEmpty(row.datos_extra);
+    const clienteNombre = row.cliente_nombre || toNullableString(datosExtra.cliente_nombre);
+    const clienteId = row.cliente_public_id || toNullableString(datosExtra.cliente_id);
+    const supervisorNombre = row.supervisor_nombre || toNullableString(datosExtra.supervisor_nombre);
+    const supervisorEmail = row.supervisor_email || toNullableString(datosExtra.supervisor_email);
+    const supervisorAzureOid = toNullableString(datosExtra.supervisor_azure_oid);
     return {
       id: row.public_id,
       tipo_solicitud: row.tipo_solicitud,
@@ -1179,17 +1194,18 @@ module.exports = function registerContratacionesRoutes(deps) {
           }
         : null,
       preregistro_id: row.preregistro_id || null,
-      supervisor: row.supervisor_public_id
+      supervisor: row.supervisor_public_id || supervisorNombre || supervisorEmail || supervisorAzureOid
         ? {
-            id: row.supervisor_public_id,
-            nombre: row.supervisor_nombre,
-            email: row.supervisor_email || null
+            id: row.supervisor_public_id || null,
+            nombre: supervisorNombre || null,
+            email: supervisorEmail || null,
+            azure_oid: supervisorAzureOid || null
           }
         : null,
-      cliente: row.cliente_public_id
+      cliente: clienteId || clienteNombre
         ? {
-            id: row.cliente_public_id,
-            nombre: row.cliente_nombre,
+            id: clienteId || null,
+            nombre: clienteNombre || null,
             requiere_confirmacion_cliente: Boolean(row.cliente_requiere_confirmacion_cliente)
           }
         : null,
@@ -1345,6 +1361,16 @@ module.exports = function registerContratacionesRoutes(deps) {
       ]
     );
     return result.rows[0] || null;
+  }
+
+  function applySupervisorMetadata(datosExtra, supervisorLocal, supervisorFallback = {}) {
+    datosExtra.supervisor_nombre =
+      toNullableString(supervisorLocal?.nombre_usuario) || toNullableString(supervisorFallback?.supervisor_nombre);
+    datosExtra.supervisor_email =
+      toNullableString(supervisorLocal?.email) || toNullableString(supervisorFallback?.supervisor_email);
+    datosExtra.supervisor_azure_oid =
+      toNullableString(supervisorLocal?.azure_oid) || toNullableString(supervisorFallback?.supervisor_azure_oid);
+    return datosExtra;
   }
 
   async function revocarAccesoInternoPorRetiroTotal(db, solicitudRow) {
@@ -2150,7 +2176,14 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (payload.cliente_id && !refs.cliente_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
 
         const personaUsuarioId = refs.persona_usuario_id || null;
-        const supervisorId = refs.supervisor_id || req.user?.id || null;
+        const supervisorFallback = toObjectOrEmpty(payload.datos_extra);
+        const tieneSupervisorEntra = Boolean(
+          toNullableString(supervisorFallback.supervisor_azure_oid) ||
+          toNullableString(supervisorFallback.supervisor_email) ||
+          toNullableString(supervisorFallback.supervisor_nombre)
+        );
+        const supervisorId = refs.supervisor_id || (tieneSupervisorEntra ? null : (req.user?.id || null));
+        const supervisorSeleccionadoMeta = await resolveUsuarioMeta(supervisorId);
         const tipoDocumentoId = refs.tipo_documento_id || null;
         const clienteId = refs.cliente_id || null;
         const monedaFinal = moneda || await resolvePersonaMoneda(pool, personaUsuarioId);
@@ -2209,6 +2242,7 @@ module.exports = function registerContratacionesRoutes(deps) {
           payload.datos_extra && typeof payload.datos_extra === "object" && !Array.isArray(payload.datos_extra)
             ? payload.datos_extra
             : {};
+        applySupervisorMetadata(datosExtra, supervisorSeleccionadoMeta, supervisorFallback);
 
         if (payload.modulo_id && isUuid(payload.modulo_id) && !datosExtra.modulo_id) datosExtra.modulo_id = payload.modulo_id;
         if (payload.modulo && !datosExtra.modulo) datosExtra.modulo = payload.modulo;
@@ -2253,21 +2287,19 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
 
         if (tipoSolicitud === TIPO_EXTENSION) {
-          const [extensionContext, supervisorMeta] = await Promise.all([
-            buildPersonaExtensionContext({
+          const extensionContext = await buildPersonaExtensionContext({
               userInternalId: personaUsuarioId,
               numeroDocumento,
               correoPersonal,
               correoEmpresarial,
               preferAnexoItemId: toNullableString(datosExtra?.anexo_item_id)
-            }),
-            resolveUsuarioMeta(supervisorId)
-          ]);
+            });
           const extensionExtra = buildExtensionExtraContext(extensionContext, {
             cliente_id: payload.cliente_id || null,
             cliente_nombre: clienteNombre || extensionContext?.cliente_nombre || null,
-            supervisor_id: supervisorMeta?.public_id || payload.supervisor_id || null,
-            supervisor_nombre: supervisorMeta?.nombre_usuario || extensionContext?.supervisor_nombre || null,
+            supervisor_id: supervisorSeleccionadoMeta?.public_id || payload.supervisor_id || datosExtra.supervisor_azure_oid || null,
+            supervisor_nombre: supervisorSeleccionadoMeta?.nombre_usuario || datosExtra.supervisor_nombre || extensionContext?.supervisor_nombre || null,
+            supervisor_azure_oid: supervisorSeleccionadoMeta?.azure_oid || datosExtra.supervisor_azure_oid || null,
             perfil,
             moneda: monedaFinal,
             modalidad_contrato: modalidadContrato,
@@ -2592,6 +2624,7 @@ module.exports = function registerContratacionesRoutes(deps) {
 
         const personaUsuarioId = refs.persona_usuario_id || null;
         const supervisorId = refs.supervisor_id || null;
+        const supervisorSeleccionadoMeta = await resolveUsuarioMeta(supervisorId);
         const tipoDocumentoId = refs.tipo_documento_id || null;
         const clienteId = refs.cliente_id || null;
         if (!moneda) {
@@ -2663,6 +2696,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             ? payload.datos_extra
             : {};
         const datosExtra = { ...existingDatosExtra, ...incomingDatosExtra };
+        applySupervisorMetadata(datosExtra, supervisorSeleccionadoMeta, datosExtra);
         if (payload.modulo_id && isUuid(payload.modulo_id) && !datosExtra.modulo_id) datosExtra.modulo_id = payload.modulo_id;
         if (payload.modulo && !datosExtra.modulo) datosExtra.modulo = payload.modulo;
         if (perfil && !datosExtra.modulo) datosExtra.modulo = perfil;
@@ -2687,21 +2721,19 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
 
         if (tipoSolicitud === TIPO_EXTENSION) {
-          const [extensionContext, supervisorMeta] = await Promise.all([
-            buildPersonaExtensionContext({
+          const extensionContext = await buildPersonaExtensionContext({
               userInternalId: personaUsuarioId,
               numeroDocumento,
               correoPersonal,
               correoEmpresarial,
               preferAnexoItemId: toNullableString(datosExtra?.anexo_item_id)
-            }),
-            resolveUsuarioMeta(supervisorId)
-          ]);
+            });
           const extensionExtra = buildExtensionExtraContext(extensionContext, {
             cliente_id: clientePublicId || null,
             cliente_nombre: clienteNombre || extensionContext?.cliente_nombre || null,
-            supervisor_id: supervisorMeta?.public_id || supervisorPublicId || null,
-            supervisor_nombre: supervisorMeta?.nombre_usuario || extensionContext?.supervisor_nombre || null,
+            supervisor_id: supervisorSeleccionadoMeta?.public_id || supervisorPublicId || datosExtra.supervisor_azure_oid || null,
+            supervisor_nombre: supervisorSeleccionadoMeta?.nombre_usuario || datosExtra.supervisor_nombre || extensionContext?.supervisor_nombre || null,
+            supervisor_azure_oid: supervisorSeleccionadoMeta?.azure_oid || datosExtra.supervisor_azure_oid || null,
             perfil,
             moneda,
             modalidad_contrato: modalidadContrato,

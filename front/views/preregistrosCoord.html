@@ -68,7 +68,7 @@
                                 <p class="font-semibold text-slate-800" x-text="`${item.nombre || ''} ${item.apellidos || ''}`.trim()"></p>
                                 <p class="text-xs text-slate-500" x-text="item.numero_documento || 'Sin documento'"></p>
                             </td>
-                            <td class="py-3 pr-3" x-text="item?.cliente?.nombre || '-' "></td>
+                            <td class="py-3 pr-3" x-text="item?.cliente?.nombre || item?.datos_extra?.cliente_nombre || '-' "></td>
                             <td class="py-3 pr-3" x-text="formatFecha(item.created_at)"></td>
                             <td class="py-3 pr-3">
                                 <span class="px-2.5 py-1 rounded-full text-xs font-semibold" :class="estadoClass(item.estado)" x-text="item.estado"></span>
@@ -234,12 +234,21 @@
                                 type="text" placeholder="Nombre del cliente prospecto *"
                                 class="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200" />
                         </div>
-                        <select x-model="form.supervisor_id" class="px-3 py-2 rounded-xl border border-slate-200">
-                            <option value="">Responsable / Supervisor</option>
-                            <template x-for="sup in supervisores" :key="sup.id">
-                                <option :value="sup.id" x-text="sup.nombre"></option>
-                            </template>
-                        </select>
+                        <div class="relative" @click.outside="ocultarSugerenciasSupervisor">
+                            <input x-model="busquedaSupervisor" @input="onInputSupervisor" @focus="onFocusSupervisor"
+                                type="text" autocomplete="off" placeholder="Buscar responsable / supervisor en Microsoft 365"
+                                class="w-full px-3 py-2 rounded-xl border border-slate-200">
+                            <span x-show="supervisorBuscando" class="absolute right-3 top-2.5 text-xs text-slate-400" style="display:none">Buscando...</span>
+                            <div x-show="mostrarSugerenciasSupervisor && supervisorSugerencias.length"
+                                class="absolute z-30 left-0 right-0 mt-1 max-h-56 overflow-auto rounded-xl border border-slate-200 bg-white shadow-xl divide-y divide-slate-100" style="display:none">
+                                <template x-for="sup in supervisorSugerencias" :key="sup.azure_oid">
+                                    <button type="button" @click="seleccionarSupervisorTenant(sup)" class="w-full px-3 py-2 text-left hover:bg-slate-50">
+                                        <p class="text-sm font-semibold text-slate-800" x-text="sup.nombre_usuario"></p>
+                                        <p class="text-xs text-slate-500" x-text="sup.email"></p>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
                         <div>
                             <label class="block text-xs text-slate-500 mb-1">Fecha inicio *</label>
                             <input x-model="form.fecha_inicio" type="date" class="w-full px-3 py-2 rounded-xl border border-slate-200">
@@ -365,12 +374,21 @@
                                 <option :value="rol" x-text="rol"></option>
                             </template>
                         </select>
-                        <select x-model="form.supervisor_id" class="px-3 py-2 rounded-xl border border-slate-200">
-                            <option value="">Responsable / Coordinador *</option>
-                            <template x-for="sup in supervisores" :key="sup.id">
-                                <option :value="sup.id" x-text="sup.nombre"></option>
-                            </template>
-                        </select>
+                        <div class="relative" @click.outside="ocultarSugerenciasSupervisor">
+                            <input x-model="busquedaSupervisor" @input="onInputSupervisor" @focus="onFocusSupervisor"
+                                type="text" autocomplete="off" placeholder="Buscar responsable / coordinador en Microsoft 365 *"
+                                class="w-full px-3 py-2 rounded-xl border border-slate-200">
+                            <span x-show="supervisorBuscando" class="absolute right-3 top-2.5 text-xs text-slate-400" style="display:none">Buscando...</span>
+                            <div x-show="mostrarSugerenciasSupervisor && supervisorSugerencias.length"
+                                class="absolute z-30 left-0 right-0 mt-1 max-h-56 overflow-auto rounded-xl border border-slate-200 bg-white shadow-xl divide-y divide-slate-100" style="display:none">
+                                <template x-for="sup in supervisorSugerencias" :key="sup.azure_oid">
+                                    <button type="button" @click="seleccionarSupervisorTenant(sup)" class="w-full px-3 py-2 text-left hover:bg-slate-50">
+                                        <p class="text-sm font-semibold text-slate-800" x-text="sup.nombre_usuario"></p>
+                                        <p class="text-xs text-slate-500" x-text="sup.email"></p>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
                         <select x-model="form.cliente_id" class="px-3 py-2 rounded-xl border border-slate-200">
                             <option value="">Cliente</option>
                             <template x-for="cliente in clientes" :key="cliente.id">
@@ -428,12 +446,21 @@
                             <label class="block text-xs text-slate-500 mb-1">Fecha de extensión hasta</label>
                             <input x-model="form.fecha_extension_hasta" type="date" class="w-full px-3 py-2 rounded-xl border border-slate-200">
                         </div>
-                        <select x-model="form.supervisor_id" class="px-3 py-2 rounded-xl border border-slate-200">
-                            <option value="">Responsable / Supervisor / Coordinador</option>
-                            <template x-for="sup in supervisores" :key="sup.id">
-                                <option :value="sup.id" x-text="sup.nombre"></option>
-                            </template>
-                        </select>
+                        <div class="relative" @click.outside="ocultarSugerenciasSupervisor">
+                            <input x-model="busquedaSupervisor" @input="onInputSupervisor" @focus="onFocusSupervisor"
+                                type="text" autocomplete="off" placeholder="Buscar responsable / supervisor en Microsoft 365"
+                                class="w-full px-3 py-2 rounded-xl border border-slate-200">
+                            <span x-show="supervisorBuscando" class="absolute right-3 top-2.5 text-xs text-slate-400" style="display:none">Buscando...</span>
+                            <div x-show="mostrarSugerenciasSupervisor && supervisorSugerencias.length"
+                                class="absolute z-30 left-0 right-0 mt-1 max-h-56 overflow-auto rounded-xl border border-slate-200 bg-white shadow-xl divide-y divide-slate-100" style="display:none">
+                                <template x-for="sup in supervisorSugerencias" :key="sup.azure_oid">
+                                    <button type="button" @click="seleccionarSupervisorTenant(sup)" class="w-full px-3 py-2 text-left hover:bg-slate-50">
+                                        <p class="text-sm font-semibold text-slate-800" x-text="sup.nombre_usuario"></p>
+                                        <p class="text-xs text-slate-500" x-text="sup.email"></p>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
                         <input x-model="form.tarifa_hora" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa hora">
                         <input x-model="form.tarifa_mes" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa mes">
                         <input x-model="form.tarifa_medio_tiempo" type="number" step="0.01" class="px-3 py-2 rounded-xl border border-slate-200" placeholder="Tarifa medio tiempo">
@@ -481,13 +508,13 @@
             <div class="overflow-y-auto flex-1 p-6">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Tipo</p><p class="font-semibold" x-text="detalle?.tipo_solicitud || '-' "></p></div>
-                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Cliente</p><p class="font-semibold" x-text="detalle?.cliente?.nombre || '-' "></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Cliente</p><p class="font-semibold" x-text="detalle?.cliente?.nombre || detalle?.datos_extra?.cliente_nombre || '-' "></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Nombre</p><p class="font-semibold" x-text="`${detalle?.nombre || ''} ${detalle?.apellidos || ''}`.trim() || '-' "></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Documento</p><p class="font-semibold" x-text="detalle?.numero_documento || '-' "></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Correo personal</p><p class="font-semibold" x-text="detalle?.correo_personal || '-' "></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Correo empresarial</p><p class="font-semibold" x-text="detalle?.correo_empresarial || '-' "></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Perfil</p><p class="font-semibold" x-text="detalle?.perfil || '-' "></p></div>
-                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Supervisor</p><p class="font-semibold" x-text="detalle?.supervisor?.nombre || '-' "></p></div>
+                <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Supervisor</p><p class="font-semibold" x-text="detalle?.supervisor?.nombre || detalle?.datos_extra?.supervisor_nombre || '-' "></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Moneda</p><p class="font-semibold" x-text="detalle?.moneda || '-' "></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Factura en Colombia</p><p class="font-semibold" x-text="detalle?.factura_en_colombia === true || detalle?.datos_extra?.factura_en_colombia === true ? 'Sí' : (detalle?.factura_en_colombia === false || detalle?.datos_extra?.factura_en_colombia === false ? 'No' : '-')"></p></div>
                 <div class="rounded-xl border border-slate-200 p-3"><p class="text-xs text-slate-500">Modalidad</p><p class="font-semibold" x-text="detalle?.modalidad_contrato || '-' "></p></div>

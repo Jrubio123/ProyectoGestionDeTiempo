@@ -10,6 +10,9 @@ window.preregistrosCoordApp = function () {
         cliente_id: "",
         cliente_nombre_prospecto: "",
         supervisor_id: "",
+        supervisor_nombre: "",
+        supervisor_email: "",
+        supervisor_azure_oid: "",
         modulo_id: "",
         nombre: "",
         apellidos: "",
@@ -53,7 +56,6 @@ window.preregistrosCoordApp = function () {
         clientes: [],
         modulos: [],
         documentos: [],
-        supervisores: [],
         monedas: [],
 
         filtroEstado: "",
@@ -80,6 +82,12 @@ window.preregistrosCoordApp = function () {
         guardandoSolicitud: false,
         enviandoTh: false,
         debounceBusquedaPersona: null,
+        busquedaSupervisor: "",
+        supervisorSugerencias: [],
+        supervisorBuscando: false,
+        mostrarSugerenciasSupervisor: false,
+        debounceBusquedaSupervisor: null,
+        supervisorLookupSeq: 0,
 
         erroresFormulario: [],
 
@@ -117,26 +125,21 @@ window.preregistrosCoordApp = function () {
 
         async cargarCatalogos() {
             try {
-                const [clientes, modulos, documentos, supervisores, monedas] = await Promise.all([
+                const [clientes, modulos, documentos, monedas] = await Promise.all([
                     axios.get(`${API}/clientes`, this.getAuthConfig()),
                     axios.get(`${API}/modulos`, this.getAuthConfig()),
                     axios.get(`${API}/documentos-identidad`, this.getAuthConfig()),
-                    axios.get(`${API}/supervisores`, this.getAuthConfig()),
                     axios.get(`${API}/monedas`, this.getAuthConfig())
                 ]);
                 this.clientes = Array.isArray(clientes.data) ? clientes.data : [];
                 this.modulos = Array.isArray(modulos.data) ? modulos.data : [];
                 this.documentos = Array.isArray(documentos.data) ? documentos.data : [];
-                this.supervisores = Array.isArray(supervisores.data) ? supervisores.data : [];
                 this.monedas = Array.isArray(monedas.data) && monedas.data.length ? monedas.data : this.fallbackMonedas();
-                this.incluirSolicitanteEnSupervisores();
             } catch (e) {
                 this.clientes = [];
                 this.modulos = [];
                 this.documentos = [];
-                this.supervisores = [];
                 this.monedas = this.fallbackMonedas();
-                this.incluirSolicitanteEnSupervisores();
             }
         },
 
@@ -156,23 +159,84 @@ window.preregistrosCoordApp = function () {
             return {
                 id,
                 nombre: String(user?.nombre_usuario || user?.email || "Usuario actual").trim(),
-                email: String(user?.email || "").trim() || null
+                email: String(user?.email || "").trim() || null,
+                azure_oid: String(user?.azure_oid || "").trim() || null
             };
         },
 
-        incluirSolicitanteEnSupervisores() {
+        aplicarSupervisorPorDefecto() {
             const solicitante = this.usuarioSolicitanteActual();
             if (!solicitante?.id) return;
-            const yaExiste = (this.supervisores || []).some((sup) => String(sup?.id || "") === solicitante.id);
-            if (yaExiste) return;
-            this.supervisores = [solicitante, ...(this.supervisores || [])];
+            this.form.supervisor_id = solicitante.id;
+            this.form.supervisor_nombre = solicitante.nombre || "";
+            this.form.supervisor_email = solicitante.email || "";
+            this.form.supervisor_azure_oid = solicitante.azure_oid || "";
+            this.busquedaSupervisor = solicitante.nombre || solicitante.email || "";
         },
 
-        aplicarSupervisorPorDefecto() {
-            this.incluirSolicitanteEnSupervisores();
-            const currentUserId = this.usuarioSolicitanteActual()?.id || "";
-            if (!currentUserId) return;
-            this.form.supervisor_id = currentUserId;
+        onInputSupervisor() {
+            const q = String(this.busquedaSupervisor || "").trim();
+            this.form.supervisor_id = "";
+            this.form.supervisor_nombre = "";
+            this.form.supervisor_email = "";
+            this.form.supervisor_azure_oid = "";
+            if (this.debounceBusquedaSupervisor) clearTimeout(this.debounceBusquedaSupervisor);
+            if (q.length < 2) {
+                this.supervisorLookupSeq += 1;
+                this.supervisorSugerencias = [];
+                this.mostrarSugerenciasSupervisor = false;
+                this.supervisorBuscando = false;
+                return;
+            }
+            this.debounceBusquedaSupervisor = setTimeout(() => this.buscarSupervisoresTenant(q), 250);
+        },
+
+        onFocusSupervisor() {
+            const q = String(this.busquedaSupervisor || "").trim();
+            if (this.supervisorSugerencias.length) {
+                this.mostrarSugerenciasSupervisor = true;
+            } else if (q.length >= 2) {
+                this.buscarSupervisoresTenant(q);
+            }
+        },
+
+        ocultarSugerenciasSupervisor() {
+            this.mostrarSugerenciasSupervisor = false;
+        },
+
+        async buscarSupervisoresTenant(q) {
+            const query = String(q || "").trim();
+            if (query.length < 2) return;
+            const seq = ++this.supervisorLookupSeq;
+            this.supervisorBuscando = true;
+            try {
+                const res = await axios.get(`${API}/admin/tenant/usuarios`, {
+                    ...(this.getAuthConfig() || {}),
+                    params: { q: query }
+                });
+                if (seq !== this.supervisorLookupSeq) return;
+                this.supervisorSugerencias = Array.isArray(res.data) ? res.data : [];
+                this.mostrarSugerenciasSupervisor = this.supervisorSugerencias.length > 0;
+            } catch (_) {
+                if (seq !== this.supervisorLookupSeq) return;
+                this.supervisorSugerencias = [];
+                this.mostrarSugerenciasSupervisor = false;
+            } finally {
+                if (seq === this.supervisorLookupSeq) this.supervisorBuscando = false;
+            }
+        },
+
+        seleccionarSupervisorTenant(supervisor) {
+            if (!supervisor) return;
+            this.supervisorLookupSeq += 1;
+            this.form.supervisor_id = supervisor.usuario_id || "";
+            this.form.supervisor_nombre = String(supervisor.nombre_usuario || "").trim();
+            this.form.supervisor_email = String(supervisor.email || "").trim();
+            this.form.supervisor_azure_oid = String(supervisor.azure_oid || "").trim();
+            this.busquedaSupervisor = this.form.supervisor_nombre || this.form.supervisor_email;
+            this.supervisorSugerencias = [];
+            this.mostrarSugerenciasSupervisor = false;
+            this.supervisorBuscando = false;
         },
 
         pickFirst(...values) {
@@ -295,6 +359,7 @@ window.preregistrosCoordApp = function () {
                 cliente_nombre: source.cliente_nombre || null,
                 supervisor_id: source.supervisor_id || null,
                 supervisor_nombre: source.supervisor_nombre || null,
+                supervisor_azure_oid: source.supervisor_azure_oid || null,
                 perfil: perfilData.perfil || null,
                 modulo_id: perfilData.modulo_id && perfilData.modulo_id !== "otros" ? perfilData.modulo_id : null,
                 modulo_nombre: source.modulo_nombre || perfilData.perfil || null,
@@ -321,6 +386,7 @@ window.preregistrosCoordApp = function () {
                 cliente_nombre: this.pickFirst(first?.cliente_nombre, fallback?.cliente_nombre),
                 supervisor_id: this.pickFirst(first?.supervisor_id, fallback?.supervisor_id),
                 supervisor_nombre: this.pickFirst(first?.supervisor_nombre, fallback?.supervisor_nombre),
+                supervisor_azure_oid: this.pickFirst(first?.supervisor_azure_oid, fallback?.supervisor_azure_oid),
                 perfil: this.pickFirst(first?.perfil, fallback?.perfil),
                 modulo_id: this.pickFirst(first?.modulo_id, fallback?.modulo_id),
                 modulo_nombre: this.pickFirst(first?.modulo_nombre, fallback?.modulo_nombre),
@@ -344,6 +410,7 @@ window.preregistrosCoordApp = function () {
                 cliente_nombre: persona?.cliente_nombre || anexo?.cliente_nombre || null,
                 supervisor_id: persona?.supervisor_id || null,
                 supervisor_nombre: persona?.supervisor_nombre || null,
+                supervisor_azure_oid: persona?.supervisor_azure_oid || null,
                 perfil: persona?.perfil || persona?.modulo_nombre || anexo?.modulo_nombre || null,
                 modulo_id: persona?.modulo_id || anexo?.modulo_id || null,
                 modulo_nombre: persona?.modulo_nombre || anexo?.modulo_nombre || null,
@@ -420,7 +487,8 @@ window.preregistrosCoordApp = function () {
                 cliente_nombre: item?.cliente?.nombre || base?.cliente_nombre || null,
                 supervisor_id: item?.supervisor?.id || base?.supervisor_id || null,
                 supervisor_nombre: item?.supervisor?.nombre || base?.supervisor_nombre || null,
-                supervisor_email: item?.supervisor?.email || null,
+                supervisor_email: item?.supervisor?.email || item?.datos_extra?.supervisor_email || null,
+                supervisor_azure_oid: item?.supervisor?.azure_oid || item?.datos_extra?.supervisor_azure_oid || null,
                 perfil: perfilData.perfil || item?.perfil || base?.perfil || null,
                 modulo_id: perfilData.modulo_id || "",
                 modulo_nombre: base?.modulo_nombre || perfilData.perfil || item?.perfil || null,
@@ -456,8 +524,20 @@ window.preregistrosCoordApp = function () {
             if (persona.moneda) this.form.moneda = persona.moneda;
             if (persona.factura_en_colombia === true) this.form.factura_en_colombia = "true";
             if (persona.factura_en_colombia === false) this.form.factura_en_colombia = "false";
-            if (persona.cliente_id) this.form.cliente_id = String(persona.cliente_id);
-            if (persona.supervisor_id) this.form.supervisor_id = String(persona.supervisor_id);
+            if (persona.cliente_id) {
+                this.form.cliente_id = String(persona.cliente_id);
+                this.form.cliente_nombre_prospecto = "";
+            } else if (persona.cliente_nombre) {
+                this.form.cliente_id = "__prospecto__";
+                this.form.cliente_nombre_prospecto = persona.cliente_nombre;
+            }
+            if (persona.supervisor_id || persona.supervisor_nombre) {
+                this.form.supervisor_id = persona.supervisor_id ? String(persona.supervisor_id) : "";
+                this.form.supervisor_nombre = persona.supervisor_nombre || "";
+                this.form.supervisor_email = persona.supervisor_email || "";
+                this.form.supervisor_azure_oid = persona.supervisor_azure_oid || "";
+                this.busquedaSupervisor = this.form.supervisor_nombre || this.form.supervisor_email;
+            }
             if (perfilData.modulo_id) this.form.modulo_id = perfilData.modulo_id;
             if (perfilData.perfil) this.form.perfil = perfilData.perfil;
             if (persona.modalidad_contrato) this.form.modalidad_contrato = persona.modalidad_contrato;
@@ -475,11 +555,18 @@ window.preregistrosCoordApp = function () {
                 moduloId: item?.datos_extra?.modulo_id || "",
                 perfil: item?.perfil || item?.datos_extra?.modulo || ""
             });
+            const clienteId = item?.cliente?.id || "";
+            const clienteNombre = item?.cliente?.nombre || item?.datos_extra?.cliente_nombre || "";
+            const esClienteProspecto = !clienteId && Boolean(String(clienteNombre || "").trim());
             return {
                 persona_usuario_id: item?.persona?.id || "",
                 tipo_documento_id: item?.tipo_documento?.id || "",
-                cliente_id: item?.cliente?.id || "",
+                cliente_id: esClienteProspecto ? "__prospecto__" : clienteId,
+                cliente_nombre_prospecto: esClienteProspecto ? clienteNombre : "",
                 supervisor_id: item?.supervisor?.id || "",
+                supervisor_nombre: item?.supervisor?.nombre || item?.datos_extra?.supervisor_nombre || "",
+                supervisor_email: item?.supervisor?.email || item?.datos_extra?.supervisor_email || "",
+                supervisor_azure_oid: item?.supervisor?.azure_oid || item?.datos_extra?.supervisor_azure_oid || "",
                 modulo_id: perfilData.modulo_id || "",
                 nombre: item?.nombre || "",
                 apellidos: item?.apellidos || "",
@@ -535,6 +622,7 @@ window.preregistrosCoordApp = function () {
                 this.observacionesThActivas = item?.observaciones_th || "";
                 this.personaSeleccionada = this.construirPersonaDesdeSolicitud(item);
                 this.busquedaPersona = this.personaSeleccionada?.nombre_usuario || item?.persona?.nombre || "";
+                this.busquedaSupervisor = this.form.supervisor_nombre || this.form.supervisor_email || "";
                 return;
             }
 
@@ -544,6 +632,7 @@ window.preregistrosCoordApp = function () {
             this.observacionesThActivas = "";
             this.form = emptyForm();
             this.busquedaPersona = "";
+            this.busquedaSupervisor = "";
             if (tipo !== "Extension") {
                 this.aplicarSupervisorPorDefecto();
             }
@@ -565,6 +654,10 @@ window.preregistrosCoordApp = function () {
             this.form = emptyForm();
             this.personasEncontradas = [];
             this.busquedaPersona = "";
+            this.busquedaSupervisor = "";
+            this.supervisorSugerencias = [];
+            this.mostrarSugerenciasSupervisor = false;
+            this.supervisorBuscando = false;
             this.personaSeleccionada = null;
             this.anexosActivos = [];
             this.anexoSeleccionadoId = "";
@@ -574,6 +667,10 @@ window.preregistrosCoordApp = function () {
             if (this.debounceBusquedaPersona) {
                 clearTimeout(this.debounceBusquedaPersona);
                 this.debounceBusquedaPersona = null;
+            }
+            if (this.debounceBusquedaSupervisor) {
+                clearTimeout(this.debounceBusquedaSupervisor);
+                this.debounceBusquedaSupervisor = null;
             }
         },
 
@@ -691,6 +788,7 @@ window.preregistrosCoordApp = function () {
             const perfilActual = this.perfilFormularioActual();
             const clienteId = String(this.form.cliente_id || "").trim() || null;
             const supervisorId = String(this.form.supervisor_id || "").trim() || null;
+            const supervisorRef = supervisorId || String(this.form.supervisor_azure_oid || "").trim() || null;
             const moneda = String(this.form.moneda || "").trim().toUpperCase() || null;
             const fechaDesde = String(this.form.fecha_extension_desde || "").trim() || null;
             const fechaHasta = String(this.form.fecha_extension_hasta || "").trim() || null;
@@ -700,7 +798,7 @@ window.preregistrosCoordApp = function () {
                     fechaDesde ||
                     fechaHasta ||
                     clienteId ||
-                    supervisorId ||
+                    supervisorRef ||
                     perfilActual ||
                     moneda ||
                     this.normalizarNumero(this.form.tarifa_hora) !== null ||
@@ -714,7 +812,8 @@ window.preregistrosCoordApp = function () {
                 return true;
             }
             if (clienteId && clienteId !== String(base.cliente_id || "")) return true;
-            if (supervisorId && supervisorId !== String(base.supervisor_id || "")) return true;
+            const supervisorBaseRef = String(base.supervisor_id || base.supervisor_azure_oid || "") || null;
+            if (supervisorRef && supervisorRef !== supervisorBaseRef) return true;
             if (perfilActual && this.normalizarTexto(perfilActual) !== this.normalizarTexto(base.perfil || base.modulo_nombre || "")) {
                 return true;
             }
@@ -769,7 +868,9 @@ window.preregistrosCoordApp = function () {
             if (this.tipoModal === "Retiro") {
                 if (!String(this.form.correo_personal || "").trim()) errors.push("Email del consultor");
                 if (!String(this.form.grupo_app_tiempos || "").trim()) errors.push("Grupo de usuario");
-                if (!String(this.form.supervisor_id || "").trim()) errors.push("Responsable / Coordinador");
+                if (!String(this.form.supervisor_id || this.form.supervisor_azure_oid || "").trim()) {
+                    errors.push("Responsable / Coordinador");
+                }
                 if (!String(this.form.fecha_retiro || "").trim()) errors.push("Fecha de retiro");
                 if (!String(this.form.necesidad_ti || "").trim()) errors.push("Acciones requeridas a TI");
                 if (this.anexosActivos.length > 0 && !this.anexoSeleccionadoId) {
@@ -889,6 +990,9 @@ window.preregistrosCoordApp = function () {
             else delete datosExtra.modulo_id;
             if (perfil) datosExtra.modulo_nombre = perfil;
             else delete datosExtra.modulo_nombre;
+            datosExtra.supervisor_nombre = String(this.form.supervisor_nombre || "").trim() || null;
+            datosExtra.supervisor_email = String(this.form.supervisor_email || "").trim() || null;
+            datosExtra.supervisor_azure_oid = String(this.form.supervisor_azure_oid || "").trim() || null;
 
             const base = {
                 ...this.form,
@@ -900,6 +1004,7 @@ window.preregistrosCoordApp = function () {
                 enviar_correos: true,
                 datos_extra: datosExtra
             };
+            base.supervisor_id = String(this.form.supervisor_id || "").trim() || null;
             const facturaEnColombiaRaw = String(this.form.factura_en_colombia || "").trim();
             if (["true", "false"].includes(facturaEnColombiaRaw)) {
                 base.factura_en_colombia = facturaEnColombiaRaw === "true";
@@ -920,6 +1025,8 @@ window.preregistrosCoordApp = function () {
                 if (esProspecto) {
                     base.cliente_id = null;
                     datosExtra.cliente_nombre = String(this.form.cliente_nombre_prospecto || "").trim() || null;
+                } else {
+                    datosExtra.cliente_nombre = null;
                 }
                 // Tipo de asignación explícito para el anexo técnico
                 if (this.form.tipo_asignacion) datosExtra.tipo_asignacion = this.form.tipo_asignacion;

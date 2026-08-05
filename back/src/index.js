@@ -2175,8 +2175,8 @@ async function getSolicitudContratacionDetalleById(internalId) {
       sc.tipo_documento_id,
       sc.cliente_id,
       c.public_id AS cliente_public_id,
-      c.titulo AS cliente_nombre,
-      sup.nombre_usuario AS supervisor_nombre,
+      COALESCE(c.titulo, sc.datos_extra->>'cliente_nombre') AS cliente_nombre,
+      COALESCE(sup.nombre_usuario, sc.datos_extra->>'supervisor_nombre') AS supervisor_nombre,
       CASE
         WHEN LOWER(BTRIM(sc.datos_extra->>'factura_en_colombia')) IN ('true', 't', '1', 'yes', 'y', 'on', 'si', 'sí') THEN true
         WHEN LOWER(BTRIM(sc.datos_extra->>'factura_en_colombia')) IN ('false', 'f', '0', 'no', 'n', 'off') THEN false
@@ -2255,7 +2255,7 @@ async function getPreregistroDetalleById(internalId) {
       sr.public_id AS rrhh_public_id,
       sr.cliente_id,
       c.public_id AS cliente_public_id,
-      c.titulo AS cliente_nombre,
+      COALESCE(c.titulo, sr.cliente_nombre_otro) AS cliente_nombre,
       sup.nombre_usuario AS supervisor_nombre,
       di.public_id AS tipo_documento_public_id,
       di.titulo AS tipo_documento_titulo,
@@ -8502,7 +8502,7 @@ app.get("/admin/tenant/usuarios", requireAccess({ roles: ["Administrador", "Coor
     }
 
     const usuarios = await graphGetAll(path, token, 3);
-    res.json((usuarios || [])
+    const usuariosTenant = (usuarios || [])
       .map((u) => ({
         azure_oid: u.id || "",
         nombre_usuario: u.displayName || "",
@@ -8511,7 +8511,28 @@ app.get("/admin/tenant/usuarios", requireAccess({ roles: ["Administrador", "Coor
         email: u.mail || u.userPrincipalName || "",
         telefono: Array.isArray(u.businessPhones) && u.businessPhones[0] ? u.businessPhones[0] : (u.mobilePhone || "")
       }))
-      .filter((u) => u.email));
+      .filter((u) => u.email);
+
+    const azureOids = usuariosTenant.map((u) => u.azure_oid).filter(Boolean);
+    const emails = usuariosTenant.map((u) => u.email.toLowerCase()).filter(Boolean);
+    const locales = azureOids.length || emails.length
+      ? await pool.query(
+        `
+        SELECT public_id::text AS usuario_id, azure_oid, LOWER(email) AS email
+        FROM usuarios
+        WHERE azure_oid = ANY($1::varchar[])
+           OR LOWER(email) = ANY($2::text[])
+        `,
+        [azureOids, emails]
+      )
+      : { rows: [] };
+    const localPorAzure = new Map(locales.rows.map((u) => [String(u.azure_oid || ""), u.usuario_id]));
+    const localPorCorreo = new Map(locales.rows.map((u) => [String(u.email || "").toLowerCase(), u.usuario_id]));
+
+    res.json(usuariosTenant.map((u) => ({
+      ...u,
+      usuario_id: localPorAzure.get(u.azure_oid) || localPorCorreo.get(u.email.toLowerCase()) || null
+    })));
   } catch (err) {
     console.error("Error buscando usuarios del tenant:", err?.message || err);
     res.status(502).json({ error: "No se pudieron buscar usuarios del tenant" });

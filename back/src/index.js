@@ -12552,6 +12552,21 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       });
     }
 
+    // Foto de las filas del anexo que quedaron impresas en el PDF enviado a Click&Sign,
+    // para poder marcarlas como firmadas cuando se confirme la firma (misma idea que
+    // anexo_item_ids en tokens_firma_anexo_individual).
+    let anexoItemIds = Array.isArray(docExistente?.anexo_item_ids) ? docExistente.anexo_item_ids : null;
+    if (docDefinitionKey === "anexo_tecnico") {
+      try {
+        const anexoItems = await requirePersistedAnexoFromProceso(proceso, personaContext);
+        anexoItemIds = (anexoItems || [])
+          .map((item) => Number(item?.id))
+          .filter((id) => Number.isInteger(id) && id > 0);
+      } catch (anexoIdsErr) {
+        console.error("No se pudieron registrar los items del anexo para la firma:", anexoIdsErr?.message || anexoIdsErr);
+      }
+    }
+
     const docEntry = {
       ...docExistente,
       doc_index: idx,
@@ -12559,6 +12574,7 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       titulo: docDefinitionTitulo,
       template_file: docDefinition.template_file,
       empresa_key: docDefinition.empresa_key || null,
+      anexo_item_ids: anexoItemIds,
       request_id: resolvedRequestId || null,
       contract_id: contractId,
       signature_id: signatureId || null,
@@ -14377,6 +14393,48 @@ function isAnexoTecnicoContratoDoc(doc = {}) {
   return !hasExplicitIdentity && (docIndex === 5 || LEGACY_DOC_INDEX_TO_KEY.get(docIndex) === "anexo_tecnico");
 }
 
+// Sincroniza anexo_tecnico_items con el estado del Anexo Tecnico dentro del paquete de contrato.
+// Usa anexo_item_ids (foto tomada al iniciar la firma) para marcar exactamente las filas impresas
+// en el PDF que firmo la persona. Equivalente a markAnexoIndividualSignedWithOneDrive del flujo individual.
+async function syncAnexoItemsEstadoFirmaDesdeDocsContrato(docsFirma, executor = pool) {
+  const docs = Array.isArray(docsFirma) ? docsFirma : [];
+  const firmados = [];
+  const pendientes = [];
+
+  for (const doc of docs) {
+    if (!isAnexoTecnicoContratoDoc(doc)) continue;
+    const ids = (Array.isArray(doc?.anexo_item_ids) ? doc.anexo_item_ids : [])
+      .map((id) => Number(id))
+      .filter((id) => Number.isInteger(id) && id > 0);
+    if (!ids.length) continue;
+
+    if (normalizeDocStatus(doc?.estado) === "rejected") {
+      pendientes.push(...ids);
+    } else if (contratoDocSyncCompleted(doc)) {
+      firmados.push(...ids);
+    }
+  }
+
+  // IS DISTINCT FROM mantiene la operacion idempotente: los webhooks repetidos y la
+  // reconciliacion periodica no vuelven a mover updated_at.
+  if (firmados.length) {
+    await executor.query(
+      `UPDATE anexo_tecnico_items
+       SET estado_firma = 'firmado', updated_at = NOW()
+       WHERE id = ANY($1::int[]) AND estado_firma IS DISTINCT FROM 'firmado'`,
+      [firmados]
+    );
+  }
+  if (pendientes.length) {
+    await executor.query(
+      `UPDATE anexo_tecnico_items
+       SET estado_firma = 'pendiente', updated_at = NOW()
+       WHERE id = ANY($1::int[]) AND estado_firma IS DISTINCT FROM 'pendiente'`,
+      [pendientes]
+    );
+  }
+}
+
 function buildContratoOneDriveFolderNames(proceso, personaContext) {
   const fechaStr = getContratoProcessDate(proceso, personaContext);
   const nombrePersona =
@@ -14654,6 +14712,11 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
        WHERE id = $3`,
       [JSON.stringify(nextDocs), nextEstado, proceso.id]
     );
+    try {
+      await syncAnexoItemsEstadoFirmaDesdeDocsContrato(nextDocs);
+    } catch (anexoSyncErr) {
+      console.error("Error sincronizando estado de firma del anexo tras reconciliar:", anexoSyncErr?.message || anexoSyncErr);
+    }
   }
 
   if (nextEstado === "completado") {
@@ -14896,6 +14959,9 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
         titulo: fallbackDef?.titulo || `Documento ${docIndex}`,
         template_file: fallbackDef?.template_file || null,
         empresa_key: fallbackDef?.empresa_key || null,
+        // upsertDocFirmaEntry reemplaza la entrada completa: conservar la foto del anexo.
+        anexo_item_ids:
+          docsActuales.find((d) => Number(d?.doc_index || 0) === Number(docIndex))?.anexo_item_ids || null,
         request_id: requestId || null,
         contract_id: contractId || null,
         signature_id: effectiveSignatureId || null,
@@ -14923,6 +14989,13 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
 
     await client.query("COMMIT");
     transactionOpen = false;
+
+    // Fuera de la transaccion a proposito: un fallo aqui no puede revertir el cierre de la firma.
+    try {
+      await syncAnexoItemsEstadoFirmaDesdeDocsContrato(finalDocs);
+    } catch (anexoSyncErr) {
+      console.error("Error sincronizando estado de firma del anexo desde webhook:", anexoSyncErr?.message || anexoSyncErr);
+    }
 
     if (todosFirmados) {
       try {

@@ -909,6 +909,16 @@ const CONTRATO_DOC_DEFINITIONS_ANEXO_ONLY = Object.freeze(
 const CONTRATO_VINCULADO_DOC_KEYS = new Set(
   CONTRATO_DOC_DEFINITIONS_VINCULADO.map((d) => d.doc_key)
 );
+// Documentos que NO deben identificar a la persona juridica en su cuerpo.
+// Las autorizaciones de tratamiento de datos las firma siempre una persona natural sobre
+// SUS PROPIOS datos: cuando el contratista es una empresa, quien autoriza es el representante
+// legal, no la empresa. Por eso usan ContratistaFirmaNombre/ContratistaFirmaDocumento y no
+// deben exigir ContratistaComparecencia ni el trio ContratistaNombreLegal/Documento*.
+const CONTRATO_DOCS_SIN_IDENTIFICACION_JURIDICA = new Set([
+  "autorizacion_datos_personales",
+  "autorizacion_datos_personales_vinculado",
+  "autorizacion_datos_sensibles_vinculado"
+]);
 const CONTRATO_DOC_DEFINITIONS_BY_KEY = new Map(
   [...CONTRATO_DOC_DEFINITIONS_FULL, ...CONTRATO_DOC_DEFINITIONS_VINCULADO].map((d) => [d.doc_key, d])
 );
@@ -5156,6 +5166,10 @@ async function buildContratoTemplatePayload({ docDefinition, personaContext, pro
 }
 
 function isContratoDocPersonaJuridicaCompatible(docDefinition) {
+  // Exentos: el documento es valido con persona juridica aunque no la identifique,
+  // porque a proposito debe identificar a quien firma (el representante legal).
+  const docKey = toNullableTrimmedString(docDefinition?.doc_key);
+  if (docKey && CONTRATO_DOCS_SIN_IDENTIFICACION_JURIDICA.has(docKey)) return true;
   if (!docDefinition?.template_file || !PizZip) return false;
   const binary = getDocxTemplateBinary(docDefinition.template_file, docDefinition.folder);
   const zip = new PizZip(binary);

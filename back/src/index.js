@@ -909,15 +909,23 @@ const CONTRATO_DOC_DEFINITIONS_ANEXO_ONLY = Object.freeze(
 const CONTRATO_VINCULADO_DOC_KEYS = new Set(
   CONTRATO_DOC_DEFINITIONS_VINCULADO.map((d) => d.doc_key)
 );
-// Documentos que NO deben identificar a la persona juridica en su cuerpo.
-// Las autorizaciones de tratamiento de datos las firma siempre una persona natural sobre
-// SUS PROPIOS datos: cuando el contratista es una empresa, quien autoriza es el representante
-// legal, no la empresa. Por eso usan ContratistaFirmaNombre/ContratistaFirmaDocumento y no
-// deben exigir ContratistaComparecencia ni el trio ContratistaNombreLegal/Documento*.
+// Documentos que NO deben identificar a la persona juridica en su cuerpo, cada uno por su razon:
+//
+// - Autorizaciones de tratamiento de datos: las firma siempre una persona natural sobre SUS
+//   PROPIOS datos. Cuando el contratista es una empresa, quien autoriza es el representante
+//   legal, no la empresa; por eso usan ContratistaFirmaNombre/ContratistaFirmaDocumento.
+// - Politica de garantia: no identifica a nadie a proposito. Se declara "parte integral del
+//   Contrato de Prestacion de Servicios", de donde toma la definicion de EL CONTRATISTA, y ya
+//   incluye la aceptacion expresa en su texto. Agregarle etiquetas seria texto redundante.
+//
+// Exentar significa que isContratoDocPersonaJuridicaCompatible los da por validos sin abrir el
+// DOCX. No exentar un contrato que si identifica a la parte: ese es el error que la validacion
+// existe para atrapar (imprimir a la persona natural cuando quien contrata es la empresa).
 const CONTRATO_DOCS_SIN_IDENTIFICACION_JURIDICA = new Set([
   "autorizacion_datos_personales",
   "autorizacion_datos_personales_vinculado",
-  "autorizacion_datos_sensibles_vinculado"
+  "autorizacion_datos_sensibles_vinculado",
+  "politica_garantia"
 ]);
 const CONTRATO_DOC_DEFINITIONS_BY_KEY = new Map(
   [...CONTRATO_DOC_DEFINITIONS_FULL, ...CONTRATO_DOC_DEFINITIONS_VINCULADO].map((d) => [d.doc_key, d])

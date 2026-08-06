@@ -45,14 +45,17 @@ function cargarValidador() {
 
 const PLANTILLA_SIN_MARCADORES = "<w:t>Contrato entre las partes sin identificacion juridica</w:t>";
 
-test("las autorizaciones de tratamiento de datos quedan exentas de identificar a la juridica", () => {
+test("los documentos que no identifican a la parte quedan exentos", () => {
   const { esCompatible, setXml } = cargarValidador();
   setXml(PLANTILLA_SIN_MARCADORES);
 
   for (const docKey of [
+    // Autorizaciones: las firma una persona natural sobre sus propios datos.
     "autorizacion_datos_personales",
     "autorizacion_datos_personales_vinculado",
-    "autorizacion_datos_sensibles_vinculado"
+    "autorizacion_datos_sensibles_vinculado",
+    // Politica de garantia: toma la definicion de EL CONTRATISTA del contrato al que se adhiere.
+    "politica_garantia"
   ]) {
     assert.equal(
       esCompatible({ doc_key: docKey, template_file: "cualquiera.docx" }),
@@ -74,7 +77,6 @@ test("un contrato sin marcadores sigue bloqueado", () => {
   for (const docKey of [
     "contrato_prestacion_servicios",
     "acuerdo_confidencialidad",
-    "politica_garantia",
     "anexo_tecnico",
     "cl_termino_indefinido"
   ]) {

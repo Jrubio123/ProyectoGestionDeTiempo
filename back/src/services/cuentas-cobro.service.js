@@ -3377,7 +3377,8 @@ function buildManualUploadFileName({
   fallbackName,
   buffer,
   ext,
-  sanitizeUploadFileName
+  sanitizeUploadFileName,
+  usedNames = null
 } = {}) {
   const hash = crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 12);
   const safeName = sanitizeUploadFileName(requestedName || defaultName, fallbackName, ext);
@@ -3388,7 +3389,23 @@ function buildManualUploadFileName({
   const nameWithHash = baseName.endsWith(`_${hash}`)
     ? `${baseName}${suffix}`
     : `${baseName}_${hash}${suffix}`;
-  return sanitizeUploadFileName(nameWithHash, fallbackName, ext);
+  let finalName = sanitizeUploadFileName(nameWithHash, fallbackName, ext);
+  if (!usedNames) return finalName;
+
+  // El consultor puede subir el mismo archivo dos veces (p. ej. la cuenta de cobro
+  // repetida cuando no tiene seguridad social). Nombre y hash serian identicos, y el
+  // segundo PUT sobrescribiria al primero en OneDrive dejando ambos registros
+  // apuntando al mismo webUrl, asi que desambiguamos con un consecutivo.
+  const finalBase = finalName.toLowerCase().endsWith(suffix)
+    ? finalName.slice(0, -suffix.length)
+    : finalName;
+  let copia = 2;
+  while (usedNames.has(finalName.toLowerCase())) {
+    finalName = sanitizeUploadFileName(`${finalBase}_${copia}${suffix}`, fallbackName, ext);
+    copia += 1;
+  }
+  usedNames.add(finalName.toLowerCase());
+  return finalName;
 }
 
 async function subirDocumentosManualesCuenta(req, res, deps = {}) {
@@ -3482,6 +3499,7 @@ async function subirDocumentosManualesCuenta(req, res, deps = {}) {
     }
 
     const tokenCuenta = String(cuenta.public_id || cuenta.id || "cuenta").split("-")[0];
+    const nombresUsados = new Set();
     const files = parsedFiles.map((item, index) => {
       const hash = crypto.createHash("sha256").update(item.buffer).digest("hex").slice(0, 12);
       const principal = index === 0;
@@ -3499,7 +3517,8 @@ async function subirDocumentosManualesCuenta(req, res, deps = {}) {
           fallbackName,
           buffer: item.buffer,
           ext: item.ext,
-          sanitizeUploadFileName
+          sanitizeUploadFileName,
+          usedNames: nombresUsados
         }),
         contentType: item.mime
       };

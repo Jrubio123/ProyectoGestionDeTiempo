@@ -1,6 +1,9 @@
 const { findCorreoPersonaConflict } = require("./services/persona-identidad.service");
 const { upsertPersonaDesdeContratacion } = require("./services/persona-contratacion.service");
-const { resolveTipoCuentaBancaria } = require("./services/tipo-cuenta-bancaria.service");
+const {
+  resolveTipoCuentaBancaria,
+  toLegacyTipoCuentaValue
+} = require("./services/tipo-cuenta-bancaria.service");
 
 module.exports = function registerPreregistroRoutes(deps) {
   const {
@@ -299,6 +302,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       p.tipo_documento_representante, p.numero_documento_representante,
       b.titulo AS banco_nombre,
       p.tipo_cuenta_id, tcb.public_id AS tipo_cuenta_public_id,
+      tcb.titulo AS tipo_cuenta_catalogo,
       p.tipo_cuenta, p.numero_cuenta, p.correo_silver, p.estado, p.crear_usuario_sistema,
       p.creado_por, creador.public_id AS creado_por_public_id, creador.nombre_usuario AS creado_por_nombre,
       p.completado_coordinador_por, coordDone.public_id AS completado_coordinador_por_public_id, coordDone.nombre_usuario AS completado_coordinador_por_nombre,
@@ -390,7 +394,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       numero_documento_representante: row.numero_documento_representante,
       banco: row.banco_id ? { id: row.banco_id, nombre: row.banco_nombre } : null,
       tipo_cuenta_id: row.tipo_cuenta_public_id || null,
-      tipo_cuenta: row.tipo_cuenta,
+      tipo_cuenta: row.tipo_cuenta_catalogo || row.tipo_cuenta,
       numero_cuenta: row.numero_cuenta,
       correo_silver: row.correo_silver,
       crear_usuario_sistema: row.crear_usuario_sistema !== false,
@@ -460,7 +464,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       tipo_persona: preregistroRow.tipo_persona || existingDatosExtra.tipo_persona || null,
       banco_id: preregistroRow.banco_id || existingDatosExtra.banco_id || null,
       tipo_cuenta_id: preregistroRow.tipo_cuenta_public_id || existingDatosExtra.tipo_cuenta_id || null,
-      tipo_cuenta: preregistroRow.tipo_cuenta || existingDatosExtra.tipo_cuenta || null,
+      tipo_cuenta: preregistroRow.tipo_cuenta_catalogo || preregistroRow.tipo_cuenta || existingDatosExtra.tipo_cuenta || null,
       numero_cuenta: preregistroRow.numero_cuenta || existingDatosExtra.numero_cuenta || null,
       razon_social: preregistroRow.razon_social || existingDatosExtra.razon_social || null,
       nit_empresa: preregistroRow.nit_empresa || existingDatosExtra.nit_empresa || null,
@@ -1267,7 +1271,7 @@ module.exports = function registerPreregistroRoutes(deps) {
              tipo_cuenta_id = $15
          WHERE id = $9`,
         [
-          direccion, tipoPersonaNorm, bancoId, tipoCuenta.titulo, String(numero_cuenta).trim(),
+          direccion, tipoPersonaNorm, bancoId, toLegacyTipoCuentaValue(tipoCuenta.titulo), String(numero_cuenta).trim(),
           correoSilverNorm, nextState, req.user?.id, id,
           razon_social ? String(razon_social).trim() : null,
           nit_empresa ? String(nit_empresa).trim() : null,

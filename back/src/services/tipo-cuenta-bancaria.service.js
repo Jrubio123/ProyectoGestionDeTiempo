@@ -21,6 +21,13 @@ function normalizeTipoCuentaKey(value) {
     .join(" ");
 }
 
+function toLegacyTipoCuentaValue(value) {
+  const key = normalizeTipoCuentaKey(value);
+  if (key === "ahorros") return "Ahorros";
+  if (key === "corriente") return "Corriente";
+  return null;
+}
+
 function invalidTipoCuentaError() {
   const error = new Error("Tipo de cuenta no válido o inactivo");
   error.status = 400;
@@ -71,5 +78,6 @@ async function resolveTipoCuentaBancaria(
 
 module.exports = {
   normalizeTipoCuentaKey,
+  toLegacyTipoCuentaValue,
   resolveTipoCuentaBancaria
 };

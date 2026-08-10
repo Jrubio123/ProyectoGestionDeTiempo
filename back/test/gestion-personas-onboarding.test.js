@@ -5,6 +5,7 @@ const path = require("node:path");
 
 const {
   normalizeTipoCuentaKey,
+  toLegacyTipoCuentaValue,
   resolveTipoCuentaBancaria
 } = require("../src/services/tipo-cuenta-bancaria.service");
 
@@ -23,6 +24,8 @@ test("normaliza Ahorros contra un catálogo llamado Cuenta de Ahorros", async ()
 
   assert.equal(normalizeTipoCuentaKey("Ahorros"), "ahorros");
   assert.equal(normalizeTipoCuentaKey("Cuenta de Ahorros"), "ahorros");
+  assert.equal(toLegacyTipoCuentaValue("Cuenta de Ahorros"), "Ahorros");
+  assert.equal(toLegacyTipoCuentaValue("Cuenta Corriente"), "Corriente");
   const resolved = await resolveTipoCuentaBancaria(db, {
     tipoCuentaNombre: "Ahorros",
     required: true

@@ -1,6 +1,9 @@
 const { findCorreoPersonaConflict } = require("./services/persona-identidad.service");
 const { upsertPersonaDesdeContratacion } = require("./services/persona-contratacion.service");
-const { resolveTipoCuentaBancaria } = require("./services/tipo-cuenta-bancaria.service");
+const {
+  resolveTipoCuentaBancaria,
+  toLegacyTipoCuentaValue
+} = require("./services/tipo-cuenta-bancaria.service");
 
 module.exports = function registerContratacionesRoutes(deps) {
   const {
@@ -469,7 +472,15 @@ module.exports = function registerContratacionesRoutes(deps) {
     const nextEstado = mapSolicitudEstadoToPreregistroEstado(solicitudRow.estado);
     const direccion = toNullableString(datosExtra.direccion);
     const tipoPersona = normalizeTipoPersonaForPreregistro(datosExtra.tipo_persona);
-    const tipoCuenta = toNullableString(datosExtra.tipo_cuenta);
+    const tieneTipoCuenta = Boolean(datosExtra.tipo_cuenta_id || datosExtra.tipo_cuenta);
+    const tipoCuenta = tieneTipoCuenta
+      ? await resolveTipoCuentaBancaria(db, {
+          tipoCuentaId: datosExtra.tipo_cuenta_id,
+          tipoCuentaNombre: datosExtra.tipo_cuenta,
+          required: true
+        })
+      : null;
+    const tipoCuentaLegacy = toLegacyTipoCuentaValue(tipoCuenta?.titulo);
     const numeroCuenta = toNullableString(datosExtra.numero_cuenta);
     const correoSilver = toNullableString(solicitudRow.correo_empresarial);
     const bancoId = await resolveBancoInternalId(db, datosExtra.banco_id);
@@ -495,9 +506,11 @@ module.exports = function registerContratacionesRoutes(deps) {
       sets.push(`banco_id = COALESCE($${idx++}, banco_id)`);
       values.push(bancoId);
     }
-    if (tipoCuenta !== null) {
-      sets.push(`tipo_cuenta = COALESCE($${idx++}, tipo_cuenta)`);
-      values.push(tipoCuenta);
+    if (tipoCuenta) {
+      sets.push(`tipo_cuenta_id = $${idx++}`);
+      values.push(tipoCuenta.id);
+      sets.push(`tipo_cuenta = $${idx++}`);
+      values.push(tipoCuentaLegacy);
     }
     if (numeroCuenta !== null) {
       sets.push(`numero_cuenta = COALESCE($${idx++}, numero_cuenta)`);

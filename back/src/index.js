@@ -9255,7 +9255,7 @@ function buildGestionConsultoresVisibleExpression(actorParam, scopedParam) {
         )`;
 }
 
-// GET /admin/consultores - listado de usuarios consultores activos con RBAC por responsable
+// GET /admin/consultores - listado de usuarios consultores con RBAC por responsable
 app.get("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordinador", "Comercial", "Talento Humano"] }), async (req, res) => {
   try {
     const scoped = isGestionConsultoresScopedRole(req);
@@ -9281,8 +9281,7 @@ app.get("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordina
       FROM personas p
       INNER JOIN usuarios u ON p.id = u.persona_id
       LEFT JOIN roles r    ON r.id = u.rol_usuario_id
-      WHERE u.activo = true
-        AND (
+      WHERE (
           LOWER(COALESCE(r.titulo, '')) IN ('consultor', 'consultor principal', 'mesa de servicio')
           OR NULLIF(BTRIM(COALESCE(u.tipo_consultor::text, '')), '') IS NOT NULL
         )
@@ -9931,7 +9930,6 @@ app.get("/admin/consultores/:id", requireAccess({ roles: ["Administrador", "Coor
       LEFT JOIN clientes cl              ON cl.id = p.cliente_id
       LEFT JOIN usuarios cp              ON cp.id = u.id_consultor_principal
       WHERE u.public_id = $1
-        AND u.activo = true
         AND (
           LOWER(COALESCE(r.titulo, '')) IN ('consultor', 'consultor principal', 'mesa de servicio')
           OR NULLIF(BTRIM(COALESCE(u.tipo_consultor::text, '')), '') IS NOT NULL
@@ -10110,25 +10108,49 @@ app.put("/admin/personas/:id/identidad", requireAccess({ roles: ["Administrador"
     if (!emailNormalizado || !isValidEmailFormat(emailNormalizado)) {
       return res.status(400).json({ error: "El email no tiene un formato válido" });
     }
-    if (typeof activo !== "boolean") {
-      return res.status(400).json({ error: "El estado activo es obligatorio" });
+    if (activo !== undefined && typeof activo !== "boolean") {
+      return res.status(400).json({ error: "El estado activo debe ser booleano" });
+    }
+    if (activo !== undefined && normalizeValue(req.user?.rol) !== "administrador") {
+      return res.status(403).json({ error: "Solo un administrador puede cambiar el estado del consultor" });
     }
 
     const result = await pool.query(`
-      UPDATE usuarios SET
-        nombre_usuario = $1,
-        email          = $2,
-        rol_usuario_id = $3,
-        activo         = $4,
-        azure_oid      = $5,
-        updated_at     = CURRENT_TIMESTAMP
-      WHERE public_id = $6
-      RETURNING public_id AS id, nombre_usuario, email, activo, azure_oid
+      WITH usuario_actualizado AS (
+        UPDATE usuarios SET
+          nombre_usuario = $1,
+          email          = $2,
+          rol_usuario_id = $3,
+          activo         = COALESCE($4::boolean, activo),
+          azure_oid      = $5,
+          updated_at     = CURRENT_TIMESTAMP
+        WHERE public_id = $6
+        RETURNING
+          usuarios.id AS usuario_internal_id,
+          persona_id,
+          public_id,
+          nombre_usuario,
+          email,
+          activo,
+          azure_oid
+      ),
+      persona_actualizada AS (
+        UPDATE personas p
+        SET
+          estado = CASE WHEN $4::boolean THEN 'activo' ELSE 'inactivo' END,
+          updated_at = CURRENT_TIMESTAMP
+        FROM usuario_actualizado u
+        WHERE $4::boolean IS NOT NULL
+          AND p.id = u.persona_id
+        RETURNING p.id
+      )
+      SELECT public_id AS id, nombre_usuario, email, activo, azure_oid
+      FROM usuario_actualizado
     `, [
       nombreUsuario,
       emailNormalizado,
       rolRef.id,
-      activo,
+      activo === undefined ? null : activo,
       azureOid,
       id
     ]);

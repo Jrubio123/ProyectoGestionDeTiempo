@@ -266,6 +266,20 @@ async function createAnexoIndividualItem(req, res) {
 
     const insert = await pool.query(
       `
+      WITH persona_reactivada AS (
+        UPDATE personas
+        SET estado = 'activo', updated_at = NOW()
+        WHERE id = $24::int
+          AND estado IS DISTINCT FROM 'activo'
+        RETURNING id
+      ),
+      usuario_reactivado AS (
+        UPDATE usuarios
+        SET activo = true, updated_at = NOW()
+        WHERE id = $3::int
+          AND activo IS DISTINCT FROM true
+        RETURNING id
+      )
       INSERT INTO anexo_tecnico_items (
         solicitud_contratacion_id,
         preregistro_id,
@@ -321,7 +335,8 @@ async function createAnexoIndividualItem(req, res) {
         payload.creado_por,
         null,
         solicitanteInternalId,
-        rolSolicitante
+        rolSolicitante,
+        userRow.persona_id || null
       ]
     );
 

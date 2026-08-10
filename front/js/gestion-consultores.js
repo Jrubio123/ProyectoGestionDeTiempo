@@ -5,6 +5,7 @@ window.gestionConsultoresApp = function () {
     return {
         puedeEditar: false,
         puedeAgregar: false,
+        puedeCambiarEstado: false,
         cargando: false,
         cargandoFicha: false,
         modalAddConsultorOpen: false,
@@ -85,6 +86,7 @@ window.gestionConsultoresApp = function () {
             const roleKey = window.auth?.getRoleKey?.() || "other";
             this.puedeEditar = roleKey === "admin" || roleKey === "talento_humano" || roleKey === "coordinador";
             this.puedeAgregar = ["admin", "talento_humano", "coordinador", "comercial"].includes(roleKey);
+            this.puedeCambiarEstado = roleKey === "admin";
 
             await Promise.all([
                 this.cargarPersonas(),
@@ -406,13 +408,14 @@ window.gestionConsultoresApp = function () {
             this.editando[seccion] = true;
 
             if (seccion === "identidad") {
-                this.draft.identidad = {
+                const identidad = {
                     nombre_usuario: this.ficha?.nombre_usuario || "",
                     email: this.ficha?.email || "",
                     rol_id: this.ficha?.rol_id || "",
-                    activo: Boolean(this.ficha?.activo),
                     azure_oid: this.ficha?.azure_oid || ""
                 };
+                if (this.puedeCambiarEstado) identidad.activo = Boolean(this.ficha?.activo);
+                this.draft.identidad = identidad;
                 return;
             }
 
@@ -458,6 +461,7 @@ window.gestionConsultoresApp = function () {
             this.guardando[seccion] = true;
             this.errores[seccion] = null;
             const payload = { ...this.draft[seccion] };
+            if (seccion === "identidad" && !this.puedeCambiarEstado) delete payload.activo;
 
             Object.keys(payload).forEach((k) => {
                 if (payload[k] === "") payload[k] = null;

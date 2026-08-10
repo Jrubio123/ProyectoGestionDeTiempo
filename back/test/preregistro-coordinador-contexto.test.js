@@ -113,3 +113,47 @@ test("Solicitud Nuevo reactiva la persona y el anexo permite consultar inactivos
   assert.match(coordHtml, /Se reactivara al crear la solicitud nueva/);
   assert.match(thHtml, /activas o inactivas/);
 });
+
+test("el anexo manual reactiva y solo Admin puede cambiar el estado de un consultor", () => {
+  const anexoService = fs.readFileSync(
+    path.resolve(__dirname, "../src/services/anexo-individual.service.js"),
+    "utf8"
+  );
+  const index = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  const gestionJs = fs.readFileSync(
+    path.resolve(__dirname, "../../front/js/gestion-consultores.js"),
+    "utf8"
+  );
+  const gestionHtml = fs.readFileSync(
+    path.resolve(__dirname, "../../front/views/gestion-consultores.html"),
+    "utf8"
+  );
+
+  const createSource = anexoService.slice(
+    anexoService.indexOf("async function createAnexoIndividualItem"),
+    anexoService.indexOf("async function updateAnexoIndividualItem")
+  );
+  assert.match(createSource, /persona_reactivada AS/);
+  assert.match(createSource, /usuario_reactivado AS/);
+  assert.match(createSource, /SET estado = 'activo', updated_at = NOW\(\)/);
+  assert.match(createSource, /SET activo = true, updated_at = NOW\(\)/);
+
+  const listSource = index.slice(
+    index.indexOf('app.get("/admin/consultores"'),
+    index.indexOf('app.post("/admin/consultores"')
+  );
+  const detailSource = index.slice(
+    index.indexOf('app.get("/admin/consultores/:id"'),
+    index.indexOf('app.get("/admin/personas/:id"')
+  );
+  const identitySource = index.slice(
+    index.indexOf('app.put("/admin/personas/:id/identidad"'),
+    index.indexOf('app.put("/admin/personas/:id/personal"')
+  );
+  assert.doesNotMatch(listSource, /WHERE u\.activo = true/);
+  assert.doesNotMatch(detailSource, /AND u\.activo = true/);
+  assert.match(identitySource, /normalizeValue\(req\.user\?\.rol\) !== "administrador"/);
+  assert.match(identitySource, /estado = CASE WHEN \$4::boolean THEN 'activo' ELSE 'inactivo' END/);
+  assert.match(gestionJs, /this\.puedeCambiarEstado = roleKey === "admin"/);
+  assert.match(gestionHtml, /x-show="puedeCambiarEstado"/);
+});

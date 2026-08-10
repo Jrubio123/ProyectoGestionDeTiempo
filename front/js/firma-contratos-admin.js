@@ -183,6 +183,13 @@ window.firmaContratosApp = function () {
             return docs.find(d => this.normalizeDocIndex(d?.doc_index) === target)?.estado || null;
         },
 
+        getArchivoFirmaEstado(doc) {
+            if (doc?.onedrive_url) return "subido";
+            const estado = String(doc?.archivo_estado || "").trim().toLowerCase();
+            if (estado) return estado;
+            return String(doc?.firma_estado || doc?.estado || "").toLowerCase() === "signed" ? "pendiente" : "pendiente de firma";
+        },
+
         getDocFirmaIndices(token) {
             const docs = Array.isArray(token?.docs_firma) ? token.docs_firma : [];
             return [...new Set(

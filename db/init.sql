@@ -1085,6 +1085,27 @@ COMMENT ON TABLE tokens_firma_contrato IS 'Tokens de acceso para el proceso publ
 COMMENT ON COLUMN tokens_firma_contrato.checks_completados IS 'Estado de lectura de cada PDF informativo {pdf1, pdf2, pdf3, pdf4, pdf5}';
 COMMENT ON COLUMN tokens_firma_contrato.docs_firma IS 'Array de documentos de firma con request_id ClickSign, estado y URL OneDrive';
 
+CREATE TABLE clicksign_webhook_eventos (
+    id BIGSERIAL PRIMARY KEY,
+    event_key VARCHAR(64) NOT NULL UNIQUE,
+    payload JSONB NOT NULL,
+    estado VARCHAR(20) NOT NULL DEFAULT 'pendiente'
+        CHECK (estado IN ('pendiente', 'procesando', 'procesado', 'error')),
+    intentos INTEGER NOT NULL DEFAULT 0 CHECK (intentos >= 0),
+    siguiente_intento_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    ultimo_error TEXT,
+    recibido_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    procesado_at TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_clicksign_webhook_pendientes
+    ON clicksign_webhook_eventos (siguiente_intento_at, id)
+    WHERE estado IN ('pendiente', 'error');
+
+COMMENT ON TABLE clicksign_webhook_eventos IS
+    'Bandeja durable e idempotente de webhooks Click&Sign; el evento se persiste antes de responder HTTP 200';
+
 -- ============================================================================
 -- FIRMA DE CONTRATOS: ITEMS HISTÓRICOS DEL ANEXO TÉCNICO
 -- ============================================================================

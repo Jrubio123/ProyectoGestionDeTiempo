@@ -69,13 +69,15 @@ test("marca firmados los items retratados cuando el anexo del paquete queda firm
   assert.deepEqual(db.queries[0].values, [[11, 12]]);
 });
 
-test("no marca nada mientras el PDF firmado no esté guardado en OneDrive", async () => {
+test("la firma legal marca el anexo aunque OneDrive siga pendiente", async () => {
   const sync = cargarSincronizador();
   const db = ejecutorFalso();
 
   await sync([{ ...anexoFirmado, onedrive_url: "" }], db);
 
-  assert.deepEqual(db.queries, []);
+  assert.equal(db.queries.length, 1);
+  assert.match(db.queries[0].text, /estado_firma = 'firmado'/);
+  assert.deepEqual(db.queries[0].values, [[11, 12]]);
 });
 
 test("devuelve los items a pendiente cuando la firma se rechaza", async () => {

@@ -1,4 +1,5 @@
 const { pool } = require("../db");
+const crypto = require("crypto");
 const { extractPublicIdFromContract } = require("../lib/clicksign");
 const {
   resolverFirmaCuentaVerificada
@@ -14,6 +15,100 @@ const {
 
 function getIndexHelpers() {
   return require("../index");
+}
+
+function buildClickSignWebhookEventKey(event) {
+  const payload = event && typeof event === "object" ? event : {};
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+async function enqueueSignatureEvent(event) {
+  const payload = event && typeof event === "object" ? event : {};
+  const eventKey = buildClickSignWebhookEventKey(payload);
+  const result = await pool.query(
+    `INSERT INTO clicksign_webhook_eventos (event_key, payload)
+     VALUES ($1, $2::jsonb)
+     ON CONFLICT (event_key) DO UPDATE
+       SET estado = CASE
+             WHEN clicksign_webhook_eventos.estado IN ('procesado', 'procesando')
+               THEN clicksign_webhook_eventos.estado
+             ELSE 'pendiente'
+           END,
+           siguiente_intento_at = CASE
+             WHEN clicksign_webhook_eventos.estado IN ('procesado', 'procesando')
+               THEN clicksign_webhook_eventos.siguiente_intento_at
+             ELSE NOW()
+           END,
+           updated_at = NOW()
+     RETURNING id, estado, intentos`,
+    [eventKey, JSON.stringify(payload)]
+  );
+  return result.rows[0];
+}
+
+async function processQueuedSignatureEvent(eventId) {
+  const claimed = await pool.query(
+    `UPDATE clicksign_webhook_eventos
+     SET estado = 'procesando',
+         intentos = intentos + 1,
+         updated_at = NOW()
+     WHERE id = $1
+       AND (
+         (estado IN ('pendiente', 'error') AND siguiente_intento_at <= NOW())
+         OR (estado = 'procesando' AND updated_at < NOW() - INTERVAL '5 minutes')
+       )
+     RETURNING id, payload, intentos`,
+    [eventId]
+  );
+  const queued = claimed.rows[0];
+  if (!queued) return { ok: true, skipped: "not_available" };
+
+  try {
+    await processSignatureEvent(queued.payload);
+    await pool.query(
+      `UPDATE clicksign_webhook_eventos
+       SET estado = 'procesado',
+           procesado_at = NOW(),
+           ultimo_error = NULL,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [queued.id]
+    );
+    return { ok: true, event_id: queued.id };
+  } catch (err) {
+    const retrySeconds = Math.min(15 * (2 ** Math.max(Number(queued.intentos || 1) - 1, 0)), 15 * 60);
+    const errorMessage = String(err?.message || err || "Error procesando webhook").slice(0, 4000);
+    await pool.query(
+      `UPDATE clicksign_webhook_eventos
+       SET estado = 'error',
+           ultimo_error = $2,
+           siguiente_intento_at = NOW() + ($3 * INTERVAL '1 second'),
+           updated_at = NOW()
+       WHERE id = $1`,
+      [queued.id, errorMessage, retrySeconds]
+    );
+    throw err;
+  }
+}
+
+async function jobProcesarWebhooksClickSignPendientes({ limit = 20 } = {}) {
+  const result = await pool.query(
+    `SELECT id
+     FROM clicksign_webhook_eventos
+     WHERE (estado IN ('pendiente', 'error') AND siguiente_intento_at <= NOW())
+        OR (estado = 'procesando' AND updated_at < NOW() - INTERVAL '5 minutes')
+     ORDER BY siguiente_intento_at ASC, id ASC
+     LIMIT $1`,
+    [Math.max(1, Math.min(Number(limit) || 20, 100))]
+  );
+  for (const row of result.rows) {
+    try {
+      await processQueuedSignatureEvent(row.id);
+    } catch (err) {
+      console.error(`[clicksign-webhook-job] Evento ${row.id}:`, err?.message || err);
+    }
+  }
+  return { procesados: result.rowCount };
 }
 
 function esIdentificadorContratoClickSign(valor) {
@@ -444,8 +539,13 @@ async function processSignatureEvent(event) {
     const esAnexoIndividual = esWebhookDeAnexoIndividual({ requestId, contractId });
 
     if (esContrato) {
-      await handleClickSignContratoWebhook({ event, requestId, contractId, signatureId, status, rawStatus });
-      return;
+      const handledContrato = await handleClickSignContratoWebhook({ event, requestId, contractId, signatureId, status, rawStatus });
+      if (!handledContrato) {
+        const correlationError = new Error("Webhook de contrato pendiente de correlacion local");
+        correlationError.code = "CLICKSIGN_CONTRATO_SIN_CORRELACION";
+        throw correlationError;
+      }
+      return { handled: true, tipo: "contrato" };
     }
 
     if (esAnexoIndividual) {
@@ -605,16 +705,22 @@ async function processSignatureEvent(event) {
     }
 
     if (!cuenta) {
-      console.warn("Webhook Click&Sign sin cuenta asociada:", { requestId, contractId, signatureId, rawStatus });
-      return;
+      const correlationError = new Error("Webhook Click&Sign pendiente de correlacion local");
+      correlationError.code = "CLICKSIGN_WEBHOOK_SIN_CORRELACION";
+      correlationError.context = { requestId, contractId, signatureId, rawStatus };
+      throw correlationError;
     }
 
   } catch (innerErr) {
     console.error("Error procesando webhook Click&Sign:", innerErr);
+    throw innerErr;
   }
 }
 
 module.exports = {
+  enqueueSignatureEvent,
+  processQueuedSignatureEvent,
+  jobProcesarWebhooksClickSignPendientes,
   processSignatureEvent,
   reintentarCuentaCobroFirma,
   __private: {

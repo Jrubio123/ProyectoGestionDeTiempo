@@ -1719,12 +1719,12 @@ function normalizeDocStatus(value) {
   if (["signed", "firmado", "completado", "approved", "done"].includes(normalizedRaw)) return "signed";
   if (["rejected", "rechazado", "declined", "cancelled", "canceled", "expired", "expirado", "expirada", "failed", "error"].includes(normalizedRaw)) return "rejected";
   if (["pending"].includes(normalizedRaw)) return "pending";
-  if (["sent", "started", "created", "open", "start_signature"].includes(normalizedRaw)) return "sent";
+  if (["sent", "started", "starting", "iniciando", "created", "open", "start_signature"].includes(normalizedRaw)) return "sent";
   if (["en_proceso", "in_progress", "inprogress", "en_firma"].includes(normalizedRaw)) return "en_proceso";
   if (normalizedRaw.includes("signed") || normalizedRaw.includes("completed")) return "signed";
   if (normalizedRaw.includes("rejected") || normalizedRaw.includes("declined") || normalizedRaw.includes("cancel") || normalizedRaw.includes("expired") || normalizedRaw.includes("failed") || normalizedRaw.includes("error")) return "rejected";
   if (normalizedRaw.includes("progress") || normalizedRaw.includes("en_proceso") || normalizedRaw.includes("en_firma")) return "en_proceso";
-  if (normalizedRaw.includes("start_signature") || normalizedRaw.includes("started") || normalizedRaw.includes("sent") || normalizedRaw.includes("created") || normalizedRaw.includes("open")) return "sent";
+  if (normalizedRaw.includes("start_signature") || normalizedRaw.includes("starting") || normalizedRaw.includes("started") || normalizedRaw.includes("iniciando") || normalizedRaw.includes("sent") || normalizedRaw.includes("created") || normalizedRaw.includes("open")) return "sent";
   if (normalizedRaw.includes("pending")) return "pending";
   return "pending";
 }
@@ -1914,6 +1914,12 @@ function normalizeDocsFirmaList(docsRaw, options = {}) {
           getEmpresaKeyFromContratoTemplate(def, resolvedTemplateFile, def?.empresa_key || null)
         )
         : (def?.empresa_key || toNullableTrimmedString(doc.empresa_key) || null);
+      const firmaEstado = normalizeDocStatus(doc.firma_estado || doc.estado);
+      const archivoEstado = String(doc.archivo_estado || "").trim().toLowerCase() || (
+        String(doc.onedrive_url || "").trim()
+          ? "subido"
+          : (firmaEstado === "signed" && ONEDRIVE_ENABLED ? "pendiente" : (ONEDRIVE_ENABLED ? "pendiente" : "no_aplica"))
+      );
       return {
         ...doc,
         doc_index: docIndex,
@@ -1922,7 +1928,9 @@ function normalizeDocsFirmaList(docsRaw, options = {}) {
         folder: toNullableTrimmedString(doc.folder) || def?.folder || null,
         template_file: resolvedTemplateFile,
         empresa_key: resolvedEmpresaKey,
-        estado: normalizeDocStatus(doc.estado)
+        estado: firmaEstado,
+        firma_estado: firmaEstado,
+        archivo_estado: archivoEstado
       };
     })
     .filter(Boolean)
@@ -1944,10 +1952,17 @@ function normalizeDocsFirmaListCompat(docsRaw, options = {}) {
       if (!doc || typeof doc !== "object") return null;
       const rawIndex = Number(doc.doc_index);
       const docIndex = Number.isInteger(rawIndex) && rawIndex > 0 ? rawIndex : index + 1;
+      const firmaEstado = normalizeDocStatus(doc.firma_estado || doc.estado);
       return {
         ...doc,
         doc_index: docIndex,
-        estado: normalizeDocStatus(doc.estado)
+        estado: firmaEstado,
+        firma_estado: firmaEstado,
+        archivo_estado: String(doc.archivo_estado || "").trim().toLowerCase() || (
+          String(doc.onedrive_url || "").trim()
+            ? "subido"
+            : (ONEDRIVE_ENABLED ? "pendiente" : "no_aplica")
+        )
       };
     })
     .filter(Boolean)
@@ -4075,6 +4090,125 @@ async function resolveAnexoIndividualOneDriveIdentity(proceso = {}) {
     documento: documento || null,
     folderName: sanitizePathSegment(`${nombre}_${fallbackIdentity}`, "Persona_sin_documento")
   };
+}
+
+function mergeContratoFirmaStatus(previousValue, incomingValue) {
+  const previous = normalizeDocStatus(previousValue);
+  const incoming = normalizeDocStatus(incomingValue);
+  if (previous === "signed" && incoming !== "signed") return "signed";
+  if (previous === "rejected" && !["signed", "rejected"].includes(incoming)) return "rejected";
+  return incoming;
+}
+
+function mergeContratoDocPatch(currentDoc, patch = {}) {
+  const current = currentDoc && typeof currentDoc === "object" ? currentDoc : {};
+  const definedPatch = Object.fromEntries(
+    Object.entries(patch || {}).filter(([, value]) => value !== undefined)
+  );
+  const next = { ...current, ...definedPatch };
+  if (Object.prototype.hasOwnProperty.call(definedPatch, "estado") || Object.prototype.hasOwnProperty.call(definedPatch, "firma_estado")) {
+    const incoming = definedPatch.firma_estado || definedPatch.estado;
+    const mergedStatus = mergeContratoFirmaStatus(current.firma_estado || current.estado, incoming);
+    next.estado = mergedStatus;
+    next.firma_estado = mergedStatus;
+  }
+  if (String(current.onedrive_url || "").trim() && !String(definedPatch.onedrive_url || "").trim()) {
+    next.onedrive_url = current.onedrive_url;
+    next.onedrive_carpeta = current.onedrive_carpeta || next.onedrive_carpeta || null;
+    next.onedrive_carpeta_url = current.onedrive_carpeta_url || next.onedrive_carpeta_url || null;
+    next.onedrive_id = current.onedrive_id || next.onedrive_id || null;
+    next.onedrive_nombre = current.onedrive_nombre || next.onedrive_nombre || null;
+  }
+  if (String(next.onedrive_url || "").trim()) {
+    next.archivo_estado = "subido";
+    next.archivo_error = null;
+  } else if (!ONEDRIVE_ENABLED) {
+    next.archivo_estado = "no_aplica";
+  } else if (current.archivo_estado === "subido" && definedPatch.archivo_estado !== "subido") {
+    next.archivo_estado = "subido";
+  }
+  return next;
+}
+
+function buildContratoDocPatch(previousDoc, nextDoc) {
+  const patch = {};
+  const previous = previousDoc && typeof previousDoc === "object" ? previousDoc : {};
+  const next = nextDoc && typeof nextDoc === "object" ? nextDoc : {};
+  for (const [key, value] of Object.entries(next)) {
+    if (JSON.stringify(previous[key]) !== JSON.stringify(value)) patch[key] = value;
+  }
+  return patch;
+}
+
+async function mutateContratoDocsFirma(procesoId, mutator) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `SELECT id, public_id, nombre_persona, correo_personal, estado, docs_firma,
+              solicitud_id, preregistro_id, created_at, updated_at
+       FROM tokens_firma_contrato
+       WHERE id = $1
+       FOR UPDATE`,
+      [procesoId]
+    );
+    if (!result.rows[0]) {
+      const error = new Error("Proceso de firma no encontrado");
+      error.status = 404;
+      throw error;
+    }
+    const proceso = result.rows[0];
+    const currentDocs = normalizeDocsFirmaListCompat(proceso.docs_firma);
+    const mutation = await mutator(currentDocs, proceso);
+    const rawDocs = Array.isArray(mutation) ? mutation : mutation?.docs;
+    const nextDocs = normalizeDocsFirmaListCompat(Array.isArray(rawDocs) ? rawDocs : currentDocs);
+    const nextEstado = nextDocs.length > 0 && nextDocs.every((doc) => contratoDocSyncCompleted(doc))
+      ? "completado"
+      : (proceso.estado === "expirado" ? "expirado" : "en_proceso");
+    const changed = JSON.stringify(currentDocs) !== JSON.stringify(nextDocs) || nextEstado !== proceso.estado;
+    if (changed) {
+      await client.query(
+        `UPDATE tokens_firma_contrato
+         SET docs_firma = $1::jsonb,
+             estado = $2,
+             updated_at = NOW()
+         WHERE id = $3`,
+        [JSON.stringify(nextDocs), nextEstado, proceso.id]
+      );
+    }
+    await client.query("COMMIT");
+    return {
+      proceso: { ...proceso, docs_firma: nextDocs, estado: nextEstado },
+      docs_firma: nextDocs,
+      estado: nextEstado,
+      changed,
+      meta: Array.isArray(mutation) ? null : mutation?.meta || null
+    };
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch (_) { }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function patchContratoDocFirmaSafely({ procesoId, docIndex, expectedRequestId = "", patch = {} }) {
+  return mutateContratoDocsFirma(procesoId, (docs) => {
+    const target = Number(docIndex);
+    let stale = false;
+    let matched = false;
+    const nextDocs = docs.map((doc) => {
+      if (Number(doc?.doc_index || 0) !== target) return doc;
+      matched = true;
+      const currentRequestId = String(doc?.request_id || "").trim();
+      if (expectedRequestId && currentRequestId && currentRequestId !== expectedRequestId) {
+        stale = true;
+        return doc;
+      }
+      return mergeContratoDocPatch(doc, patch);
+    });
+    return { docs: nextDocs, meta: { matched, stale } };
+  });
 }
 
 async function uploadAnexoIndividualFirmadoToOneDrive(proceso, pdfBuffer, fileName) {
@@ -7459,6 +7593,7 @@ async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = ""
 
   let pendingCandidate = null;
   let lastEvent = null;
+  const lookupErrors = [];
 
   for (const lookup of lookupRequests) {
     try {
@@ -7525,17 +7660,29 @@ async function fetchClickSignSignatureSnapshot({ requestId = "", contractId = ""
         };
       }
     } catch (err) {
-      // Algunos endpoints no existen según plan contratado; se ignoran.
+      lookupErrors.push({
+        status: Number(err?.status || 0) || null,
+        message: String(err?.message || ""),
+        detail: typeof err?.response === "string" ? err.response : JSON.stringify(err?.response || {})
+      });
     }
   }
 
   if (pendingCandidate) return pendingCandidate;
+  const invalidReference = lookupErrors.some((lookupError) => {
+    const detail = `${lookupError.message || ""} ${lookupError.detail || ""}`.toLowerCase();
+    return [400, 404, 410].includes(Number(lookupError.status || 0)) && (
+      detail.includes("invalid") || detail.includes("not found") || detail.includes("no existe")
+    );
+  });
   return {
     event: lastEvent || {},
-    rawStatus: "",
+    rawStatus: invalidReference ? "INVALID_SIGNATURE_REFERENCE" : "",
     status: "",
     signatureId: String(signatureId || extractClickSignSignatureId(lastEvent || {}) || "").trim() || null,
-    source: ""
+    source: "",
+    invalidReference,
+    lookupErrors
   };
 }
 
@@ -8324,6 +8471,7 @@ function buildContratoFirmaCompletadaEmail({ proceso, docs = [] }) {
     String(links.find((doc) => String(doc?.carpeta_url || "").trim())?.carpeta_url || "").trim() ||
     deriveOneDriveFolderUrlFromFileUrl(String(links.find((doc) => String(doc?.url || "").trim())?.url || "").trim()) ||
     "";
+  const todosArchivados = links.length > 0 && links.every((doc) => String(doc?.url || "").trim());
 
   const metaLines = [
     `Persona: ${nombre || "Sin nombre"}`,
@@ -8334,9 +8482,14 @@ function buildContratoFirmaCompletadaEmail({ proceso, docs = [] }) {
     carpetaOneDrive ? `Carpeta OneDrive: ${carpetaOneDrive}` : null
   ].filter(Boolean);
 
-  const docLines = links.map((doc) => `- ${doc.titulo}: ${doc.url}`);
+  const docLines = links.map((doc) => doc.url
+    ? `- ${doc.titulo}: ${doc.url}`
+    : `- ${doc.titulo}: firma confirmada; archivo automatico pendiente`
+  );
   const text = [
-    `El contrato de ${nombre || "la persona"} ya fue firmado y los documentos quedaron disponibles en OneDrive.`,
+    todosArchivados
+      ? `El contrato de ${nombre || "la persona"} ya fue firmado y los documentos quedaron disponibles en OneDrive.`
+      : `El contrato de ${nombre || "la persona"} ya fue firmado. Uno o mas documentos siguen pendientes de archivo automatico en OneDrive.`,
     "",
     ...metaLines,
     "",
@@ -8349,7 +8502,9 @@ function buildContratoFirmaCompletadaEmail({ proceso, docs = [] }) {
     .map((doc) => `
       <li style="margin:0 0 10px;">
         <strong>${escapeHtmlText(doc.titulo)}</strong><br>
-        <a href="${escapeHtmlText(doc.url)}" style="color:#2563eb;text-decoration:none;">${escapeHtmlText(doc.url)}</a>
+        ${doc.url
+          ? `<a href="${escapeHtmlText(doc.url)}" style="color:#2563eb;text-decoration:none;">${escapeHtmlText(doc.url)}</a>`
+          : '<span style="color:#b45309;">Firma confirmada; archivo automatico pendiente</span>'}
       </li>
     `)
     .join("");
@@ -8369,7 +8524,9 @@ function buildContratoFirmaCompletadaEmail({ proceso, docs = [] }) {
     <tr>
       <td style="padding:28px 32px;">
         <p style="margin:0 0 18px;font-size:15px;">
-          El contrato de <strong>${escapeHtmlText(nombre || "la persona")}</strong> ya fue firmado y los documentos quedaron almacenados en OneDrive.
+          ${todosArchivados
+            ? `El contrato de <strong>${escapeHtmlText(nombre || "la persona")}</strong> ya fue firmado y los documentos quedaron almacenados en OneDrive.`
+            : `El contrato de <strong>${escapeHtmlText(nombre || "la persona")}</strong> ya fue firmado. El archivo automatico en OneDrive sigue pendiente para uno o mas documentos.`}
         </p>
         <p style="margin:0 0 10px;font-size:13px;color:#475569;font-weight:700;">Datos del proceso</p>
         <ul style="margin:0 0 22px 18px;padding:0;font-size:14px;color:#334155;">
@@ -8462,11 +8619,6 @@ async function notifyContratoFirmaCompletada(tokenId) {
       await client.query("ROLLBACK");
       return { ok: false, skipped: "no_signed_docs" };
     }
-    if (docs.some((doc) => !doc.url)) {
-      await client.query("ROLLBACK");
-      return { ok: false, skipped: "pending_onedrive_upload" };
-    }
-
     const mail = buildContratoFirmaCompletadaEmail({ proceso, docs });
     const sendResult = await sendEmailSafe({
       graphUserEmail: CONTRATOS_FIRMA_COMPLETADA_SENDER || ONEDRIVE_TARGET_USER,
@@ -12662,7 +12814,7 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       !isClickSignInvalidSignatureReference(docExistente)
     ) {
       scheduleContratoReconciliation(tokenId, idx, {
-        delayMs: 60 * 1000,
+        delayMs: 15 * 1000,
         reason: "firma_link_reabierto"
       });
       return res.json({
@@ -12708,13 +12860,29 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
     const docTitulo = `${docDefinitionTitulo}_${personaSlug}`;
     const publicIdToken = req.tokenFirma.token_public_id;
     const tokenRef = publicIdToken || String(tokenId || "token");
-    const requestId = `CF-${tokenRef}-${docDefinitionKey}-${Date.now()}`;
-    const contractId = `contrato_${tokenRef}_${docDefinitionKey}_${idx}`;
+    const attemptTimestamp = Date.now();
+    const attemptRef = attemptTimestamp.toString(36);
+    const requestId = `CF-${tokenRef}-${docDefinitionKey}-${attemptTimestamp}`;
+    const contractId = `contrato_${tokenRef}_${docDefinitionKey}_${attemptRef}_${idx}`;
     const signatoryExternalId = String(tokenId || req.tokenFirma.token_public_id || idx || Date.now());
     const fileName = sanitizePdfFileName(
       `${docTitulo}.pdf`,
       `Contrato_${docDefinitionKey}_${idx}.pdf`
     );
+
+    // Foto durable de las filas del anexo impresas en el PDF. Se toma antes de
+    // llamar a Click&Sign para que un fallo posterior no deje el envio sin contexto.
+    let anexoItemIds = Array.isArray(docExistente?.anexo_item_ids) ? docExistente.anexo_item_ids : null;
+    if (docDefinitionKey === "anexo_tecnico") {
+      try {
+        const anexoItems = await requirePersistedAnexoFromProceso(proceso, personaContext);
+        anexoItemIds = (anexoItems || [])
+          .map((item) => Number(item?.id))
+          .filter((id) => Number.isInteger(id) && id > 0);
+      } catch (anexoIdsErr) {
+        console.error("No se pudieron registrar los items del anexo para la firma:", anexoIdsErr?.message || anexoIdsErr);
+      }
+    }
 
     const clicksignPayload = {
       request: "START_SIGNATURE",
@@ -12777,6 +12945,99 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
       clicksignPayload.signature.signatory_email_cb_url = signatoryEmailCbUrl;
     }
 
+    // Reserva local primero. Así request_id/contract_id sobreviven aunque Click&Sign
+    // acepte el envio y el servidor falle antes de guardar su respuesta.
+    let reservationMode = "reserved";
+    let reservedDoc = null;
+    await mutateContratoDocsFirma(tokenId, (currentDocs) => {
+      const current = currentDocs.find((doc) => Number(doc?.doc_index || 0) === idx);
+      if (!current) {
+        const error = new Error("El documento ya no esta habilitado para este proceso");
+        error.status = 409;
+        throw error;
+      }
+      const currentStatus = normalizeDocStatus(current.firma_estado || current.estado);
+      if (currentStatus === "signed") {
+        reservationMode = "signed";
+        reservedDoc = current;
+        return currentDocs;
+      }
+      if (current.request_id && currentStatus !== "rejected" && !isClickSignInvalidSignatureReference(current)) {
+        reservationMode = current.url_firma ? "reuse" : "busy";
+        reservedDoc = current;
+        return currentDocs;
+      }
+      const nowIso = new Date().toISOString();
+      reservedDoc = mergeContratoDocPatch(current, {
+        doc_index: idx,
+        doc_key: docDefinitionKey,
+        titulo: docDefinitionTitulo,
+        template_file: docDefinition.template_file,
+        empresa_key: docDefinition.empresa_key || null,
+        anexo_item_ids: anexoItemIds,
+        request_id: requestId,
+        contract_id: contractId,
+        signature_id: null,
+        estado: "sent",
+        firma_estado: "sent",
+        url_firma: null,
+        iniciado_en: nowIso,
+        firmado_en: null,
+        ultimo_evento: "START_SIGNATURE_RESERVED",
+        ultimo_error: null,
+        reconciliado_en: null,
+        reconciliado_origen: null,
+        reconciliacion_estado: "pendiente",
+        reconciliacion_error: null,
+        clicksign_origen: null,
+        archivo_estado: ONEDRIVE_ENABLED ? "pendiente" : "no_aplica",
+        archivo_error: null,
+        onedrive_url: null,
+        onedrive_carpeta: null,
+        onedrive_carpeta_url: null,
+        onedrive_id: null,
+        onedrive_nombre: null
+      });
+      // Este es un intento nuevo confirmado; permite salir de rejected o de una
+      // referencia Click&Sign invalida sin debilitar la proteccion general antirregresion.
+      reservedDoc.estado = "sent";
+      reservedDoc.firma_estado = "sent";
+      reservedDoc.archivo_estado = ONEDRIVE_ENABLED ? "pendiente" : "no_aplica";
+      reservedDoc.archivo_error = null;
+      reservedDoc.onedrive_url = null;
+      reservedDoc.onedrive_carpeta = null;
+      reservedDoc.onedrive_carpeta_url = null;
+      reservedDoc.onedrive_id = null;
+      reservedDoc.onedrive_nombre = null;
+      return upsertDocFirmaEntry(currentDocs, reservedDoc);
+    });
+
+    if (reservationMode === "signed") {
+      return res.status(409).json({ error: "Este documento ya fue firmado", estado: "signed", doc_index: idx });
+    }
+    if (reservationMode === "reuse") {
+      scheduleContratoReconciliation(tokenId, idx, { delayMs: 15 * 1000, reason: "firma_link_reabierto_concurrente" });
+      return res.json({
+        url_firma: reservedDoc.url_firma,
+        request_id: reservedDoc.request_id || null,
+        contract_id: reservedDoc.contract_id || null,
+        signature_id: reservedDoc.signature_id || null,
+        doc_index: idx,
+        doc_key: reservedDoc.doc_key || docDefinitionKey,
+        ya_iniciado: true
+      });
+    }
+    if (reservationMode === "busy") {
+      scheduleContratoReconciliation(tokenId, idx, { delayMs: 15 * 1000, reason: "firma_inicio_pendiente" });
+      return res.status(409).json({
+        error: "La firma ya se esta iniciando. Espera unos segundos y vuelve a consultar.",
+        request_id: reservedDoc.request_id || null,
+        contract_id: reservedDoc.contract_id || null,
+        doc_index: idx,
+        recuperacion_automatica: true
+      });
+    }
+
     let clicksignRes = null;
     try {
       clicksignRes = await jsonRequest({
@@ -12786,10 +13047,29 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
         body: clicksignPayload
       });
     } catch (clickSignErr) {
+      const nowIso = new Date().toISOString();
+      await patchContratoDocFirmaSafely({
+        procesoId: tokenId,
+        docIndex: idx,
+        expectedRequestId: requestId,
+        patch: {
+          ultimo_evento: "START_SIGNATURE_ERROR",
+          ultimo_error: String(clickSignErr?.response || clickSignErr?.message || "Error desconocido").slice(0, 2000),
+          reconciliacion_estado: "pendiente",
+          reconciliacion_error: null,
+          reconciliado_en: nowIso,
+          reconciliado_origen: "firma_inicio_error"
+        }
+      });
+      scheduleContratoReconciliation(tokenId, idx, { delayMs: 15 * 1000, reason: "firma_inicio_error_ambiguo" });
       return res.status(502).json({
         error: "Error al iniciar firma en Click&Sign",
         detalle: clickSignErr?.response || clickSignErr?.message || "Error desconocido",
-        http_status: Number(clickSignErr?.status || 0) || null
+        http_status: Number(clickSignErr?.status || 0) || null,
+        request_id: requestId,
+        contract_id: contractId,
+        doc_index: idx,
+        recuperacion_automatica: true
       });
     }
 
@@ -12810,71 +13090,61 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
     const resolvedRequestId = responseRequestId || requestId;
     const signatureId = extractClickSignSignatureId(clicksignBody);
     if (!urlFirma) {
+      await patchContratoDocFirmaSafely({
+        procesoId: tokenId,
+        docIndex: idx,
+        expectedRequestId: requestId,
+        patch: {
+          request_id: requestId,
+          clicksign_request_id: responseRequestId || null,
+          signature_id: signatureId || null,
+          ultimo_evento: "START_SIGNATURE_WITHOUT_URL",
+          ultimo_error: "Click&Sign acepto la solicitud pero no devolvio URL de firma",
+          reconciliacion_estado: "pendiente"
+        }
+      });
+      scheduleContratoReconciliation(tokenId, idx, { delayMs: 15 * 1000, reason: "firma_inicio_sin_url" });
       return res.status(502).json({
         error: "Click&Sign no devolvio URL de firma.",
         detalle: clicksignBody,
         request_id: resolvedRequestId || null,
         doc_index: idx,
-        doc_key: docDefinitionKey
+        doc_key: docDefinitionKey,
+        recuperacion_automatica: true
       });
     }
 
-    // Foto de las filas del anexo que quedaron impresas en el PDF enviado a Click&Sign,
-    // para poder marcarlas como firmadas cuando se confirme la firma (misma idea que
-    // anexo_item_ids en tokens_firma_anexo_individual).
-    let anexoItemIds = Array.isArray(docExistente?.anexo_item_ids) ? docExistente.anexo_item_ids : null;
-    if (docDefinitionKey === "anexo_tecnico") {
-      try {
-        const anexoItems = await requirePersistedAnexoFromProceso(proceso, personaContext);
-        anexoItemIds = (anexoItems || [])
-          .map((item) => Number(item?.id))
-          .filter((id) => Number.isInteger(id) && id > 0);
-      } catch (anexoIdsErr) {
-        console.error("No se pudieron registrar los items del anexo para la firma:", anexoIdsErr?.message || anexoIdsErr);
-      }
-    }
-
-    const docEntry = {
-      ...docExistente,
-      doc_index: idx,
-      doc_key: docDefinitionKey,
-      titulo: docDefinitionTitulo,
-      template_file: docDefinition.template_file,
-      empresa_key: docDefinition.empresa_key || null,
-      anexo_item_ids: anexoItemIds,
-      request_id: resolvedRequestId || null,
+    const finalPatch = {
+      request_id: requestId,
+      clicksign_request_id: responseRequestId || null,
       contract_id: contractId,
       signature_id: signatureId || null,
       estado: "sent",
+      firma_estado: "sent",
       url_firma: urlFirma || null,
-      iniciado_en: new Date().toISOString(),
-      firmado_en: null,
-      ultimo_evento: null,
-      reconciliado_en: null,
-      reconciliado_origen: null,
-      clicksign_origen: null,
-      onedrive_url: null,
-      onedrive_carpeta: null,
-      onedrive_carpeta_url: null,
-      onedrive_id: null,
-      onedrive_nombre: null
+      ultimo_evento: "START_SIGNATURE",
+      ultimo_error: null,
+      reconciliacion_estado: "pendiente",
+      reconciliacion_error: null
     };
-
-    const nuevaLista = upsertDocFirmaEntry(docsActuales, docEntry, {
-      facturaEnColombia: personaContext?.facturaEnColombia ?? null
+    const persisted = await patchContratoDocFirmaSafely({
+      procesoId: tokenId,
+      docIndex: idx,
+      expectedRequestId: requestId,
+      patch: finalPatch
     });
-    await pool.query(
-      `UPDATE tokens_firma_contrato SET docs_firma = $1::jsonb, updated_at = NOW() WHERE id = $2`,
-      [JSON.stringify(nuevaLista), tokenId]
-    );
+    if (persisted.meta?.stale) {
+      return res.status(409).json({ error: "La firma cambio mientras se iniciaba. Consulta nuevamente el estado." });
+    }
     scheduleContratoReconciliation(tokenId, idx, {
-      delayMs: 60 * 1000,
+      delayMs: 15 * 1000,
       reason: "firma_link_iniciado"
     });
 
     res.json({
       url_firma: urlFirma || null,
-      request_id: resolvedRequestId || null,
+      request_id: requestId,
+      clicksign_request_id: responseRequestId || null,
       contract_id: contractId,
       signature_id: signatureId || null,
       doc_index: idx,
@@ -12883,6 +13153,9 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
   } catch (err) {
     console.error("Error iniciando firma de contrato:", err);
     const errMessage = String(err?.message || "");
+    if ([404, 409].includes(Number(err?.status || 0))) {
+      return res.status(Number(err.status)).json({ error: errMessage || "El proceso de firma cambio; consulta nuevamente" });
+    }
     if (Number(err?.status || 0) === 422) {
       return res.status(422).json({ error: errMessage || "No fue posible iniciar la firma del documento" });
     }
@@ -14786,9 +15059,8 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, opt
 }
 
 function contratoDocNeedsReconciliation(doc = {}) {
-  const status = normalizeDocStatus(doc?.estado);
+  const status = normalizeDocStatus(doc?.firma_estado || doc?.estado);
   const ultimoEvento = String(doc?.ultimo_evento || "").trim().toLowerCase();
-  if (ultimoEvento.includes("invalid id in signature_id")) return false;
   const hasIdentifiers = Boolean(
     String(doc?.request_id || "").trim() ||
     String(doc?.contract_id || "").trim() ||
@@ -14796,18 +15068,20 @@ function contratoDocNeedsReconciliation(doc = {}) {
   );
   if (!hasIdentifiers) return false;
   if (status === "rejected") return false;
-  if (status === "signed" && String(doc?.onedrive_url || "").trim()) return false;
+  if (status === "signed") {
+    return ONEDRIVE_ENABLED && !String(doc?.onedrive_url || "").trim();
+  }
+  if (isClickSignInvalidSignatureReference(doc)) return false;
   return true;
 }
 
 function contratoDocSyncCompleted(doc = {}) {
-  if (normalizeDocStatus(doc?.estado) !== "signed") return false;
-  if (!ONEDRIVE_ENABLED) return true;
-  return Boolean(String(doc?.onedrive_url || "").trim());
+  return normalizeDocStatus(doc?.firma_estado || doc?.estado) === "signed";
 }
 
 function isClickSignInvalidSignatureReference(doc = {}) {
-  return String(doc?.ultimo_evento || "").trim().toLowerCase().includes("invalid id in signature_id");
+  const event = String(doc?.ultimo_evento || "").trim().toLowerCase();
+  return event.includes("invalid id in signature_id") || event.includes("invalid_signature_reference");
 }
 
 async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reason = "manual" } = {}) {
@@ -14861,7 +15135,9 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
       const previousStatus = normalizeDocStatus(doc?.estado);
       const statusInfo = extractClickSignDocumentStatus(event);
       const rawStatus = String(statusInfo.rawStatus || snapshot?.rawStatus || snapshot?.status || doc?.ultimo_evento || doc?.estado || "pending").trim();
-      let nextStatus = statusInfo.status || normalizeClickSignStatus(rawStatus);
+      let nextStatus = snapshot?.invalidReference
+        ? previousStatus
+        : (statusInfo.status || normalizeClickSignStatus(rawStatus));
       let oneDriveInfo = null;
       let signedPdfSource = "";
       let artifactsSource = "";
@@ -14869,6 +15145,7 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
       let uploadError = "";
       let pdfDisponible = false;
       let uploadCompleted = Boolean(String(doc?.onedrive_url || "").trim());
+      let archivoEstado = uploadCompleted ? "subido" : (ONEDRIVE_ENABLED ? "pendiente" : "no_aplica");
 
       if (!nextStatus) nextStatus = previousStatus || "pending";
       if (["sent", "en_proceso"].includes(previousStatus) && nextStatus === "pending") {
@@ -14899,14 +15176,11 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
               uploadCompleted = Boolean(oneDriveInfo?.archivo?.url);
             } catch (uploadErr) {
               uploadError = uploadErr?.message || String(uploadErr);
+              archivoEstado = "error";
               console.error("Error subiendo contrato reconciliado a OneDrive:", uploadErr?.message || uploadErr);
             }
           }
-          if (uploadCompleted || previousStatus === "signed") {
-            nextStatus = "signed";
-          } else {
-            nextStatus = "en_proceso";
-          }
+          if (uploadCompleted) archivoEstado = "subido";
         }
       }
 
@@ -14915,10 +15189,20 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
         ...doc,
         signature_id: signatureId || snapshotSignatureId || doc?.signature_id || null,
         estado: nextStatus || doc?.estado || "pending",
+        firma_estado: nextStatus || doc?.firma_estado || doc?.estado || "pending",
         ultimo_evento: rawStatus || doc?.ultimo_evento || null,
         reconciliado_en: nowIso,
         reconciliado_origen: reason,
-        clicksign_origen: snapshot?.source || doc?.clicksign_origen || null
+        reconciliacion_estado: snapshot?.invalidReference ? "referencia_invalida" : "completado",
+        reconciliacion_intentos: Number(doc?.reconciliacion_intentos || 0) + 1,
+        reconciliacion_error: snapshot?.invalidReference
+          ? "Click&Sign confirmo que los identificadores reservados no existen"
+          : null,
+        clicksign_origen: snapshot?.source || doc?.clicksign_origen || null,
+        archivo_estado: archivoEstado,
+        archivo_error: uploadError || null,
+        archivo_intentos: Number(doc?.archivo_intentos || 0) + (pdfDisponible && !String(doc?.onedrive_url || "").trim() ? 1 : 0),
+        ultimo_intento_archivo_en: pdfDisponible && !String(doc?.onedrive_url || "").trim() ? nowIso : (doc?.ultimo_intento_archivo_en || null)
       };
       if (nextStatus === "signed" && !nextDoc.firmado_en) {
         nextDoc.firmado_en = nowIso;
@@ -14949,6 +15233,14 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
         source: signedPdfSource || snapshot?.source || null
       });
     } catch (err) {
+      const nowIso = new Date().toISOString();
+      nextDoc = mergeContratoDocPatch(doc, {
+        reconciliado_en: nowIso,
+        reconciliado_origen: reason,
+        reconciliacion_estado: "error",
+        reconciliacion_intentos: Number(doc?.reconciliacion_intentos || 0) + 1,
+        reconciliacion_error: String(err?.message || err).slice(0, 2000)
+      });
       console.error("Error reconciliando documento de contrato:", {
         proceso_id: proceso?.id || null,
         doc_index: currentIndex || null,
@@ -14965,22 +15257,38 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
     nextDocs.push(nextDoc);
   }
 
-  const nextEstado =
-    nextDocs.length > 0 && nextDocs.every((item) => contratoDocSyncCompleted(item))
-      ? "completado"
-      : (proceso?.estado === "expirado" ? "expirado" : "en_proceso");
+  const patchesByIndex = new Map();
+  for (const nextDoc of nextDocs) {
+    const original = docsActuales.find((doc) => Number(doc?.doc_index || 0) === Number(nextDoc?.doc_index || 0));
+    if (!original) continue;
+    const patch = buildContratoDocPatch(original, nextDoc);
+    if (Object.keys(patch).length) {
+      patchesByIndex.set(Number(nextDoc.doc_index), {
+        patch,
+        expectedRequestId: String(original.request_id || "").trim()
+      });
+    }
+  }
 
-  if (changed || nextEstado !== proceso?.estado) {
-    await pool.query(
-      `UPDATE tokens_firma_contrato
-       SET docs_firma = $1::jsonb,
-           estado = $2,
-           updated_at = NOW()
-       WHERE id = $3`,
-      [JSON.stringify(nextDocs), nextEstado, proceso.id]
-    );
+  const persisted = await mutateContratoDocsFirma(proceso.id, (currentDocs) => {
+    const mergedDocs = currentDocs.map((current) => {
+      const update = patchesByIndex.get(Number(current?.doc_index || 0));
+      if (!update) return current;
+      const currentRequestId = String(current?.request_id || "").trim();
+      if (update.expectedRequestId && currentRequestId && currentRequestId !== update.expectedRequestId) {
+        return current;
+      }
+      return mergeContratoDocPatch(current, update.patch);
+    });
+    return mergedDocs;
+  });
+  const persistedDocs = persisted.docs_firma;
+  const nextEstado = persisted.estado;
+  changed = changed || persisted.changed;
+
+  if (persisted.changed) {
     try {
-      await syncAnexoItemsEstadoFirmaDesdeDocsContrato(nextDocs);
+      await syncAnexoItemsEstadoFirmaDesdeDocsContrato(persistedDocs);
     } catch (anexoSyncErr) {
       console.error("Error sincronizando estado de firma del anexo tras reconciliar:", anexoSyncErr?.message || anexoSyncErr);
     }
@@ -14997,10 +15305,10 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
   return {
     proceso: {
       ...proceso,
-      docs_firma: nextDocs,
+      docs_firma: persistedDocs,
       estado: nextEstado
     },
-    docs_firma: nextDocs,
+    docs_firma: persistedDocs,
     estado: nextEstado,
     changed: changed || nextEstado !== proceso?.estado,
     reconciled
@@ -15029,7 +15337,7 @@ function scheduleContratoReconciliation(
         `SELECT id, public_id, nombre_persona, correo_personal, estado, docs_firma,
                 solicitud_id, preregistro_id, created_at
          FROM tokens_firma_contrato
-         WHERE id = $1 AND estado = 'en_proceso'
+         WHERE id = $1 AND estado IN ('en_proceso', 'completado')
          LIMIT 1`,
         [procesoId]
       );
@@ -15049,240 +15357,186 @@ function scheduleContratoWebhookRetry(procesoId, docIndex) {
   });
 }
 
+
+async function findContratoProcessByClickSignIdentifiers({ requestId = "", contractId = "", signatureId = "" } = {}) {
+  const candidates = [
+    ["request_id", String(requestId || "").trim()],
+    ["clicksign_request_id", String(requestId || "").trim()],
+    ["signature_id", String(signatureId || "").trim()],
+    ["contract_id", String(contractId || "").trim()]
+  ].filter(([, value]) => value);
+  for (const [field, value] of candidates) {
+    const result = await pool.query(
+      `SELECT id, public_id, nombre_persona, correo_personal, estado, docs_firma,
+              solicitud_id, preregistro_id, created_at
+       FROM tokens_firma_contrato
+       WHERE docs_firma @> $1::jsonb
+         AND estado IN ('en_proceso', 'completado')
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [JSON.stringify([{ [field]: value }])]
+    );
+    if (!result.rows[0]) continue;
+    const proceso = result.rows[0];
+    const matchedDoc = normalizeDocsFirmaListCompat(proceso.docs_firma)
+      .find((doc) => String(doc?.[field] || "").trim() === value) || null;
+    if (matchedDoc) return { proceso, matchedDoc };
+  }
+  return null;
+}
+
 async function handleClickSignContratoWebhook({ event, requestId, contractId, signatureId = "", status, rawStatus }) {
   const eventStatusInfo = extractClickSignDocumentStatus(event);
-  const resolvedStatus = ["signed", "rejected"].includes(status)
-    ? status
-    : eventStatusInfo.status;
-  const resolvedRawStatus = rawStatus || eventStatusInfo.rawStatus || resolvedStatus || "";
-  status = resolvedStatus;
-  rawStatus = resolvedRawStatus;
-  if (status !== "signed" && status !== "rejected") return false;
+  status = ["signed", "rejected"].includes(status) ? status : eventStatusInfo.status;
+  rawStatus = rawStatus || eventStatusInfo.rawStatus || status || "";
+  if (!["signed", "rejected"].includes(status)) return false;
 
-  const client = await pool.connect();
-  let transactionOpen = false;
-  const rollbackIfOpen = async () => {
-    if (!transactionOpen) return;
-    await client.query("ROLLBACK");
-    transactionOpen = false;
-  };
+  const incomingSignatureId = String(signatureId || extractClickSignSignatureId(event) || "").trim();
+  const found = await findContratoProcessByClickSignIdentifiers({ requestId, contractId, signatureId: incomingSignatureId });
+  if (!found) {
+    console.warn("Webhook contrato: no se encontro proceso para", { requestId, contractId, signatureId: incomingSignatureId });
+    return false;
+  }
+
+  const { proceso, matchedDoc } = found;
+  let docIndex = Number(matchedDoc?.doc_index || 0);
+  if (!docIndex && contractId) {
+    const match = String(contractId).match(/_(\d+)$/);
+    docIndex = Number(match?.[1] || 0);
+  }
+  if (!docIndex) return false;
+
+  const nowIso = new Date().toISOString();
+  const effectiveSignatureId = incomingSignatureId || String(matchedDoc?.signature_id || "").trim();
+  const signedPersisted = await patchContratoDocFirmaSafely({
+    procesoId: proceso.id,
+    docIndex,
+    patch: {
+      signature_id: effectiveSignatureId || null,
+      estado: status,
+      firma_estado: status,
+      firmado_en: status === "signed" ? (matchedDoc?.firmado_en || nowIso) : (matchedDoc?.firmado_en || null),
+      ultimo_evento: rawStatus || matchedDoc?.ultimo_evento || status,
+      ultimo_error: null,
+      reconciliado_en: nowIso,
+      reconciliado_origen: "webhook",
+      reconciliacion_estado: "completado",
+      reconciliacion_intentos: Number(matchedDoc?.reconciliacion_intentos || 0) + 1,
+      reconciliacion_error: null,
+      archivo_estado: status === "signed"
+        ? (String(matchedDoc?.onedrive_url || "").trim() ? "subido" : (ONEDRIVE_ENABLED ? "pendiente" : "no_aplica"))
+        : (matchedDoc?.archivo_estado || (ONEDRIVE_ENABLED ? "pendiente" : "no_aplica"))
+    }
+  });
+  if (!signedPersisted.meta?.matched) return false;
 
   try {
-    await client.query("BEGIN");
-    transactionOpen = true;
-
-    // Buscar el proceso por request_id, contract_id o signature_id en docs_firma.
-    const incomingSignatureId = String(signatureId || extractClickSignSignatureId(event) || "").trim();
-    let proceso = null;
-    let docIndex = null;
-    let matchedDoc = null;
-
-    if (requestId) {
-      const r = await client.query(
-        `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at
-         FROM tokens_firma_contrato
-         WHERE docs_firma @> $1::jsonb AND estado = 'en_proceso'
-         LIMIT 1
-         FOR UPDATE`,
-        [JSON.stringify([{ request_id: requestId }])]
-      );
-      if (r.rowCount > 0) {
-        proceso = r.rows[0];
-        matchedDoc = normalizeDocsFirmaListCompat(proceso.docs_firma).find((d) => d.request_id === requestId) || null;
-        docIndex = matchedDoc?.doc_index || null;
-      }
-    }
-
-    if (!proceso && incomingSignatureId) {
-      const r = await client.query(
-        `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at
-         FROM tokens_firma_contrato
-         WHERE docs_firma @> $1::jsonb AND estado = 'en_proceso'
-         LIMIT 1
-         FOR UPDATE`,
-        [JSON.stringify([{ signature_id: incomingSignatureId }])]
-      );
-      if (r.rowCount > 0) {
-        proceso = r.rows[0];
-        matchedDoc = normalizeDocsFirmaListCompat(proceso.docs_firma)
-          .find((d) => String(d.signature_id || "").trim() === incomingSignatureId) || null;
-        docIndex = matchedDoc?.doc_index || null;
-      }
-    }
-
-    if (!proceso && contractId) {
-      const r = await client.query(
-        `SELECT id, public_id, nombre_persona, correo_personal, docs_firma, solicitud_id, preregistro_id, created_at
-         FROM tokens_firma_contrato
-         WHERE docs_firma @> $1::jsonb AND estado = 'en_proceso'
-         LIMIT 1
-         FOR UPDATE`,
-        [JSON.stringify([{ contract_id: contractId }])]
-      );
-      if (r.rowCount > 0) {
-        proceso = r.rows[0];
-        matchedDoc = normalizeDocsFirmaListCompat(proceso.docs_firma).find((d) => d.contract_id === contractId) || null;
-        docIndex = matchedDoc?.doc_index || null;
-      }
-    }
-
-    if (!proceso) {
-      await rollbackIfOpen();
-      console.warn("Webhook contrato: no se encontro proceso para", { requestId, contractId, signatureId: incomingSignatureId });
-      return false;
-    }
-
-    if (!docIndex && contractId) {
-      const match = String(contractId || "").match(/_(\d+)$/);
-      if (match?.[1]) {
-        docIndex = Number(match[1]);
-      }
-    }
-
-    let oneDriveInfo = null;
-    const effectiveSignatureId = String(
-      incomingSignatureId ||
-      matchedDoc?.signature_id ||
-      ""
-    ).trim();
-    if (status === "signed" && !String(matchedDoc?.onedrive_url || "").trim()) {
-      const artifacts = await resolveClickSignArtifacts({
-        event,
-        requestId,
-        contractId,
-        publicId: "",
-        signatureId: effectiveSignatureId,
-        allowCatalogFallback: true
-      });
-      const resolvedPdf = artifacts?.signedPdf || null;
-
-      if (!resolvedPdf || !isPdfBuffer(resolvedPdf.buffer)) {
-        console.warn("Webhook contrato: PDF no disponible aún, reintentando en 30s", { requestId, contractId });
-        await rollbackIfOpen();
-        scheduleContratoWebhookRetry(proceso.id, docIndex);
-        return true;
-      }
-      try {
-        const docsActualesParaUpload = normalizeDocsFirmaListCompat(proceso.docs_firma);
-        const docParaUpload =
-          matchedDoc ||
-          docsActualesParaUpload.find((d) => Number(d?.doc_index || 0) === Number(docIndex || 0)) ||
-          (docIndex ? { doc_index: Number(docIndex) } : {});
-        oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName, {
-          doc: docParaUpload,
-          personaContext: {
-            nombreCompleto: proceso?.nombre_persona || "",
-            created_at: proceso?.created_at || null
-          }
-        });
-      } catch (upErr) {
-        console.error("Error subiendo contrato firmado a OneDrive:", upErr.message);
-        scheduleContratoWebhookRetry(proceso.id, docIndex);
-        throw upErr;
-      }
-    }
-
-    const nowIso = new Date().toISOString();
-    const docsActuales = normalizeDocsFirmaListCompat(proceso.docs_firma);
-    let docMatched = false;
-    const nuevaLista = docsActuales.map((d) => {
-      const isMatched =
-        (requestId && String(d.request_id || "").trim() === requestId) ||
-        (contractId && String(d.contract_id || "").trim() === contractId) ||
-        (effectiveSignatureId && String(d.signature_id || "").trim() === effectiveSignatureId);
-      if (isMatched) {
-        const finalStatus =
-          status === "rejected"
-            ? "rejected"
-            : "signed";
-        docMatched = true;
-        return {
-          ...d,
-          signature_id: effectiveSignatureId || d.signature_id || null,
-          estado: finalStatus,
-          firmado_en: finalStatus === "signed" ? (d.firmado_en || nowIso) : d.firmado_en || null,
-          ultimo_evento: rawStatus || d.ultimo_evento || null,
-          onedrive_url: oneDriveInfo?.archivo?.url || d.onedrive_url || null,
-          onedrive_carpeta: oneDriveInfo?.carpeta || d.onedrive_carpeta || null,
-          onedrive_carpeta_url: oneDriveInfo?.carpeta_url || d.onedrive_carpeta_url || null,
-          onedrive_id: oneDriveInfo?.archivo?.id || d.onedrive_id || null,
-          onedrive_nombre: oneDriveInfo?.archivo?.nombre || d.onedrive_nombre || null
-        };
-      }
-      return d;
-    });
-
-    let finalDocs = nuevaLista;
-    if (!docMatched && docIndex) {
-      const fallbackKey = getContratoDocKeyByIndex(Number(docIndex), finalDocs.length) || null;
-      const fallbackDef = getContratoDocDefinition(fallbackKey);
-      const fallbackStatus =
-        status === "rejected"
-          ? "rejected"
-          : "signed";
-      finalDocs = upsertDocFirmaEntry(finalDocs, {
-        doc_index: Number(docIndex),
-        doc_key: fallbackDef?.doc_key || fallbackKey,
-        titulo: fallbackDef?.titulo || `Documento ${docIndex}`,
-        template_file: fallbackDef?.template_file || null,
-        empresa_key: fallbackDef?.empresa_key || null,
-        // upsertDocFirmaEntry reemplaza la entrada completa: conservar la foto del anexo.
-        anexo_item_ids:
-          docsActuales.find((d) => Number(d?.doc_index || 0) === Number(docIndex))?.anexo_item_ids || null,
-        request_id: requestId || null,
-        contract_id: contractId || null,
-        signature_id: effectiveSignatureId || null,
-        estado: fallbackStatus,
-        firmado_en: fallbackStatus === "signed" ? nowIso : null,
-        ultimo_evento: rawStatus || null,
-        onedrive_url: oneDriveInfo?.archivo?.url || null,
-        onedrive_carpeta: oneDriveInfo?.carpeta || null,
-        onedrive_carpeta_url: oneDriveInfo?.carpeta_url || null,
-        onedrive_id: oneDriveInfo?.archivo?.id || null,
-        onedrive_nombre: oneDriveInfo?.archivo?.nombre || null
-      });
-    }
-
-    const todosFirmados = finalDocs.length > 0 && finalDocs.every((d) => contratoDocSyncCompleted(d));
-
-    await client.query(
-      `UPDATE tokens_firma_contrato
-       SET docs_firma = $1::jsonb,
-           estado = $2,
-           updated_at = NOW()
-       WHERE id = $3`,
-      [JSON.stringify(finalDocs), todosFirmados ? "completado" : "en_proceso", proceso.id]
-    );
-
-    await client.query("COMMIT");
-    transactionOpen = false;
-
-    // Fuera de la transaccion a proposito: un fallo aqui no puede revertir el cierre de la firma.
-    try {
-      await syncAnexoItemsEstadoFirmaDesdeDocsContrato(finalDocs);
-    } catch (anexoSyncErr) {
-      console.error("Error sincronizando estado de firma del anexo desde webhook:", anexoSyncErr?.message || anexoSyncErr);
-    }
-
-    if (todosFirmados) {
-      try {
-        await notifyContratoFirmaCompletada(proceso.id);
-      } catch (notifyErr) {
-        console.error("Error notificando contrato completado desde webhook:", notifyErr?.message || notifyErr);
-      }
-    }
-
-    console.log(`Contrato doc${docIndex || "?"} estado ${status} para proceso ${proceso.id}. Completado: ${todosFirmados}`);
-    return true;
-  } catch (err) {
-    try {
-      await rollbackIfOpen();
-    } catch { }
-    console.error("Error procesando webhook de contrato:", err.message);
-    throw err;
-  } finally {
-    client.release();
+    await syncAnexoItemsEstadoFirmaDesdeDocsContrato(signedPersisted.docs_firma);
+  } catch (anexoSyncErr) {
+    console.error("Error sincronizando estado de firma del anexo desde webhook:", anexoSyncErr?.message || anexoSyncErr);
   }
+  if (status === "rejected") return true;
+  if (signedPersisted.estado === "completado") {
+    try {
+      await notifyContratoFirmaCompletada(proceso.id);
+    } catch (notifyErr) {
+      console.error("Error notificando contrato firmado desde webhook:", notifyErr?.message || notifyErr);
+    }
+  }
+
+  // La firma legal ya quedo persistida. Descargar y archivar es un segundo paso:
+  // sus errores nunca revierten la firma ni el cierre del proceso.
+  if (!ONEDRIVE_ENABLED || String(matchedDoc?.onedrive_url || "").trim()) {
+    return true;
+  }
+
+  let resolvedPdf = null;
+  try {
+    const artifacts = await resolveClickSignArtifacts({
+      event,
+      requestId,
+      contractId,
+      publicId: "",
+      signatureId: effectiveSignatureId,
+      allowCatalogFallback: true
+    });
+    resolvedPdf = artifacts?.signedPdf || null;
+  } catch (artifactErr) {
+    await patchContratoDocFirmaSafely({
+      procesoId: proceso.id,
+      docIndex,
+      patch: {
+        archivo_estado: "error",
+        archivo_error: String(artifactErr?.message || artifactErr).slice(0, 2000),
+        archivo_intentos: Number(matchedDoc?.archivo_intentos || 0) + 1,
+        ultimo_intento_archivo_en: new Date().toISOString()
+      }
+    });
+    scheduleContratoWebhookRetry(proceso.id, docIndex);
+    return true;
+  }
+
+  if (!resolvedPdf || !isPdfBuffer(resolvedPdf.buffer)) {
+    await patchContratoDocFirmaSafely({
+      procesoId: proceso.id,
+      docIndex,
+      patch: {
+        archivo_estado: "pendiente",
+        archivo_error: "PDF firmado aun no disponible en Click&Sign",
+        ultimo_intento_archivo_en: new Date().toISOString()
+      }
+    });
+    scheduleContratoWebhookRetry(proceso.id, docIndex);
+    return true;
+  }
+
+  let oneDriveInfo = null;
+  try {
+    const latestDoc = signedPersisted.docs_firma.find((doc) => Number(doc?.doc_index || 0) === docIndex) || matchedDoc;
+    oneDriveInfo = await uploadContratoFirmadoToOneDrive(proceso, resolvedPdf.buffer, resolvedPdf.fileName, {
+      doc: latestDoc,
+      personaContext: { nombreCompleto: proceso?.nombre_persona || "", created_at: proceso?.created_at || null }
+    });
+  } catch (uploadErr) {
+    await patchContratoDocFirmaSafely({
+      procesoId: proceso.id,
+      docIndex,
+      patch: {
+        archivo_estado: "error",
+        archivo_error: String(uploadErr?.message || uploadErr).slice(0, 2000),
+        archivo_intentos: Number(matchedDoc?.archivo_intentos || 0) + 1,
+        ultimo_intento_archivo_en: new Date().toISOString()
+      }
+    });
+    console.error("Error subiendo contrato firmado a OneDrive:", uploadErr?.message || uploadErr);
+    scheduleContratoWebhookRetry(proceso.id, docIndex);
+    return true;
+  }
+
+  const archived = await patchContratoDocFirmaSafely({
+    procesoId: proceso.id,
+    docIndex,
+    patch: {
+      archivo_estado: "subido",
+      archivo_error: null,
+      archivo_intentos: Number(matchedDoc?.archivo_intentos || 0) + 1,
+      ultimo_intento_archivo_en: new Date().toISOString(),
+      onedrive_url: oneDriveInfo?.archivo?.url || null,
+      onedrive_carpeta: oneDriveInfo?.carpeta || null,
+      onedrive_carpeta_url: oneDriveInfo?.carpeta_url || null,
+      onedrive_id: oneDriveInfo?.archivo?.id || null,
+      onedrive_nombre: oneDriveInfo?.archivo?.nombre || null
+    }
+  });
+  if (archived.estado === "completado") {
+    try {
+      await notifyContratoFirmaCompletada(proceso.id);
+    } catch (notifyErr) {
+      console.error("Error notificando contrato completado desde webhook:", notifyErr?.message || notifyErr);
+    }
+  }
+  console.log(`Contrato doc${docIndex} firmado; archivo OneDrive: ${oneDriveInfo?.archivo?.url ? "subido" : "pendiente"}`);
+  return true;
 }
 
 // Ruta Default para SPA (Siempre al final)
@@ -15675,7 +15929,7 @@ async function jobReconciliarContratosEnFirma() {
       `SELECT tf.id, tf.public_id, tf.nombre_persona, tf.correo_personal, tf.docs_firma,
               tf.solicitud_id, tf.preregistro_id, tf.created_at, tf.updated_at
        FROM tokens_firma_contrato tf
-       WHERE tf.estado = 'en_proceso'
+       WHERE tf.estado IN ('en_proceso', 'completado')
          AND tf.updated_at < NOW() - ($1 || ' minutes')::INTERVAL
          AND EXISTS (
            SELECT 1
@@ -15714,7 +15968,7 @@ async function jobReconciliarContratosEnFirma() {
           `SELECT id, public_id, nombre_persona, correo_personal, estado, checks_completados, docs_firma,
                   solicitud_id, preregistro_id, created_at, updated_at
            FROM tokens_firma_contrato
-           WHERE id = $1 AND estado = 'en_proceso'
+           WHERE id = $1 AND estado IN ('en_proceso', 'completado')
            LIMIT 1`,
           [proceso.id]
         );
@@ -15819,6 +16073,7 @@ let reconciliarJobInterval = null;
 let revalidarSoportesJobInterval = null;
 let reconciliarContratosJobInterval = null;
 let reintentarCorreosJobInterval = null;
+let clicksignWebhooksJobInterval = null;
 setTimeout(() => {
   if (isShuttingDown) return;
   // Firma Click&Sign de cuentas de cobro deshabilitada (flujo de carga manual).
@@ -15842,6 +16097,14 @@ setTimeout(() => {
   void jobReintentarCorreosCuentasCobro();
   reintentarCorreosJobInterval = setInterval(() => { void jobReintentarCorreosCuentasCobro(); }, 15 * 60 * 1000);
 }, 3 * 60 * 1000);
+setTimeout(() => {
+  if (isShuttingDown) return;
+  const clicksignWebhookService = require("./services/clicksign.service");
+  void clicksignWebhookService.jobProcesarWebhooksClickSignPendientes();
+  clicksignWebhooksJobInterval = setInterval(() => {
+    void clicksignWebhookService.jobProcesarWebhooksClickSignPendientes();
+  }, 60 * 1000);
+}, 15 * 1000);
 // ─────────────────────────────────────────────────────────────────────────────
 
 let isShuttingDown = false;
@@ -15852,6 +16115,7 @@ async function gracefulShutdown(signal) {
   if (revalidarSoportesJobInterval) clearInterval(revalidarSoportesJobInterval);
   if (reconciliarContratosJobInterval) clearInterval(reconciliarContratosJobInterval);
   if (reintentarCorreosJobInterval) clearInterval(reintentarCorreosJobInterval);
+  if (clicksignWebhooksJobInterval) clearInterval(clicksignWebhooksJobInterval);
   for (const scheduled of contratoReconciliationTimers.values()) {
     if (scheduled?.timer) clearTimeout(scheduled.timer);
   }

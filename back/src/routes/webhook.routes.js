@@ -33,11 +33,12 @@ router.post("/clicksign/signature", async (req, res) => {
       keys: Object.keys(event),
       body: JSON.stringify(event).slice(0, 4000)
     });
-    res.status(200).json({ ok: true });
+    const queued = await clicksignService.enqueueSignatureEvent(event);
+    res.status(200).json({ ok: true, event_id: queued.id });
 
     setImmediate(() => {
       clicksignService
-        .processSignatureEvent(event)
+        .processQueuedSignatureEvent(queued.id)
         .catch((err) => console.error("[clicksign-webhook]", err?.message || err));
     });
   } catch (err) {

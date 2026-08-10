@@ -575,7 +575,14 @@ window.contratacionApp = function () {
                     this.firmaError = "No se recibió enlace de firma. Contacta a Talento Humano.";
                 }
             } catch (e) {
-                this.firmaError = e?.response?.data?.error || "Error iniciando firma digital.";
+                const errorData = e?.response?.data || {};
+                this.firmaError = errorData?.recuperacion_automatica
+                    ? "El envío quedó en verificación automática. No vuelvas a iniciarlo; actualizaremos su estado en unos segundos."
+                    : (errorData?.error || "Error iniciando firma digital.");
+                if (errorData?.recuperacion_automatica) {
+                    await this.refrescarEstado({ reconciliar: false });
+                    this.iniciarPolling();
+                }
             } finally {
                 this.firmaCargando = false;
             }

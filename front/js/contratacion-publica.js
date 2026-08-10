@@ -40,6 +40,8 @@ window.contratacionApp = function () {
         pdfBlobUrl: null,
         pdfCargando: false,
         pdfError: "",
+        descargaPlantillaEnCurso: false,
+        descargaPlantillaError: "",
         timerSeg: TIMER_PDF,
         timerOk: false,
         confirmoLectura: false,
@@ -268,6 +270,7 @@ window.contratacionApp = function () {
             if (this._pdfCargadoParaIdx === this.docActualIdx && this.pdfBlobUrl) return;
 
             this.pdfError = "";
+            this.descargaPlantillaError = "";
             this.pdfCargando = true;
             if (this.pdfBlobUrl) {
                 URL.revokeObjectURL(this.pdfBlobUrl);
@@ -341,16 +344,17 @@ window.contratacionApp = function () {
             let blob = null;
             let fileName = fileNameFromDoc;
 
-            if (this.docActual?.archivo === fileNameFromDoc && this.pdfBlobUrl) {
+            if (this.docActual?.archivo === fileNameFromDoc && this.pdfBlobUrl && !this.docActual?.plantilla) {
                 const resp = await fetch(this.pdfBlobUrl);
                 blob = await resp.blob();
             } else {
                 const resp = await axios.get(`${API}/contratacion/pdf/${encodeURIComponent(fileNameFromDoc)}`, {
                     headers: { Authorization: `Bearer ${this.jwt}` },
+                    params: { descarga: 1 },
                     responseType: "blob"
                 });
                 const headerName = this._parseFileNameFromDisposition(resp?.headers?.["content-disposition"] || "");
-                fileName = headerName || fileNameFromDoc;
+                fileName = this.docActual?.nombre_descarga || headerName || fileNameFromDoc;
                 blob = resp.data;
             }
 
@@ -369,18 +373,27 @@ window.contratacionApp = function () {
         // ─────────────────────────────────────────────────────
         async confirmarLectura() {
             if (!this.confirmoLectura || !this.timerOk || !this.docActual || this.isChecked(this.docActual.clave)) return;
-            await this._registrarCheck(this.docActual.clave);
-            // Auto-descarga si el doc es una plantilla/formato que el usuario va a necesitar usar
+            this.descargaPlantillaError = "";
+            // Las plantillas se descargan antes de registrar el check. Si la descarga
+            // falla, el documento sigue pendiente y no se puede avanzar a la firma.
             if (this.docActual.plantilla) {
                 const archivoDescarga = this.docActual?.descarga_archivo || this.docActual?.archivo;
                 if (archivoDescarga) {
+                    this.descargaPlantillaEnCurso = true;
                     try {
                         await this.descargarArchivo(archivoDescarga, this.docActual?.label || "Documento");
                     } catch (err) {
                         console.warn("No se pudo descargar automaticamente la plantilla:", err?.message || err);
+                        this.descargaPlantillaError = "No se pudo descargar la plantilla. Intenta nuevamente; este paso es obligatorio.";
+                        this.confirmoLectura = false;
+                        return;
+                    } finally {
+                        this.descargaPlantillaEnCurso = false;
                     }
                 }
             }
+            const registrado = await this._registrarCheck(this.docActual.clave);
+            if (!registrado) this.confirmoLectura = false;
         },
 
         // ─────────────────────────────────────────────────────
@@ -489,8 +502,11 @@ window.contratacionApp = function () {
                 );
                 this.checksCompletados = res.data.checks_completados || this.checksCompletados;
                 this.checksCompletados = { ...this.checksCompletados, [clave]: true };
+                return true;
             } catch (e) {
                 console.error("Error registrando check:", e?.message);
+                this.descargaPlantillaError = e?.response?.data?.error || "No se pudo guardar la confirmacion. Intenta nuevamente.";
+                return false;
             }
         },
 

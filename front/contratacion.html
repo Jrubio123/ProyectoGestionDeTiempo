@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/styles/tailwind.css">
     <script defer src="/lib/axios.min.js"></script>
     <script defer src="/env.js"></script>
-    <script defer src="/js/contratacion-publica.js?v=20260810-firma-durable"></script>
+    <script defer src="/js/contratacion-publica.js?v=20260810-firma-descarga"></script>
     <script defer src="/lib/alpinejs.min.js"></script>
     <style>
         body { background: #f1f5f9; }
@@ -191,7 +191,7 @@
                         <h3 class="font-bold text-slate-800 truncate" x-text="docActual?.label"></h3>
                     </div>
                     <template x-if="docActual?.plantilla && !isChecked(docActual?.clave)">
-                        <span class="px-2.5 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-semibold flex-shrink-0">Plantilla · se descarga al confirmar</span>
+                        <span class="px-2.5 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-semibold flex-shrink-0">Descarga obligatoria</span>
                     </template>
                     <template x-if="isChecked(docActual?.clave) && !(docActual?.tipo === 'form' && personaDatosDirty)">
                         <span class="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold flex-shrink-0">Revisado ✓</span>
@@ -207,6 +207,11 @@
 
                 <!-- Visor (PDF o formulario) -->
                 <div class="flex-1 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col" style="min-height:0;">
+
+                    <div x-show="docActual?.descripcion && docActual?.tipo === 'pdf'"
+                         class="mx-4 mt-4 bg-cyan-50 border border-cyan-200 text-cyan-900 rounded-xl px-4 py-3 text-sm flex-shrink-0">
+                        <p class="font-semibold" x-text="docActual?.descripcion"></p>
+                    </div>
 
                     <!-- Loading PDF -->
                     <div x-show="pdfCargando" class="flex-1 flex items-center justify-center gap-3 text-slate-400">
@@ -453,11 +458,17 @@
 
                     <!-- Check habilitado (PDF no confirmado) -->
                     <div x-show="docActual?.tipo === 'pdf' && timerOk && !isChecked(docActual?.clave) && !pdfCargando" class="flex-1">
+                        <p x-show="descargaPlantillaError" class="mb-2 text-xs font-semibold text-red-600" x-text="descargaPlantillaError"></p>
                         <label class="flex items-center gap-3 cursor-pointer bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5">
                             <input x-model="confirmoLectura" type="checkbox" @change="confirmarLectura()"
+                                   :disabled="descargaPlantillaEnCurso"
                                    class="w-4 h-4 accent-blue-600 flex-shrink-0">
-                            <span class="text-sm text-blue-800 font-medium">
+                            <span x-show="!docActual?.plantilla" class="text-sm text-blue-800 font-medium">
                                 Confirmo que leí <strong x-text="docActual?.label"></strong>
+                            </span>
+                            <span x-show="docActual?.plantilla" class="text-sm text-blue-800 font-medium">
+                                <span x-show="!descargaPlantillaEnCurso">Confirmo que revisé el documento y deseo descargar la plantilla obligatoria</span>
+                                <span x-show="descargaPlantillaEnCurso">Descargando plantilla...</span>
                             </span>
                         </label>
                     </div>

@@ -140,7 +140,7 @@ const corsOptions = {
     "Pragma",
     "Expires"
   ],
-  exposedHeaders: ["Authorization"],
+  exposedHeaders: ["Authorization", "Content-Disposition"],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 };
 
@@ -873,7 +873,7 @@ function defineContratoDoc(docKey, titulo, templateFiles, folder = "todoSilver")
 
 const CONTRATO_DOC_DEFINITIONS_FULL = Object.freeze([
   defineContratoDoc("contrato_prestacion_servicios", "Contrato Prestacion de Servicios", {
-    silver: "Contrato Prestación de Servicios .docx",
+    silver: "Contrato Prestación de Servicios.docx",
     capital: "ContratoPrestacionServicioCapital.docx"
   }, "todoSilver"),
   defineContratoDoc("acuerdo_confidencialidad", "Acuerdo de Confidencialidad", {
@@ -11467,6 +11467,15 @@ const DOCS_ESTATICOS = [
   { clave: "guia_autenticador", archivo: "Silver Consulting - Configurar Autenticaci\u00F3n Multifactor - Office 365.pdf", label: "Guia Autenticador Office 365" },
   { clave: "guia_mfa_365", archivo: "Silver Consulting - configurar MFA Silver Consulting - Office 365.pdf", label: "Guia MFA Office 365" },
   { clave: "guia_ingreso_365", archivo: "Silver Consulting - Ingresar a Microsoft 365 Est\u00E1ndar.pdf", label: "Guia ingreso Microsoft 365 Estandar" },
+  {
+    clave: "firma_correo_silver",
+    archivo: "FirmaCorreoSilverConsultingl.html",
+    label: "Firma de correo Silver Consulting",
+    plantilla: true,
+    descarga_archivo: "FirmaCorreoSilverConsultingl.html",
+    nombre_descarga: "Firma de correo Silver Consulting.html",
+    descripcion: "Descarga y abre el archivo. Copia la firma en Outlook, reemplaza el nombre, cargo, celular y correo Silver, y guardala como tu firma corporativa. Se recomienda personalizarla antes de usarla."
+  },
 ];
 
 const DOCS_VINCULADO_LECTURA = [
@@ -11487,6 +11496,15 @@ const ARCHIVOS_ESTATICOS_CONTRATACION = new Set(
     .flatMap((d) => [d.archivo, d.descarga_archivo])
     .filter(Boolean)
 );
+
+function getContratacionDocConfigByFile(nombre) {
+  return [...DOCS_ESTATICOS, ...DOCS_VINCULADO_LECTURA]
+    .find((doc) => doc.archivo === nombre || doc.descarga_archivo === nombre) || null;
+}
+
+function getContratacionDescargaCheckKey(docConfig) {
+  return docConfig?.plantilla && docConfig?.clave ? `descarga_${docConfig.clave}` : null;
+}
 
 const FORM_DATOS_PERSONA = {
   clave: "datos_personales",
@@ -11720,7 +11738,15 @@ app.get("/contratacion/docs-info", requireTokenFirma, async (req, res) => {
   }
 
   res.json({
-    docs: docsContratacion.map(d => ({ clave: d.clave, label: d.label, archivo: d.archivo, plantilla: !!d.plantilla, descarga_archivo: d.descarga_archivo || null })),
+    docs: docsContratacion.map(d => ({
+      clave: d.clave,
+      label: d.label,
+      archivo: d.archivo,
+      plantilla: !!d.plantilla,
+      descarga_archivo: d.descarga_archivo || null,
+      nombre_descarga: d.nombre_descarga || null,
+      descripcion: d.descripcion || null
+    })),
     form: { clave: FORM_DATOS_PERSONA.clave, label: FORM_DATOS_PERSONA.label },
     video_disponible: fs.existsSync(path.join(CONTRATOS_STATIC_DIR, VIDEO_BIENVENIDA))
   });
@@ -12509,7 +12535,7 @@ app.get("/contratacion/video", (req, res) => {
 });
 
 // GET /contratacion/pdf/:nombre ? sirve PDF informativo estático
-app.get("/contratacion/pdf/:nombre", requireTokenFirma, (req, res) => {
+app.get("/contratacion/pdf/:nombre", requireTokenFirma, async (req, res) => {
   const nombre = req.params.nombre;
   if (!ARCHIVOS_ESTATICOS_CONTRATACION.has(nombre)) {
     return res.status(404).json({ error: "Documento no encontrado" });
@@ -12520,15 +12546,38 @@ app.get("/contratacion/pdf/:nombre", requireTokenFirma, (req, res) => {
     return res.status(503).json({ error: "Documento aun no disponible. Contacta a Talento Humano." });
   }
 
+  const docConfig = getContratacionDocConfigByFile(nombre);
+  const forceDownload = String(req.query?.descarga || "").trim() === "1";
+  const descargaCheckKey = forceDownload ? getContratacionDescargaCheckKey(docConfig) : null;
+  if (descargaCheckKey) {
+    try {
+      const receipt = await pool.query(
+        `UPDATE tokens_firma_contrato
+         SET checks_completados = jsonb_set(checks_completados, $1::text[], 'true', true),
+             updated_at = NOW()
+         WHERE id = $2 AND estado = 'en_proceso'
+         RETURNING id`,
+        [`{${descargaCheckKey}}`, req.tokenFirma.token_id]
+      );
+      if (receipt.rowCount === 0) {
+        return res.status(409).json({ error: "No se pudo registrar la descarga obligatoria" });
+      }
+    } catch (err) {
+      console.error("Error registrando descarga obligatoria de contratacion:", err);
+      return res.status(500).json({ error: "No se pudo registrar la descarga obligatoria" });
+    }
+  }
+
   const ext = String(path.extname(nombre) || "").toLowerCase();
   let contentType = "application/octet-stream";
   if (ext === ".pdf") contentType = "application/pdf";
   if (ext === ".doc") contentType = "application/msword";
   if (ext === ".docx") contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   if (ext === ".xlsx") contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  if (ext === ".html" || ext === ".htm") contentType = "text/html; charset=utf-8";
 
-  const dispositionType = ext === ".pdf" ? "inline" : "attachment";
-  const safeName = sanitizeDownloadFileName(nombre, "documento.bin").replace(/"/g, "");
+  const dispositionType = forceDownload || ![".pdf", ".html", ".htm"].includes(ext) ? "attachment" : "inline";
+  const safeName = sanitizeDownloadFileName(docConfig?.nombre_descarga || nombre, "documento.bin").replace(/"/g, "");
   res.setHeader("Content-Type", contentType);
   res.setHeader("Content-Disposition", `${dispositionType}; filename="${safeName}"`);
   fs.createReadStream(filePath).pipe(res);
@@ -12545,15 +12594,25 @@ app.patch("/contratacion/check", requireTokenFirma, async (req, res) => {
   }
 
   try {
+    const docConfig = [...DOCS_ESTATICOS, ...DOCS_VINCULADO_LECTURA].find((doc) => doc.clave === key) || null;
+    const descargaCheckKey = getContratacionDescargaCheckKey(docConfig);
     const r = await pool.query(
       `UPDATE tokens_firma_contrato
        SET checks_completados = jsonb_set(checks_completados, $1::text[], 'true', true),
            updated_at = NOW()
-       WHERE id = $2 AND estado = 'en_proceso'
+       WHERE id = $2
+         AND estado = 'en_proceso'
+         AND ($3::text IS NULL OR COALESCE((checks_completados ->> $3)::boolean, false) = true)
        RETURNING checks_completados`,
-      [`{${key}}`, req.tokenFirma.token_id]
+      [`{${key}}`, req.tokenFirma.token_id, descargaCheckKey]
     );
-    if (r.rowCount === 0) return res.status(400).json({ error: "No se pudo registrar el check" });
+    if (r.rowCount === 0) {
+      return res.status(descargaCheckKey ? 409 : 400).json({
+        error: descargaCheckKey
+          ? "Debes descargar la plantilla antes de confirmar este documento"
+          : "No se pudo registrar el check"
+      });
+    }
     res.json({ checks_completados: r.rows[0].checks_completados });
   } catch (err) {
     console.error(err);

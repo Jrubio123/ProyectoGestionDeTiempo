@@ -1,5 +1,8 @@
 const crypto = require("crypto");
 const { pool } = require("../db");
+const {
+  generateAnexoIndividualManualPdfFromItems
+} = require("./anexo-individual-documento.service");
 
 function getIndexHelpers() {
   return require("../index");
@@ -493,12 +496,9 @@ async function finalizarAnexoIndividualItem(req, res) {
 async function previewAnexoIndividualPdf(req, res) {
   const {
     collectAnexoIndividualSignatureContext,
-    generateAnexoIndividualPdfFromItems,
     sanitizeDownloadFileName,
     isAnexoIndividualInfraError,
-    buildAnexoIndividualInfraErrorPayload,
-    isDocxTemplateFailureMessage,
-    isDocxInfraFailureMessage
+    buildAnexoIndividualInfraErrorPayload
   } = getIndexHelpers();
 
   const correoFirmante = String(req.body?.correo_firmante || "").trim();
@@ -514,7 +514,7 @@ async function previewAnexoIndividualPdf(req, res) {
       correoFirmante,
       requestedItemIds: req.body?.item_ids || []
     });
-    const generated = await generateAnexoIndividualPdfFromItems({
+    const generated = await generateAnexoIndividualManualPdfFromItems({
       userRow,
       items,
       correoFirmante: correoFinal,
@@ -540,18 +540,6 @@ async function previewAnexoIndividualPdf(req, res) {
     if (isAnexoIndividualInfraError(err)) {
       return res.status(503).json(buildAnexoIndividualInfraErrorPayload());
     }
-    const errMessage = String(err?.message || "");
-    if (isDocxTemplateFailureMessage(errMessage)) {
-      return res.status(422).json({
-        error: "No fue posible generar la vista previa porque la plantilla del anexo tecnico tiene marcadores invalidos."
-      });
-    }
-    if (isDocxInfraFailureMessage(errMessage)) {
-      return res.status(503).json({
-        error: "No fue posible generar el PDF del anexo tecnico.",
-        detalle: errMessage || "Sin detalle tecnico"
-      });
-    }
     return res.status(500).json({ error: "Error generando la vista previa del anexo tecnico" });
   }
 }
@@ -565,7 +553,6 @@ async function iniciarFirmaAnexoIndividual(req, res) {
     getUsuarioAnexoIndividualById,
     mapAnexoIndividualTokenRow,
     collectAnexoIndividualSignatureContext,
-    generateAnexoIndividualPdfFromItems,
     getRequestPublicBaseUrl,
     pickStringByPaths,
     extractClickSignSignatureId,
@@ -575,8 +562,6 @@ async function iniciarFirmaAnexoIndividual(req, res) {
     buildClickSignAuthHeaders,
     isAnexoIndividualInfraError,
     buildAnexoIndividualInfraErrorPayload,
-    isDocxTemplateFailureMessage,
-    isDocxInfraFailureMessage,
     getAnexoTecnicoClickSignConfigId,
     CLICKSIGN_USER,
     CLICKSIGN_SIGNATURE_CB_URL,
@@ -642,7 +627,7 @@ async function iniciarFirmaAnexoIndividual(req, res) {
         lockRows: true
       });
 
-      const generated = await generateAnexoIndividualPdfFromItems({
+      const generated = await generateAnexoIndividualManualPdfFromItems({
         userRow,
         items,
         correoFirmante: correoFinal,
@@ -821,18 +806,6 @@ async function iniciarFirmaAnexoIndividual(req, res) {
     }
     if (isAnexoIndividualInfraError(err)) {
       return res.status(503).json(buildAnexoIndividualInfraErrorPayload());
-    }
-    const errMessage = String(err?.message || "");
-    if (isDocxTemplateFailureMessage(errMessage)) {
-      return res.status(422).json({
-        error: "No fue posible generar el PDF porque la plantilla del anexo tecnico tiene marcadores invalidos."
-      });
-    }
-    if (isDocxInfraFailureMessage(errMessage)) {
-      return res.status(503).json({
-        error: "No fue posible generar el PDF del anexo tecnico.",
-        detalle: errMessage || "Sin detalle tecnico"
-      });
     }
     res.status(500).json({ error: "Error iniciando proceso de firma del anexo tecnico" });
   }

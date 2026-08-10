@@ -20,8 +20,8 @@ window.onboardingThApp = function () {
     });
 
     const ANEXO_TIPO_LABELS = Object.freeze({
-        full_time: "Full time",
-        medio_tiempo: "Medio tiempo",
+        full_time: "180/160 Horas",
+        medio_tiempo: "80/90 Horas",
         proyecto: "Proyecto",
         horas: "Horas",
         capacitacion: "Capacitacion"

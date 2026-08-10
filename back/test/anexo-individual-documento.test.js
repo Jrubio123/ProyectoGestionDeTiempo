@@ -6,7 +6,9 @@ const PizZip = require("pizzip");
 const Docxtemplater = require("docxtemplater");
 
 const {
-  buildAnexoIndividualDocumentContext
+  buildAnexoIndividualDocumentContext,
+  generateAnexoIndividualManualPdfFromItems,
+  labelAnexoTipo
 } = require("../src/services/anexo-individual-documento.service");
 
 function buildValidInput() {
@@ -74,19 +76,47 @@ test("construye el contexto contractual del anexo individual", () => {
   assert.equal(result.items.length, 1);
 });
 
-test("rechaza el anexo cuando faltan datos legales o contractuales", () => {
+test("rechaza el anexo cuando falta la identidad requerida", () => {
   const input = buildValidInput();
-  input.userRow.direccion = "";
+  input.userRow.cedula = "";
 
   assert.throws(
     () => buildAnexoIndividualDocumentContext(input),
     (err) => {
       assert.equal(err?.status, 422);
       assert.equal(err?.code, "ANEXO_DOCUMENTO_INCOMPLETO");
-      assert.ok(err?.missing.includes("Dirección"));
+      assert.ok(err?.missing.includes("Número de documento"));
       return true;
     }
   );
+});
+
+test("genera el anexo manual PDFKit en una sola hoja con etiquetas por horas", async () => {
+  const generated = await generateAnexoIndividualManualPdfFromItems(buildValidInput());
+  const pdfSource = generated.pdfBuffer.toString("latin1");
+
+  assert.equal(generated.pageCount, 1);
+  assert.match(generated.fileName, /^AnexoTecnicoIndividual_Ana_Consultora_/);
+  assert.ok(generated.pdfBuffer.subarray(0, 4).equals(Buffer.from("%PDF")));
+  assert.equal((pdfSource.match(/\/Type\s*\/Page\b/g) || []).length, 1);
+  assert.equal(labelAnexoTipo("full_time"), "180/160 Horas");
+  assert.equal(labelAnexoTipo("medio_tiempo"), "80/90 Horas");
+});
+
+test("el flujo manual usa PDFKit y comparte una carpeta estable por persona", () => {
+  const manualService = fs.readFileSync(
+    path.resolve(__dirname, "../src/services/anexo-individual.service.js"),
+    "utf8"
+  );
+  const indexSource = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+
+  assert.doesNotMatch(manualService, /generateAnexoIndividualPdfFromItems/);
+  assert.equal(
+    (manualService.match(/generateAnexoIndividualManualPdfFromItems\(/g) || []).length,
+    2
+  );
+  assert.match(indexSource, /folderName: sanitizePathSegment\(`\$\{nombre\}_\$\{fallbackIdentity\}`/);
+  assert.match(indexSource, /return uploadAnexoIndividualFirmadoToOneDrive\(proceso, pdfBuffer, fileName\)/);
 });
 
 test("permite modulo opcional y tarifa cero, como admite la base de datos", () => {
@@ -109,7 +139,7 @@ for (const templateName of ["Anexo Tecnico.docx", "AnexoTecnicoCapital.docx"]) {
       Anio: "2026",
       items: [
         {
-          tipo: "Full time - Módulo: SAP ABAP",
+          tipo: "180/160 Horas - Módulo: SAP ABAP",
           cliente: "CLIENTE_UNO_UNICO",
           valorTarifa: "$ 5.000.000 / mes",
           fechaInicio: "01/08/2026",
@@ -127,7 +157,7 @@ for (const templateName of ["Anexo Tecnico.docx", "AnexoTecnicoCapital.docx"]) {
 
     assert.match(output, /CLIENTE_UNO_UNICO/);
     assert.match(output, /CLIENTE_DOS_UNICO/);
-    assert.match(output, /Full time/);
+    assert.match(output, /180\/160 Horas/);
     assert.match(output, /Módulo: SAP ABAP/);
     assert.match(output, /Proyecto/);
   });

@@ -34,7 +34,10 @@ const {
   buildCuentaFirmaDiagnosticoFromResolution
 } = require("./services/cuenta-cobro-cierre.service");
 const { persistirDiagnosticoFirmaCuenta } = require("./services/cuentas-cobro.service");
-const { buildAnexoIndividualDocumentContext } = require("./services/anexo-individual-documento.service");
+const {
+  ANEXO_TIPO_LABELS,
+  buildAnexoIndividualDocumentContext
+} = require("./services/anexo-individual-documento.service");
 const { resolveTipoCuentaBancaria } = require("./services/tipo-cuenta-bancaria.service");
 const { env } = require("./config/env");
 const { requireAccess, requireAuthenticated, hasAccess } = require("./middlewares/access");
@@ -953,13 +956,6 @@ const CONTRATO_BASE_ONEDRIVE_TEXT_KEYS = new Set([
   "autorizaciondetratamientodedatospersonales",
   "autorizaciontratamientodatoscapital"
 ]);
-const ANEXO_TIPO_LABELS = Object.freeze({
-  full_time: "Full time",
-  medio_tiempo: "Medio tiempo",
-  horas: "Horas",
-  capacitacion: "Capacitacion",
-  proyecto: "Proyecto"
-});
 const docxTemplateCache = new Map();
 const docxToPdfQueue = [];
 let docxToPdfBusy = false;
@@ -4019,17 +4015,75 @@ async function buildAnexoIndividualDashboardPayload(userRow, { includeFinalizado
   };
 }
 
+async function resolveAnexoIndividualOneDriveIdentity(proceso = {}) {
+  const personaId = toNullableInteger(proceso?.persona_id);
+  const usuarioId = toNullableInteger(proceso?.usuario_id);
+  let identityRow = null;
+
+  if (personaId || usuarioId) {
+    const identityRes = await pool.query(
+      `
+      SELECT
+        COALESCE(
+          NULLIF(BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)), ''),
+          NULLIF(BTRIM(u.nombre_usuario), '')
+        ) AS nombre,
+        COALESCE(NULLIF(BTRIM(p.numero_documento), ''), NULLIF(BTRIM(u.cedula), '')) AS documento,
+        COALESCE(NULLIF(BTRIM(p.correo_electronico), ''), NULLIF(BTRIM(u.email), '')) AS correo
+      FROM (SELECT $1::int AS persona_id, $2::int AS usuario_id) input
+      LEFT JOIN usuarios u ON u.id = input.usuario_id
+      LEFT JOIN personas p ON p.id = COALESCE(input.persona_id, u.persona_id)
+      LIMIT 1
+      `,
+      [personaId || null, usuarioId || null]
+    );
+    identityRow = identityRes.rows[0] || null;
+  }
+
+  let contratoContext = null;
+  if (!identityRow?.nombre || !identityRow?.documento) {
+    try {
+      contratoContext = await resolveContratoPersonaContext(proceso);
+    } catch (err) {
+      console.warn("No se pudo resolver identidad para carpeta de anexo tecnico:", err?.message || err);
+    }
+  }
+
+  const nombre =
+    toNullableTrimmedString(identityRow?.nombre) ||
+    toNullableTrimmedString(contratoContext?.nombreCompleto) ||
+    toNullableTrimmedString(proceso?.nombre_persona) ||
+    "Persona";
+  const documento =
+    toNullableTrimmedString(identityRow?.documento) ||
+    toNullableTrimmedString(contratoContext?.numeroDocumento) ||
+    toNullableTrimmedString(proceso?.numero_documento);
+  const correo =
+    toNullableTrimmedString(identityRow?.correo) ||
+    toNullableTrimmedString(contratoContext?.correoPersonal) ||
+    toNullableTrimmedString(proceso?.correo_personal) ||
+    toNullableTrimmedString(proceso?.correo_firmante);
+  const fallbackIdentity =
+    documento ||
+    correo ||
+    (personaId ? `persona_${personaId}` : null) ||
+    (usuarioId ? `usuario_${usuarioId}` : null) ||
+    "sin_documento";
+
+  return {
+    nombre,
+    documento: documento || null,
+    folderName: sanitizePathSegment(`${nombre}_${fallbackIdentity}`, "Persona_sin_documento")
+  };
+}
+
 async function uploadAnexoIndividualFirmadoToOneDrive(proceso, pdfBuffer, fileName) {
   const token = await getGraphAccessToken();
   const encodedUser = encodeURIComponent(ONEDRIVE_TARGET_USER);
   await graphGet(`/v1.0/users/${encodedUser}/drive`, token);
 
   const fechaStr = new Date().toISOString().slice(0, 10);
-  const shortPublicId = String(proceso?.public_id || "").replace(/-/g, "").slice(0, 8) || "anexo";
-  const folderName = sanitizePathSegment(
-    `${proceso.nombre_persona} - ${fechaStr} - ${shortPublicId}`,
-    `AnexoTecnico_${fechaStr}_${shortPublicId}`
-  );
+  const { folderName } = await resolveAnexoIndividualOneDriveIdentity(proceso);
 
   const safeName = sanitizePdfFileName(
     fileName || `AnexoTecnico_${proceso?.nombre_persona || "Persona"}_${fechaStr}.pdf`,

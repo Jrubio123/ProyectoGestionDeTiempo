@@ -74,3 +74,42 @@ test("la vista busca supervisores en Microsoft 365 y el backend devuelve el cont
   assert.match(routes, /datosExtra\.supervisor_azure_oid/);
   assert.match(index, /public_id::text AS usuario_id, azure_oid, LOWER\(email\) AS email/);
 });
+
+test("Solicitud Nuevo reactiva la persona y el anexo permite consultar inactivos", () => {
+  const routes = fs.readFileSync(
+    path.resolve(__dirname, "../src/contrataciones-routes.js"),
+    "utf8"
+  );
+  const anexoService = fs.readFileSync(
+    path.resolve(__dirname, "../src/services/anexo-individual.service.js"),
+    "utf8"
+  );
+  const index = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  const coordHtml = fs.readFileSync(
+    path.resolve(__dirname, "../../front/views/preregistrosCoord.html"),
+    "utf8"
+  );
+  const thHtml = fs.readFileSync(
+    path.resolve(__dirname, "../../front/views/onboardingTH.html"),
+    "utf8"
+  );
+
+  assert.equal((routes.match(/persona_reactivada AS/g) || []).length, 2);
+  assert.match(routes, /SET estado = 'activo', updated_at = NOW\(\)/);
+  assert.match(routes, /SET activo = true, updated_at = NOW\(\)/);
+
+  const searchSource = anexoService.slice(
+    anexoService.indexOf("async function searchAnexoIndividualUsuarios"),
+    anexoService.indexOf("async function getAnexoIndividualUsuarioItems")
+  );
+  assert.doesNotMatch(searchSource, /u\.activo = true/);
+  assert.match(searchSource, /COALESCE\(u\.activo, false\) AS activo/);
+
+  const resolverSource = index.slice(
+    index.indexOf("async function getUsuarioAnexoIndividualById"),
+    index.indexOf("async function resolveSuggestedAnexoFirmanteEmailForUser")
+  );
+  assert.doesNotMatch(resolverSource, /AND u\.activo = true/);
+  assert.match(coordHtml, /Se reactivara al crear la solicitud nueva/);
+  assert.match(thHtml, /activas o inactivas/);
+});

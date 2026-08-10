@@ -120,7 +120,10 @@
                     <div x-show="mostrarSugerenciasPersona && personasEncontradas.length" class="absolute z-20 left-0 right-0 mt-1 max-h-52 overflow-auto border border-slate-200 rounded-xl bg-white divide-y divide-slate-100 shadow-lg" style="display: none;">
                         <template x-for="persona in personasEncontradas" :key="persona.id">
                             <button type="button" @click="seleccionarPersona(persona)" class="w-full text-left px-3 py-2 hover:bg-slate-50">
-                                <p class="text-sm font-semibold text-slate-800" x-text="persona.nombre_usuario"></p>
+                                <div class="flex items-center gap-2">
+                                    <p class="text-sm font-semibold text-slate-800" x-text="persona.nombre_usuario"></p>
+                                    <span x-show="persona.activo === false" class="px-2 py-0.5 rounded-full bg-amber-100 text-[10px] font-bold text-amber-700">Inactivo</span>
+                                </div>
                                 <p class="text-xs text-slate-500" x-text="`${persona.numero_documento || 'Sin doc'} - ${persona.correo_empresarial || 'Sin correo'}`"></p>
                                 <p class="text-[11px] text-slate-400" x-text="[persona.cliente_nombre, persona.perfil || persona.modulo_nombre, persona.tipo_asignacion_label].filter(Boolean).join(' | ') || 'Sin contexto contractual previo'"></p>
                             </button>
@@ -131,6 +134,7 @@
                     <div class="flex items-start justify-between gap-3">
                         <div class="space-y-1">
                             <p class="text-emerald-900 font-semibold" x-text="personaSeleccionada?.nombre_usuario || personaSeleccionada?.nombre || '-'"></p>
+                            <p x-show="personaSeleccionada?.activo === false && tipoModal === 'Nuevo'" class="font-semibold text-amber-700">Se reactivara al crear la solicitud nueva.</p>
                             <p class="text-emerald-800" x-text="`Documento: ${personaSeleccionada?.numero_documento || form.numero_documento || 'Sin documento'}`"></p>
                             <p class="text-emerald-700" x-text="extensionCorreosObjetivo.length ? `Correos de referencia: ${extensionCorreosObjetivo.join(' / ')}` : 'Sin correos detectados aún'"></p>
                         </div>

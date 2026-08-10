@@ -106,6 +106,7 @@ async function searchAnexoIndividualUsuarios(req, res) {
           u.email,
           COALESCE(p.numero_documento, u.cedula) AS cedula,
           u.tipo_consultor::text AS tipo_consultor,
+          COALESCE(u.activo, false) AS activo,
           EXISTS (
             SELECT 1
             FROM anexo_tecnico_items ati
@@ -131,8 +132,7 @@ async function searchAnexoIndividualUsuarios(req, res) {
           'usuario' AS source
         FROM usuarios u
         LEFT JOIN personas p ON u.persona_id = p.id
-        WHERE u.activo = true
-          AND LOWER(COALESCE(u.email, '')) LIKE '%@silverconsulting.com.co'
+        WHERE LOWER(COALESCE(u.email, '')) LIKE '%@silverconsulting.com.co'
           AND (
             $1 = ''
             OR u.nombre_usuario ILIKE $2
@@ -149,6 +149,7 @@ async function searchAnexoIndividualUsuarios(req, res) {
           p.correo_electronico AS email,
           p.numero_documento AS cedula,
           NULL::text AS tipo_consultor,
+          (p.estado = 'activo') AS activo,
           EXISTS (
             SELECT 1
             FROM anexo_tecnico_items ati
@@ -173,6 +174,7 @@ async function searchAnexoIndividualUsuarios(req, res) {
           )
       ) AS combined
       ORDER BY
+        CASE WHEN combined.activo THEN 0 ELSE 1 END,
         CASE WHEN combined.nombre ILIKE $2 THEN 0 ELSE 1 END,
         combined.nombre ASC
       LIMIT 20

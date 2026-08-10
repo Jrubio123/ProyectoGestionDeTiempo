@@ -106,7 +106,7 @@
                 <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                     <div class="space-y-1">
                         <h2 class="text-xl font-bold text-slate-900">Anexo tecnico individual</h2>
-                        <p class="text-sm text-slate-500">Busca una persona Silver activa para ver, editar y enviar su anexo tecnico a firma.</p>
+                        <p class="text-sm text-slate-500">Busca personas Silver activas o inactivas para consultar y mantener su anexo tecnico.</p>
                     </div>
                     <div class="w-full max-w-xl">
                         <template x-if="!usuarioAnexo">
@@ -127,6 +127,7 @@
                                                     <span x-text="usuario.nombre"></span>
                                                     <span x-show="usuario.source === 'persona'" class="badge bg-secondary ms-2">Persona</span>
                                                     <span x-show="usuario.source !== 'persona'" class="badge bg-primary ms-2">Consultor</span>
+                                                    <span x-show="usuario.activo === false" class="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">Inactivo</span>
                                                 </div>
                                                 <div class="text-xs text-slate-500" x-text="usuario.email"></div>
                                             </div>
@@ -184,6 +185,7 @@
                                 <div class="flex flex-wrap gap-2">
                                     <span class="px-3 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-700" x-text="usuarioAnexo.tipo_consultor || 'Consultor'"></span>
                                     <span class="px-3 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-700" x-text="usuarioAnexo.cedula || 'Sin documento'"></span>
+                                    <span x-show="usuarioAnexo.activo === false" class="px-3 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-700">Inactivo</span>
                                 </div>
                             </div>
                         </div>

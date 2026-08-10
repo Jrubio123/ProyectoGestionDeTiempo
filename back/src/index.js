@@ -3552,6 +3552,7 @@ async function getUsuarioAnexoIndividualById(userInput) {
         COALESCE(p.direccion_residencia, u.direccion) AS direccion,
         COALESCE(p.ciudad_residencia, u.ciudad)       AS ciudad,
         u.moneda_cobro,
+        COALESCE(u.activo, false) AS activo,
         COALESCE(p.factura_en_colombia, u.factura_en_colombia) AS factura_en_colombia,
         u.tipo_consultor,
         COALESCE(di_p.titulo, di_u.titulo) AS tipo_documento_titulo,
@@ -3561,7 +3562,6 @@ async function getUsuarioAnexoIndividualById(userInput) {
       LEFT JOIN documento_identidad di_p ON di_p.id = p.tipo_documento_id
       LEFT JOIN documento_identidad di_u ON di_u.id = u.tipo_documento_id
       WHERE u.id = $1
-        AND u.activo = true
       LIMIT 1
       `,
       [internalId]
@@ -3586,6 +3586,7 @@ async function getUsuarioAnexoIndividualById(userInput) {
       p.direccion_residencia AS direccion,
       p.ciudad_residencia AS ciudad,
       p.factura_en_colombia,
+      (p.estado = 'activo') AS activo,
       NULL AS moneda_cobro,
       NULL AS tipo_consultor,
       di.titulo AS tipo_documento_titulo,
@@ -4005,6 +4006,7 @@ async function buildAnexoIndividualDashboardPayload(userRow, { includeFinalizado
       nombre: userRow.nombre_usuario,
       email: userRow.email,
       cedula: userRow.cedula || null,
+      activo: userRow.activo !== false,
       tipo_consultor: userRow.tipo_consultor || null,
       tipo_documento: userRow.tipo_documento_codigo || userRow.tipo_documento_titulo || null
     },

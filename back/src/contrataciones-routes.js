@@ -1884,10 +1884,13 @@ module.exports = function registerContratacionesRoutes(deps) {
             u.cedula AS numero_documento,
             u.telefono,
             u.moneda_cobro AS moneda,
+            COALESCE(u.activo, false) AS activo,
+            p.estado AS persona_estado,
             di.public_id AS tipo_documento_id,
             di.titulo AS tipo_documento,
             di.codigo AS tipo_documento_codigo
           FROM usuarios u
+          LEFT JOIN personas p ON p.id = u.persona_id
           LEFT JOIN documento_identidad di ON di.id = u.tipo_documento_id
           WHERE (
             u.nombre_usuario ILIKE $1
@@ -1929,6 +1932,8 @@ module.exports = function registerContratacionesRoutes(deps) {
               numero_documento: row.numero_documento || null,
               telefono: row.telefono || null,
               moneda: context?.moneda || row.moneda || null,
+              activo: Boolean(row.activo),
+              persona_estado: row.persona_estado || null,
               tipo_documento_id: row.tipo_documento_id || null,
               tipo_documento: row.tipo_documento || null,
               tipo_documento_codigo: row.tipo_documento_codigo || null,
@@ -2341,6 +2346,34 @@ module.exports = function registerContratacionesRoutes(deps) {
 
         const inserted = await pool.query(
           `
+          WITH persona_objetivo AS (
+            SELECT COALESCE(
+              (SELECT u.persona_id FROM usuarios u WHERE u.id = $4 AND u.persona_id IS NOT NULL LIMIT 1),
+              (SELECT p.id FROM personas p WHERE NULLIF(BTRIM(p.numero_documento), '') = $12 LIMIT 1)
+            ) AS id
+          ), persona_reactivada AS (
+            UPDATE personas p
+            SET estado = 'activo', updated_at = NOW()
+            FROM persona_objetivo objetivo
+            WHERE $1 = 'Nuevo'
+              AND objetivo.id IS NOT NULL
+              AND p.id = objetivo.id
+              AND p.estado IS DISTINCT FROM 'activo'
+            RETURNING p.id
+          ), usuarios_reactivados AS (
+            UPDATE usuarios u
+            SET activo = true, updated_at = NOW()
+            FROM roles r, persona_objetivo objetivo
+            WHERE $1 = 'Nuevo'
+              AND r.id = u.rol_usuario_id
+              AND LOWER(r.titulo) LIKE 'consultor%'
+              AND (
+                u.id = $4
+                OR (objetivo.id IS NOT NULL AND u.persona_id = objetivo.id)
+              )
+              AND u.activo IS DISTINCT FROM true
+            RETURNING u.id
+          )
           INSERT INTO solicitudes_contratacion (
             tipo_solicitud,
             estado,
@@ -2777,6 +2810,34 @@ module.exports = function registerContratacionesRoutes(deps) {
 
         await pool.query(
           `
+          WITH persona_objetivo AS (
+            SELECT COALESCE(
+              (SELECT u.persona_id FROM usuarios u WHERE u.id = $2 AND u.persona_id IS NOT NULL LIMIT 1),
+              (SELECT p.id FROM personas p WHERE NULLIF(BTRIM(p.numero_documento), '') = $8 LIMIT 1)
+            ) AS id
+          ), persona_reactivada AS (
+            UPDATE personas p
+            SET estado = 'activo', updated_at = NOW()
+            FROM persona_objetivo objetivo
+            WHERE $36 = 'Nuevo'
+              AND objetivo.id IS NOT NULL
+              AND p.id = objetivo.id
+              AND p.estado IS DISTINCT FROM 'activo'
+            RETURNING p.id
+          ), usuarios_reactivados AS (
+            UPDATE usuarios u
+            SET activo = true, updated_at = NOW()
+            FROM roles r, persona_objetivo objetivo
+            WHERE $36 = 'Nuevo'
+              AND r.id = u.rol_usuario_id
+              AND LOWER(r.titulo) LIKE 'consultor%'
+              AND (
+                u.id = $2
+                OR (objetivo.id IS NOT NULL AND u.persona_id = objetivo.id)
+              )
+              AND u.activo IS DISTINCT FROM true
+            RETURNING u.id
+          )
           UPDATE solicitudes_contratacion
           SET
             estado = $1,
@@ -2860,7 +2921,8 @@ module.exports = function registerContratacionesRoutes(deps) {
             JSON.stringify(datosExtra),
             crearUsuarioSistema,
             requiereConfirmacionCliente,
-            internalId
+            internalId,
+            tipoSolicitud
           ]
         );
 

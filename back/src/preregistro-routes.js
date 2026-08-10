@@ -1,5 +1,6 @@
 const { findCorreoPersonaConflict } = require("./services/persona-identidad.service");
 const { upsertPersonaDesdeContratacion } = require("./services/persona-contratacion.service");
+const { resolveTipoCuentaBancaria } = require("./services/tipo-cuenta-bancaria.service");
 
 module.exports = function registerPreregistroRoutes(deps) {
   const {
@@ -53,7 +54,6 @@ module.exports = function registerPreregistroRoutes(deps) {
     return null;
   }
 
-  const TIPOS_CUENTA = new Set(["Ahorros", "Corriente"]);
   const TIPOS_PERSONA = new Set(["Natural", "Juridica", "Jurídica"]);
   const MONEDAS = new Set(["COP", "USD", "EUR"]);
   const GRUPOS_DISTRIBUCION_CONTRATACION = new Set(["Todos Silver", "Vinculados"]);
@@ -223,19 +223,22 @@ module.exports = function registerPreregistroRoutes(deps) {
   }
 
   async function materializePersonaDesdePreregistro(db, current, actorUserId = null) {
-    const [linkedSolicitud, tipoCuentaResult] = await Promise.all([
+    const [linkedSolicitud, tipoCuenta] = await Promise.all([
       db.query(
-        `SELECT datos_extra
-         FROM solicitudes_contratacion
-         WHERE preregistro_id = $1 AND estado <> 'Cancelado'
-         ORDER BY updated_at DESC
+        `SELECT sc.datos_extra, sc.perfil,
+                COALESCE(sup.nombre_usuario, sc.datos_extra->>'supervisor_nombre') AS supervisor_nombre
+         FROM solicitudes_contratacion sc
+         LEFT JOIN usuarios sup ON sup.id = sc.supervisor_id
+         WHERE sc.preregistro_id = $1 AND sc.estado <> 'Cancelado'
+         ORDER BY sc.updated_at DESC
          LIMIT 1`,
         [current.id]
       ),
-      db.query(
-        `SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) LIMIT 1`,
-        [`${current.tipo_cuenta || ""}%`]
-      )
+      resolveTipoCuentaBancaria(db, {
+        tipoCuentaId: current.tipo_cuenta_id,
+        tipoCuentaNombre: current.tipo_cuenta,
+        required: Boolean(current.tipo_cuenta_id || current.tipo_cuenta)
+      })
     ]);
     const datosExtra = linkedSolicitud.rows[0]?.datos_extra || {};
     const [moduloId, clienteId] = await Promise.all([
@@ -258,7 +261,7 @@ module.exports = function registerPreregistroRoutes(deps) {
           ? null
           : Boolean(current.factura_en_colombia),
       banco_id: current.banco_id,
-      tipo_cuenta_id: tipoCuentaResult.rows[0]?.id || null,
+      tipo_cuenta_id: tipoCuenta?.id || null,
       numero_cuenta: current.numero_cuenta,
       modulo_id: moduloId,
       modulo_otro: moduloId
@@ -272,7 +275,11 @@ module.exports = function registerPreregistroRoutes(deps) {
       tipo_documento_representante: current.tipo_documento_representante,
       numero_documento_representante: current.numero_documento_representante,
       preregistro_id: current.id,
-      created_by: actorUserId
+      created_by: actorUserId,
+      cargo: linkedSolicitud.rows[0]?.perfil || current.perfil || null,
+      jefe_inmediato:
+        linkedSolicitud.rows[0]?.supervisor_nombre || current.responsable_supervisor || null,
+      moneda_cobro: MONEDAS.has(current.moneda) ? current.moneda : null
     });
   }
 
@@ -291,6 +298,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       p.razon_social, p.nit_empresa, p.representante_legal,
       p.tipo_documento_representante, p.numero_documento_representante,
       b.titulo AS banco_nombre,
+      p.tipo_cuenta_id, tcb.public_id AS tipo_cuenta_public_id,
       p.tipo_cuenta, p.numero_cuenta, p.correo_silver, p.estado, p.crear_usuario_sistema,
       p.creado_por, creador.public_id AS creado_por_public_id, creador.nombre_usuario AS creado_por_nombre,
       p.completado_coordinador_por, coordDone.public_id AS completado_coordinador_por_public_id, coordDone.nombre_usuario AS completado_coordinador_por_nombre,
@@ -313,6 +321,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     FROM preregistro_personas p
     JOIN solicitudes_rrhh s ON s.id = p.id_solicitud_rrhh
     LEFT JOIN bancos b ON b.id = p.banco_id
+    LEFT JOIN tipo_cuenta_bancaria tcb ON tcb.id = p.tipo_cuenta_id
     LEFT JOIN documento_identidad di ON di.id = p.tipo_documento_id
     LEFT JOIN clientes c ON c.id = s.cliente_id
     LEFT JOIN modulo m ON m.id = s.modulo_id
@@ -380,6 +389,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       tipo_documento_representante: row.tipo_documento_representante,
       numero_documento_representante: row.numero_documento_representante,
       banco: row.banco_id ? { id: row.banco_id, nombre: row.banco_nombre } : null,
+      tipo_cuenta_id: row.tipo_cuenta_public_id || null,
       tipo_cuenta: row.tipo_cuenta,
       numero_cuenta: row.numero_cuenta,
       correo_silver: row.correo_silver,
@@ -449,6 +459,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       direccion: preregistroRow.direccion || existingDatosExtra.direccion || null,
       tipo_persona: preregistroRow.tipo_persona || existingDatosExtra.tipo_persona || null,
       banco_id: preregistroRow.banco_id || existingDatosExtra.banco_id || null,
+      tipo_cuenta_id: preregistroRow.tipo_cuenta_public_id || existingDatosExtra.tipo_cuenta_id || null,
       tipo_cuenta: preregistroRow.tipo_cuenta || existingDatosExtra.tipo_cuenta || null,
       numero_cuenta: preregistroRow.numero_cuenta || existingDatosExtra.numero_cuenta || null,
       razon_social: preregistroRow.razon_social || existingDatosExtra.razon_social || null,
@@ -1188,18 +1199,15 @@ module.exports = function registerPreregistroRoutes(deps) {
 
   app.patch("/api/preregistros/:public_id/seccion-3", requireAccess({ roles: ["Talento Humano"] }), async (req, res) => {
     const {
-      direccion, tipo_persona, banco_id, tipo_cuenta, numero_cuenta, correo_silver,
+      direccion, tipo_persona, banco_id, tipo_cuenta_id, tipo_cuenta, numero_cuenta, correo_silver,
       razon_social, nit_empresa, representante_legal,
       tipo_documento_representante, numero_documento_representante
     } = req.body || {};
-    if (!direccion || !tipo_persona || !banco_id || !tipo_cuenta || !numero_cuenta) {
+    if (!direccion || !tipo_persona || !banco_id || (!tipo_cuenta_id && !tipo_cuenta) || !numero_cuenta) {
       return res.status(400).json({ error: "Faltan campos obligatorios de la seccion 3" });
     }
     if (!TIPOS_PERSONA.has(String(tipo_persona || "").trim())) {
       return res.status(400).json({ error: "tipo_persona no valido" });
-    }
-    if (!TIPOS_CUENTA.has(String(tipo_cuenta || "").trim())) {
-      return res.status(400).json({ error: "tipo_cuenta no valido" });
     }
     if (
       normalizeValue(tipo_persona) === "juridica" &&
@@ -1226,6 +1234,11 @@ module.exports = function registerPreregistroRoutes(deps) {
 
       const bancoId = await resolveBancoInternalId(client, banco_id);
       if (!bancoId) return res.status(400).json({ error: "Banco no encontrado" });
+      const tipoCuenta = await resolveTipoCuentaBancaria(client, {
+        tipoCuentaId: tipo_cuenta_id,
+        tipoCuentaNombre: tipo_cuenta,
+        required: true
+      });
       const correoSilverNorm = correo_silver ? String(correo_silver).trim().toLowerCase() : null;
       if (correoSilverNorm) {
         const [dupUser, dupPre] = await Promise.all([
@@ -1250,16 +1263,18 @@ module.exports = function registerPreregistroRoutes(deps) {
              correo_silver = COALESCE($6, correo_silver), estado = $7,
              completado_th_por = $8, fecha_completado_th = NOW(),
              razon_social = $10, nit_empresa = $11, representante_legal = $12,
-             tipo_documento_representante = $13, numero_documento_representante = $14
+             tipo_documento_representante = $13, numero_documento_representante = $14,
+             tipo_cuenta_id = $15
          WHERE id = $9`,
         [
-          direccion, tipoPersonaNorm, bancoId, String(tipo_cuenta).trim(), String(numero_cuenta).trim(),
+          direccion, tipoPersonaNorm, bancoId, tipoCuenta.titulo, String(numero_cuenta).trim(),
           correoSilverNorm, nextState, req.user?.id, id,
           razon_social ? String(razon_social).trim() : null,
           nit_empresa ? String(nit_empresa).trim() : null,
           representante_legal ? String(representante_legal).trim() : null,
           tipo_documento_representante ? String(tipo_documento_representante).trim() : null,
-          numero_documento_representante ? String(numero_documento_representante).trim() : null
+          numero_documento_representante ? String(numero_documento_representante).trim() : null,
+          tipoCuenta.id
         ]
       );
 
@@ -1286,6 +1301,9 @@ module.exports = function registerPreregistroRoutes(deps) {
         } catch (_) {}
       }
       if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.status(400).json({ error: "Preregistro o banco no encontrado" });
+      if (err?.code === "TIPO_CUENTA_INVALIDO") {
+        return res.status(err.status || 400).json({ error: err.message });
+      }
       if (err?.code === "PERSONA_DOCUMENTO_REQUIRED") {
         return res.status(err.statusCode || 422).json({ error: err.message });
       }
@@ -1351,7 +1369,11 @@ module.exports = function registerPreregistroRoutes(deps) {
       const debeCrearUsuario = current.crear_usuario_sistema !== false;
       let correoSilver = null;
       let rolId = null;
-      let tipoCuentaRes = null;
+      const tipoCuenta = await resolveTipoCuentaBancaria(client, {
+        tipoCuentaId: current.tipo_cuenta_id,
+        tipoCuentaNombre: current.tipo_cuenta,
+        required: true
+      });
 
       if (debeCrearUsuario) {
         correoSilver = String(current.correo_silver || "").trim().toLowerCase();
@@ -1370,22 +1392,12 @@ module.exports = function registerPreregistroRoutes(deps) {
           return res.status(409).json({ error: "Ya existe un usuario con ese correo_silver" });
         }
 
-        const [rolRes, tipoCuentaResult] = await Promise.all([
-          client.query(`SELECT id FROM roles WHERE LOWER(titulo) = LOWER('Consultor') LIMIT 1`),
-          client.query(`SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) LIMIT 1`, [`${current.tipo_cuenta || ""}%`])
-        ]);
-
-        tipoCuentaRes = tipoCuentaResult;
+        const rolRes = await client.query(`SELECT id FROM roles WHERE LOWER(titulo) = LOWER('Consultor') LIMIT 1`);
         rolId = rolRes.rows[0]?.id || null;
         if (!rolId) {
           await client.query("ROLLBACK");
           return res.status(500).json({ error: "No existe el rol Consultor" });
         }
-      } else {
-        tipoCuentaRes = await client.query(
-          `SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) LIMIT 1`,
-          [`${current.tipo_cuenta || ""}%`]
-        );
       }
 
       // ── UPSERT en tabla personas (núcleo de datos personales) ──────────────
@@ -1464,7 +1476,7 @@ module.exports = function registerPreregistroRoutes(deps) {
           tipoPersonaParaPersonas,
           current.factura_en_colombia === null || current.factura_en_colombia === undefined ? null : Boolean(current.factura_en_colombia),
           current.banco_id || null,
-          tipoCuentaRes.rows[0]?.id || null,
+          tipoCuenta.id,
           current.numero_cuenta || null,
           moduloInternoIdPreregistro,
           moduloOtroPreregistro,
@@ -1536,7 +1548,7 @@ module.exports = function registerPreregistroRoutes(deps) {
           rolId,
           current.numero_cuenta || null,
           current.banco_id || null,
-          tipoCuentaRes.rows[0]?.id || null,
+          tipoCuenta.id,
           current.tipo_documento_id || null,
           current.numero_documento || null,
           current.direccion || null,
@@ -1594,6 +1606,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     } catch (err) {
       try { await client.query("ROLLBACK"); } catch (_) {}
       if (err?.code === "PUBLIC_ID_NOT_FOUND") return res.status(404).json({ error: "Preregistro no encontrado" });
+      if (err?.code === "TIPO_CUENTA_INVALIDO") return res.status(err.status || 400).json({ error: err.message });
       if (err?.code === "23505") return res.status(409).json({ error: "Conflicto de unicidad creando usuario" });
       console.error(err);
       return res.status(500).json({ error: "Error aprobando preregistro" });

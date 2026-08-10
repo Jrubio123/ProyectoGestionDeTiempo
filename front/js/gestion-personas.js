@@ -238,13 +238,50 @@ window.gestionPersonasApp = function () {
             return Array.from(set).sort();
         },
 
+        get fichaSinUsuario() {
+            return this.ficha?.registro_tipo === "persona" || !this.ficha?.usuario_id;
+        },
+
+        get fichaEsVinculada() {
+            return String(this.ficha?.tipo_vinculacion || "").toLowerCase() === "vinculado";
+        },
+
+        get cargoActual() {
+            return this.ficha?.cargo_actual || this.ficha?.cargo || this.ficha?.solicitud_perfil || this.ficha?.persona_modulo || "-";
+        },
+
+        get responsableActual() {
+            return this.ficha?.responsable_actual || this.ficha?.jefe_inmediato || this.ficha?.supervisor_nombre || "-";
+        },
+
+        get monedaRelacion() {
+            return this.ficha?.moneda_relacion || (this.fichaEsVinculada ? this.ficha?.salario_moneda : this.ficha?.moneda_cobro) || "-";
+        },
+
+        get tarifaRelacion() {
+            if (this.fichaEsVinculada) return null;
+            const modalidad = String(this.ficha?.solicitud_modalidad || this.ficha?.modalidad || "").toLowerCase();
+            if (modalidad.includes("hora")) return this.ficha?.tarifa_hora;
+            if (modalidad.includes("medio")) return this.ficha?.tarifa_medio_tiempo || this.ficha?.tarifa_mes;
+            return this.ficha?.tarifa_mes || this.ficha?.tarifa_hora || this.ficha?.tarifa_capacitacion;
+        },
+
+        endpointFicha(persona = this.ficha) {
+            if (!persona) return null;
+            const sinUsuario = persona.registro_tipo === "persona" || !persona.usuario_id;
+            const id = sinUsuario
+                ? (persona.persona_public_id || persona.id)
+                : (persona.usuario_id || persona.id);
+            return sinUsuario ? `${API}/admin/personas/p/${id}` : `${API}/admin/personas/${id}`;
+        },
+
         async seleccionar(persona) {
             if (this.ficha?.id === persona.id) return;
             this.ficha = null;
             this.cerrarTodosLosDrafts();
             this.cargandoFicha = true;
             try {
-                const res = await axios.get(`${API}/admin/personas/${persona.id}`, this.getAuthConfig());
+                const res = await axios.get(this.endpointFicha(persona), this.getAuthConfig());
                 this.ficha = res.data;
             } catch (e) {
                 this.ficha = null;
@@ -285,6 +322,7 @@ window.gestionPersonasApp = function () {
         },
 
         abrirEdicion(seccion) {
+            if (this.fichaSinUsuario && ["identidad", "operativa"].includes(seccion)) return;
             this.cerrarTodosLosDrafts();
             this.editando[seccion] = true;
 
@@ -368,13 +406,14 @@ window.gestionPersonasApp = function () {
             });
 
             try {
+                const fichaEndpoint = this.endpointFicha();
                 await axios.put(
-                    `${API}/admin/personas/${this.ficha.id}/${seccion}`,
+                    `${fichaEndpoint}/${seccion}`,
                     payload,
                     this.getAuthConfig()
                 );
 
-                const res = await axios.get(`${API}/admin/personas/${this.ficha.id}`, this.getAuthConfig());
+                const res = await axios.get(fichaEndpoint, this.getAuthConfig());
                 this.ficha = res.data;
 
                 const idx = this.personas.findIndex((p) => p.id === this.ficha.id);
@@ -425,6 +464,21 @@ window.gestionPersonasApp = function () {
                 });
             } catch {
                 return "-";
+            }
+        },
+
+        formatMonto(value, moneda) {
+            if (value === null || value === undefined || value === "") return "-";
+            const numero = Number(value);
+            if (!Number.isFinite(numero)) return "-";
+            try {
+                return new Intl.NumberFormat("es-CO", {
+                    style: "currency",
+                    currency: String(moneda || "COP").toUpperCase(),
+                    maximumFractionDigits: 2
+                }).format(numero);
+            } catch (_) {
+                return `${moneda || ""} ${numero}`.trim();
             }
         }
     };

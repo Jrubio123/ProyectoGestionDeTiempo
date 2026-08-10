@@ -462,6 +462,7 @@ CREATE TABLE personas
     banco_id       INTEGER REFERENCES bancos(id),
     tipo_cuenta_id INTEGER REFERENCES tipo_cuenta_bancaria(id),
     numero_cuenta  VARCHAR(50),
+    moneda_cobro   tipo_moneda,
 
     -- Composición familiar
     composicion_familiar VARCHAR(100),

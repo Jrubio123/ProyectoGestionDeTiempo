@@ -1,5 +1,6 @@
 const { findCorreoPersonaConflict } = require("./services/persona-identidad.service");
 const { upsertPersonaDesdeContratacion } = require("./services/persona-contratacion.service");
+const { resolveTipoCuentaBancaria } = require("./services/tipo-cuenta-bancaria.service");
 
 module.exports = function registerContratacionesRoutes(deps) {
   const {
@@ -29,7 +30,6 @@ module.exports = function registerContratacionesRoutes(deps) {
   const TIPO_NUEVO = "Nuevo";
   const TIPO_EXTENSION = "Extension";
   const TIPO_RETIRO = "Retiro";
-  const TIPOS_CUENTA = new Set(["Ahorros", "Corriente"]);
   const GRUPOS_DISTRIBUCION_CONTRATACION = new Set(["Todos Silver", "Vinculados"]);
 
   const DESTINOS_MESA = parseEmailList(
@@ -389,14 +389,14 @@ module.exports = function registerContratacionesRoutes(deps) {
 
   async function materializePersonaDesdeSolicitud(db, solicitudRow, actorUserId = null) {
     const datosExtra = toObjectOrEmpty(solicitudRow.datos_extra);
-    const tipoCuenta = toNullableString(datosExtra.tipo_cuenta);
-    const [bancoId, moduloId, tipoCuentaResult] = await Promise.all([
+    const [bancoId, moduloId, tipoCuenta] = await Promise.all([
       resolveBancoInternalId(db, datosExtra.banco_id),
       resolveModuloInternalId(db, datosExtra.modulo_id),
-      db.query(
-        `SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) LIMIT 1`,
-        [`${tipoCuenta || ""}%`]
-      )
+      resolveTipoCuentaBancaria(db, {
+        tipoCuentaId: datosExtra.tipo_cuenta_id,
+        tipoCuentaNombre: datosExtra.tipo_cuenta,
+        required: Boolean(datosExtra.tipo_cuenta_id || datosExtra.tipo_cuenta)
+      })
     ]);
     const facturaEnColombia =
       datosExtra.factura_en_colombia === true || datosExtra.factura_en_colombia === "true"
@@ -417,7 +417,7 @@ module.exports = function registerContratacionesRoutes(deps) {
       tipo_persona: normalizeTipoPersonaForUsuarios(datosExtra.tipo_persona),
       factura_en_colombia: facturaEnColombia,
       banco_id: bancoId,
-      tipo_cuenta_id: tipoCuentaResult.rows[0]?.id || null,
+      tipo_cuenta_id: tipoCuenta?.id || null,
       numero_cuenta: toNullableString(datosExtra.numero_cuenta),
       modulo_id: moduloId,
       modulo_otro: moduloId
@@ -433,7 +433,12 @@ module.exports = function registerContratacionesRoutes(deps) {
       tipo_documento_representante: toNullableString(datosExtra.tipo_documento_representante),
       numero_documento_representante: toNullableString(datosExtra.numero_documento_representante),
       preregistro_id: solicitudRow.preregistro_id || null,
-      created_by: actorUserId
+      created_by: actorUserId,
+      cargo: toNullableString(solicitudRow.perfil),
+      jefe_inmediato:
+        toNullableString(solicitudRow.supervisor_nombre) ||
+        toNullableString(datosExtra.supervisor_nombre),
+      moneda_cobro: normalizeMoneda(solicitudRow.moneda)
     });
   }
 
@@ -2966,7 +2971,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
 
         const bancoId     = await resolveBancoInternalId(client, req.body?.banco_id);
-        const tipoCuenta  = toNullableString(req.body?.tipo_cuenta);
+        const tipoCuentaInput = toNullableString(req.body?.tipo_cuenta);
         const numeroCuenta = toNullableString(req.body?.numero_cuenta);
         const direccion   = toNullableString(req.body?.direccion);
         const tipoPersona = normalizeTipoPersonaForForm(req.body?.tipo_persona);
@@ -2980,7 +2985,12 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (!bancoId) {
           return res.status(400).json({ error: "Banco no válido" });
         }
-        if (!direccion || !tipoPersona || !TIPOS_CUENTA.has(tipoCuenta) || !numeroCuenta) {
+        const tipoCuenta = await resolveTipoCuentaBancaria(client, {
+          tipoCuentaId: req.body?.tipo_cuenta_id,
+          tipoCuentaNombre: tipoCuentaInput,
+          required: true
+        });
+        if (!direccion || !tipoPersona || !numeroCuenta) {
           return res.status(400).json({
             error: "Completa direccion, tipo de persona, tipo de cuenta y numero de cuenta"
           });
@@ -3023,7 +3033,8 @@ module.exports = function registerContratacionesRoutes(deps) {
             correoSilver,
             JSON.stringify({
               banco_id:      bancoPublicId || bancoId,
-              tipo_cuenta:   tipoCuenta,
+              tipo_cuenta_id: tipoCuenta.public_id,
+              tipo_cuenta:   tipoCuenta.titulo,
               numero_cuenta: numeroCuenta,
               direccion:     direccion,
               tipo_persona:  tipoPersona,
@@ -3056,6 +3067,9 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
         if (err?.code === "PERSONA_DOCUMENTO_REQUIRED") {
           return res.status(err.statusCode || 422).json({ error: err.message });
+        }
+        if (err?.code === "TIPO_CUENTA_INVALIDO") {
+          return res.status(err.status || 400).json({ error: err.message });
         }
         console.error(err);
         return res.status(500).json({ error: "Error guardando sección 3 de contratación" });
@@ -3107,7 +3121,11 @@ module.exports = function registerContratacionesRoutes(deps) {
         const datosExtra = toObjectOrEmpty(row.datos_extra);
         const direccion = toNullableString(datosExtra.direccion);
         const bancoId = await resolveBancoInternalId(client, datosExtra.banco_id);
-        const tipoCuenta = toNullableString(datosExtra.tipo_cuenta);
+        const tipoCuenta = await resolveTipoCuentaBancaria(client, {
+          tipoCuentaId: datosExtra.tipo_cuenta_id,
+          tipoCuentaNombre: datosExtra.tipo_cuenta,
+          required: true
+        });
         const numeroCuenta = toNullableString(datosExtra.numero_cuenta);
         const tipoPersona = normalizeTipoPersonaForUsuarios(datosExtra.tipo_persona);
         const clienteOtroContrat = row.cliente_id ? null : toNullableString(datosExtra.cliente_nombre);
@@ -3123,7 +3141,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         const tipoDocRepContrat = toNullableString(datosExtra.tipo_documento_representante);
         const numDocRepContrat = toNullableString(datosExtra.numero_documento_representante);
 
-        if (!direccion || !bancoId || !tipoCuenta || !numeroCuenta || !tipoPersona) {
+        if (!direccion || !bancoId || !numeroCuenta || !tipoPersona) {
           await client.query("ROLLBACK");
           return res.status(422).json({
             error:
@@ -3153,11 +3171,6 @@ module.exports = function registerContratacionesRoutes(deps) {
         const moduloOtroContrat = !moduloInternoIdContrat
           ? (datosExtra.modulo_nombre || datosExtra.modulo_otro || datosExtra.modulo || row.perfil || null)
           : null;
-
-        const tipoCuentaResPersona = await client.query(
-          `SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) LIMIT 1`,
-          [`${tipoCuenta}%`]
-        );
 
         const personaResContrat = await client.query(
           `INSERT INTO personas (
@@ -3205,7 +3218,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             tipoPersona,
             facturaEnColombia,
             bancoId,
-            tipoCuentaResPersona.rows[0]?.id || null,
+            tipoCuenta.id,
             numeroCuenta,
             moduloInternoIdContrat,
             moduloOtroContrat,
@@ -3230,10 +3243,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             return res.status(409).json({ error: "Ya existe un usuario con ese correo Silver" });
           }
 
-          const [rolRes, tipoCuentaRes] = await Promise.all([
-            client.query(`SELECT id FROM roles WHERE LOWER(titulo) = LOWER('Consultor') LIMIT 1`),
-            client.query(`SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) LIMIT 1`, [`${tipoCuenta}%`])
-          ]);
+          const rolRes = await client.query(`SELECT id FROM roles WHERE LOWER(titulo) = LOWER('Consultor') LIMIT 1`);
           const rolId = rolRes.rows[0]?.id || null;
           if (!rolId) {
             await client.query("ROLLBACK");
@@ -3254,7 +3264,7 @@ module.exports = function registerContratacionesRoutes(deps) {
               rolId,
               numeroCuenta,
               bancoId,
-              tipoCuentaRes.rows[0]?.id || null,
+              tipoCuenta.id,
               row.tipo_documento_id || null,
               row.numero_documento || null,
               direccion,
@@ -3323,6 +3333,9 @@ module.exports = function registerContratacionesRoutes(deps) {
         } catch (_) {}
         if (err?.code === "23505") {
           return res.status(409).json({ error: "Conflicto de unicidad creando usuario" });
+        }
+        if (err?.code === "TIPO_CUENTA_INVALIDO") {
+          return res.status(err.status || 400).json({ error: err.message });
         }
         console.error(err);
         return res.status(500).json({ error: "Error procesando revision TH" });

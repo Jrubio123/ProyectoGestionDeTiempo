@@ -31,7 +31,8 @@ window.onboardingThApp = function () {
         direccion: "",
         tipo_persona: "Natural",
         banco_id: "",
-        tipo_cuenta: "Ahorros",
+        tipo_cuenta_id: "",
+        tipo_cuenta: "",
         numero_cuenta: "",
         razon_social: "",
         nit_empresa: "",
@@ -67,6 +68,7 @@ window.onboardingThApp = function () {
 
         preregistros: [],
         bancos: [],
+        tiposCuenta: [],
         filtro: "all",
         busqueda: "",
         modalDetalle: false,
@@ -168,7 +170,7 @@ window.onboardingThApp = function () {
 
         async init() {
             await Promise.all([
-                this.cargarBancos(),
+                this.cargarCatalogosLegales(),
                 this.cargarRegistros(),
                 this.cargarCatalogosAnexo()
             ]);
@@ -178,12 +180,17 @@ window.onboardingThApp = function () {
             this.vistaActiva = vista;
         },
 
-        async cargarBancos() {
+        async cargarCatalogosLegales() {
             try {
-                const res = await axios.get(`${API}/bancos`, this.getAuthConfig());
-                this.bancos = res.data || [];
+                const [bancosRes, tiposCuentaRes] = await Promise.all([
+                    axios.get(`${API}/bancos`, this.getAuthConfig()),
+                    axios.get(`${API}/tipos-cuenta-bancaria`, this.getAuthConfig())
+                ]);
+                this.bancos = Array.isArray(bancosRes.data) ? bancosRes.data : [];
+                this.tiposCuenta = Array.isArray(tiposCuentaRes.data) ? tiposCuentaRes.data : [];
             } catch (_) {
                 this.bancos = [];
+                this.tiposCuenta = [];
             }
         },
 
@@ -342,6 +349,7 @@ window.onboardingThApp = function () {
                 banco: item?.datos_extra?.banco_id
                     ? { id: item.datos_extra.banco_id, nombre: preregistroBanco?.nombre || null }
                     : (preregistroBanco || null),
+                tipo_cuenta_id: item?.datos_extra?.tipo_cuenta_id || preregistro?.tipo_cuenta_id || null,
                 tipo_cuenta: item?.datos_extra?.tipo_cuenta || preregistro?.tipo_cuenta || null,
                 numero_cuenta: item?.datos_extra?.numero_cuenta || preregistro?.numero_cuenta || null,
                 correo_silver: item?.correo_empresarial || preregistro?.correo_silver || null,
@@ -378,6 +386,27 @@ window.onboardingThApp = function () {
                 .replace(/[\u0300-\u036f]/g, "")
                 .toLowerCase()
                 .trim();
+        },
+
+        normalizarTipoCuenta(value) {
+            const normalized = this.normalizar(value);
+            if (normalized.includes("ahorro")) return "ahorros";
+            if (normalized.includes("corrient")) return "corriente";
+            return normalized
+                .split(/\s+/)
+                .filter((token) => !["cuenta", "de", "bancaria", "bancario"].includes(token))
+                .join(" ");
+        },
+
+        resolverTipoCuentaCatalogo(id, nombre) {
+            const idNormalizado = String(id || "").trim();
+            const porId = this.tiposCuenta.find((item) => String(item?.id || "") === idNormalizado);
+            if (porId) return porId;
+            const nombreNormalizado = this.normalizarTipoCuenta(nombre);
+            if (!nombreNormalizado) return null;
+            return this.tiposCuenta.find(
+                (item) => this.normalizarTipoCuenta(item?.titulo) === nombreNormalizado
+            ) || null;
         },
 
         normalizarId(value) {
@@ -505,11 +534,13 @@ window.onboardingThApp = function () {
         abrirDetalle(item, focoCorreo = false) {
             this.itemActivo = JSON.parse(JSON.stringify(item || {}));
             const rawBancoId = item?.banco?.id ?? item?.banco_id ?? "";
+            const tipoCuenta = this.resolverTipoCuentaCatalogo(item?.tipo_cuenta_id, item?.tipo_cuenta);
             this.formS3 = {
                 direccion: item?.direccion || "",
                 tipo_persona: item?.tipo_persona || "Natural",
                 banco_id: rawBancoId !== "" && rawBancoId !== null ? String(rawBancoId) : "",
-                tipo_cuenta: item?.tipo_cuenta || "Ahorros",
+                tipo_cuenta_id: tipoCuenta?.id ? String(tipoCuenta.id) : "",
+                tipo_cuenta: tipoCuenta?.titulo || item?.tipo_cuenta || "",
                 numero_cuenta: item?.numero_cuenta || "",
                 razon_social: item?.razon_social || "",
                 nit_empresa: item?.nit_empresa || "",
@@ -554,7 +585,7 @@ window.onboardingThApp = function () {
             const baseValida = !!String(form.direccion || "").trim()
                 && !!String(form.tipo_persona || "").trim()
                 && !!String(form.banco_id || "").trim()
-                && !!String(form.tipo_cuenta || "").trim()
+                && !!String(form.tipo_cuenta_id || "").trim()
                 && !!String(form.numero_cuenta || "").trim();
             if (!baseValida) return false;
             if (this.normalizar(form.tipo_persona) !== "juridica") return true;
@@ -578,11 +609,13 @@ window.onboardingThApp = function () {
 
         buildS3Payload() {
             const juridica = this.normalizar(this.formS3.tipo_persona) === "juridica";
+            const tipoCuenta = this.resolverTipoCuentaCatalogo(this.formS3.tipo_cuenta_id, this.formS3.tipo_cuenta);
             return {
                 direccion: String(this.formS3.direccion || "").trim(),
                 tipo_persona: String(this.formS3.tipo_persona || "").trim(),
                 banco_id: this.bancoIdPayload(),
-                tipo_cuenta: String(this.formS3.tipo_cuenta || "").trim(),
+                tipo_cuenta_id: tipoCuenta?.id || null,
+                tipo_cuenta: tipoCuenta?.titulo || null,
                 numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
                 correo_silver: String(this.formS3.correo_silver || "").trim() || null,
                 razon_social: juridica ? String(this.formS3.razon_social || "").trim() : null,

@@ -434,9 +434,11 @@
                             <option :value="String(b.id)" x-text="b.titulo"></option>
                         </template>
                     </select>
-                    <select class="prereg-input" x-model="formS3.tipo_cuenta" :disabled="!seccion3Editable">
-                        <option value="Ahorros">Ahorros</option>
-                        <option value="Corriente">Corriente</option>
+                    <select class="prereg-input" x-model="formS3.tipo_cuenta_id" :disabled="!seccion3Editable">
+                        <option value="">Tipo de cuenta *</option>
+                        <template x-for="tipoCuenta in tiposCuenta" :key="tipoCuenta.id">
+                            <option :value="String(tipoCuenta.id)" x-text="tipoCuenta.titulo"></option>
+                        </template>
                     </select>
                     <input class="prereg-input" x-model="formS3.numero_cuenta" :disabled="!seccion3Editable" placeholder="Numero de cuenta *">
                     <input id="thCorreoSilver" class="prereg-input md:col-span-2" x-model="formS3.correo_silver" :disabled="!seccion3Editable"

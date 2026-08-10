@@ -35,6 +35,7 @@ const {
 } = require("./services/cuenta-cobro-cierre.service");
 const { persistirDiagnosticoFirmaCuenta } = require("./services/cuentas-cobro.service");
 const { buildAnexoIndividualDocumentContext } = require("./services/anexo-individual-documento.service");
+const { resolveTipoCuentaBancaria } = require("./services/tipo-cuenta-bancaria.service");
 const { env } = require("./config/env");
 const { requireAccess, requireAuthenticated, hasAccess } = require("./middlewares/access");
 const registerPreregistroRoutes = require("./preregistro-routes");
@@ -8614,12 +8615,56 @@ function sanitizePersonaForRead(row, req) {
   return sanitized;
 }
 
+function decorateGestionPersonaRow(row) {
+  if (!row) return row;
+  const tipoContrato = toNullableTrimmedString(row.tipo_contrato);
+  const grupoDistribucion = normalizeValue(row.grupo_distribucion);
+  const esVinculado =
+    tipoContrato === "Vinculado" ||
+    tipoContrato === "Aprendiz" ||
+    grupoDistribucion === "vinculados";
+  const esTodosilver =
+    ["Full time", "Por horas"].includes(tipoContrato) ||
+    grupoDistribucion === "todos silver" ||
+    grupoDistribucion === "todosilver";
+
+  return {
+    ...row,
+    tipo_vinculacion: esVinculado ? "Vinculado" : (esTodosilver ? "Todosilver" : "Sin definir"),
+    cargo_actual:
+      toNullableTrimmedString(row.cargo) ||
+      toNullableTrimmedString(row.solicitud_perfil) ||
+      toNullableTrimmedString(row.persona_modulo) ||
+      toNullableTrimmedString(row.modulo_otro),
+    responsable_actual:
+      toNullableTrimmedString(row.jefe_inmediato) ||
+      toNullableTrimmedString(row.supervisor_nombre),
+    moneda_relacion: esVinculado
+      ? (toNullableTrimmedString(row.salario_moneda) || "COP")
+      : (
+        toNullableTrimmedString(row.moneda_cobro) ||
+        toNullableTrimmedString(row.solicitud_moneda)
+      ),
+    fecha_inicio_relacion: esVinculado
+      ? (row.fecha_inicio_labores || row.solicitud_fecha_inicio || null)
+      : (row.solicitud_fecha_inicio || row.fecha_inicio_labores || null)
+  };
+}
+
 // GET /admin/personas-standalone — personas creadas sin usuario del sistema (admin + TH)
 app.get("/admin/personas-standalone", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
-        p.public_id,
+        p.public_id                 AS id,
+        p.public_id                 AS persona_public_id,
+        'persona'::text             AS registro_tipo,
+        CONCAT_WS(' ', p.nombre, p.apellidos) AS nombre_usuario,
+        p.correo_electronico        AS email,
+        (p.estado = 'activo')       AS activo,
+        'Sin usuario'::text         AS rol,
+        NULL::text                  AS azure_oid,
+        NULL::timestamp             AS ultimo_inicio_sesion,
         p.estado,
         p.nombre,
         p.apellidos,
@@ -8645,12 +8690,20 @@ app.get("/admin/personas-standalone", requireAccess({ roles: ["Administrador", "
 
 // GET /admin/personas/p/:personaId — ficha de persona standalone por personas.public_id (admin + TH)
 // Solo aplica a personas sin usuario vinculado; si tiene usuario, usar GET /admin/personas/:id.
-app.get("/admin/personas/p/:personaId", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+app.get("/admin/personas/p/:personaId", requireAccess({ roles: ["Administrador", "Coordinador", "Talento Humano"] }), async (req, res) => {
   const { personaId } = req.params;
   try {
     const result = await pool.query(`
       SELECT
-        p.public_id,
+        p.public_id                 AS id,
+        p.public_id                 AS persona_public_id,
+        'persona'::text             AS registro_tipo,
+        CONCAT_WS(' ', p.nombre, p.apellidos) AS nombre_usuario,
+        p.correo_electronico        AS email,
+        (p.estado = 'activo')       AS activo,
+        'Sin usuario'::text         AS rol,
+        NULL::text                  AS azure_oid,
+        NULL::timestamp             AS ultimo_inicio_sesion,
         p.estado,
         p.nombre,
         p.apellidos,
@@ -8671,6 +8724,18 @@ app.get("/admin/personas/p/:personaId", requireAccess({ roles: ["Administrador",
         p.eps, p.afp, p.arl,
         p.composicion_familiar, p.hijos, p.personas_a_cargo,
         p.tipo_contrato, p.modalidad,
+        p.tipo_trabajador,
+        p.cargo,
+        p.salario_mensual,
+        p.salario_moneda,
+        p.periodo_pago,
+        p.periodo_prueba,
+        p.jefe_inmediato,
+        p.caja_compensacion,
+        p.condiciones_especiales,
+        p.duracion_contrato,
+        p.fecha_inicio_labores,
+        p.lugar_celebracion,
         p.numero_cuenta           AS nro_cuenta_bancaria,
         p.razon_social,
         p.nit_empresa,
@@ -8688,19 +8753,43 @@ app.get("/admin/personas/p/:personaId", requireAccess({ roles: ["Administrador",
         m.public_id   AS persona_modulo_id,
         m.titulo      AS persona_modulo,
         cl.public_id  AS persona_cliente_id,
-        cl.titulo     AS persona_cliente
+        cl.titulo     AS persona_cliente,
+        sc.perfil     AS solicitud_perfil,
+        sc.moneda     AS solicitud_moneda,
+        COALESCE(p.moneda_cobro, sc.moneda) AS moneda_cobro,
+        sc.modalidad_contrato AS solicitud_modalidad,
+        sc.fecha_inicio AS solicitud_fecha_inicio,
+        sc.fecha_fin AS solicitud_fecha_fin,
+        sc.tarifa_hora,
+        sc.tarifa_mes,
+        sc.tarifa_medio_tiempo,
+        sc.tarifa_capacitacion,
+        COALESCE(sc.grupo_distribucion, sc.datos_extra->>'grupo_distribucion') AS grupo_distribucion,
+        COALESCE(sup.nombre_usuario, sc.datos_extra->>'supervisor_nombre') AS supervisor_nombre
       FROM personas p
       LEFT JOIN documento_identidad di  ON di.id = p.tipo_documento_id
       LEFT JOIN bancos b                ON b.id  = p.banco_id
       LEFT JOIN tipo_cuenta_bancaria tc ON tc.id = p.tipo_cuenta_id
       LEFT JOIN modulo m                ON m.id  = p.modulo_id
       LEFT JOIN clientes cl             ON cl.id = p.cliente_id
+      LEFT JOIN LATERAL (
+        SELECT solicitud.*
+        FROM solicitudes_contratacion solicitud
+        WHERE solicitud.estado <> 'Cancelado'
+          AND (
+            (p.preregistro_id IS NOT NULL AND solicitud.preregistro_id = p.preregistro_id)
+            OR NULLIF(BTRIM(solicitud.numero_documento), '') = NULLIF(BTRIM(p.numero_documento), '')
+          )
+        ORDER BY solicitud.updated_at DESC NULLS LAST, solicitud.id DESC
+        LIMIT 1
+      ) sc ON TRUE
+      LEFT JOIN usuarios sup ON sup.id = sc.supervisor_id
       WHERE p.public_id = $1
         AND NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.persona_id = p.id)
     `, [personaId]);
 
     if (result.rowCount === 0) return res.status(404).json({ error: "Persona standalone no encontrada" });
-    res.json(sanitizePersonaForRead(result.rows[0], req));
+    res.json(sanitizePersonaForRead(decorateGestionPersonaRow(result.rows[0]), req));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al obtener ficha de persona" });
@@ -8733,22 +8822,22 @@ app.put("/admin/personas/p/:personaId/personal", requireAccess({ roles: ["Admini
       UPDATE personas SET
         tipo_documento_id              = $1,
         numero_documento               = $2,
-        nombre                         = $3,
-        apellidos                      = $4,
+        nombre                         = COALESCE($3, nombre),
+        apellidos                      = COALESCE($4, apellidos),
         numero_contacto                = $5,
         direccion_residencia           = $6,
         ciudad_residencia              = $7,
         tipo_persona                   = $8::tipo_persona,
-        fecha_nacimiento               = $9,
-        sexo                           = $10::tipo_sexo,
-        departamento_pais              = $11,
-        titulo_profesional             = $12,
-        correo_electronico             = $13,
-        razon_social                   = $14,
-        nit_empresa                    = $15,
-        representante_legal            = $16,
-        tipo_documento_representante   = $17,
-        numero_documento_representante = $18,
+        fecha_nacimiento               = COALESCE($9, fecha_nacimiento),
+        sexo                           = COALESCE($10::tipo_sexo, sexo),
+        departamento_pais              = COALESCE($11, departamento_pais),
+        titulo_profesional             = COALESCE($12, titulo_profesional),
+        correo_electronico             = COALESCE($13, correo_electronico),
+        razon_social                   = COALESCE($14, razon_social),
+        nit_empresa                    = COALESCE($15, nit_empresa),
+        representante_legal            = COALESCE($16, representante_legal),
+        tipo_documento_representante   = COALESCE($17, tipo_documento_representante),
+        numero_documento_representante = COALESCE($18, numero_documento_representante),
         updated_at                     = CURRENT_TIMESTAMP
       WHERE public_id = $19
         AND NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.persona_id = personas.id)
@@ -8787,7 +8876,7 @@ app.put("/admin/personas/p/:personaId/personal", requireAccess({ roles: ["Admini
 // PUT /admin/personas/p/:personaId/cobro — editar datos bancarios de persona standalone (admin + TH)
 app.put("/admin/personas/p/:personaId/cobro", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
   const { personaId } = req.params;
-  const { banco_id, tipo_cuenta_id, nro_cuenta_bancaria, factura_en_colombia } = req.body || {};
+  const { moneda_cobro, banco_id, tipo_cuenta_id, nro_cuenta_bancaria, factura_en_colombia } = req.body || {};
   try {
     const bancoRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.bancos, banco_id, "Banco");
     const tipoCuentaRef = await resolvePersonaReferenceOrThrow(pool, ID_TABLES.tipoCuentaBancaria, tipo_cuenta_id, "Tipo de cuenta");
@@ -8795,6 +8884,10 @@ app.put("/admin/personas/p/:personaId/cobro", requireAccess({ roles: ["Administr
       factura_en_colombia === true || factura_en_colombia === "true" || factura_en_colombia === 1 ? true
         : factura_en_colombia === false || factura_en_colombia === "false" || factura_en_colombia === 0 ? false
           : null;
+    const monedaNormalizada = toNullableTrimmedString(moneda_cobro)?.toUpperCase() || null;
+    if (monedaNormalizada && !["COP", "USD", "EUR"].includes(monedaNormalizada)) {
+      return res.status(400).json({ error: "Moneda no válida" });
+    }
 
     const result = await pool.query(`
       UPDATE personas SET
@@ -8802,17 +8895,48 @@ app.put("/admin/personas/p/:personaId/cobro", requireAccess({ roles: ["Administr
         tipo_cuenta_id      = $2,
         numero_cuenta       = $3,
         factura_en_colombia = $4,
+        moneda_cobro        = $5::tipo_moneda,
         updated_at          = CURRENT_TIMESTAMP
-      WHERE public_id = $5
+      WHERE public_id = $6
         AND NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.persona_id = personas.id)
       RETURNING public_id, numero_cuenta AS nro_cuenta_bancaria, factura_en_colombia
-    `, [bancoRef.id, tipoCuentaRef.id, toNullableTrimmedString(nro_cuenta_bancaria), facturaVal, personaId]);
+    `, [bancoRef.id, tipoCuentaRef.id, toNullableTrimmedString(nro_cuenta_bancaria), facturaVal, monedaNormalizada, personaId]);
     if (result.rowCount === 0) return res.status(404).json({ error: "Persona standalone no encontrada. Si tiene usuario vinculado, usa PUT /admin/personas/:id/cobro" });
     res.json(result.rows[0]);
   } catch (err) {
     if (err?.status === 400) return res.status(400).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: "Error al actualizar datos de cobro" });
+  }
+});
+
+// PUT /admin/personas/p/:personaId/laboral — datos laborales de persona sin usuario
+app.put("/admin/personas/p/:personaId/laboral", requireAccess({ roles: ["Administrador", "Talento Humano"] }), async (req, res) => {
+  const { personaId } = req.params;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const personaRes = await client.query(
+      `SELECT id
+       FROM personas
+       WHERE public_id = $1
+         AND NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.persona_id = personas.id)
+       LIMIT 1`,
+      [personaId]
+    );
+    if (personaRes.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Persona sin usuario no encontrada" });
+    }
+    await updatePersonaDatosLaborales(client, personaRes.rows[0].id, req.body || {});
+    await client.query("COMMIT");
+    res.json({ success: true });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar datos laborales" });
+  } finally {
+    client.release();
   }
 });
 
@@ -9049,14 +9173,19 @@ app.get("/admin/personas", requireAccess({ roles: ["Administrador", "Coordinador
   try {
     const result = await pool.query(`
       SELECT
-        u.public_id                                        AS id,
-        u.nombre_usuario,
-        u.email,
-        u.activo,
+        COALESCE(u.public_id, p.public_id)                  AS id,
+        u.public_id                                        AS usuario_id,
+        p.public_id                                        AS persona_public_id,
+        CASE WHEN u.id IS NULL THEN 'persona' ELSE 'usuario' END AS registro_tipo,
+        COALESCE(
+          NULLIF(BTRIM(u.nombre_usuario), ''),
+          NULLIF(BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)), '')
+        )                                                  AS nombre_usuario,
+        COALESCE(u.email, p.correo_electronico)            AS email,
+        COALESCE(u.activo, p.estado = 'activo')            AS activo,
         u.ultimo_inicio_sesion,
         u.azure_oid,
-        r.titulo                                           AS rol,
-        p.public_id                                        AS persona_public_id,
+        COALESCE(r.titulo, 'Sin usuario')                  AS rol,
         COALESCE(p.ciudad_residencia, u.ciudad)            AS ciudad,
         COALESCE(p.numero_documento, u.cedula)             AS cedula,
         COALESCE(p.tipo_persona, u.tipo_persona)           AS tipo_persona,
@@ -9064,9 +9193,9 @@ app.get("/admin/personas", requireAccess({ roles: ["Administrador", "Coordinador
         p.nombre                                           AS persona_nombre,
         p.apellidos                                        AS persona_apellidos
       FROM usuarios u
+      FULL JOIN personas p ON p.id = u.persona_id
       LEFT JOIN roles r    ON r.id = u.rol_usuario_id
-      LEFT JOIN personas p ON p.id = u.persona_id
-      ORDER BY u.nombre_usuario ASC
+      ORDER BY COALESCE(u.nombre_usuario, CONCAT_WS(' ', p.nombre, p.apellidos)) ASC
     `);
     res.json((result.rows || []).map((row) => sanitizePersonaForRead(row, req)));
   } catch (err) {
@@ -9834,7 +9963,7 @@ app.get("/admin/personas/:id", requireAccess({ roles: ["Administrador", "Coordin
         u.activo,
         u.azure_oid,
         u.ultimo_inicio_sesion,
-        u.moneda_cobro,
+        COALESCE(u.moneda_cobro, p.moneda_cobro, sc.moneda) AS moneda_cobro,
         u.tipo_consultor,
         u.observaciones,
 
@@ -9896,7 +10025,32 @@ app.get("/admin/personas/:id", requireAccess({ roles: ["Administrador", "Coordin
         -- Documento (persona primero, luego usuario)
         COALESCE(di_p.public_id, di_u.public_id)               AS tipo_documento_id,
         COALESCE(di_p.titulo, di_u.titulo)                     AS tipo_documento,
-        COALESCE(di_p.codigo, di_u.codigo)                     AS tipo_documento_codigo
+        COALESCE(di_p.codigo, di_u.codigo)                     AS tipo_documento_codigo,
+
+        p.tipo_trabajador,
+        p.cargo,
+        p.salario_mensual,
+        p.salario_moneda,
+        p.periodo_pago,
+        p.periodo_prueba,
+        p.jefe_inmediato,
+        p.caja_compensacion,
+        p.condiciones_especiales,
+        p.duracion_contrato,
+        p.fecha_inicio_labores,
+        p.lugar_celebracion,
+
+        sc.perfil                                             AS solicitud_perfil,
+        sc.moneda                                             AS solicitud_moneda,
+        sc.modalidad_contrato                                 AS solicitud_modalidad,
+        sc.fecha_inicio                                       AS solicitud_fecha_inicio,
+        sc.fecha_fin                                          AS solicitud_fecha_fin,
+        sc.tarifa_hora,
+        sc.tarifa_mes,
+        sc.tarifa_medio_tiempo,
+        sc.tarifa_capacitacion,
+        COALESCE(sc.grupo_distribucion, sc.datos_extra->>'grupo_distribucion') AS grupo_distribucion,
+        COALESCE(sup.nombre_usuario, sc.datos_extra->>'supervisor_nombre') AS supervisor_nombre
 
       FROM usuarios u
       LEFT JOIN roles r                  ON r.id  = u.rol_usuario_id
@@ -9910,11 +10064,28 @@ app.get("/admin/personas/:id", requireAccess({ roles: ["Administrador", "Coordin
       LEFT JOIN modulo m                 ON m.id  = p.modulo_id
       LEFT JOIN clientes cl              ON cl.id = p.cliente_id
       LEFT JOIN usuarios cp              ON cp.id = u.id_consultor_principal
+      LEFT JOIN LATERAL (
+        SELECT solicitud.*
+        FROM solicitudes_contratacion solicitud
+        WHERE solicitud.estado <> 'Cancelado'
+          AND (
+            solicitud.persona_usuario_id = u.id
+            OR (p.preregistro_id IS NOT NULL AND solicitud.preregistro_id = p.preregistro_id)
+            OR NULLIF(BTRIM(solicitud.numero_documento), '') = NULLIF(BTRIM(COALESCE(p.numero_documento, u.cedula)), '')
+          )
+        ORDER BY solicitud.updated_at DESC NULLS LAST, solicitud.id DESC
+        LIMIT 1
+      ) sc ON TRUE
+      LEFT JOIN usuarios sup              ON sup.id = sc.supervisor_id
       WHERE u.public_id = $1
     `, [id]);
 
     if (result.rowCount === 0) return res.status(404).json({ error: "Persona no encontrada" });
-    res.json(sanitizePersonaForRead(result.rows[0], req));
+    res.json(sanitizePersonaForRead(decorateGestionPersonaRow({
+      ...result.rows[0],
+      registro_tipo: "usuario",
+      usuario_id: result.rows[0].id
+    }), req));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al obtener ficha de persona" });
@@ -10185,10 +10356,10 @@ app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador", "C
       // Crear persona con datos de cobro y vincular.
       // Se puebla nombre con nombre_usuario para que la persona no quede completamente vacía.
       const newPersona = await client.query(`
-        INSERT INTO personas (nombre, banco_id, tipo_cuenta_id, numero_cuenta, factura_en_colombia, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO personas (nombre, banco_id, tipo_cuenta_id, numero_cuenta, factura_en_colombia, moneda_cobro, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6::tipo_moneda, $7)
         RETURNING id
-      `, [usuario.nombre_usuario, bancoRef.id, tipoCuentaRef.id, toNullableTrimmedString(nro_cuenta_bancaria), facturaEnColombiaNormalizada ?? null, usuario.id]);
+      `, [usuario.nombre_usuario, bancoRef.id, tipoCuentaRef.id, toNullableTrimmedString(nro_cuenta_bancaria), facturaEnColombiaNormalizada ?? null, monedaNormalizada, usuario.id]);
       personaId = newPersona.rows[0].id;
       await client.query(
         "UPDATE usuarios SET persona_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
@@ -10202,9 +10373,10 @@ app.put("/admin/personas/:id/cobro", requireAccess({ roles: ["Administrador", "C
           tipo_cuenta_id      = $2,
           numero_cuenta       = $3,
           factura_en_colombia = $4,
+          moneda_cobro        = $5::tipo_moneda,
           updated_at          = CURRENT_TIMESTAMP
-        WHERE id = $5
-      `, [bancoRef.id, tipoCuentaRef.id, toNullableTrimmedString(nro_cuenta_bancaria), facturaEnColombiaNormalizada ?? null, personaId]);
+        WHERE id = $6
+      `, [bancoRef.id, tipoCuentaRef.id, toNullableTrimmedString(nro_cuenta_bancaria), facturaEnColombiaNormalizada ?? null, monedaNormalizada, personaId]);
     }
 
     await client.query("COMMIT");
@@ -11669,17 +11841,12 @@ function normalizeContratoPersonaFormPayload(body = {}) {
 }
 
 async function resolveTipoCuentaBancariaId(db, value) {
-  const raw = toNullableTrimmedString(value);
-  if (!raw) return null;
-
-  const id = await resolveInternalIdFromPublicIdOrId(db, ID_TABLES.tipoCuentaBancaria, raw);
-  if (id) return id;
-
-  const r = await db.query(
-    `SELECT id FROM tipo_cuenta_bancaria WHERE LOWER(titulo) LIKE LOWER($1) ORDER BY id LIMIT 1`,
-    [`${raw}%`]
-  );
-  return r.rows[0]?.id || null;
+  const tipoCuenta = await resolveTipoCuentaBancaria(db, {
+    tipoCuentaId: value,
+    tipoCuentaNombre: value,
+    required: Boolean(toNullableTrimmedString(value))
+  });
+  return tipoCuenta?.id || null;
 }
 
 async function buildContratoPersonaSyncData(db, personaContext) {
@@ -11691,7 +11858,7 @@ async function buildContratoPersonaSyncData(db, personaContext) {
   );
   const tipoCuentaId = await resolveTipoCuentaBancariaId(
     db,
-    extra.tipo_cuenta || personaContext?.preregistro?.tipo_cuenta || null
+    extra.tipo_cuenta_id || extra.tipo_cuenta || personaContext?.preregistro?.tipo_cuenta || null
   );
 
   return {

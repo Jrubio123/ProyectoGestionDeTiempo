@@ -16,10 +16,10 @@ async function upsertPersonaDesdeContratacion(db, data = {}) {
       modulo_id, modulo_otro, cliente_id, cliente_otro,
       razon_social, nit_empresa, representante_legal,
       tipo_documento_representante, numero_documento_representante,
-      preregistro_id, created_by
+      preregistro_id, created_by, cargo, jefe_inmediato, moneda_cobro
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12,
-      $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
+      $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27::tipo_moneda
     )
     ON CONFLICT (numero_documento) DO UPDATE SET
       tipo_documento_id              = COALESCE(EXCLUDED.tipo_documento_id, personas.tipo_documento_id),
@@ -56,6 +56,9 @@ async function upsertPersonaDesdeContratacion(db, data = {}) {
       tipo_documento_representante   = COALESCE(EXCLUDED.tipo_documento_representante, personas.tipo_documento_representante),
       numero_documento_representante = COALESCE(EXCLUDED.numero_documento_representante, personas.numero_documento_representante),
       preregistro_id                 = COALESCE(EXCLUDED.preregistro_id, personas.preregistro_id),
+      cargo                          = COALESCE(EXCLUDED.cargo, personas.cargo),
+      jefe_inmediato                 = COALESCE(EXCLUDED.jefe_inmediato, personas.jefe_inmediato),
+      moneda_cobro                   = COALESCE(EXCLUDED.moneda_cobro, personas.moneda_cobro),
       estado                         = 'activo',
       updated_at                     = NOW()
     RETURNING id, public_id`,
@@ -83,7 +86,10 @@ async function upsertPersonaDesdeContratacion(db, data = {}) {
       data.tipo_documento_representante || null,
       data.numero_documento_representante || null,
       data.preregistro_id || null,
-      data.created_by || null
+      data.created_by || null,
+      data.cargo || null,
+      data.jefe_inmediato || null,
+      data.moneda_cobro || null
     ]
   );
 

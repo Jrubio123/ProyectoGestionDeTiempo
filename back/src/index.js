@@ -1656,6 +1656,13 @@ function normalizeTextKey(value) {
     .trim();
 }
 
+function firstDistinctLocationValue(values, duplicatedValue) {
+  const duplicatedKey = normalizeTextKey(duplicatedValue);
+  return values
+    .map(toNullableTrimmedString)
+    .find((value) => value && (!duplicatedKey || normalizeTextKey(value) !== duplicatedKey)) || "";
+}
+
 function normalizeAnexoTipoInput(value) {
   const key = normalizeTextKey(value);
   if (!key) return null;
@@ -2482,6 +2489,10 @@ async function resolveContratoPersonaContext(proceso) {
     toNullableTrimmedString(solicitud?.ubicacion) ||
     toNullableTrimmedString(personaBase?.usuario_ciudad) ||
     CONTRATOS_CIUDAD_SILVER;
+  const paisUbicacion = firstDistinctLocationValue([
+    personaBase?.pais_residencia,
+    preregistro?.pais_ubicacion
+  ], ciudad);
 
   // personas/usuarios tienen prioridad aqui porque el formulario publico permite corregir datos antes de firmar.
   const facturaEnColombiaRaw =
@@ -2547,10 +2558,7 @@ async function resolveContratoPersonaContext(proceso) {
     telefono,
     direccion,
     ciudad,
-    paisUbicacion:
-      toNullableTrimmedString(personaBase?.pais_residencia) ||
-      toNullableTrimmedString(preregistro?.pais_ubicacion) ||
-      null,
+    paisUbicacion: paisUbicacion || null,
     facturaEnColombia,
     tipoPersona,
     tipoContrato: toNullableTrimmedString(personaBase?.tipo_contrato),
@@ -11992,6 +12000,15 @@ async function resolveModuloForContratoPersonaForm(db, personaContext, baseRecor
 
 function buildContratoPersonaFormData(baseRecord, personaContext, moduloRef = null) {
   const ctx = personaContext || {};
+  const ciudadResidencia =
+    toNullableTrimmedString(baseRecord?.ciudad_residencia) ||
+    toNullableTrimmedString(ctx.ciudad) ||
+    toNullableTrimmedString(baseRecord?.usuario_ciudad) ||
+    "";
+  const paisResidencia = firstDistinctLocationValue([
+    baseRecord?.pais_residencia,
+    ctx.paisUbicacion
+  ], ciudadResidencia);
   return {
     nombre: toNullableTrimmedString(baseRecord?.persona_nombre) || toNullableTrimmedString(ctx.nombre) || "",
     apellidos: toNullableTrimmedString(baseRecord?.persona_apellidos) || toNullableTrimmedString(ctx.apellidos) || "",
@@ -12017,16 +12034,9 @@ function buildContratoPersonaFormData(baseRecord, personaContext, moduloRef = nu
       toNullableTrimmedString(baseRecord?.usuario_direccion) ||
       "",
     barrio: toNullableTrimmedString(baseRecord?.barrio) || "",
-    ciudad_residencia:
-      toNullableTrimmedString(baseRecord?.ciudad_residencia) ||
-      toNullableTrimmedString(ctx.ciudad) ||
-      toNullableTrimmedString(baseRecord?.usuario_ciudad) ||
-      "",
+    ciudad_residencia: ciudadResidencia,
     departamento_pais: toNullableTrimmedString(baseRecord?.departamento_pais) || "",
-    pais_residencia:
-      toNullableTrimmedString(baseRecord?.pais_residencia) ||
-      toNullableTrimmedString(ctx.paisUbicacion) ||
-      "",
+    pais_residencia: paisResidencia,
     correo_electronico:
       toNullableTrimmedString(baseRecord?.correo_electronico) ||
       toNullableTrimmedString(ctx.correoPersonal) ||

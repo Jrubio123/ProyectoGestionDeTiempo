@@ -13,6 +13,18 @@ const {
   persistirDiagnosticoFirmaCuenta
 } = require("./cuentas-cobro.service");
 
+const CLICKSIGN_ARCHIVO_FIRMADO_PENDIENTE = "CLICKSIGN_ARCHIVO_FIRMADO_PENDIENTE";
+
+function buildArchivoFirmadoPendienteError(tipo = "documento", reason = "archivo_pendiente") {
+  const error = new Error(`PDF firmado pendiente para ${tipo}: ${reason}`);
+  error.code = CLICKSIGN_ARCHIVO_FIRMADO_PENDIENTE;
+  return error;
+}
+
+function isArchivoFirmadoPendienteError(error) {
+  return String(error?.code || "") === CLICKSIGN_ARCHIVO_FIRMADO_PENDIENTE;
+}
+
 function getIndexHelpers() {
   return require("../index");
 }
@@ -87,6 +99,9 @@ async function processQueuedSignatureEvent(eventId) {
        WHERE id = $1`,
       [queued.id, errorMessage, retrySeconds]
     );
+    if (isArchivoFirmadoPendienteError(err)) {
+      return { ok: false, retry: true, event_id: queued.id, retry_seconds: retrySeconds };
+    }
     throw err;
   }
 }
@@ -545,6 +560,9 @@ async function processSignatureEvent(event) {
         correlationError.code = "CLICKSIGN_CONTRATO_SIN_CORRELACION";
         throw correlationError;
       }
+      if (handledContrato?.retry) {
+        throw buildArchivoFirmadoPendienteError("contrato", handledContrato.reason);
+      }
       return { handled: true, tipo: "contrato" };
     }
 
@@ -564,6 +582,9 @@ async function processSignatureEvent(event) {
           signatureId,
           rawStatus
         });
+      }
+      if (handledAnexoIndividual?.retry) {
+        throw buildArchivoFirmadoPendienteError("anexo_individual", handledAnexoIndividual.reason);
       }
       return;
     }
@@ -679,6 +700,9 @@ async function processSignatureEvent(event) {
         rawStatus
       });
       if (handledAnexoIndividual) {
+        if (handledAnexoIndividual?.retry) {
+          throw buildArchivoFirmadoPendienteError("anexo_individual", handledAnexoIndividual.reason);
+        }
         return;
       }
       if (esCuentaCobro) {
@@ -700,6 +724,9 @@ async function processSignatureEvent(event) {
         rawStatus
       });
       if (handledContrato) {
+        if (handledContrato?.retry) {
+          throw buildArchivoFirmadoPendienteError("contrato", handledContrato.reason);
+        }
         return;
       }
     }
@@ -712,7 +739,9 @@ async function processSignatureEvent(event) {
     }
 
   } catch (innerErr) {
-    console.error("Error procesando webhook Click&Sign:", innerErr);
+    if (!isArchivoFirmadoPendienteError(innerErr)) {
+      console.error("Error procesando webhook Click&Sign:", innerErr);
+    }
     throw innerErr;
   }
 }
@@ -725,6 +754,8 @@ module.exports = {
   reintentarCuentaCobroFirma,
   __private: {
     getFirmaWebhookMismatch,
-    registrarHintWebhookCuentaCobro
+    registrarHintWebhookCuentaCobro,
+    buildArchivoFirmadoPendienteError,
+    isArchivoFirmadoPendienteError
   }
 };

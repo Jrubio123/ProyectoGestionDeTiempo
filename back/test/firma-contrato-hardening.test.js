@@ -19,9 +19,11 @@ function cargarHelpersFirma() {
     recorte(source, "function normalizeDocStatus", "function isDocxTemplateFailureMessage"),
     recorte(source, "function mergeContratoFirmaStatus", "function buildContratoDocPatch"),
     recorte(source, "function contratoDocNeedsReconciliation", "function isClickSignInvalidSignatureReference"),
+    recorte(source, "function isClickSignSignedFileEntry", "async function fetchClickSignFileListEntries"),
     "globalThis.__merge = mergeContratoDocPatch;",
     "globalThis.__complete = contratoDocSyncCompleted;",
-    "globalThis.__needs = contratoDocNeedsReconciliation;"
+    "globalThis.__needs = contratoDocNeedsReconciliation;",
+    "globalThis.__isSignedFile = isClickSignSignedFileEntry;"
   ].join("\n"), context);
   return context;
 }
@@ -30,6 +32,29 @@ test("firma confirmada completa el documento aunque OneDrive falle", () => {
   const helpers = cargarHelpersFirma();
   assert.equal(helpers.__complete({ estado: "signed", onedrive_url: "" }), true);
   assert.equal(helpers.__needs({ estado: "signed", request_id: "CF-1", onedrive_url: "" }), true);
+});
+
+test("solo file_group signed se acepta como PDF firmado", () => {
+  const helpers = cargarHelpersFirma();
+  assert.equal(helpers.__isSignedFile({ fileGroup: "signed", status: "available" }), true);
+  assert.equal(helpers.__isSignedFile({ fileGroup: "signed", status: "pending" }), false);
+  assert.equal(helpers.__isSignedFile({ fileGroup: "original", fileName: "contrato_signed.pdf" }), false);
+  assert.equal(helpers.__isSignedFile({ fileType: "signed_contract", fileName: "firmado.pdf" }), false);
+
+  const source = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  const resolver = recorte(source, "async function resolveClickSignArtifacts", "async function resolveCuentaFirmaFirmadaAcrossAttempts");
+  assert.doesNotMatch(resolver, /get_file_catalog_fallback/);
+  assert.doesNotMatch(resolver, /resolveSignedPdfFromClickSign/);
+  assert.match(resolver, /selectedFile/);
+});
+
+test("una referencia invalida temporal puede volver a reconciliarse", () => {
+  const helpers = cargarHelpersFirma();
+  assert.equal(helpers.__needs({
+    estado: "sent",
+    request_id: "CF-1",
+    ultimo_evento: "INVALID_SIGNATURE_REFERENCE"
+  }), true);
 });
 
 test("una escritura concurrente nunca degrada firma ni archivo confirmados", () => {
@@ -63,6 +88,16 @@ test("webhook se guarda antes de responder y tiene reintento durable", () => {
   assert.match(service, /clicksign_webhook_eventos/);
   assert.match(service, /siguiente_intento_at/);
   assert.match(service, /jobProcesarWebhooksClickSignPendientes/);
+  assert.match(service, /CLICKSIGN_ARCHIVO_FIRMADO_PENDIENTE/);
+  assert.match(service, /handledContrato\?\.retry/);
+
+  const { __private } = require("../src/services/clicksign.service");
+  const pendingError = __private.buildArchivoFirmadoPendienteError("contrato", "file_group_signed_pendiente");
+  assert.equal(__private.isArchivoFirmadoPendienteError(pendingError), true);
+
+  const backend = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  assert.doesNotMatch(backend, /scheduleContratoWebhookRetry/);
+  assert.match(backend, /file_group_signed_pendiente/);
 });
 
 test("reconciliador sigue archivando procesos ya firmados", () => {
@@ -80,4 +115,60 @@ test("la UI sigue consultando cuando el inicio queda ambiguo", () => {
   const backend = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
   assert.match(backend, /INVALID_SIGNATURE_REFERENCE/);
   assert.match(backend, /firma_inicio_error_ambiguo/);
+});
+
+test("la UI reconcilia cada 30 segundos mientras permanezca abierta", () => {
+  const frontend = fs.readFileSync(path.resolve(__dirname, "../../front/js/contratacion-publica.js"), "utf8");
+  assert.match(frontend, /FIRMA_POLLING_INTERVAL_MS = 30000/);
+  assert.doesNotMatch(frontend, /FIRMA_POLLING_MAX_ATTEMPTS/);
+  assert.match(frontend, /document\.hidden/);
+  assert.doesNotMatch(frontend, /pollingIntentos/);
+  assert.match(frontend, /this\.docsFirmaOrdenados\.filter\(\(doc\) => this\.puedeReconciliarDoc\(doc\)\)/);
+  assert.match(frontend, /`\$\{API\}\/contratacion\/firma\/reconciliar`,\s*\{ doc_index: Number\(doc\.doc_index\) \}/);
+
+  const backend = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  assert.doesNotMatch(backend, /skipped: "doc_index_required"/);
+  assert.match(backend, /RECONCILIACION_CONTRATOS_JOB_HABILITADO \|\| "true"/);
+  assert.match(backend, /RECONCILIACION_CONTRATOS_INTERVAL_SEGUNDOS \|\| 300/);
+  assert.match(backend, /archivo_file_group/);
+  assert.match(backend, /archivo_catalogo/);
+});
+
+test("el catalogo se consulta para archivar solo cuando la firma ya esta confirmada", () => {
+  const backend = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  const reconciliador = recorte(
+    backend,
+    "async function reconcileContratoDocsForProcess",
+    "const contratoReconciliationTimers"
+  );
+  assert.match(reconciliador, /if \(nextStatus === "signed"\) \{\s*const artifacts = await resolveClickSignArtifacts/);
+});
+
+test("anexo individual conserva firma legal y trazabilidad mientras espera el PDF", () => {
+  const backend = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  const pending = recorte(
+    backend,
+    "async function markAnexoIndividualSignedPending",
+    "async function markAnexoIndividualSignedWithOneDrive"
+  );
+  assert.match(pending, /SET estado = 'firmado'/);
+  assert.match(pending, /archivo_estado = \$3/);
+  assert.match(pending, /archivo_file_group = \$7/);
+  assert.match(pending, /archivo_catalogo = \$11::jsonb/);
+
+  const handler = recorte(
+    backend,
+    "async function handleClickSignAnexoIndividualWebhook",
+    "function normalizeTemplateFileName"
+  );
+  assert.match(handler, /markAnexoIndividualSignedPending/);
+  assert.match(handler, /retry: true/);
+});
+
+test("no quedan resolutores inseguros ni configuracion legacy del PDF firmado", () => {
+  const backend = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  assert.doesNotMatch(backend, /resolveSignedPdfFromClickSign/);
+  assert.doesNotMatch(backend, /isClickSignSecondaryFileEntry/);
+  assert.doesNotMatch(backend, /isClickSignUploadedOrOriginalGroup/);
+  assert.doesNotMatch(backend, /CLICKSIGN_SIGNED_FILE_URL_TEMPLATE/);
 });

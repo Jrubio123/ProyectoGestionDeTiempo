@@ -794,7 +794,6 @@ const CLICKSIGN_SIGNATURE_CB_URL = String(process.env.CLICKSIGN_SIGNATURE_CB_URL
 const CLICKSIGN_SIGNATORY_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_CB_URL || "").trim();
 const CLICKSIGN_SIGNATORY_EMAIL_CB_URL = String(process.env.CLICKSIGN_SIGNATORY_EMAIL_CB_URL || "").trim();
 const CLICKSIGN_WEBHOOK_TOKEN = String(env.CLICKSIGN_WEBHOOK_TOKEN || "").trim();
-const CLICKSIGN_SIGNED_FILE_URL_TEMPLATE = String(process.env.CLICKSIGN_SIGNED_FILE_URL_TEMPLATE || "").trim();
 const CLICKSIGN_SIGNED_NOTIFY_ENABLED = String(process.env.CLICKSIGN_SIGNED_NOTIFY_ENABLED || "true").toLowerCase() === "true";
 const CLICKSIGN_SIGNED_NOTIFY_TO = String(process.env.CLICKSIGN_SIGNED_NOTIFY_TO || "proveedores@silverconsulting.com.co").trim();
 const CLICKSIGN_SIGNED_NOTIFY_CC = String(process.env.CLICKSIGN_SIGNED_NOTIFY_CC || "").trim();
@@ -3549,6 +3548,15 @@ function mapAnexoIndividualTokenRow(row) {
     onedrive_url: row.onedrive_url || null,
     onedrive_carpeta: row.onedrive_carpeta || null,
     onedrive_carpeta_url: row.onedrive_carpeta_url || null,
+    archivo_estado: row.archivo_estado || null,
+    archivo_error: row.archivo_error || null,
+    archivo_origen: row.archivo_origen || null,
+    archivo_file_id: row.archivo_file_id || null,
+    archivo_file_group: row.archivo_file_group || null,
+    archivo_file_type: row.archivo_file_type || null,
+    archivo_file_name: row.archivo_file_name || null,
+    archivo_catalogo_origen: row.archivo_catalogo_origen || null,
+    archivo_catalogo: Array.isArray(row.archivo_catalogo) ? row.archivo_catalogo : [],
     firmado_at: row.firmado_at || null,
     created_at: row.created_at || null,
     updated_at: row.updated_at || null
@@ -4376,27 +4384,77 @@ async function resolveAnexoIndividualSignedPdfUpload({ proceso, event = {}, requ
     requestId: requestId || proceso?.request_id || "",
     contractId: contractId || proceso?.contract_id || "",
     publicId: String(proceso?.public_id || ""),
-    signatureId: effectiveSignatureId,
-    allowCatalogFallback: true
+    signatureId: effectiveSignatureId
   });
+  const artifactMetadata = buildClickSignArtifactMetadata(artifacts);
   const resolvedPdf = artifacts?.signedPdf || null;
   if (!resolvedPdf || !isPdfBuffer(resolvedPdf.buffer)) {
-    return { signatureId: effectiveSignatureId, oneDriveInfo: null };
+    return { signatureId: effectiveSignatureId, oneDriveInfo: null, artifactMetadata, uploadError: "" };
   }
 
-  const oneDriveInfo = await uploadAnexoIndividualFirmadoToOneDrive(
-    proceso,
-    resolvedPdf.buffer,
-    resolvedPdf.fileName || `AnexoTecnico_${sanitizePathSegment(proceso?.nombre_persona, "Persona")}.pdf`
-  );
+  let oneDriveInfo = null;
+  let uploadError = "";
+  try {
+    oneDriveInfo = await uploadAnexoIndividualFirmadoToOneDrive(
+      proceso,
+      resolvedPdf.buffer,
+      resolvedPdf.fileName || `AnexoTecnico_${sanitizePathSegment(proceso?.nombre_persona, "Persona")}.pdf`
+    );
+  } catch (error) {
+    uploadError = String(error?.message || error).slice(0, 2000);
+  }
 
-  return { signatureId: effectiveSignatureId, oneDriveInfo };
+  return { signatureId: effectiveSignatureId, oneDriveInfo, artifactMetadata, uploadError };
 }
 
-async function markAnexoIndividualSignedWithOneDrive(proceso, oneDriveInfo, signatureId) {
+async function markAnexoIndividualSignedPending(proceso, { signatureId = "", artifactMetadata = {}, error = "" } = {}) {
+  if (!proceso?.id) return false;
+  const nowIso = new Date().toISOString();
+  const result = await pool.query(
+    `
+    UPDATE tokens_firma_anexo_individual
+    SET estado = 'firmado',
+        firmado_at = COALESCE(firmado_at, NOW()),
+        signature_id = COALESCE($2, signature_id),
+        archivo_estado = $3,
+        archivo_error = $4,
+        archivo_origen = $5,
+        archivo_file_id = $6,
+        archivo_file_group = $7,
+        archivo_file_type = $8,
+        archivo_file_name = $9,
+        archivo_catalogo_origen = $10,
+        archivo_catalogo = $11::jsonb,
+        archivo_catalogo_actualizado_en = $12,
+        archivo_intentos = COALESCE(archivo_intentos, 0) + 1,
+        ultimo_intento_archivo_en = $12,
+        updated_at = NOW()
+    WHERE id = $1
+      AND estado IN ('enviado', 'firmado')
+    `,
+    [
+      proceso.id,
+      signatureId || null,
+      error ? "error" : "pendiente",
+      error || "PDF con file_group=signed aun no disponible en Click&Sign",
+      artifactMetadata.archivo_origen || null,
+      artifactMetadata.archivo_file_id || null,
+      artifactMetadata.archivo_file_group || null,
+      artifactMetadata.archivo_file_type || null,
+      artifactMetadata.archivo_file_name || null,
+      artifactMetadata.archivo_catalogo_origen || null,
+      JSON.stringify(artifactMetadata.archivo_catalogo || []),
+      nowIso
+    ]
+  );
+  return result.rowCount > 0;
+}
+
+async function markAnexoIndividualSignedWithOneDrive(proceso, oneDriveInfo, signatureId, artifactMetadata = {}) {
   if (!proceso?.id || !oneDriveInfo?.archivo?.url) return false;
 
-  await pool.query(
+  const nowIso = new Date().toISOString();
+  const updated = await pool.query(
     `
     UPDATE tokens_firma_anexo_individual
     SET estado = 'firmado',
@@ -4405,17 +4463,39 @@ async function markAnexoIndividualSignedWithOneDrive(proceso, oneDriveInfo, sign
         onedrive_url = $3,
         onedrive_carpeta = COALESCE($4, onedrive_carpeta),
         onedrive_carpeta_url = COALESCE($5, onedrive_carpeta_url),
+        archivo_estado = 'subido',
+        archivo_error = NULL,
+        archivo_origen = $6,
+        archivo_file_id = $7,
+        archivo_file_group = $8,
+        archivo_file_type = $9,
+        archivo_file_name = $10,
+        archivo_catalogo_origen = $11,
+        archivo_catalogo = $12::jsonb,
+        archivo_catalogo_actualizado_en = $13,
+        archivo_intentos = COALESCE(archivo_intentos, 0) + 1,
+        ultimo_intento_archivo_en = $13,
         updated_at = NOW()
     WHERE id = $1
+      AND estado IN ('enviado', 'firmado')
     `,
     [
       proceso.id,
       signatureId || null,
       oneDriveInfo.archivo.url,
       oneDriveInfo.carpeta || null,
-      oneDriveInfo.carpeta_url || null
+      oneDriveInfo.carpeta_url || null,
+      artifactMetadata.archivo_origen || null,
+      artifactMetadata.archivo_file_id || null,
+      artifactMetadata.archivo_file_group || null,
+      artifactMetadata.archivo_file_type || null,
+      artifactMetadata.archivo_file_name || null,
+      artifactMetadata.archivo_catalogo_origen || null,
+      JSON.stringify(artifactMetadata.archivo_catalogo || []),
+      nowIso
     ]
   );
+  if (updated.rowCount === 0) return false;
 
   await pool.query(
     `
@@ -4436,17 +4516,6 @@ async function markAnexoIndividualSignedWithOneDrive(proceso, oneDriveInfo, sign
   return true;
 }
 
-function scheduleAnexoIndividualSignedUploadRetry(tokenId) {
-  const numericTokenId = Number(tokenId || 0);
-  if (!Number.isInteger(numericTokenId) || numericTokenId <= 0) return;
-  const timer = setTimeout(() => {
-    reintentarAnexoIndividualFirma(numericTokenId).catch((err) => {
-      console.error("Error reintentando firmado de anexo individual:", err?.message || err);
-    });
-  }, 30000);
-  if (typeof timer.unref === "function") timer.unref();
-}
-
 async function reintentarAnexoIndividualFirma(tokenId) {
   const result = await pool.query(
     `
@@ -4464,13 +4533,18 @@ async function reintentarAnexoIndividualFirma(tokenId) {
   const proceso = result.rows[0] || null;
   if (!proceso || String(proceso.onedrive_url || "").trim()) return false;
 
-  const { signatureId, oneDriveInfo } = await resolveAnexoIndividualSignedPdfUpload({
+  const { signatureId, oneDriveInfo, artifactMetadata, uploadError } = await resolveAnexoIndividualSignedPdfUpload({
     proceso,
     requestId: proceso.request_id || "",
     contractId: proceso.contract_id || "",
     signatureId: proceso.signature_id || ""
   });
   if (!oneDriveInfo?.archivo?.url) {
+    await markAnexoIndividualSignedPending(proceso, {
+      signatureId,
+      artifactMetadata,
+      error: uploadError
+    });
     console.warn("Reintento anexo individual: PDF firmado aun no disponible", {
       tokenId,
       requestId: proceso.request_id || null,
@@ -4479,7 +4553,7 @@ async function reintentarAnexoIndividualFirma(tokenId) {
     return false;
   }
 
-  await markAnexoIndividualSignedWithOneDrive(proceso, oneDriveInfo, signatureId);
+  await markAnexoIndividualSignedWithOneDrive(proceso, oneDriveInfo, signatureId, artifactMetadata);
   return true;
 }
 
@@ -4569,6 +4643,7 @@ async function handleClickSignAnexoIndividualWebhook({ event, requestId, contrac
     }
 
     let signedUpload = null;
+    let signedUploadReason = "";
     try {
       signedUpload = await resolveAnexoIndividualSignedPdfUpload({
         proceso,
@@ -4579,28 +4654,39 @@ async function handleClickSignAnexoIndividualWebhook({ event, requestId, contrac
       });
     } catch (artifactErr) {
       console.error("Error resolviendo firmado de anexo individual:", artifactErr?.message || artifactErr);
+      signedUploadReason = "consulta_catalogo_error";
+      signedUpload = {
+        signatureId: incomingSignatureId || String(proceso.signature_id || "").trim(),
+        oneDriveInfo: null,
+        artifactMetadata: {},
+        uploadError: String(artifactErr?.message || artifactErr).slice(0, 2000)
+      };
     }
 
     const finalSignatureId = signedUpload?.signatureId || incomingSignatureId || String(proceso.signature_id || "").trim();
     if (!signedUpload?.oneDriveInfo?.archivo?.url) {
-      await pool.query(
-        `
-        UPDATE tokens_firma_anexo_individual
-        SET signature_id = COALESCE($2, signature_id),
-            updated_at = NOW()
-        WHERE id = $1
-        `,
-        [proceso.id, finalSignatureId || null]
-      );
-      scheduleAnexoIndividualSignedUploadRetry(proceso.id);
-      return true;
+      await markAnexoIndividualSignedPending(proceso, {
+        signatureId: finalSignatureId,
+        artifactMetadata: signedUpload?.artifactMetadata || {},
+        error: signedUpload?.uploadError || ""
+      });
+      return {
+        handled: true,
+        retry: true,
+        reason: signedUploadReason || (signedUpload?.uploadError ? "onedrive_error" : "file_group_signed_pendiente")
+      };
     }
 
-    await markAnexoIndividualSignedWithOneDrive(proceso, signedUpload.oneDriveInfo, finalSignatureId);
+    await markAnexoIndividualSignedWithOneDrive(
+      proceso,
+      signedUpload.oneDriveInfo,
+      finalSignatureId,
+      signedUpload.artifactMetadata || {}
+    );
     return true;
   } catch (err) {
     console.error("Error procesando webhook de anexo individual:", err?.message || err);
-    return true;
+    return { handled: true, retry: true, reason: "procesamiento_error" };
   }
 }
 
@@ -6570,22 +6656,6 @@ function binaryRequest({ method = "GET", url, headers = {}, body = null, timeout
   });
 }
 
-function parseBase64Pdf(rawValue) {
-  const raw = String(rawValue || "").trim();
-  if (!raw) return null;
-  const fromDataUrl = parsePdfDataUrl(raw);
-  if (isPdfBuffer(fromDataUrl)) return fromDataUrl;
-
-  const compact = normalizeBase64Input(raw);
-  if (!compact) return null;
-  try {
-    const buffer = Buffer.from(compact, "base64");
-    return isPdfBuffer(buffer) ? buffer : null;
-  } catch (err) {
-    return null;
-  }
-}
-
 function parseBase64Buffer(rawValue) {
   const raw = String(rawValue || "").trim();
   if (!raw) return null;
@@ -6608,29 +6678,11 @@ function normalizeBase64Input(rawValue) {
   return missingPadding ? `${normalized}${"=".repeat(4 - missingPadding)}` : normalized;
 }
 
-function isHttpUrl(value) {
-  try {
-    const parsed = new URL(String(value || "").trim());
-    return parsed.protocol === "https:" || parsed.protocol === "http:";
-  } catch (err) {
-    return false;
-  }
-}
-
 function sameResourceUrl(a, b) {
   const ua = String(a || "").trim();
   const ub = String(b || "").trim();
   if (!ua || !ub) return false;
   return ua === ub;
-}
-
-function applyTemplatePlaceholders(template, values = {}) {
-  let output = String(template || "");
-  for (const [key, value] of Object.entries(values)) {
-    const safeValue = encodeURIComponent(String(value || ""));
-    output = output.replace(new RegExp(`\\{${key}\\}`, "gi"), safeValue);
-  }
-  return output.trim();
 }
 
 function extractSignedPdfCandidate(source) {
@@ -6683,61 +6735,6 @@ function extractSignedPdfCandidate(source) {
     base64: fileBase64,
     fileName: sanitizePdfFileName(fileName || "CuentaCobroFirmada.pdf", "CuentaCobroFirmada.pdf")
   };
-}
-
-async function resolveSignedPdfFromSource(source, preferredName = "CuentaCobroFirmada.pdf") {
-  const candidate = extractSignedPdfCandidate(source);
-  if (!candidate) return null;
-
-  const fromBase64 = parseBase64Pdf(candidate.base64);
-  if (isPdfBuffer(fromBase64)) {
-    return {
-      buffer: fromBase64,
-      fileName: candidate.fileName || preferredName,
-      source: "payload_base64"
-    };
-  }
-
-  let candidateUrl = String(candidate.url || "").trim();
-  if (candidateUrl && !isHttpUrl(candidateUrl) && candidateUrl.startsWith("/")) {
-    try {
-      candidateUrl = new URL(candidateUrl, `${CLICKSIGN_API_BASE}/`).toString();
-    } catch (err) {
-      candidateUrl = "";
-    }
-  }
-  if (!isHttpUrl(candidateUrl)) return null;
-
-  const tryHeaders = [
-    {},
-    CLICKSIGN_API_KEY ? buildClickSignAuthHeaders({ includeJsonHeaders: false }) : {}
-  ];
-
-  for (const headers of tryHeaders) {
-    try {
-      const downloaded = await binaryRequest({
-        method: "GET",
-        url: candidateUrl,
-        headers
-      });
-      if (isPdfBuffer(downloaded.buffer)) {
-        return {
-          buffer: downloaded.buffer,
-          fileName: candidate.fileName || preferredName,
-          source: "payload_url"
-        };
-      }
-      if (downloaded.contentType.includes("application/json")) {
-        const nested = parseJsonSafe(downloaded.buffer.toString("utf8"));
-        const nestedResolved = await resolveSignedPdfFromSource(nested, preferredName);
-        if (nestedResolved) return nestedResolved;
-      }
-    } catch (err) {
-      // Se sigue con otras variantes/cabeceras.
-    }
-  }
-
-  return null;
 }
 
 function buildClickSignApiRequestId(prefix) {
@@ -6905,65 +6902,6 @@ async function uploadCuentaCobroFilesToOneDrive(cuenta, files, { accessToken = "
   return { carpeta: targetPath, archivos };
 }
 
-async function resolveSignedPdfFromClickSign({ event, requestId, contractId, publicId, signatureId }) {
-  const defaultName = sanitizePdfFileName(
-    `CuentaCobroFirmada_${publicId || requestId || "documento"}.pdf`,
-    "CuentaCobroFirmada.pdf"
-  );
-
-  const direct = await resolveSignedPdfFromSource(event, defaultName);
-  if (direct) return direct;
-
-  const templateUrl = applyTemplatePlaceholders(CLICKSIGN_SIGNED_FILE_URL_TEMPLATE, {
-    request_id: requestId || "",
-    contract_id: contractId || "",
-    public_id: publicId || ""
-  });
-  if (isHttpUrl(templateUrl)) {
-    try {
-      const downloaded = await binaryRequest({
-        method: "GET",
-        url: templateUrl,
-        headers: CLICKSIGN_API_KEY
-          ? buildClickSignAuthHeaders({ includeJsonHeaders: false })
-          : {}
-      });
-      if (isPdfBuffer(downloaded.buffer)) {
-        return {
-          buffer: downloaded.buffer,
-          fileName: defaultName,
-          source: "template_url"
-        };
-      }
-    } catch (err) {
-      // Se continúa con consultas de fallback.
-    }
-  }
-
-  const lookupRequests = buildClickSignLookupRequests({ requestId, contractId, signatureId });
-  for (const lookup of lookupRequests) {
-    try {
-      const response = await jsonRequest({
-        method: lookup.method,
-        url: buildClickSignUrl(lookup.path),
-        headers: buildClickSignAuthHeaders(),
-        body: lookup.body || null
-      });
-      const resolved = await resolveSignedPdfFromSource(response.data, defaultName);
-      if (resolved) {
-        return {
-          ...resolved,
-          source: `lookup_${lookup.path}`
-        };
-      }
-    } catch (err) {
-      // Algunos endpoints no existen según plan contratado; se ignora y continúa.
-    }
-  }
-
-  return null;
-}
-
 function extractClickSignSignatureId(source) {
   return pickStringByPaths(source, [
     "signature.signature_id",
@@ -7021,42 +6959,10 @@ function normalizeClickSignFileEntries(source) {
   return entries;
 }
 
-function isClickSignUploadedOrOriginalGroup(fileGroup = "") {
-  return ["uploaded_files", "uploaded", "original", "originals"].includes(String(fileGroup || "").toLowerCase());
-}
-
 function isClickSignSignedFileEntry(entry = {}) {
   const fileGroup = String(entry.fileGroup || "").toLowerCase();
   const status = String(entry.status || "").toLowerCase();
-  // Click&Sign marca el firmado real con file_group=signed.
-  if (fileGroup === "signed") return status ? status === "available" : true;
-  if (isClickSignUploadedOrOriginalGroup(fileGroup)) return false;
-
-  const fileType = String(entry.fileType || "").toLowerCase();
-  const fileName = String(entry.fileName || "").toLowerCase();
-  return [
-    "signed_contract",
-    "signed_file",
-    "signed_files",
-    "signed_pdf",
-    "signed_document",
-    "signed_documents",
-    "contract_signed",
-    "document_signed",
-    "pdf_signed",
-    "completed_contract",
-    "signed_once",
-    "signature_stamp",
-    "signatory_stamp"
-  ].includes(fileType) || /signed|firmado|completado/.test(`${fileType} ${fileName}`);
-}
-
-function isClickSignSecondaryFileEntry(entry = {}) {
-  const fileGroup = String(entry.fileGroup || "").toLowerCase();
-  if (isClickSignUploadedOrOriginalGroup(fileGroup)) return true;
-
-  const text = `${entry.fileType || ""} ${entry.fileName || ""}`.toLowerCase();
-  return /evidence|evidencia|attachment|adjunto|uploaded|original|certificate|certificado/.test(text);
+  return fileGroup === "signed" && (!status || status === "available");
 }
 
 async function fetchClickSignFileListEntries({ requestId, contractId, signatureId }) {
@@ -7198,7 +7104,7 @@ async function fetchClickSignFileBuffer(fileId) {
   return null;
 }
 
-async function resolveClickSignArtifacts({ event, requestId, contractId, publicId, signatureId, allowCatalogFallback = false }) {
+async function resolveClickSignArtifacts({ event, requestId, contractId, publicId, signatureId }) {
   const catalog = await fetchClickSignFilesCatalog({ event, requestId, contractId, signatureId });
   const byType = new Map();
   for (const entry of catalog.entries) {
@@ -7206,9 +7112,9 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
     byType.get(entry.fileType).push(entry);
   }
 
-  const hasCatalogEntries = Array.isArray(catalog.entries) && catalog.entries.length > 0;
   let signedPdf = null;
   let signedFileId = "";
+  let selectedFile = null;
   const signedCandidates = catalog.entries
     .filter(isClickSignSignedFileEntry)
     .sort((a, b) => {
@@ -7221,35 +7127,19 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
     const buffer = await fetchClickSignFileBuffer(signedEntry.fileId);
     if (!isPdfBuffer(buffer)) continue;
     signedFileId = String(signedEntry.fileId || "").trim();
+    selectedFile = {
+      file_id: signedFileId,
+      file_group: String(signedEntry.fileGroup || "").trim(),
+      file_type: String(signedEntry.rawFileType || signedEntry.fileType || "").trim(),
+      file_name: String(signedEntry.fileName || "").trim(),
+      status: String(signedEntry.status || "").trim()
+    };
     signedPdf = {
       buffer,
       fileName: sanitizePdfFileName(signedEntry.fileName || `CuentaCobroFirmada_${publicId || "documento"}.pdf`, "CuentaCobroFirmada.pdf"),
       source: "get_file_signed_contract"
     };
     break;
-  }
-
-  if (!signedPdf && hasCatalogEntries && allowCatalogFallback) {
-    const fallbackCandidates = catalog.entries.filter((entry) => {
-      const fileGroup = String(entry.fileGroup || "").toLowerCase();
-      return isClickSignSignedFileEntry(entry) || (!isClickSignSecondaryFileEntry(entry) && !isClickSignUploadedOrOriginalGroup(fileGroup));
-    });
-    for (const entry of fallbackCandidates) {
-      const buffer = await fetchClickSignFileBuffer(entry.fileId);
-      if (!isPdfBuffer(buffer)) continue;
-      signedFileId = String(entry.fileId || "").trim();
-      signedPdf = {
-        buffer,
-        fileName: sanitizePdfFileName(entry.fileName || `CuentaCobroFirmada_${publicId || "documento"}.pdf`, "CuentaCobroFirmada.pdf"),
-        source: "get_file_catalog_fallback"
-      };
-      break;
-    }
-  }
-
-  // Solo usa fallback legacy cuando no hay catálogo, para evitar confundir START_FILES/show_landing con firmado.
-  if (!signedPdf && (!hasCatalogEntries || allowCatalogFallback)) {
-    signedPdf = await resolveSignedPdfFromClickSign({ event, requestId, contractId, publicId, signatureId });
   }
 
   const extraFiles = [];
@@ -7302,13 +7192,29 @@ async function resolveClickSignArtifacts({ event, requestId, contractId, publicI
 
   return {
     signedPdf,
+    selectedFile,
     extraFiles,
     catalogSource: catalog.source || null,
     catalogEntries: catalog.entries.map((entry) => ({
+      file_id: String(entry.fileId || "").trim(),
+      file_group: String(entry.fileGroup || "").trim(),
       file_type: entry.rawFileType || entry.fileType || "",
       file_name: entry.fileName || "",
-      file_id_tail: String(entry.fileId || "").slice(-8)
+      status: String(entry.status || "").trim()
     }))
+  };
+}
+
+function buildClickSignArtifactMetadata(artifacts = {}) {
+  const selectedFile = artifacts?.selectedFile || {};
+  return {
+    archivo_origen: artifacts?.signedPdf?.source || null,
+    archivo_file_id: selectedFile.file_id || null,
+    archivo_file_group: selectedFile.file_group || null,
+    archivo_file_type: selectedFile.file_type || null,
+    archivo_file_name: selectedFile.file_name || null,
+    archivo_catalogo_origen: artifacts?.catalogSource || null,
+    archivo_catalogo: Array.isArray(artifacts?.catalogEntries) ? artifacts.catalogEntries : []
   };
 }
 
@@ -11685,19 +11591,6 @@ app.post("/contratacion/firma/reconciliar", requireTokenFirma, async (req, res) 
       signature_id: docObjetivo?.signature_id || null
     });
 
-    if (!idx) {
-      return res.json({
-        ok: true,
-        skipped: "doc_index_required",
-        nombre_persona: row.nombre_persona,
-        estado: row.estado,
-        checks_completados: row.checks_completados,
-        docs_firma: normalizeDocsFirmaListCompat(docsFirma),
-        expires_at: row.expires_at,
-        reconciled: []
-      });
-    }
-
     const reconciled = await reconcileContratoDocsForProcess(
       { ...row, docs_firma: docsFirma },
       { docIndex: idx, reason: "endpoint" }
@@ -13061,6 +12954,14 @@ app.post("/contratacion/firmar", requireTokenFirma, async (req, res) => {
         clicksign_origen: null,
         archivo_estado: ONEDRIVE_ENABLED ? "pendiente" : "no_aplica",
         archivo_error: null,
+        archivo_origen: null,
+        archivo_file_id: null,
+        archivo_file_group: null,
+        archivo_file_type: null,
+        archivo_file_name: null,
+        archivo_catalogo_origen: null,
+        archivo_catalogo: [],
+        archivo_catalogo_actualizado_en: null,
         onedrive_url: null,
         onedrive_carpeta: null,
         onedrive_carpeta_url: null,
@@ -15129,7 +15030,6 @@ async function uploadContratoFirmadoToOneDrive(proceso, pdfBuffer, fileName, opt
 
 function contratoDocNeedsReconciliation(doc = {}) {
   const status = normalizeDocStatus(doc?.firma_estado || doc?.estado);
-  const ultimoEvento = String(doc?.ultimo_evento || "").trim().toLowerCase();
   const hasIdentifiers = Boolean(
     String(doc?.request_id || "").trim() ||
     String(doc?.contract_id || "").trim() ||
@@ -15140,7 +15040,6 @@ function contratoDocNeedsReconciliation(doc = {}) {
   if (status === "signed") {
     return ONEDRIVE_ENABLED && !String(doc?.onedrive_url || "").trim();
   }
-  if (isClickSignInvalidSignatureReference(doc)) return false;
   return true;
 }
 
@@ -15211,6 +15110,7 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
       let signedPdfSource = "";
       let artifactsSource = "";
       let catalogEntries = [];
+      let selectedFile = null;
       let uploadError = "";
       let pdfDisponible = false;
       let uploadCompleted = Boolean(String(doc?.onedrive_url || "").trim());
@@ -15224,17 +15124,17 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
         nextStatus = "signed";
       }
 
-      if (nextStatus === "signed" || nextStatus === "pending" || nextStatus === "en_proceso" || nextStatus === "sent" || !nextStatus) {
+      if (nextStatus === "signed") {
         const artifacts = await resolveClickSignArtifacts({
           event,
           requestId,
           contractId,
           publicId: "",
-          signatureId: signatureId || snapshotSignatureId,
-          allowCatalogFallback: nextStatus === "signed"
+          signatureId: signatureId || snapshotSignatureId
         });
         artifactsSource = artifacts?.catalogSource || "";
         catalogEntries = Array.isArray(artifacts?.catalogEntries) ? artifacts.catalogEntries : [];
+        selectedFile = artifacts?.selectedFile || null;
         const resolvedPdf = artifacts?.signedPdf || null;
         if (resolvedPdf && isPdfBuffer(resolvedPdf.buffer)) {
           pdfDisponible = true;
@@ -15254,6 +15154,9 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
       }
 
       const nowIso = new Date().toISOString();
+      const intentoArchivoFirmado = nextStatus === "signed" && ONEDRIVE_ENABLED && !String(doc?.onedrive_url || "").trim();
+      const archivoFirmadoPendiente = intentoArchivoFirmado && !pdfDisponible;
+      if (archivoFirmadoPendiente) archivoEstado = "pendiente";
       nextDoc = {
         ...doc,
         signature_id: signatureId || snapshotSignatureId || doc?.signature_id || null,
@@ -15262,16 +15165,26 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
         ultimo_evento: rawStatus || doc?.ultimo_evento || null,
         reconciliado_en: nowIso,
         reconciliado_origen: reason,
-        reconciliacion_estado: snapshot?.invalidReference ? "referencia_invalida" : "completado",
+        reconciliacion_estado: snapshot?.invalidReference
+          ? "referencia_invalida"
+          : (archivoFirmadoPendiente ? "archivo_pendiente" : (uploadError ? "archivo_error" : "completado")),
         reconciliacion_intentos: Number(doc?.reconciliacion_intentos || 0) + 1,
         reconciliacion_error: snapshot?.invalidReference
           ? "Click&Sign confirmo que los identificadores reservados no existen"
           : null,
         clicksign_origen: snapshot?.source || doc?.clicksign_origen || null,
         archivo_estado: archivoEstado,
-        archivo_error: uploadError || null,
-        archivo_intentos: Number(doc?.archivo_intentos || 0) + (pdfDisponible && !String(doc?.onedrive_url || "").trim() ? 1 : 0),
-        ultimo_intento_archivo_en: pdfDisponible && !String(doc?.onedrive_url || "").trim() ? nowIso : (doc?.ultimo_intento_archivo_en || null)
+        archivo_error: uploadError || (archivoFirmadoPendiente ? "PDF con file_group=signed aun no disponible en Click&Sign" : null),
+        archivo_origen: signedPdfSource || null,
+        archivo_file_id: selectedFile?.file_id || null,
+        archivo_file_group: selectedFile?.file_group || null,
+        archivo_file_type: selectedFile?.file_type || null,
+        archivo_file_name: selectedFile?.file_name || null,
+        archivo_catalogo_origen: artifactsSource || null,
+        archivo_catalogo: catalogEntries,
+        archivo_catalogo_actualizado_en: nowIso,
+        archivo_intentos: Number(doc?.archivo_intentos || 0) + (intentoArchivoFirmado ? 1 : 0),
+        ultimo_intento_archivo_en: intentoArchivoFirmado ? nowIso : (doc?.ultimo_intento_archivo_en || null)
       };
       if (nextStatus === "signed" && !nextDoc.firmado_en) {
         nextDoc.firmado_en = nowIso;
@@ -15298,6 +15211,7 @@ async function reconcileContratoDocsForProcess(proceso, { docIndex = null, reaso
         pdf_disponible: pdfDisponible,
         catalog_source: artifactsSource || null,
         catalog_entries: catalogEntries,
+        selected_file: selectedFile,
         upload_error: uploadError || null,
         source: signedPdfSource || snapshot?.source || null
       });
@@ -15419,14 +15333,6 @@ function scheduleContratoReconciliation(
   contratoReconciliationTimers.set(key, { timer, runAt });
 }
 
-function scheduleContratoWebhookRetry(procesoId, docIndex) {
-  scheduleContratoReconciliation(procesoId, docIndex, {
-    delayMs: 30 * 1000,
-    reason: "webhook_retry"
-  });
-}
-
-
 async function findContratoProcessByClickSignIdentifiers({ requestId = "", contractId = "", signatureId = "" } = {}) {
   const candidates = [
     ["request_id", String(requestId || "").trim()],
@@ -15520,16 +15426,20 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
   }
 
   let resolvedPdf = null;
+  let artifactMetadata = {};
   try {
     const artifacts = await resolveClickSignArtifacts({
       event,
       requestId,
       contractId,
       publicId: "",
-      signatureId: effectiveSignatureId,
-      allowCatalogFallback: true
+      signatureId: effectiveSignatureId
     });
     resolvedPdf = artifacts?.signedPdf || null;
+    artifactMetadata = {
+      ...buildClickSignArtifactMetadata(artifacts),
+      archivo_catalogo_actualizado_en: new Date().toISOString()
+    };
   } catch (artifactErr) {
     await patchContratoDocFirmaSafely({
       procesoId: proceso.id,
@@ -15541,8 +15451,7 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
         ultimo_intento_archivo_en: new Date().toISOString()
       }
     });
-    scheduleContratoWebhookRetry(proceso.id, docIndex);
-    return true;
+    return { handled: true, retry: true, reason: "consulta_catalogo_error" };
   }
 
   if (!resolvedPdf || !isPdfBuffer(resolvedPdf.buffer)) {
@@ -15550,13 +15459,15 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
       procesoId: proceso.id,
       docIndex,
       patch: {
+        ...artifactMetadata,
         archivo_estado: "pendiente",
-        archivo_error: "PDF firmado aun no disponible en Click&Sign",
+        archivo_error: "PDF con file_group=signed aun no disponible en Click&Sign",
+        reconciliacion_estado: "archivo_pendiente",
+        archivo_intentos: Number(matchedDoc?.archivo_intentos || 0) + 1,
         ultimo_intento_archivo_en: new Date().toISOString()
       }
     });
-    scheduleContratoWebhookRetry(proceso.id, docIndex);
-    return true;
+    return { handled: true, retry: true, reason: "file_group_signed_pendiente" };
   }
 
   let oneDriveInfo = null;
@@ -15571,23 +15482,26 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
       procesoId: proceso.id,
       docIndex,
       patch: {
+        ...artifactMetadata,
         archivo_estado: "error",
         archivo_error: String(uploadErr?.message || uploadErr).slice(0, 2000),
+        reconciliacion_estado: "archivo_error",
         archivo_intentos: Number(matchedDoc?.archivo_intentos || 0) + 1,
         ultimo_intento_archivo_en: new Date().toISOString()
       }
     });
     console.error("Error subiendo contrato firmado a OneDrive:", uploadErr?.message || uploadErr);
-    scheduleContratoWebhookRetry(proceso.id, docIndex);
-    return true;
+    return { handled: true, retry: true, reason: "onedrive_error" };
   }
 
   const archived = await patchContratoDocFirmaSafely({
     procesoId: proceso.id,
     docIndex,
     patch: {
+      ...artifactMetadata,
       archivo_estado: "subido",
       archivo_error: null,
+      reconciliacion_estado: "completado",
       archivo_intentos: Number(matchedDoc?.archivo_intentos || 0) + 1,
       ultimo_intento_archivo_en: new Date().toISOString(),
       onedrive_url: oneDriveInfo?.archivo?.url || null,
@@ -15639,10 +15553,19 @@ const server = app.listen(port, "0.0.0.0", () => {
 const RECONCILIACION_JOB_INTERVAL_MS = 10 * 60 * 1000; // cada 10 minutos
 const RECONCILIACION_MIN_EDAD_MIN = 20; // solo cuentas con más de 20 min sin actualizar
 const RECONCILIACION_BATCH = 10; // máximo por ciclo
-const RECONCILIACION_CONTRATOS_INTERVAL_MS = 2 * 60 * 1000; // respaldo cada 2 minutos
+const RECONCILIACION_CONTRATOS_INTERVAL_SEGUNDOS = Number(process.env.RECONCILIACION_CONTRATOS_INTERVAL_SEGUNDOS || 300);
+const RECONCILIACION_CONTRATOS_INTERVAL_MS = Math.max(
+  60,
+  Number.isFinite(RECONCILIACION_CONTRATOS_INTERVAL_SEGUNDOS)
+    ? RECONCILIACION_CONTRATOS_INTERVAL_SEGUNDOS
+    : 300
+) * 1000;
 const RECONCILIACION_CONTRATOS_MIN_EDAD_MIN = 1; // procesos sin cambios durante al menos 1 minuto
 const RECONCILIACION_CONTRATOS_BATCH = 20; // máximo por ciclo
 const RECONCILIACION_CONTRATOS_EXPIRAR_HORAS = CONTRATOS_TOKEN_EXPIRY_HOURS;
+const RECONCILIACION_CONTRATOS_JOB_HABILITADO = ["true", "1", "yes", "si", "on"].includes(
+  String(process.env.RECONCILIACION_CONTRATOS_JOB_HABILITADO || "true").trim().toLowerCase()
+);
 const REVALIDACION_SOPORTES_INTERVAL_MS = 30 * 60 * 1000; // cada 30 min
 const REVALIDACION_SOPORTES_MIN_EDAD_MIN = 20; // cuentas con >20 min sin update
 const REVALIDACION_SOPORTES_BATCH = 10;
@@ -15975,8 +15898,11 @@ async function jobRevalidarSoportesCuentasFirmadas() {
   }
 }
 
+let reconciliacionContratosEnCurso = false;
+
 async function jobReconciliarContratosEnFirma() {
-  if (isShuttingDown) return;
+  if (isShuttingDown || reconciliacionContratosEnCurso) return;
+  reconciliacionContratosEnCurso = true;
   try {
     const expirados = await pool.query(
       `UPDATE tokens_firma_contrato
@@ -16075,6 +16001,8 @@ async function jobReconciliarContratosEnFirma() {
     }
   } catch (err) {
     console.error("[reconciliar-contratos] Error en ciclo:", err?.message || err);
+  } finally {
+    reconciliacionContratosEnCurso = false;
   }
 }
 
@@ -16158,6 +16086,7 @@ setTimeout(() => {
 }, 2 * 60 * 1000);
 setTimeout(() => {
   if (isShuttingDown) return;
+  if (!RECONCILIACION_CONTRATOS_JOB_HABILITADO) return;
   void jobReconciliarContratosEnFirma();
   reconciliarContratosJobInterval = setInterval(() => { void jobReconciliarContratosEnFirma(); }, RECONCILIACION_CONTRATOS_INTERVAL_MS);
 }, 2 * 60 * 1000);

@@ -1,7 +1,6 @@
 window.contratacionApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
     const FIRMA_POLLING_INTERVAL_MS = 30000;
-    const FIRMA_POLLING_MAX_ATTEMPTS = 20;
     const TIMER_PDF = 20; // segundos mínimos de lectura por PDF
 
     return {
@@ -54,8 +53,7 @@ window.contratacionApp = function () {
         firmaError: "",
         descargaDocIndex: null,
         pollingInterval: null,
-        pollingIntentos: 0,
-        _pollCycle: 0,
+        _pollingDocCursor: 0,
         _pollingEnCurso: false,
 
         // ── Init
@@ -543,6 +541,10 @@ window.contratacionApp = function () {
         puedeReconciliarDoc(doc) {
             const estado = this.estadoDocFirmaReconciliacion(doc);
             const tieneIdsFirma = Boolean(doc?.request_id || doc?.contract_id || doc?.signature_id);
+            if (estado === "signed") {
+                const archivoEstado = String(doc?.archivo_estado || "").trim().toLowerCase();
+                return tieneIdsFirma && !doc?.onedrive_url && !["subido", "no_aplica"].includes(archivoEstado);
+            }
             if (["sent", "en_proceso"].includes(estado)) return true;
             return estado === "pending" && Boolean(doc?.url_firma || tieneIdsFirma);
         },
@@ -686,31 +688,30 @@ window.contratacionApp = function () {
         },
 
         async _reconciliarFirmaSilenciosa() {
-            const docs = this.docsFirmaOrdenados.filter((doc) =>
-                ["pending", "sent", "en_proceso"].includes(this.estadoDocFirmaReconciliacion(doc))
-            );
+            const docs = this.docsFirmaOrdenados.filter((doc) => this.puedeReconciliarDoc(doc));
             if (!docs.length || !this.jwt) return false;
 
-            let reconciliado = false;
-            for (const doc of docs) {
-                const docIndex = Number(doc?.doc_index || 0);
-                if (!docIndex) continue;
-                try {
-                    await axios.post(
-                        `${API}/contratacion/firma/reconciliar`,
-                        { doc_index: docIndex },
-                        { headers: { Authorization: `Bearer ${this.jwt}` } }
-                    );
-                    reconciliado = true;
-                } catch {
-                    // Reconciliacion silenciosa: no bloquear ni mostrar errores en UI.
-                }
-            }
+            const cursor = this._pollingDocCursor % docs.length;
+            const doc = docs[cursor];
+            this._pollingDocCursor = (cursor + 1) % docs.length;
 
-            if (reconciliado) {
-                await this.refrescarEstado({ reconciliar: false });
+            try {
+                const res = await axios.post(
+                    `${API}/contratacion/firma/reconciliar`,
+                    { doc_index: Number(doc.doc_index) },
+                    { headers: { Authorization: `Bearer ${this.jwt}` } }
+                );
+                const data = res?.data || {};
+                this.docsActuales = data.docs_firma || [];
+                this.checksCompletados = data.checks_completados || this.checksCompletados;
+                if (data.estado === "completado" && !this.requiereReconciliacionFirma()) {
+                    this.pantalla = "completado";
+                    this.detenerPollingFirma();
+                }
+                return true;
+            } catch {
+                return false;
             }
-            return reconciliado;
         },
 
         detenerPollingFirma() {
@@ -723,13 +724,11 @@ window.contratacionApp = function () {
 
         iniciarPolling() {
             this.detenerPollingFirma();
-            this.pollingIntentos = 0;
-            this._pollCycle = 0;
+            this._pollingDocCursor = 0;
 
             const debeSeguir = () =>
                 this.pantalla === "firma" &&
-                (!this.todosFirmados || this.requiereReconciliacionFirma()) &&
-                this.pollingIntentos < FIRMA_POLLING_MAX_ATTEMPTS;
+                (!this.todosFirmados || this.requiereReconciliacionFirma());
 
             if (!debeSeguir()) return;
 
@@ -739,23 +738,16 @@ window.contratacionApp = function () {
                     this.detenerPollingFirma();
                     return;
                 }
-
                 if (document.hidden) return;
 
-                this.pollingIntentos += 1;
-                this._pollCycle = (this._pollCycle || 0) + 1;
                 this._pollingEnCurso = true;
-                let ok = false;
                 try {
-                    ok = await this.refrescarEstado({ reconciliar: false });
-                    if (ok && this._pollCycle % 3 === 0) {
-                        await this._reconciliarFirmaSilenciosa();
-                    }
+                    await this._reconciliarFirmaSilenciosa();
                 } finally {
                     this._pollingEnCurso = false;
                 }
 
-                if (!ok || !debeSeguir()) {
+                if (!debeSeguir()) {
                     this.detenerPollingFirma();
                 }
             };

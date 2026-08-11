@@ -1770,8 +1770,7 @@ async function buscarSeguridadSocialClickSign(req, res, deps = {}) {
       requestId,
       contractId,
       publicId: cuenta.public_id,
-      signatureId,
-      allowCatalogFallback: false
+      signatureId
     });
 
     const seguridadFile = (artifacts.extraFiles || [])

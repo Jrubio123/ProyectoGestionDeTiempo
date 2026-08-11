@@ -206,3 +206,22 @@ for (const templateName of ["Anexo Tecnico.docx", "AnexoTecnicoCapital.docx"]) {
     assert.match(output, /Proyecto/);
   });
 }
+
+const {
+  __private: { formatDate }
+} = require("../src/services/anexo-individual-documento.service");
+
+test("las fechas del anexo se imprimen en formato dia/mes/ano", () => {
+  // pg entrega las columnas DATE como objetos Date; antes salia "Tue Sep 01".
+  assert.equal(formatDate(new Date(2026, 8, 1)), "01/09/2026");
+  assert.equal(formatDate(new Date(2026, 11, 31)), "31/12/2026");
+
+  // Cadenas ISO y con hora siguen funcionando.
+  assert.equal(formatDate("2026-08-01"), "01/08/2026");
+  assert.equal(formatDate("2026-11-01T00:00:00.000Z"), "01/11/2026");
+
+  // Sin dato utilizable, guion.
+  assert.equal(formatDate(null), "-");
+  assert.equal(formatDate(""), "-");
+  assert.equal(formatDate(new Date("fecha-invalida")), "-");
+});

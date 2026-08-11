@@ -77,6 +77,15 @@ function labelAnexoTipo(tipo) {
 }
 
 function formatDate(value) {
+  // pg entrega las columnas DATE como objetos Date. Sin este caso, String(fecha) produce
+  // "Tue Sep 01 2026 00:00:00 GMT-0500" y el corte a 10 caracteres dejaba "Tue Sep 01".
+  // Se usan los getters locales porque pg construye esas fechas a medianoche local.
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return "-";
+    const dia = String(value.getDate()).padStart(2, "0");
+    const mes = String(value.getMonth() + 1).padStart(2, "0");
+    return `${dia}/${mes}/${value.getFullYear()}`;
+  }
   const raw = text(value).slice(0, 10);
   const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   return match ? `${match[3]}/${match[2]}/${match[1]}` : (raw || "-");
@@ -256,5 +265,6 @@ module.exports = {
   ANEXO_TIPO_LABELS,
   buildAnexoIndividualDocumentContext,
   generateAnexoIndividualManualPdfFromItems,
-  labelAnexoTipo
+  labelAnexoTipo,
+  __private: { formatDate }
 };

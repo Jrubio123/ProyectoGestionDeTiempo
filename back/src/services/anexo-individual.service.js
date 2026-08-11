@@ -11,6 +11,11 @@ function getIndexHelpers() {
 const DESTINOS_TH_FALLBACK =
   process.env.CONTRATACIONES_DESTINO_TH ||
   "catalina.loaiza@silverconsulting.com.co,ana.garcia@silverconsulting.com.co";
+const ANEXO_FIRMA_SENDER = String(
+  process.env.CONTRATOS_FIRMA_COMPLETADA_SENDER ||
+  process.env.ONEDRIVE_TARGET_USER ||
+  "admin.apps@silverconsulting.com.co"
+).trim();
 
 function parseEmailList(value) {
   return String(value || "")
@@ -36,6 +41,30 @@ function buildAnexoCheckErrorPayload(error = {}) {
       ANEXO_CHECK_MESSAGES[constraint] ||
       `Los datos no cumplen la restricción ${constraint || "CHECK"} de anexo_tecnico_items.`,
     constraint: constraint || null
+  };
+}
+
+function buildAnexoFirmaPendienteEmail({ nombrePersona = "", urlFirma = "", buildEmailLayout }) {
+  const nombre = String(nombrePersona || "Persona").trim() || "Persona";
+  const url = String(urlFirma || "").trim();
+  return {
+    subject: "Firma pendiente de anexo técnico",
+    text:
+      `Hola ${nombre},\n\n` +
+      "Tu anexo técnico está pendiente de firma. Usa únicamente el siguiente enlace:\n" +
+      `${url}\n\n` +
+      "Este enlace es personal. No lo compartas con otras personas.",
+    html: buildEmailLayout({
+      title: "Firma pendiente de anexo técnico",
+      intro: `Hola <strong>${nombre}</strong>. Tu anexo técnico está listo para revisión y firma.`,
+      blocks: [
+        { label: "Documento", value: "Anexo técnico individual" },
+        { label: "Importante", value: "Este enlace es personal. No lo compartas con otras personas." }
+      ],
+      ctaLabel: "Revisar y firmar anexo",
+      ctaUrl: url,
+      closing: "Silver Consulting"
+    })
   };
 }
 
@@ -590,6 +619,9 @@ async function iniciarFirmaAnexoIndividual(req, res) {
     isAnexoIndividualInfraError,
     buildAnexoIndividualInfraErrorPayload,
     getAnexoTecnicoClickSignConfigId,
+    sendEmailSafe,
+    getGraphContext,
+    buildEmailLayout,
     CLICKSIGN_USER,
     CLICKSIGN_SIGNATURE_CB_URL,
     CLICKSIGN_SIGNATORY_CB_URL,
@@ -809,10 +841,51 @@ async function iniciarFirmaAnexoIndividual(req, res) {
       );
 
       await client.query("COMMIT");
+      const tokenRow = insertToken.rows[0];
+      const invitation = buildAnexoFirmaPendienteEmail({
+        nombrePersona: userRow.nombre_usuario || correoFinal,
+        urlFirma,
+        buildEmailLayout
+      });
+      const sendResult = await sendEmailSafe({
+        ...getGraphContext(req),
+        graphUserEmail: ANEXO_FIRMA_SENDER,
+        to: correoFinal,
+        subject: invitation.subject,
+        text: invitation.text,
+        html: invitation.html
+      });
+      const correoEnviado = Boolean(sendResult?.ok);
+      const correoError = correoEnviado
+        ? null
+        : String(sendResult?.error || "No fue posible enviar el correo").slice(0, 2000);
+      try {
+        await client.query(
+          `
+          UPDATE tokens_firma_anexo_individual
+          SET invitacion_enviada_at = CASE WHEN $2::boolean THEN NOW() ELSE invitacion_enviada_at END,
+              invitacion_enviada_a = $3,
+              invitacion_error = $4,
+              updated_at = NOW()
+          WHERE id = $1
+          `,
+          [tokenRow.id, correoEnviado, correoFinal, correoError]
+        );
+      } catch (auditErr) {
+        console.error("No se pudo auditar el correo de firma del anexo:", auditErr?.message || auditErr);
+      }
       return res.status(200).json({
         ok: true,
-        token: mapAnexoIndividualTokenRow(insertToken.rows[0]),
-        url_firma: urlFirma || null
+        token: mapAnexoIndividualTokenRow({
+          ...tokenRow,
+          invitacion_enviada_at: correoEnviado ? new Date().toISOString() : null,
+          invitacion_enviada_a: correoFinal,
+          invitacion_error: correoError
+        }),
+        url_firma: urlFirma || null,
+        correo_enviado: correoEnviado,
+        correo_destino: correoFinal,
+        correo_error: correoError
       });
     } catch (err) {
       try {
@@ -929,6 +1002,7 @@ module.exports = {
   iniciarFirmaAnexoIndividual,
   cancelarFirmaAnexoIndividual,
   __private: {
-    buildAnexoCheckErrorPayload
+    buildAnexoCheckErrorPayload,
+    buildAnexoFirmaPendienteEmail
   }
 };

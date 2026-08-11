@@ -1222,6 +1222,10 @@ CREATE TABLE tokens_firma_anexo_individual (
     firma_notificada_at TIMESTAMP,
     firma_notificada_a TEXT,
 
+    invitacion_enviada_at TIMESTAMP,
+    invitacion_enviada_a TEXT,
+    invitacion_error TEXT,
+
     generado_por INT REFERENCES usuarios(id) ON DELETE SET NULL,
 
     created_at TIMESTAMP DEFAULT NOW(),

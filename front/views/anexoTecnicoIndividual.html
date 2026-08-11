@@ -201,13 +201,10 @@
                                     <div class="text-sm font-semibold text-amber-800">Envio pendiente</div>
                                     <div class="text-sm text-amber-700" x-text="`Desde ${formatFechaHora(anexoTokenActivo.created_at)}`"></div>
                                     <div class="text-xs text-amber-700/90" x-text="`Firmante: ${anexoTokenActivo.correo_firmante || 'Sin correo'}`"></div>
+                                    <div x-show="anexoTokenActivo.invitacion_enviada_at" class="text-xs font-medium text-emerald-700" x-text="`Correo enviado a ${anexoTokenActivo.invitacion_enviada_a || anexoTokenActivo.correo_firmante}`"></div>
+                                    <div x-show="anexoTokenActivo.invitacion_error" class="text-xs font-medium text-rose-700" x-text="`Correo no enviado: ${anexoTokenActivo.invitacion_error}`"></div>
                                 </div>
                                 <div class="flex flex-wrap gap-2">
-                                    <template x-if="anexoTokenActivo.url_firma">
-                                        <button type="button" class="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100" @click="abrirEnlaceFirmaAnexo(anexoTokenActivo.url_firma)">
-                                            Abrir enlace de firma
-                                        </button>
-                                    </template>
                                     <template x-if="anexoTokenActivo.url_firma">
                                         <button type="button" class="rounded-xl border border-amber-200 bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-200" @click="copiarEnlaceFirmaAnexo(anexoTokenActivo.url_firma)">
                                             Copiar enlace

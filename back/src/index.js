@@ -3553,6 +3553,9 @@ function mapAnexoIndividualTokenRow(row) {
     archivo_file_name: row.archivo_file_name || null,
     archivo_catalogo_origen: row.archivo_catalogo_origen || null,
     archivo_catalogo: Array.isArray(row.archivo_catalogo) ? row.archivo_catalogo : [],
+    invitacion_enviada_at: row.invitacion_enviada_at || null,
+    invitacion_enviada_a: row.invitacion_enviada_a || null,
+    invitacion_error: row.invitacion_error || null,
     firmado_at: row.firmado_at || null,
     created_at: row.created_at || null,
     updated_at: row.updated_at || null
@@ -4231,9 +4234,17 @@ async function uploadAnexoIndividualFirmadoToOneDrive(proceso, pdfBuffer, fileNa
   const fechaStr = new Date().toISOString().slice(0, 10);
   const { folderName } = await resolveAnexoIndividualOneDriveIdentity(proceso);
 
-  const safeName = sanitizePdfFileName(
+  const sourceName = sanitizePdfFileName(
     fileName || `AnexoTecnico_${proceso?.nombre_persona || "Persona"}_${fechaStr}.pdf`,
     "AnexoTecnico.pdf"
+  );
+  const versionKey = sanitizePathSegment(
+    proceso?.request_id || proceso?.public_id || proceso?.id || "firma",
+    "firma"
+  ).replace(/\s+/g, "_");
+  const safeName = sanitizePdfFileName(
+    `${sourceName.replace(/\.pdf$/i, "")}_${versionKey}.pdf`,
+    "AnexoTecnico_firma.pdf"
   );
 
   let targetPath = sanitizePathSegment(folderAnexo, "AnexoTecnico");
@@ -4300,10 +4311,7 @@ function buildAnexoIndividualFirmaCompletadaEmail({ proceso }) {
 }
 
 async function notifyAnexoIndividualFirmaCompletada(tokenId) {
-  const recipients = await resolveTalentoHumanoNotificationRecipients({
-    fallback: ANEXO_INDIVIDUAL_FALLBACK_NOTIFY_EMAIL
-  });
-  if (!tokenId || recipients.length === 0) {
+  if (!tokenId) {
     return { ok: false, skipped: "config_missing" };
   }
 
@@ -4336,6 +4344,21 @@ async function notifyAnexoIndividualFirmaCompletada(tokenId) {
     if (!String(proceso.onedrive_url || "").trim()) {
       await client.query("ROLLBACK");
       return { ok: false, skipped: "pending_onedrive_upload" };
+    }
+
+    const initiatorResult = proceso.generado_por
+      ? await client.query(
+          "SELECT LOWER(BTRIM(email)) AS email FROM usuarios WHERE id = $1 AND NULLIF(BTRIM(email), '') IS NOT NULL LIMIT 1",
+          [proceso.generado_por]
+        )
+      : { rows: [] };
+    const recipients = await resolveTalentoHumanoNotificationRecipients({
+      fallback: ANEXO_INDIVIDUAL_FALLBACK_NOTIFY_EMAIL,
+      extras: initiatorResult.rows[0]?.email || ""
+    });
+    if (recipients.length === 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, skipped: "config_missing" };
     }
 
     const mail = buildAnexoIndividualFirmaCompletadaEmail({ proceso });

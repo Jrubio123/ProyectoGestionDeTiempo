@@ -11,7 +11,7 @@ const {
   labelAnexoTipo
 } = require("../src/services/anexo-individual-documento.service");
 const {
-  __private: { buildAnexoCheckErrorPayload }
+  __private: { buildAnexoCheckErrorPayload, buildAnexoFirmaPendienteEmail }
 } = require("../src/services/anexo-individual.service");
 
 function buildValidInput() {
@@ -169,6 +169,43 @@ test("el anexo permite asociar una persona sin usuario mediante su documento", (
     constraint: "anexo_tecnico_items_origen_proceso_check"
   });
   assert.match(payload.error, /persona con documento/i);
+});
+
+test("el correo de firma del anexo se dirige al firmante y contiene su enlace", () => {
+  const mail = buildAnexoFirmaPendienteEmail({
+    nombrePersona: "Ana Consultora",
+    urlFirma: "https://firma.example/anexo-123",
+    buildEmailLayout: ({ ctaLabel, ctaUrl }) => `${ctaLabel}:${ctaUrl}`
+  });
+
+  assert.match(mail.subject, /Firma pendiente de anexo técnico/);
+  assert.match(mail.text, /Hola Ana Consultora/);
+  assert.match(mail.text, /https:\/\/firma\.example\/anexo-123/);
+  assert.match(mail.html, /Revisar y firmar anexo:https:\/\/firma\.example\/anexo-123/);
+});
+
+test("el flujo no abre la firma al remitente y notifica el cierre a TH más el iniciador", () => {
+  const serviceSource = fs.readFileSync(
+    path.resolve(__dirname, "../src/services/anexo-individual.service.js"),
+    "utf8"
+  );
+  const indexSource = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  const frontendSource = fs.readFileSync(
+    path.resolve(__dirname, "../../front/js/onboarding-th.js"),
+    "utf8"
+  );
+  const migration = fs.readFileSync(
+    path.resolve(__dirname, "../../db/migrations/2026-08-11-anexo-notificaciones-firma.sql"),
+    "utf8"
+  );
+
+  assert.match(serviceSource, /to: correoFinal/);
+  assert.match(serviceSource, /invitacion_enviada_at/);
+  assert.doesNotMatch(frontendSource, /window\.open\(urlFirma/);
+  assert.doesNotMatch(frontendSource, /abrirEnlaceFirmaAnexo/);
+  assert.match(indexSource, /extras: initiatorResult\.rows\[0\]\?\.email/);
+  assert.match(indexSource, /sourceName\.replace\(\/\\\.pdf\$\/i, ""\).*versionKey/s);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS invitacion_enviada_at/);
 });
 
 for (const templateName of ["Anexo Tecnico.docx", "AnexoTecnicoCapital.docx"]) {

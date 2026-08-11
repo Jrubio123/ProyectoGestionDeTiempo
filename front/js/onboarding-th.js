@@ -1250,17 +1250,17 @@ window.onboardingThApp = function () {
                     },
                     this.getAuthConfig()
                 );
-                const urlFirma = String(res?.data?.url_firma || res?.data?.token?.url_firma || "").trim();
+                const correoEnviado = res?.data?.correo_enviado !== false;
+                const correoDestino = String(res?.data?.correo_destino || correo).trim();
                 this.cerrarModalFirmaAnexo();
                 await this.cargarItemsAnexo();
-                if (urlFirma) {
-                    window.open(urlFirma, "_blank", "noopener");
+                if (correoEnviado) {
                     this.setAnexoFeedback({
-                        success: "Proceso de firma iniciado. Se abrio el enlace de firma y tambien queda disponible en el envio pendiente."
+                        success: `Proceso de firma iniciado. El enlace fue enviado a ${correoDestino}.`
                     });
                 } else {
                     this.setAnexoFeedback({
-                        success: "Proceso de firma iniciado. Si no llega correo, usa el enlace disponible en el envio pendiente."
+                        error: "La firma fue creada, pero el correo no pudo enviarse. El enlace queda disponible en el envio pendiente para copiarlo."
                     });
                 }
             } catch (e) {
@@ -1268,15 +1268,6 @@ window.onboardingThApp = function () {
             } finally {
                 this.anexoModalFirma.saving = false;
             }
-        },
-
-        abrirEnlaceFirmaAnexo(url = "") {
-            const target = String(url || this.anexoTokenActivo?.url_firma || "").trim();
-            if (!target) {
-                this.setAnexoFeedback({ error: "Este envio no tiene un enlace de firma disponible." });
-                return;
-            }
-            window.open(target, "_blank", "noopener");
         },
 
         async copiarEnlaceFirmaAnexo(url = "") {

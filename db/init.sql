@@ -1149,10 +1149,11 @@ CREATE TABLE anexo_tecnico_items (
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
 
-    CHECK (
+    CONSTRAINT anexo_tecnico_items_origen_proceso_check CHECK (
       solicitud_contratacion_id IS NOT NULL
       OR preregistro_id IS NOT NULL
       OR usuario_id IS NOT NULL
+      OR NULLIF(BTRIM(numero_documento), '') IS NOT NULL
     ),
     CHECK (
       (tipo_asignacion IN ('full_time', 'medio_tiempo', 'proyecto') AND cliente_id IS NOT NULL)

@@ -25,7 +25,8 @@ function uniqueEmailList(input) {
 
 const ANEXO_CHECK_MESSAGES = Object.freeze({
   anexo_tecnico_items_fechas_check: "La fecha de fin no puede ser anterior a la fecha de inicio.",
-  anexo_tecnico_items_origen_proceso_check: "No se pudo asociar el ítem con la persona seleccionada."
+  anexo_tecnico_items_origen_proceso_check:
+    "El ítem debe estar asociado a una solicitud, preregistro, usuario o persona con documento."
 });
 
 function buildAnexoCheckErrorPayload(error = {}) {

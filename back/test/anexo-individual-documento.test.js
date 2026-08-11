@@ -153,6 +153,24 @@ test("el anexo permite fecha fin libre y reporta la restricción real", () => {
   assert.match(payload.error, /fecha de fin no puede ser anterior/i);
 });
 
+test("el anexo permite asociar una persona sin usuario mediante su documento", () => {
+  const migration = fs.readFileSync(
+    path.resolve(__dirname, "../../db/migrations/2026-08-11-anexo-origen-persona.sql"),
+    "utf8"
+  );
+  const initSource = fs.readFileSync(path.resolve(__dirname, "../../db/init.sql"), "utf8");
+
+  assert.match(migration, /CONSTRAINT anexo_tecnico_items_origen_proceso_check/);
+  assert.match(migration, /NULLIF\(BTRIM\(numero_documento\), ''\) IS NOT NULL/);
+  assert.match(initSource, /CONSTRAINT anexo_tecnico_items_origen_proceso_check CHECK/);
+  assert.match(initSource, /NULLIF\(BTRIM\(numero_documento\), ''\) IS NOT NULL/);
+
+  const payload = buildAnexoCheckErrorPayload({
+    constraint: "anexo_tecnico_items_origen_proceso_check"
+  });
+  assert.match(payload.error, /persona con documento/i);
+});
+
 for (const templateName of ["Anexo Tecnico.docx", "AnexoTecnicoCapital.docx"]) {
   test(`la plantilla ${templateName} imprime todos los items`, () => {
     const output = renderTemplate(findTemplate(templateName), {

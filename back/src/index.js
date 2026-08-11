@@ -3138,6 +3138,16 @@ function buildAnexoInsertPayload({
     throw err;
   }
 
+  const usuarioId = toNullableInteger(personaContext?.usuario_id);
+  const numeroDocumento =
+    toNullableTrimmedString(input?.numero_documento) ||
+    toNullableTrimmedString(personaContext?.numeroDocumento);
+  if (!solicitudId && !preregistroId && !usuarioId && !numeroDocumento) {
+    const err = new Error("El ítem debe estar asociado a una solicitud, preregistro, usuario o persona con documento");
+    err.status = 400;
+    throw err;
+  }
+
   const resolvedModuloId = toNullableInteger(input?.modulo_id) || toNullableInteger(personaContext?.modulo_id) || null;
   const resolvedModuloNombre = resolvedModuloId
     ? null
@@ -3156,9 +3166,9 @@ function buildAnexoInsertPayload({
   return {
     solicitud_contratacion_id: solicitudId || null,
     preregistro_id: preregistroId || null,
-    usuario_id: personaContext?.usuario_id || null,
+    usuario_id: usuarioId,
     nombre_persona: nombrePersona,
-    numero_documento: toNullableTrimmedString(input?.numero_documento) || toNullableTrimmedString(personaContext?.numeroDocumento),
+    numero_documento: numeroDocumento,
     correo_personal: toNullableTrimmedString(input?.correo_personal) || toNullableTrimmedString(personaContext?.correoPersonal),
     tipo_asignacion: tipoAsignacion,
     cliente_id: resolvedClienteId || null,

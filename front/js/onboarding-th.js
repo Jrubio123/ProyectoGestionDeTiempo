@@ -50,6 +50,11 @@ window.onboardingThApp = function () {
         return `${year}-${month}-${day}`;
     };
 
+    const yearEndYmd = (value = todayYmd()) => {
+        const year = String(value || "").slice(0, 4);
+        return /^\d{4}$/.test(year) ? `${year}-12-31` : "";
+    };
+
     const emptyAnexoItemForm = () => ({
         usuario_id: "",
         tipo_asignacion: "full_time",
@@ -59,7 +64,7 @@ window.onboardingThApp = function () {
         moneda: "COP",
         valor_tarifa: "",
         fecha_inicio: todayYmd(),
-        fecha_fin: "",
+        fecha_fin: yearEndYmd(),
         correo_personal: ""
     });
 
@@ -1005,11 +1010,11 @@ window.onboardingThApp = function () {
 
         syncFechaFinAnexo(force = false) {
             const form = this.anexoModalItem.form;
-            if (!this.tipoAnexoEsAnual(form.tipo_asignacion) || !form.fecha_inicio) return;
-            const year = String(form.fecha_inicio).slice(0, 4);
-            if (!year || year.length !== 4) return;
-            if (force || !form.fecha_fin) {
-                form.fecha_fin = `${year}-12-31`;
+            if (!form.fecha_inicio) return;
+            const suggestedDate = yearEndYmd(form.fecha_inicio);
+            const currentIsYearEnd = /^\d{4}-12-31$/.test(String(form.fecha_fin || ""));
+            if (!form.fecha_fin || (force && currentIsYearEnd)) {
+                form.fecha_fin = suggestedDate;
             }
         },
 
@@ -1027,7 +1032,12 @@ window.onboardingThApp = function () {
                 itemId: "",
                 form: {
                     ...emptyAnexoItemForm(),
-                    usuario_id: this.usuarioAnexo.id
+                    usuario_id: this.usuarioAnexo.id,
+                    correo_personal:
+                        this.anexoCorreoSugerido ||
+                        this.usuarioAnexo?.correo_personal ||
+                        this.usuarioAnexo?.email ||
+                        ""
                 }
             };
         },
@@ -1059,7 +1069,12 @@ window.onboardingThApp = function () {
                     valor_tarifa: data.valor_tarifa ?? "",
                     fecha_inicio: this.toDateInput(data.fecha_inicio),
                     fecha_fin: this.toDateInput(data.fecha_fin),
-                    correo_personal: data.correo_personal || this.anexoCorreoSugerido || ""
+                    correo_personal:
+                        data.correo_personal ||
+                        this.anexoCorreoSugerido ||
+                        this.usuarioAnexo?.correo_personal ||
+                        this.usuarioAnexo?.email ||
+                        ""
                 };
             } catch (e) {
                 this.anexoModalItem.error = e?.response?.data?.error || "No se pudo cargar el item.";
@@ -1085,15 +1100,11 @@ window.onboardingThApp = function () {
             if (!this.tipoAnexoRequiereCliente(form.tipo_asignacion)) {
                 form.cliente_id = "";
             }
-            if (this.tipoAnexoEsAnual(form.tipo_asignacion)) {
-                this.syncFechaFinAnexo(true);
-            }
+            this.syncFechaFinAnexo(false);
         },
 
         onFechaInicioAnexoChange() {
-            if (this.tipoAnexoEsAnual(this.anexoModalItem.form.tipo_asignacion)) {
-                this.syncFechaFinAnexo(true);
-            }
+            this.syncFechaFinAnexo(true);
         },
 
         validarFormAnexoItem() {

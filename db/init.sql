@@ -1158,15 +1158,8 @@ CREATE TABLE anexo_tecnico_items (
       (tipo_asignacion IN ('full_time', 'medio_tiempo', 'proyecto') AND cliente_id IS NOT NULL)
       OR tipo_asignacion IN ('horas', 'capacitacion')
     ),
-    CHECK (
-      (tipo_asignacion IN ('full_time', 'medio_tiempo', 'proyecto') AND fecha_fin >= fecha_inicio)
-      OR (
-        tipo_asignacion IN ('horas', 'capacitacion')
-        AND EXTRACT(YEAR FROM fecha_fin) = EXTRACT(YEAR FROM fecha_inicio)
-        AND EXTRACT(MONTH FROM fecha_fin) = 12
-        AND EXTRACT(DAY FROM fecha_fin) = 31
-      )
-    )
+    CONSTRAINT anexo_tecnico_items_fechas_check
+      CHECK (fecha_fin >= fecha_inicio)
 );
 
 CREATE INDEX idx_anexo_tecnico_items_doc ON anexo_tecnico_items(numero_documento);
@@ -1182,7 +1175,7 @@ CREATE INDEX idx_anexo_tecnico_items_fecha ON anexo_tecnico_items(fecha_inicio, 
 COMMENT ON TABLE anexo_tecnico_items IS 'Historial acumulado de filas del Anexo Tecnico por persona';
 COMMENT ON COLUMN anexo_tecnico_items.tipo_asignacion IS 'full_time, medio_tiempo, horas, capacitacion o proyecto';
 COMMENT ON COLUMN anexo_tecnico_items.modulo_nombre IS 'Nombre libre del modulo cuando no existe en el catalogo';
-COMMENT ON COLUMN anexo_tecnico_items.fecha_fin_calculada IS 'true cuando la fecha_fin se calculó automáticamente (31 de diciembre)';
+COMMENT ON COLUMN anexo_tecnico_items.fecha_fin_calculada IS 'true cuando fecha_fin se asignó automáticamente al 31 de diciembre; la fecha sigue siendo editable';
 
 CREATE TABLE tokens_firma_anexo_individual (
     id SERIAL PRIMARY KEY,

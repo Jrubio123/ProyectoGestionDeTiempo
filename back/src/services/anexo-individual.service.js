@@ -23,6 +23,21 @@ function uniqueEmailList(input) {
   return Array.from(new Set((Array.isArray(input) ? input : parseEmailList(input)).filter(Boolean)));
 }
 
+const ANEXO_CHECK_MESSAGES = Object.freeze({
+  anexo_tecnico_items_fechas_check: "La fecha de fin no puede ser anterior a la fecha de inicio.",
+  anexo_tecnico_items_origen_proceso_check: "No se pudo asociar el ítem con la persona seleccionada."
+});
+
+function buildAnexoCheckErrorPayload(error = {}) {
+  const constraint = String(error?.constraint || "").trim();
+  return {
+    error:
+      ANEXO_CHECK_MESSAGES[constraint] ||
+      `Los datos no cumplen la restricción ${constraint || "CHECK"} de anexo_tecnico_items.`,
+    constraint: constraint || null
+  };
+}
+
 async function getDestinosTalentoHumano(client = pool) {
   try {
     const result = await client.query(
@@ -351,11 +366,13 @@ async function createAnexoIndividualItem(req, res) {
       return res.status(status).json({ error: err.message || "Datos invalidos para item de anexo tecnico" });
     }
     if (err?.code === "23514") {
-      console.error("CHECK anexo_tecnico_items:", err.message);
-      return res.status(400).json({
-        error:
-          "Los datos no cumplen las reglas del anexo en base de datos. Si acabas de habilitar anexo individual, aplica la migracion 2026-03-25-anexo-individual-check-usuario.sql."
+      const payload = buildAnexoCheckErrorPayload(err);
+      console.error("CHECK anexo_tecnico_items:", {
+        constraint: payload.constraint,
+        detail: err?.detail || null,
+        message: err?.message || null
       });
+      return res.status(400).json(payload);
     }
     console.error(err);
     res.status(500).json({ error: "Error creando item de anexo tecnico" });
@@ -443,6 +460,15 @@ async function updateAnexoIndividualItem(req, res) {
     const status = Number(err?.status || 0);
     if (status >= 400 && status < 500) {
       return res.status(status).json({ error: err.message || "Datos invalidos para actualizar el item" });
+    }
+    if (err?.code === "23514") {
+      const payload = buildAnexoCheckErrorPayload(err);
+      console.error("CHECK anexo_tecnico_items:", {
+        constraint: payload.constraint,
+        detail: err?.detail || null,
+        message: err?.message || null
+      });
+      return res.status(400).json(payload);
     }
     console.error(err);
     res.status(500).json({ error: "Error actualizando item de anexo tecnico" });
@@ -900,5 +926,8 @@ module.exports = {
   notifyThIfZeroAnexos,
   previewAnexoIndividualPdf,
   iniciarFirmaAnexoIndividual,
-  cancelarFirmaAnexoIndividual
+  cancelarFirmaAnexoIndividual,
+  __private: {
+    buildAnexoCheckErrorPayload
+  }
 };

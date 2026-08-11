@@ -10,6 +10,9 @@ const {
   generateAnexoIndividualManualPdfFromItems,
   labelAnexoTipo
 } = require("../src/services/anexo-individual-documento.service");
+const {
+  __private: { buildAnexoCheckErrorPayload }
+} = require("../src/services/anexo-individual.service");
 
 function buildValidInput() {
   return {
@@ -115,6 +118,7 @@ test("el flujo manual usa PDFKit y comparte una carpeta estable por persona", ()
     (manualService.match(/generateAnexoIndividualManualPdfFromItems\(/g) || []).length,
     2
   );
+  assert.doesNotMatch(manualService, /aplica la migracion 2026-03-25-anexo-individual-check-usuario/);
   assert.match(indexSource, /folderName: sanitizePathSegment\(`\$\{nombre\}_\$\{fallbackIdentity\}`/);
   assert.match(indexSource, /return uploadAnexoIndividualFirmadoToOneDrive\(proceso, pdfBuffer, fileName\)/);
 });
@@ -125,6 +129,28 @@ test("permite modulo opcional y tarifa cero, como admite la base de datos", () =
   input.items[0].valor_tarifa = 0;
 
   assert.doesNotThrow(() => buildAnexoIndividualDocumentContext(input));
+});
+
+test("el anexo permite fecha fin libre y reporta la restricción real", () => {
+  const indexSource = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  const functionStart = indexSource.indexOf("function buildAnexoInsertPayload");
+  const functionEnd = indexSource.indexOf("async function findActiveAnexoBySource", functionStart);
+  const payloadSource = indexSource.slice(functionStart, functionEnd);
+  const migration = fs.readFileSync(
+    path.resolve(__dirname, "../../db/migrations/2026-08-11-anexo-fecha-fin-libre.sql"),
+    "utf8"
+  );
+
+  assert.match(payloadSource, /const fechaFinIngresada = normalizeDateOnlyInput\(input\?\.fecha_fin\)/);
+  assert.doesNotMatch(payloadSource, /isCorteAnual/);
+  assert.match(migration, /CONSTRAINT anexo_tecnico_items_fechas_check/);
+  assert.match(migration, /CHECK \(fecha_fin >= fecha_inicio\)/);
+
+  const payload = buildAnexoCheckErrorPayload({
+    constraint: "anexo_tecnico_items_fechas_check"
+  });
+  assert.equal(payload.constraint, "anexo_tecnico_items_fechas_check");
+  assert.match(payload.error, /fecha de fin no puede ser anterior/i);
 });
 
 for (const templateName of ["Anexo Tecnico.docx", "AnexoTecnicoCapital.docx"]) {

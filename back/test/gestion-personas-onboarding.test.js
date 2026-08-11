@@ -68,6 +68,40 @@ test("onboarding precarga el ID de catálogo desde un valor histórico", (t) => 
   assert.equal(payload.tipo_cuenta, "Cuenta de Ahorros");
 });
 
+test("anexo individual precarga correo y propone una fecha fin editable", (t) => {
+  const frontPath = path.resolve(__dirname, "../../front/js/onboarding-th.js");
+  const previousWindow = global.window;
+  t.after(() => {
+    global.window = previousWindow;
+    delete require.cache[frontPath];
+  });
+
+  global.window = { API_BASE: "http://test" };
+  delete require.cache[frontPath];
+  require(frontPath);
+  const app = global.window.onboardingThApp();
+  app.usuarioAnexo = {
+    id: "persona-1",
+    email: "persona@correo.com"
+  };
+
+  app.abrirModalNuevoItemAnexo();
+
+  const currentYear = String(new Date().getFullYear());
+  assert.equal(app.anexoModalItem.form.correo_personal, "persona@correo.com");
+  assert.equal(app.anexoModalItem.form.fecha_fin, `${currentYear}-12-31`);
+
+  app.anexoModalItem.form.tipo_asignacion = "horas";
+  app.anexoModalItem.form.valor_tarifa = 0;
+  app.anexoModalItem.form.fecha_inicio = "2026-08-11";
+  app.anexoModalItem.form.fecha_fin = "2026-08-11";
+  assert.equal(app.validarFormAnexoItem(), "");
+
+  app.anexoModalItem.form.fecha_inicio = "2026-08-10";
+  app.onFechaInicioAnexoChange();
+  assert.equal(app.anexoModalItem.form.fecha_fin, "2026-08-11");
+});
+
 test("gestión de personas diferencia Vinculado, Todosilver y persona sin usuario", (t) => {
   const frontPath = path.resolve(__dirname, "../../front/js/gestion-personas.js");
   const previousWindow = global.window;

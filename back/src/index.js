@@ -2164,15 +2164,6 @@ function inferAnexoDatesFromContext(ctx, tipoAsignacion) {
     normalizeDateOnlyInput(ctx?.created_at) ||
     new Date().toISOString().slice(0, 10);
 
-  const isCorteAnual = tipoAsignacion === "horas" || tipoAsignacion === "capacitacion";
-  if (isCorteAnual) {
-    return {
-      fecha_inicio: fechaInicio,
-      fecha_fin: computeYearEndDate(fechaInicio),
-      fecha_fin_calculada: true
-    };
-  }
-
   const fechaFin =
     normalizeDateOnlyInput(ctx?.fecha_extension_hasta) ||
     normalizeDateOnlyInput(ctx?.fecha_fin) ||
@@ -3111,25 +3102,20 @@ function buildAnexoInsertPayload({
     throw err;
   }
 
-  const isCorteAnual = tipoAsignacion === "horas" || tipoAsignacion === "capacitacion";
-  let fechaFin = null;
-  let fechaFinCalculada = false;
-  if (isCorteAnual) {
-    fechaFin = computeYearEndDate(fechaInicio);
-    fechaFinCalculada = true;
-  } else {
-    fechaFin = normalizeDateOnlyInput(input?.fecha_fin);
-    if (!fechaFin) {
-      const err = new Error("fecha_fin es obligatoria para el tipo seleccionado");
-      err.status = 400;
-      throw err;
-    }
-    fechaFinCalculada = toBooleanInput(input?.fecha_fin_calculada, false);
-    if (fechaFin < fechaInicio) {
-      const err = new Error("fecha_fin no puede ser menor que fecha_inicio");
-      err.status = 400;
-      throw err;
-    }
+  const fechaFinIngresada = normalizeDateOnlyInput(input?.fecha_fin);
+  const fechaFin = fechaFinIngresada || computeYearEndDate(fechaInicio);
+  const fechaFinCalculada = fechaFinIngresada
+    ? toBooleanInput(input?.fecha_fin_calculada, false)
+    : true;
+  if (!fechaFin) {
+    const err = new Error("fecha_fin invalida");
+    err.status = 400;
+    throw err;
+  }
+  if (fechaFin < fechaInicio) {
+    const err = new Error("fecha_fin no puede ser menor que fecha_inicio");
+    err.status = 400;
+    throw err;
   }
 
   let resolvedClienteId = clienteId;

@@ -187,3 +187,15 @@ test("el historial del anexo incluye finalizados y cancelados sin mezclarlos con
   assert.equal(app.estadoHistorialBadgeText("cancelado"), "Cancelado");
   assert.match(app.estadoHistorialBadgeClass("cancelado"), /rose/);
 });
+
+test("el banner del anexo depende del estado de firma y no de updated_at", () => {
+  const indexSource = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  const dashboardStart = indexSource.indexOf("async function buildAnexoIndividualDashboardPayload");
+  const dashboardEnd = indexSource.indexOf("async function resolveAnexoIndividualOneDriveIdentity", dashboardStart);
+  const dashboardSource = indexSource.slice(dashboardStart, dashboardEnd);
+  const routerSource = fs.readFileSync(path.resolve(__dirname, "../../front/router.js"), "utf8");
+
+  assert.match(dashboardSource, /ultimoFirmado && activos\.some\(\(item\) => item\.estado_firma !== "firmado"\)/);
+  assert.doesNotMatch(dashboardSource, /updatedAt > firmadoAt/);
+  assert.match(routerSource, /20260812-anexo-estado-firma/);
+});

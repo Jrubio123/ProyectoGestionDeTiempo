@@ -4016,13 +4016,8 @@ async function buildAnexoIndividualDashboardPayload(userRow, { includeFinalizado
   const historicos = items.filter((item) => item.estado !== "activo");
   const tokenActivo = await getActiveAnexoIndividualTokenByUser(userRow);
   const ultimoFirmado = await getLastSignedAnexoIndividualTokenByUser(userRow);
-  const firmadoAt = ultimoFirmado?.firmado_at ? new Date(ultimoFirmado.firmado_at).getTime() : 0;
   const tieneCambiosDesdeUltimaFirma = Boolean(
-    firmadoAt &&
-    activos.some((item) => {
-      const updatedAt = new Date(item.updated_at || item.created_at || 0).getTime();
-      return Number.isFinite(updatedAt) && updatedAt > firmadoAt;
-    })
+    ultimoFirmado && activos.some((item) => item.estado_firma !== "firmado")
   );
 
   return {

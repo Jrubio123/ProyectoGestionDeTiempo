@@ -3748,8 +3748,7 @@ async function listAnexoItemsForUsuario(userRow, { includeFinalizados = false, c
     LEFT JOIN usuarios uu ON uu.id = ati.updated_by
     LEFT JOIN clientes c ON c.id = ati.cliente_id
     LEFT JOIN modulo m ON m.id = ati.modulo_id
-    WHERE ati.estado <> 'cancelado'
-      AND (
+    WHERE (
         ati.usuario_id = $1
         OR ($2::text IS NOT NULL AND ati.usuario_id IS NULL AND ati.numero_documento = $2)
         OR (
@@ -4014,7 +4013,7 @@ async function buildAnexoIndividualDashboardPayload(userRow, { includeFinalizado
     correoPersonalFallback: correoFirmanteSugerido
   });
   const activos = items.filter((item) => item.estado === "activo");
-  const finalizados = items.filter((item) => item.estado === "finalizado");
+  const historicos = items.filter((item) => item.estado !== "activo");
   const tokenActivo = await getActiveAnexoIndividualTokenByUser(userRow);
   const ultimoFirmado = await getLastSignedAnexoIndividualTokenByUser(userRow);
   const firmadoAt = ultimoFirmado?.firmado_at ? new Date(ultimoFirmado.firmado_at).getTime() : 0;
@@ -4041,7 +4040,7 @@ async function buildAnexoIndividualDashboardPayload(userRow, { includeFinalizado
     ultimo_token_firmado: mapAnexoIndividualTokenRow(ultimoFirmado),
     tiene_cambios_desde_ultima_firma: tieneCambiosDesdeUltimaFirma,
     items_activos: activos.map(toAnexoApiRow),
-    items_finalizados: includeFinalizados ? finalizados.map(toAnexoApiRow) : []
+    items_finalizados: includeFinalizados ? historicos.map(toAnexoApiRow) : []
   };
 }
 

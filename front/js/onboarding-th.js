@@ -979,6 +979,16 @@ window.onboardingThApp = function () {
             return "Pendiente";
         },
 
+        estadoHistorialBadgeClass(estado) {
+            return estado === "cancelado"
+                ? "bg-rose-100 text-rose-700"
+                : "bg-slate-100 text-slate-600";
+        },
+
+        estadoHistorialBadgeText(estado) {
+            return estado === "cancelado" ? "Cancelado" : "Finalizado";
+        },
+
         textoValorAnexo(item) {
             const valor = this.formatCurrencyValue(item?.valor_tarifa, item?.moneda || "COP");
             if (!valor) return "-";

@@ -157,3 +157,33 @@ test("la ficha consulta datos laborales y la vista los oculta para Todosilver", 
   assert.match(migration, /UPDATE personas persona/);
   assert.match(migration, /tipo_cuenta_id IS NULL/);
 });
+
+test("el historial del anexo incluye finalizados y cancelados sin mezclarlos con activos", (t) => {
+  const indexSource = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  const listStart = indexSource.indexOf("async function listAnexoItemsForUsuario");
+  const listEnd = indexSource.indexOf("async function getAnexoIndividualItemByInput", listStart);
+  const listSource = indexSource.slice(listStart, listEnd);
+  const dashboardStart = indexSource.indexOf("async function buildAnexoIndividualDashboardPayload");
+  const dashboardEnd = indexSource.indexOf("async function resolveAnexoIndividualOneDriveIdentity", dashboardStart);
+  const dashboardSource = indexSource.slice(dashboardStart, dashboardEnd);
+
+  assert.doesNotMatch(listSource, /ati\.estado <> 'cancelado'/);
+  assert.match(listSource, /\$4::boolean OR ati\.estado = 'activo'/);
+  assert.match(dashboardSource, /item\.estado !== "activo"/);
+
+  const frontPath = path.resolve(__dirname, "../../front/js/onboarding-th.js");
+  const previousWindow = global.window;
+  t.after(() => {
+    global.window = previousWindow;
+    delete require.cache[frontPath];
+  });
+
+  global.window = { API_BASE: "http://test" };
+  delete require.cache[frontPath];
+  require(frontPath);
+  const app = global.window.onboardingThApp();
+
+  assert.equal(app.estadoHistorialBadgeText("finalizado"), "Finalizado");
+  assert.equal(app.estadoHistorialBadgeText("cancelado"), "Cancelado");
+  assert.match(app.estadoHistorialBadgeClass("cancelado"), /rose/);
+});

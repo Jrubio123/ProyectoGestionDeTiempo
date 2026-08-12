@@ -1430,7 +1430,7 @@ module.exports = function registerContratacionesRoutes(deps) {
     };
   }
 
-  async function syncAnexoDesdeSolicitud(internalId, userId = null) {
+  async function syncAnexoDesdeSolicitud(internalId, userId = null, { strict = false } = {}) {
     const row = await getByInternalId(pool, internalId);
     if (!row) return row;
 
@@ -1444,9 +1444,10 @@ module.exports = function registerContratacionesRoutes(deps) {
         solicitudId: internalId,
         preregistroId: row.preregistro_id || null,
         createdBy: userId || null,
-        strict: false
+        strict
       });
     } catch (err) {
+      if (strict) throw err;
       console.warn("No se pudo persistir anexo tecnico desde solicitud:", err?.message || err);
     }
     if (row.tipo_solicitud === TIPO_EXTENSION) {
@@ -2127,6 +2128,11 @@ module.exports = function registerContratacionesRoutes(deps) {
         ? normalizeDateOnly(payload.fecha_extension_hasta)
         : null;
       const fechaRetiro = payload.fecha_retiro ? normalizeDateOnly(payload.fecha_retiro) : null;
+      const tipoAnexoNuevo = tipoSolicitud === TIPO_NUEVO
+        ? normalizeAnexoTipo(
+            toObjectOrEmpty(payload.datos_extra).tipo_asignacion || payload.modalidad_contrato
+          )
+        : null;
       if (payload.fecha_inicio && !fechaInicio) {
         return res.status(400).json({ error: "fecha_inicio invalida" });
       }
@@ -2141,6 +2147,12 @@ module.exports = function registerContratacionesRoutes(deps) {
       }
       if (payload.fecha_retiro && !fechaRetiro) {
         return res.status(400).json({ error: "fecha_retiro invalida" });
+      }
+      if (tipoSolicitud === TIPO_NUEVO && !tipoAnexoNuevo) {
+        return res.status(422).json({ error: "tipo_asignacion es obligatorio para crear el anexo tecnico" });
+      }
+      if (tipoSolicitud === TIPO_NUEVO && fechaInicio && fechaFin && fechaFin < fechaInicio) {
+        return res.status(422).json({ error: "fecha_fin no puede ser anterior a fecha_inicio" });
       }
 
       if (correoPersonal && !isValidEmail(correoPersonal)) {
@@ -2163,6 +2175,8 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (!correoPersonal) missing.push("correo_personal");
         if (!perfil && !payload.modulo_id) missing.push("perfil o modulo_id");
         if (!fechaInicio) missing.push("fecha_inicio");
+        if (!fechaFin) missing.push("fecha_fin");
+        if (!tipoAnexoNuevo) missing.push("tipo_asignacion");
         if (!moneda) missing.push("moneda");
         if (factura === null) missing.push("factura_en_colombia");
         if (!tieneTarifa) missing.push("tarifa");
@@ -2285,6 +2299,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
         if (payload.grupo_app_tiempos !== undefined) datosExtra.grupo_usuario = grupoAppTiempos;
         if (payload.grupo_distribucion !== undefined) datosExtra.grupo_distribucion = grupoDistribucion;
+        if (tipoSolicitud === TIPO_NUEVO) datosExtra.tipo_asignacion = tipoAnexoNuevo;
 
         if (tipoSolicitud === TIPO_NUEVO && (personaUsuarioId || numeroDocumento)) {
           const legalContext = await fetchPersonaLegalContext(pool, { personaUsuarioId, numeroDocumento });
@@ -2472,17 +2487,29 @@ module.exports = function registerContratacionesRoutes(deps) {
           return res.status(500).json({ error: "No se pudo recuperar la solicitud creada" });
         }
 
+        let created;
+        try {
+          created = await syncAnexoDesdeSolicitud(createdId, req.user?.id, {
+            strict: tipoSolicitud === TIPO_NUEVO
+          });
+        } catch (anexoError) {
+          await pool.query(`DELETE FROM solicitudes_contratacion WHERE id = $1`, [createdId]);
+          throw anexoError;
+        }
+
         if (!enviarCorreos) {
-          const created = await syncAnexoDesdeSolicitud(createdId, req.user?.id);
           return res.status(201).json(formatRow(created));
         }
 
         await dispatchAndFinalizeSolicitud({ internalId: createdId, req });
-        const updated = await syncAnexoDesdeSolicitud(createdId, req.user?.id);
+        const updated = await getByInternalId(pool, createdId);
         return res.status(201).json(formatRow(updated));
       } catch (err) {
         if (err?.code === "PUBLIC_ID_NOT_FOUND") {
           return res.status(400).json({ error: "Cliente, supervisor, persona o tipo documento no valido" });
+        }
+        if (err?.status === 422) {
+          return res.status(422).json({ error: err.message });
         }
         console.error(err);
         return res.status(500).json({ error: "Error creando solicitud de contratacion" });
@@ -2592,6 +2619,14 @@ module.exports = function registerContratacionesRoutes(deps) {
         const fechaRetiro = payload.fecha_retiro !== undefined
           ? (payload.fecha_retiro ? normalizeDateOnly(payload.fecha_retiro) : null)
           : current.fecha_retiro;
+        const tipoAnexoNuevo = tipoSolicitud === TIPO_NUEVO
+          ? normalizeAnexoTipo(
+              toObjectOrEmpty(payload.datos_extra).tipo_asignacion ||
+              toObjectOrEmpty(current.datos_extra).tipo_asignacion ||
+              payload.modalidad_contrato ||
+              current.modalidad_contrato
+            )
+          : null;
 
         if (payload.fecha_inicio !== undefined && payload.fecha_inicio && !fechaInicio) {
           return res.status(400).json({ error: "fecha_inicio invalida" });
@@ -2607,6 +2642,9 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
         if (payload.fecha_retiro !== undefined && payload.fecha_retiro && !fechaRetiro) {
           return res.status(400).json({ error: "fecha_retiro invalida" });
+        }
+        if (tipoSolicitud === TIPO_NUEVO && fechaInicio && fechaFin && fechaFin < fechaInicio) {
+          return res.status(422).json({ error: "fecha_fin no puede ser anterior a fecha_inicio" });
         }
 
         if (correoPersonal && !isValidEmail(correoPersonal)) {
@@ -2634,6 +2672,8 @@ module.exports = function registerContratacionesRoutes(deps) {
           if (!correoPersonal) missing.push("correo_personal");
           if (!perfil && !moduloRef) missing.push("perfil o modulo_id");
           if (!fechaInicio) missing.push("fecha_inicio");
+          if (!fechaFin) missing.push("fecha_fin");
+          if (!tipoAnexoNuevo) missing.push("tipo_asignacion");
           if (!moneda) missing.push("moneda");
           if (factura === null) missing.push("factura_en_colombia");
           if (!tieneTarifa) missing.push("tarifa");
@@ -2765,6 +2805,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
         if (payload.grupo_app_tiempos !== undefined) datosExtra.grupo_usuario = grupoAppTiempos;
         if (payload.grupo_distribucion !== undefined) datosExtra.grupo_distribucion = grupoDistribucion;
+        if (tipoSolicitud === TIPO_NUEVO) datosExtra.tipo_asignacion = tipoAnexoNuevo;
 
         if (tipoSolicitud === TIPO_NUEVO && (personaUsuarioId || numeroDocumento)) {
           const legalContext = await fetchPersonaLegalContext(pool, { personaUsuarioId, numeroDocumento });
@@ -2926,6 +2967,10 @@ module.exports = function registerContratacionesRoutes(deps) {
           ]
         );
 
+        await syncAnexoDesdeSolicitud(internalId, req.user?.id, {
+          strict: tipoSolicitud === TIPO_NUEVO
+        });
+
         const shouldRedispatchOnlyTh =
           tipoSolicitud === TIPO_NUEVO &&
           current.estado === ESTADOS.pendienteCoordinador &&
@@ -2951,11 +2996,13 @@ module.exports = function registerContratacionesRoutes(deps) {
           markCoordinadorCompletion: true
         });
 
-        const updated = await syncAnexoDesdeSolicitud(internalId, req.user?.id);
-        return res.json(formatRow(updated));
+        return res.json(formatRow(afterDispatch));
       } catch (err) {
         if (err?.code === "PUBLIC_ID_NOT_FOUND") {
           return res.status(400).json({ error: "Cliente, supervisor, persona o tipo documento no valido" });
+        }
+        if (err?.status === 422) {
+          return res.status(422).json({ error: err.message });
         }
         console.error(err);
         return res.status(500).json({ error: "Error completando solicitud de contratacion" });

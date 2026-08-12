@@ -4,6 +4,8 @@ window.preregistrosCoordApp = function () {
     const DEFAULT_MONEDAS = ["COP", "USD", "EUR"];
     const EXTENSION_TIPOS_CON_FECHA = ["full_time", "medio_tiempo", "proyecto"];
 
+    const currentYearEnd = () => `${new Date().getFullYear()}-12-31`;
+
     const emptyForm = () => ({
         persona_usuario_id: "",
         tipo_documento_id: "",
@@ -531,7 +533,7 @@ window.preregistrosCoordApp = function () {
                 this.form.cliente_id = "__prospecto__";
                 this.form.cliente_nombre_prospecto = persona.cliente_nombre;
             }
-            if (persona.supervisor_id || persona.supervisor_nombre) {
+            if (persona.supervisor_id || persona.supervisor_azure_oid) {
                 this.form.supervisor_id = persona.supervisor_id ? String(persona.supervisor_id) : "";
                 this.form.supervisor_nombre = persona.supervisor_nombre || "";
                 this.form.supervisor_email = persona.supervisor_email || "";
@@ -541,6 +543,7 @@ window.preregistrosCoordApp = function () {
             if (perfilData.modulo_id) this.form.modulo_id = perfilData.modulo_id;
             if (perfilData.perfil) this.form.perfil = perfilData.perfil;
             if (persona.modalidad_contrato) this.form.modalidad_contrato = persona.modalidad_contrato;
+            if (persona.tipo_asignacion) this.form.tipo_asignacion = persona.tipo_asignacion;
             if (persona.tarifa_hora != null) this.form.tarifa_hora = persona.tarifa_hora;
             if (persona.tarifa_mes != null) this.form.tarifa_mes = persona.tarifa_mes;
             if (persona.tarifa_medio_tiempo != null) this.form.tarifa_medio_tiempo = persona.tarifa_medio_tiempo;
@@ -592,6 +595,7 @@ window.preregistrosCoordApp = function () {
                 tarifa_mes: item?.tarifa_mes ?? "",
                 tarifa_medio_tiempo: item?.tarifa_medio_tiempo ?? "",
                 tarifa_capacitacion: item?.tarifa_capacitacion ?? "",
+                tipo_asignacion: item?.datos_extra?.tipo_asignacion || item?.tipo_asignacion || "",
                 modalidad_contrato: item?.modalidad_contrato || "",
                 fecha_inicio: this.toDateInput(item?.fecha_inicio),
                 fecha_fin: this.toDateInput(item?.fecha_fin),
@@ -631,6 +635,7 @@ window.preregistrosCoordApp = function () {
             this.datosExtraBase = {};
             this.observacionesThActivas = "";
             this.form = emptyForm();
+            if (tipo === "Nuevo") this.form.fecha_fin = currentYearEnd();
             this.busquedaPersona = "";
             this.busquedaSupervisor = "";
             if (tipo !== "Extension") {
@@ -841,6 +846,11 @@ window.preregistrosCoordApp = function () {
                 if (!String(this.form.moneda || "").trim()) errors.push("Moneda");
                 if (!["true", "false"].includes(String(this.form.factura_en_colombia || "").trim())) errors.push("Factura en Colombia");
                 if (!String(this.form.fecha_inicio || "").trim()) errors.push("Fecha inicio");
+                if (!String(this.form.fecha_fin || "").trim()) errors.push("Fecha fin");
+                if (!String(this.form.tipo_asignacion || "").trim()) errors.push("Tipo de asignacion");
+                if (this.form.fecha_inicio && this.form.fecha_fin && this.form.fecha_fin < this.form.fecha_inicio) {
+                    errors.push("Fecha fin no puede ser anterior a fecha inicio");
+                }
                 if (!String(this.form.modulo_id || "").trim() && !String(this.form.perfil || "").trim()) {
                     errors.push("Perfil / Modulo");
                 }
@@ -901,6 +911,17 @@ window.preregistrosCoordApp = function () {
             }
 
             return errors;
+        },
+
+        onFechaInicioNuevoChange() {
+            if (this.tipoModal !== "Nuevo") return;
+            const fechaInicio = String(this.form.fecha_inicio || "").trim();
+            const fechaFin = String(this.form.fecha_fin || "").trim();
+            const year = fechaInicio.slice(0, 4);
+            if (!/^\d{4}$/.test(year)) return;
+            if (!fechaFin || /^\d{4}-12-31$/.test(fechaFin)) {
+                this.form.fecha_fin = `${year}-12-31`;
+            }
         },
 
         onModuloChange() {

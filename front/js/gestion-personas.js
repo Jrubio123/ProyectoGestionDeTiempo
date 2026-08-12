@@ -5,6 +5,10 @@ window.gestionPersonasApp = function () {
     return {
         puedeEditar: false,
         puedeAgregar: false,
+        puedeExportar: false,
+        puedeExportarCompleto: false,
+        tipoExportacion: "operativa",
+        exportando: false,
         cargando: false,
         cargandoFicha: false,
         modalAddPersonaOpen: false,
@@ -76,6 +80,8 @@ window.gestionPersonasApp = function () {
             const roleKey = window.auth?.getRoleKey?.() || "other";
             this.puedeEditar = roleKey === "admin" || roleKey === "talento_humano";
             this.puedeAgregar = this.puedeEditar;
+            this.puedeExportar = this.puedeEditar;
+            this.puedeExportarCompleto = roleKey === "talento_humano";
 
             await Promise.all([
                 this.cargarPersonas(),
@@ -236,6 +242,68 @@ window.gestionPersonasApp = function () {
         get rolesUnicos() {
             const set = new Set(this.personas.map((p) => p.rol).filter(Boolean));
             return Array.from(set).sort();
+        },
+
+        async cargarLibreriaExcel() {
+            if (window.XLSX) return;
+            await new Promise((resolve, reject) => {
+                const existente = document.querySelector('script[data-personas-xlsx="true"]');
+                if (existente) {
+                    existente.addEventListener("load", resolve, { once: true });
+                    existente.addEventListener("error", reject, { once: true });
+                    return;
+                }
+                const script = document.createElement("script");
+                script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+                script.dataset.personasXlsx = "true";
+                script.onload = resolve;
+                script.onerror = reject;
+                document.head.appendChild(script);
+            });
+        },
+
+        async descargarExcelPersonas() {
+            if (!this.puedeExportar || this.exportando) return;
+            if (this.tipoExportacion === "completa" && !this.puedeExportarCompleto) return;
+            if (
+                this.tipoExportacion === "completa" &&
+                !confirm("El archivo completo contiene datos personales y bancarios. Deseas descargarlo?")
+            ) return;
+
+            this.exportando = true;
+            try {
+                await this.cargarLibreriaExcel();
+                const cfg = this.getAuthConfig() || {};
+                const params = { tipo: this.tipoExportacion };
+                if (this.filtroRol !== "todos") params.rol = this.filtroRol;
+                const res = await axios.get(`${API}/admin/personas/exportar`, { ...cfg, params });
+                const filas = Array.isArray(res.data?.filas) ? res.data.filas : [];
+                if (!filas.length) {
+                    alert("No hay personas para el rol seleccionado.");
+                    return;
+                }
+
+                const columnas = Array.from(new Set(filas.flatMap((fila) => Object.keys(fila || {}))));
+                const hoja = window.XLSX.utils.json_to_sheet(filas, { header: columnas });
+                hoja["!cols"] = columnas.map((columna) => ({
+                    wch: Math.min(
+                        45,
+                        Math.max(12, columna.length + 2, ...filas.slice(0, 100).map((fila) => String(fila[columna] ?? "").length + 2))
+                    )
+                }));
+                const libro = window.XLSX.utils.book_new();
+                window.XLSX.utils.book_append_sheet(libro, hoja, "Personas");
+
+                const rol = this.filtroRol === "todos"
+                    ? "todos"
+                    : String(this.filtroRol).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+                const fecha = new Date().toISOString().slice(0, 10);
+                window.XLSX.writeFile(libro, `personas-${this.tipoExportacion}-${rol}-${fecha}.xlsx`);
+            } catch (err) {
+                alert(err?.response?.data?.error || "No se pudo generar el Excel de personas.");
+            } finally {
+                this.exportando = false;
+            }
         },
 
         get fichaSinUsuario() {

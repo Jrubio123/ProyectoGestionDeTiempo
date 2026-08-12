@@ -523,6 +523,20 @@ COMMENT ON TABLE personas IS 'Datos permanentes de personas (físicas o jurídic
 ALTER TABLE usuarios ADD COLUMN persona_id INTEGER REFERENCES personas(id);
 CREATE UNIQUE INDEX idx_usuarios_persona ON usuarios(persona_id) WHERE persona_id IS NOT NULL;
 
+CREATE TABLE exportaciones_personas_auditoria
+(
+    id BIGSERIAL PRIMARY KEY,
+    usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    tipo_exportacion VARCHAR(20) NOT NULL
+        CHECK (tipo_exportacion IN ('operativa', 'completa')),
+    filtro_rol VARCHAR(255) NOT NULL DEFAULT 'Todos',
+    total_registros INTEGER NOT NULL DEFAULT 0 CHECK (total_registros >= 0),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_exportaciones_personas_usuario
+    ON exportaciones_personas_auditoria(usuario_id, created_at DESC);
+
 -- Tabla: UsuarioLicenciasBackup
 CREATE TABLE usuario_licencias_backup
 (
@@ -1068,8 +1082,11 @@ CREATE TABLE tokens_firma_contrato (
         CHECK (estado IN ('pendiente', 'en_proceso', 'completado', 'expirado')),
     checks_completados JSONB NOT NULL DEFAULT '{"pdf1":false,"pdf2":false,"pdf3":false,"pdf4":false,"pdf5":false}',
     docs_firma JSONB NOT NULL DEFAULT '[]',
+    firma_completada_notificacion_pendiente_at TIMESTAMP,
     firma_completada_notificada_at TIMESTAMP,
     firma_completada_notificada_a VARCHAR(255),
+    firma_completada_notificacion_intentos INTEGER NOT NULL DEFAULT 0,
+    firma_completada_notificacion_error TEXT,
     generado_por INT REFERENCES usuarios(id) ON DELETE SET NULL,
     expires_at TIMESTAMP NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
@@ -1080,6 +1097,9 @@ CREATE INDEX idx_tokens_firma_token ON tokens_firma_contrato(token);
 CREATE INDEX idx_tokens_firma_estado ON tokens_firma_contrato(estado);
 CREATE INDEX idx_tokens_firma_correo ON tokens_firma_contrato(correo_personal);
 CREATE INDEX idx_tokens_firma_expires ON tokens_firma_contrato(expires_at);
+CREATE INDEX idx_tokens_firma_notificacion_pendiente
+    ON tokens_firma_contrato(firma_completada_notificacion_pendiente_at)
+    WHERE estado = 'completado' AND firma_completada_notificada_at IS NULL;
 
 COMMENT ON TABLE tokens_firma_contrato IS 'Tokens de acceso para el proceso publico de revision y firma de contratos';
 COMMENT ON COLUMN tokens_firma_contrato.checks_completados IS 'Estado de lectura de cada PDF informativo {pdf1, pdf2, pdf3, pdf4, pdf5}';
@@ -1155,8 +1175,11 @@ CREATE TABLE anexo_tecnico_items (
       OR usuario_id IS NOT NULL
       OR NULLIF(BTRIM(numero_documento), '') IS NOT NULL
     ),
-    CHECK (
-      (tipo_asignacion IN ('full_time', 'medio_tiempo', 'proyecto') AND cliente_id IS NOT NULL)
+    CONSTRAINT anexo_tecnico_items_cliente_por_tipo_check CHECK (
+      (
+        tipo_asignacion IN ('full_time', 'medio_tiempo', 'proyecto')
+        AND (cliente_id IS NOT NULL OR NULLIF(BTRIM(cliente_nombre), '') IS NOT NULL)
+      )
       OR tipo_asignacion IN ('horas', 'capacitacion')
     ),
     CONSTRAINT anexo_tecnico_items_fechas_check

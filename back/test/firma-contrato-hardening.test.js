@@ -107,6 +107,66 @@ test("reconciliador sigue archivando procesos ya firmados", () => {
   assert.match(job, /onedrive_url/);
 });
 
+test("correo de contrato espera los archivos y conserva cierre legal independiente", () => {
+  const source = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  const mutacion = recorte(source, "async function mutateContratoDocsFirma", "async function patchContratoDocFirmaSafely");
+  const notificacion = recorte(source, "async function notifyContratoFirmaCompletada", "async function resolveProcesoForPersona");
+
+  assert.match(mutacion, /WHEN \$2 = 'completado'/);
+  assert.match(mutacion, /firma_completada_notificacion_pendiente_at/);
+  assert.match(notificacion, /const todosArchivados = docsNormalizados\.every/);
+  assert.match(notificacion, /if \(!todosArchivados && !esperaVencida\)/);
+  assert.ok(notificacion.indexOf('skipped: "files_pending"') < notificacion.indexOf("sendEmailSafe"));
+  assert.match(notificacion, /firma_completada_notificada_at = NOW\(\)/);
+  assert.match(notificacion, /enviado_por_timeout: !todosArchivados && esperaVencida/);
+});
+
+test("job rescata notificaciones pendientes aunque ya no haya archivos por conciliar", () => {
+  const source = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  const job = recorte(source, "async function jobReconciliarContratosEnFirma", "async function jobReintentarCorreosCuentasCobro");
+
+  assert.match(job, /tf\.firma_completada_notificada_at IS NULL/);
+  assert.match(job, /if \(pendientesAntes === 0\)/);
+  assert.match(job, /await notifyContratoFirmaCompletada\(procesoActual\.id\)/);
+});
+
+test("correo diferencia las carpetas del contrato y del anexo sin repetir el encabezado", () => {
+  const source = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  const context = vm.createContext({ URL });
+  vm.runInContext([
+    recorte(source, "function escapeHtmlText", "async function notifyContratoFirmaCompletada"),
+    "globalThis.__buildEmail = buildContratoFirmaCompletadaEmail;"
+  ].join("\n"), context);
+
+  const unaCarpeta = context.__buildEmail({
+    proceso: { nombre_persona: "Persona Prueba" },
+    docs: [{ titulo: "Contrato", url: "https://example.com/Contratos/contrato.pdf", archivo_estado: "subido" }]
+  });
+  assert.equal((unaCarpeta.text.match(/Carpeta OneDrive:/g) || []).length, 1);
+
+  const dosCarpetas = context.__buildEmail({
+    proceso: { nombre_persona: "Persona Prueba" },
+    docs: [
+      { titulo: "Contrato", url: "https://example.com/Contratos/contrato.pdf", archivo_estado: "subido" },
+      { titulo: "Anexo Tecnico", url: "https://example.com/AnexoTecnico/anexo.pdf", archivo_estado: "subido" }
+    ]
+  });
+  assert.match(dosCarpetas.text, /Carpetas OneDrive:/);
+  assert.match(dosCarpetas.text, /Contrato: https:\/\/example\.com\/Contratos/);
+  assert.match(dosCarpetas.text, /Anexo Tecnico: https:\/\/example\.com\/AnexoTecnico/);
+});
+
+test("migracion agrega trazabilidad durable de la notificacion", () => {
+  const migration = fs.readFileSync(
+    path.resolve(__dirname, "../../db/migrations/2026-08-12-contrato-notificacion-archivos.sql"),
+    "utf8"
+  );
+  assert.match(migration, /firma_completada_notificacion_pendiente_at/);
+  assert.match(migration, /firma_completada_notificacion_intentos/);
+  assert.match(migration, /firma_completada_notificacion_error/);
+  assert.match(migration, /firma_completada_notificada_at IS NULL/);
+});
+
 test("la UI sigue consultando cuando el inicio queda ambiguo", () => {
   const frontend = fs.readFileSync(path.resolve(__dirname, "../../front/js/contratacion-publica.js"), "utf8");
   assert.match(frontend, /recuperacion_automatica/);

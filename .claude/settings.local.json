@@ -80,5 +80,8 @@
   },
   "enabledPlugins": {
     "codex@openai-codex": true
-  }
+  },
+  "enabledMcpjsonServers": [
+    "supabase"
+  ]
 }

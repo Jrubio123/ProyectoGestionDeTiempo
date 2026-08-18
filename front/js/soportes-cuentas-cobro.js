@@ -13,6 +13,7 @@ window.soportesCuentasCobroApp = function () {
         modalDocsOpen: false,
         docsActuales: [],
         docsCuentaId: "",
+        reiniciandoCuentaId: "",
 
         async init() {
             await Promise.all([this.cargarConsultores(), this.cargarAprobadores(), this.cargarSoportes()]);
@@ -116,6 +117,38 @@ window.soportesCuentasCobroApp = function () {
             this.modalDocsOpen = false;
             this.docsActuales = [];
             this.docsCuentaId = "";
+        },
+
+        puedeReiniciarDocumentos() {
+            const rol = String(window.auth?.getUser?.()?.rol || "").toLowerCase().trim();
+            return ["administrador", "coordinador"].includes(rol);
+        },
+
+        async reiniciarDocumentos(item) {
+            const cuentaId = String(item?.id || "").trim();
+            if (!cuentaId || this.reiniciandoCuentaId) return;
+
+            const cuentaCorta = this.cuentaCorta(cuentaId);
+            const confirmado = window.confirm(
+                `¿Seguro que quieres reiniciar los documentos de la cuenta #${cuentaCorta}?\n\n` +
+                "El consultor podrá subirlos nuevamente y se enviará otro correo al completar la carga. " +
+                "Los archivos anteriores permanecerán en OneDrive."
+            );
+            if (!confirmado) return;
+
+            this.reiniciandoCuentaId = cuentaId;
+            try {
+                await axios.delete(`${API}/cuentas-cobro/${cuentaId}/documentos`, {
+                    data: { confirmacion: "REINICIAR_DOCUMENTOS" }
+                });
+                this.soportes = this.soportes.filter((soporte) => soporte.id !== cuentaId);
+                if (this.docsCuentaId === cuentaCorta) this.cerrarModalDocs();
+                window.alert(`Documentos de la cuenta #${cuentaCorta} reiniciados correctamente.`);
+            } catch (e) {
+                window.alert(e?.response?.data?.error || "No se pudieron reiniciar los documentos.");
+            } finally {
+                this.reiniciandoCuentaId = "";
+            }
         },
 
         formatDate(d) {

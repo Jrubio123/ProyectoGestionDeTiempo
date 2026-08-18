@@ -7,6 +7,7 @@ const {
   getHistorialCuentas,
   getAprobadoresCuentas,
   getSoportesCuentas,
+  reiniciarDocumentosCuenta,
   getDetalleCuenta,
   getCuentaPdf,
   uploadAdjuntosCuenta,
@@ -30,6 +31,7 @@ router.post("/", requireAccess({ roles: ROLES_ASOCIADOS, tipos: ["Asociado"] }),
 router.get("/historial/:userId", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), getHistorialCuentas);
 router.get("/aprobadores", requireAccess({ roles: ROLES_SOPORTES_CUENTAS }), getAprobadoresCuentas);
 router.get("/soportes", requireAccess({ roles: ROLES_SOPORTES_CUENTAS }), getSoportesCuentas);
+router.delete("/:id/documentos", requireAccess({ roles: ["Administrador", "Coordinador"] }), reiniciarDocumentosCuenta);
 router.get("/detalle/:cuentaId", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), getDetalleCuenta);
 router.get("/:id/pdf", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), getCuentaPdf);
 router.post("/:id/adjuntos", requireAccess({ roles: ROLES_LECTURA_AMPLIA, tipos: ["Asociado"] }), uploadAdjuntosCuenta);

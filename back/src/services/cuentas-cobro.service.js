@@ -1114,6 +1114,111 @@ async function getSoportesCuentas(req, res) {
   }
 }
 
+async function reiniciarDocumentosCuenta(req, res, deps = {}) {
+  const dbPool = deps.pool || pool;
+  const { isGuid } = deps.helpers || getIndexHelpers();
+  const { id } = req.params;
+
+  if (!isGuid(id)) {
+    return res.status(400).json({ error: "Cuenta inválida" });
+  }
+  if (req.body?.confirmacion !== "REINICIAR_DOCUMENTOS") {
+    return res.status(400).json({ error: "Confirmación inválida" });
+  }
+
+  let client = null;
+  let transactionStarted = false;
+
+  try {
+    client = await dbPool.connect();
+    await client.query("BEGIN");
+    transactionStarted = true;
+
+    const result = await client.query(
+      `
+      SELECT id, public_id, datos_adjuntos
+      FROM cuenta_cobro
+      WHERE public_id = $1
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [id]
+    );
+    const cuenta = result.rows[0] || null;
+
+    if (!cuenta) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+      return res.status(404).json({ error: "Cuenta no encontrada" });
+    }
+
+    const adjuntosActuales = asPlainObject(cuenta.datos_adjuntos);
+    const tieneFirma = Object.prototype.hasOwnProperty.call(adjuntosActuales, "firma");
+    const tieneSoportes = Object.prototype.hasOwnProperty.call(adjuntosActuales, "soportes");
+
+    if (!tieneFirma && !tieneSoportes) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+      return res.status(409).json({ error: "La cuenta no tiene documentos para reiniciar" });
+    }
+
+    const {
+      firma: _firmaEliminada,
+      soportes: _soportesEliminados,
+      ...adjuntosSinDocumentos
+    } = adjuntosActuales;
+    const reiniciosAnteriores = Array.isArray(adjuntosActuales.reinicios_documentos)
+      ? adjuntosActuales.reinicios_documentos
+      : [];
+    const reiniciadoEn = new Date().toISOString();
+    const nuevosAdjuntos = {
+      ...adjuntosSinDocumentos,
+      reinicios_documentos: [
+        ...reiniciosAnteriores,
+        {
+          reiniciado_en: reiniciadoEn,
+          reiniciado_por: {
+            usuario_id: req.user?.id ?? null,
+            email: req.user?.email || null,
+            rol: req.user?.rol || null
+          }
+        }
+      ]
+    };
+
+    await client.query(
+      `
+      UPDATE cuenta_cobro
+      SET datos_adjuntos = $1::jsonb,
+          estado = 'Pendiente'::tipo_estado_reporte,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      `,
+      [JSON.stringify(nuevosAdjuntos), cuenta.id]
+    );
+
+    await client.query("COMMIT");
+    transactionStarted = false;
+
+    return res.json({
+      ok: true,
+      cuenta_id: String(cuenta.public_id || id),
+      estado_cuenta: "Pendiente",
+      reiniciado_en: reiniciadoEn
+    });
+  } catch (err) {
+    if (transactionStarted) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (_) { }
+    }
+    console.error("Error reiniciando documentos de cuenta de cobro:", err);
+    return res.status(500).json({ error: "Error reiniciando documentos de la cuenta" });
+  } finally {
+    client?.release();
+  }
+}
+
 // Detalle de cuenta de cobro
 /**
  * Retorna la lista detallada de reportes de horas asociados a una cuenta
@@ -3875,6 +3980,7 @@ module.exports = {
   getHistorialCuentas,
   getAprobadoresCuentas,
   getSoportesCuentas,
+  reiniciarDocumentosCuenta,
   getDetalleCuenta,
   getCuentaPdf,
   uploadAdjuntosCuenta,

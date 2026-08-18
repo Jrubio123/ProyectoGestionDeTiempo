@@ -66,13 +66,33 @@
                                 <span x-text="formatDate(item.fecha_fin_periodo)"></span>
                             </td>
                             <td class="px-6 py-4 text-right font-mono font-bold text-gray-700" x-text="formatearDinero(item.total_numeros)"></td>
-                            <td class="px-6 py-4 text-center">
-                                <button x-show="getDocumentosDeItem(item).length"
-                                        @click="verDocumentos(item)"
-                                        class="px-3 py-1.5 rounded-lg bg-cyan-600 text-white text-xs font-bold hover:bg-cyan-700">
-                                    Ver documentos
-                                </button>
-                                <span x-show="!getDocumentosDeItem(item).length" class="text-xs text-gray-400">Sin documentos</span>
+                            <td class="px-6 py-4">
+                                <div class="flex items-center justify-center gap-2">
+                                    <button x-show="getDocumentosDeItem(item).length"
+                                            @click="verDocumentos(item)"
+                                            class="px-3 py-1.5 rounded-lg bg-cyan-600 text-white text-xs font-bold hover:bg-cyan-700">
+                                        Ver documentos
+                                    </button>
+                                    <span x-show="!getDocumentosDeItem(item).length" class="text-xs text-gray-400">Sin documentos</span>
+                                    <button x-show="puedeReiniciarDocumentos()"
+                                            @click="reiniciarDocumentos(item)"
+                                            :disabled="Boolean(reiniciandoCuentaId)"
+                                            :aria-label="`Reiniciar documentos de la cuenta ${cuentaCorta(item.id)}`"
+                                            title="Reiniciar documentos"
+                                            class="p-2 rounded-lg text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                                        <svg x-show="reiniciandoCuentaId !== item.id" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M3 6h18"></path>
+                                            <path d="M8 6V4h8v2"></path>
+                                            <path d="M19 6l-1 14H6L5 6"></path>
+                                            <path d="M10 11v5"></path>
+                                            <path d="M14 11v5"></path>
+                                        </svg>
+                                        <svg x-show="reiniciandoCuentaId === item.id" class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                                        </svg>
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                     </template>

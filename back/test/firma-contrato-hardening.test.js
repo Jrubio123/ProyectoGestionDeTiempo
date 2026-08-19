@@ -112,7 +112,7 @@ test("correo de contrato espera los archivos y conserva cierre legal independien
   const mutacion = recorte(source, "async function mutateContratoDocsFirma", "async function patchContratoDocFirmaSafely");
   const notificacion = recorte(source, "async function notifyContratoFirmaCompletada", "async function resolveProcesoForPersona");
 
-  assert.match(mutacion, /WHEN \$2 = 'completado'/);
+  assert.match(mutacion, /WHEN \$2::varchar = 'completado'/);
   assert.match(mutacion, /firma_completada_notificacion_pendiente_at/);
   assert.match(notificacion, /const todosArchivados = docsNormalizados\.every/);
   assert.match(notificacion, /if \(!todosArchivados && !esperaVencida\)/);

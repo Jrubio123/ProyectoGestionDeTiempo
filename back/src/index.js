@@ -8539,6 +8539,170 @@ function buildContratoFirmaCompletadaEmail({ proceso, docs = [] }) {
   };
 }
 
+function buildContratoFirmaRechazadaEmail({ proceso, doc, rawStatus = "", motivo = "" }) {
+  const nombre = String(proceso?.nombre_persona || "Sin nombre").trim();
+  const correo = String(proceso?.correo_personal || "").trim();
+  const documento = String(doc?.titulo || doc?.doc_key || `Documento ${doc?.doc_index || ""}`).trim() || "Documento";
+  const estadoRecibido = String(rawStatus || doc?.ultimo_evento || "rejected").trim();
+  const accion = estadoRecibido.toLowerCase().includes("declin") ? "declinó" : "rechazó";
+  const fechaRaw = doc?.rechazado_en || new Date();
+  const fecha = new Date(fechaRaw);
+  const fechaTexto = Number.isNaN(fecha.getTime())
+    ? String(fechaRaw || "N/A")
+    : fecha.toLocaleString("es-CO", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  const motivoTexto = String(motivo || doc?.rechazo_motivo || "").trim();
+  const procesoPublicId = String(proceso?.public_id || "").trim();
+  const solicitudPublicId = String(proceso?.solicitud_public_id || "").trim();
+
+  const text = [
+    `${nombre} ${accion} la firma digital del documento "${documento}".`,
+    "",
+    `Persona: ${nombre}`,
+    correo ? `Correo personal: ${correo}` : null,
+    `Documento: ${documento}`,
+    `Estado recibido: ${estadoRecibido}`,
+    `Fecha: ${fechaTexto}`,
+    motivoTexto ? `Motivo informado: ${motivoTexto}` : "Motivo informado: ClickSign no envió un motivo.",
+    procesoPublicId ? `Proceso de firma: ${procesoPublicId}` : null,
+    solicitudPublicId ? `Solicitud de contratación: ${solicitudPublicId}` : null
+  ].filter(Boolean).join("\n");
+
+  return {
+    subject: `Firma declinada - ${nombre} - ${documento}`,
+    text,
+    html: buildEmailLayout({
+      title: "Firma digital declinada",
+      intro: `<strong>${escapeHtmlText(nombre)}</strong> ${accion} la firma digital de <strong>${escapeHtmlText(documento)}</strong>.`,
+      blocks: [
+        { label: "Persona", value: escapeHtmlText(nombre) },
+        correo ? { label: "Correo personal", value: escapeHtmlText(correo) } : null,
+        { label: "Documento", value: escapeHtmlText(documento) },
+        { label: "Estado recibido", value: escapeHtmlText(estadoRecibido) },
+        { label: "Fecha", value: escapeHtmlText(fechaTexto) },
+        { label: "Motivo informado", value: escapeHtmlText(motivoTexto || "ClickSign no envió un motivo") },
+        procesoPublicId ? { label: "Proceso de firma", value: escapeHtmlText(procesoPublicId) } : null,
+        solicitudPublicId ? { label: "Solicitud de contratación", value: escapeHtmlText(solicitudPublicId) } : null
+      ].filter(Boolean),
+      closing: "Notificación automática del proceso de contratación."
+    })
+  };
+}
+
+async function notifyContratoFirmaRechazada({
+  tokenId,
+  docIndex,
+  expectedAttemptKey = "",
+  rawStatus = "",
+  motivo = ""
+} = {}) {
+  const recipients = await resolveTalentoHumanoNotificationRecipients({
+    fallback: CONTRATOS_FIRMA_COMPLETADA_FALLBACK_NOTIFY,
+    extras: CONTRATOS_FIRMA_COMPLETADA_NOTIFY_TO
+  });
+  if (!tokenId || !Number(docIndex) || recipients.length === 0) {
+    return { ok: false, skipped: "config_missing" };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `
+      SELECT
+        t.id,
+        t.public_id,
+        t.nombre_persona,
+        t.correo_personal,
+        t.docs_firma,
+        sc.public_id AS solicitud_public_id,
+        pp.public_id AS preregistro_public_id
+      FROM tokens_firma_contrato t
+      LEFT JOIN solicitudes_contratacion sc ON sc.id = t.solicitud_id
+      LEFT JOIN preregistro_personas pp ON pp.id = t.preregistro_id
+      WHERE t.id = $1
+      FOR UPDATE OF t
+      `,
+      [tokenId]
+    );
+    if (result.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, skipped: "not_found" };
+    }
+
+    const proceso = result.rows[0];
+    const docs = normalizeDocsFirmaListCompat(proceso.docs_firma);
+    const targetIndex = Number(docIndex);
+    const doc = docs.find((item) => Number(item?.doc_index || 0) === targetIndex);
+    if (!doc || normalizeDocStatus(doc?.firma_estado || doc?.estado) !== "rejected") {
+      await client.query("ROLLBACK");
+      return { ok: false, skipped: "not_rejected" };
+    }
+
+    const attemptKey = String(doc?.signature_id || doc?.contract_id || doc?.request_id || "").trim();
+    const expectedKey = String(expectedAttemptKey || "").trim();
+    if (expectedKey && attemptKey && expectedKey !== attemptKey) {
+      await client.query("ROLLBACK");
+      return { ok: false, skipped: "stale_attempt" };
+    }
+    if (
+      doc?.rechazo_notificada_en &&
+      String(doc?.rechazo_notificacion_intento || "").trim() === attemptKey
+    ) {
+      await client.query("ROLLBACK");
+      return { ok: true, skipped: "already_notified" };
+    }
+
+    const mail = buildContratoFirmaRechazadaEmail({ proceso, doc, rawStatus, motivo });
+    const sendResult = await sendEmailSafe({
+      graphUserEmail: CONTRATOS_FIRMA_COMPLETADA_SENDER || ONEDRIVE_TARGET_USER,
+      to: recipients,
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html
+    });
+    const nowIso = new Date().toISOString();
+    const updatedDoc = {
+      ...doc,
+      rechazo_notificacion_intento: attemptKey || expectedKey || `doc-${targetIndex}`,
+      rechazo_notificacion_intentos: Number(doc?.rechazo_notificacion_intentos || 0) + 1,
+      rechazo_notificacion_error: sendResult.ok
+        ? null
+        : String(sendResult.error || "No fue posible enviar el correo").slice(0, 2000),
+      rechazo_notificada_en: sendResult.ok ? nowIso : null,
+      rechazo_notificada_a: sendResult.ok ? recipients.join(", ") : null
+    };
+    const nextDocs = docs.map((item) => (
+      Number(item?.doc_index || 0) === targetIndex ? updatedDoc : item
+    ));
+    await client.query(
+      `UPDATE tokens_firma_contrato
+       SET docs_firma = $2::jsonb,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [tokenId, JSON.stringify(nextDocs)]
+    );
+    await client.query("COMMIT");
+
+    if (!sendResult.ok) {
+      return { ok: false, skipped: "send_failed", error: sendResult.error || null };
+    }
+    return { ok: true, sent: true, notified_to: recipients, documento: updatedDoc.titulo || updatedDoc.doc_key || null };
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch { }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 async function notifyContratoFirmaCompletada(tokenId) {
   const recipients = await resolveTalentoHumanoNotificationRecipients({
     fallback: CONTRATOS_FIRMA_COMPLETADA_FALLBACK_NOTIFY,
@@ -15749,6 +15913,29 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
   const eventStatusInfo = extractClickSignDocumentStatus(event);
   status = ["signed", "rejected"].includes(status) ? status : eventStatusInfo.status;
   rawStatus = rawStatus || eventStatusInfo.rawStatus || status || "";
+  const rawStatusNormalizado = String(rawStatus || "").trim().toLowerCase();
+  const rechazoExplicito = status === "rejected" && (
+    !rawStatusNormalizado ||
+    rawStatusNormalizado.includes("rejected") ||
+    rawStatusNormalizado.includes("rechaz") ||
+    rawStatusNormalizado.includes("declin")
+  );
+  const motivoRechazo = status === "rejected"
+    ? pickStringByPaths(event, [
+      "reason",
+      "decline_reason",
+      "rejection_reason",
+      "refusal_reason",
+      "cancellation_reason",
+      "data.reason",
+      "data.decline_reason",
+      "data.rejection_reason",
+      "data.refusal_reason",
+      "data.cancellation_reason",
+      "signature.reason",
+      "data.signature.reason"
+    ])
+    : "";
   // Click&Sign emite ready/new/stamp_generated/evidence_generated ademas del estado final.
   // Esos eventos no tienen nada que correlacionar: se acusan como atendidos para que el
   // despachador no los trate como fallo de correlacion y consuma los reintentos que si hacen
@@ -15789,6 +15976,8 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
       estado: status,
       firma_estado: status,
       firmado_en: status === "signed" ? (matchedDoc?.firmado_en || nowIso) : (matchedDoc?.firmado_en || null),
+      rechazado_en: status === "rejected" ? (matchedDoc?.rechazado_en || nowIso) : (matchedDoc?.rechazado_en || null),
+      rechazo_motivo: status === "rejected" ? (motivoRechazo || matchedDoc?.rechazo_motivo || null) : (matchedDoc?.rechazo_motivo || null),
       ultimo_evento: rawStatus || matchedDoc?.ultimo_evento || status,
       ultimo_error: null,
       reconciliado_en: nowIso,
@@ -15808,7 +15997,25 @@ async function handleClickSignContratoWebhook({ event, requestId, contractId, si
   } catch (anexoSyncErr) {
     console.error("Error sincronizando estado de firma del anexo desde webhook:", anexoSyncErr?.message || anexoSyncErr);
   }
-  if (status === "rejected") return true;
+  if (status === "rejected") {
+    if (!rechazoExplicito) return true;
+    try {
+      const notification = await notifyContratoFirmaRechazada({
+        tokenId: proceso.id,
+        docIndex,
+        expectedAttemptKey: effectiveSignatureId || contractId || requestId,
+        rawStatus,
+        motivo: motivoRechazo
+      });
+      if (!notification.ok && notification.skipped === "send_failed") {
+        return { handled: true, retry: true, reason: "notificacion_rechazo_error" };
+      }
+    } catch (notifyErr) {
+      console.error("Error notificando firma rechazada a Talento Humano:", notifyErr?.message || notifyErr);
+      return { handled: true, retry: true, reason: "notificacion_rechazo_error" };
+    }
+    return true;
+  }
   if (signedPersisted.estado === "completado") {
     try {
       await notifyContratoFirmaCompletada(proceso.id);
@@ -16678,6 +16885,8 @@ module.exports = {
   getContratoDocDefinition,
   graphPutBinaryWithRetry,
   normalizeDocStatus,
+  buildContratoFirmaRechazadaEmail,
+  notifyContratoFirmaRechazada,
   notifyContratoFirmaCompletada,
   reconcileContratoDocsForProcess,
   uploadContratoFirmadoToOneDrive,

@@ -1041,6 +1041,19 @@ window.preregistrosCoordApp = function () {
             }
 
             if (this.tipoModal === "Nuevo") {
+                const modalidadPorTipoAsignacion = {
+                    full_time: "Full time",
+                    medio_tiempo: "Medio tiempo",
+                    horas: "Por horas",
+                    capacitacion: "Por horas"
+                };
+                const modalidadContrato = modalidadPorTipoAsignacion[this.form.tipo_asignacion];
+                if (modalidadContrato) {
+                    base.modalidad_contrato = modalidadContrato;
+                } else {
+                    delete base.modalidad_contrato;
+                }
+
                 // Prospecto: enviar cliente_nombre en datos_extra, null cliente_id
                 const esProspecto = this.form.cliente_id === "__prospecto__";
                 if (esProspecto) {

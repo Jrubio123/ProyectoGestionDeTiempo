@@ -3,6 +3,7 @@ const { pool } = require("../db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { env } = require("../config/env");
+const { syncMicrosoftIdentity } = require("./microsoft-identity-sync.service");
 
 const JWT_SECRET = env.JWT_SECRET;
 
@@ -377,9 +378,12 @@ async function loginWithMicrosoft(req, res) {
   }
 
   try {
-    const me = await graphGet("/v1.0/me?$select=id,mail,userPrincipalName,displayName,mobilePhone", accessToken);
+    const me = await graphGet(
+      "/v1.0/me?$select=id,mail,userPrincipalName,displayName,givenName,surname,mobilePhone",
+      accessToken
+    );
     const oid = me.id;
-    const email = me.mail || me.userPrincipalName;
+    const email = String(me.mail || me.userPrincipalName || "").trim().toLowerCase();
     const nombre = me.displayName || email;
     const telefono = me.mobilePhone || null;
 
@@ -439,49 +443,25 @@ async function loginWithMicrosoft(req, res) {
       return res.status(500).json({ error: "No existe el rol 'Consultor' en la tabla roles" });
     }
 
-    let userRes = await pool.query(
-      `SELECT u.id, u.public_id, u.nombre_usuario, u.email, u.rol_usuario_id, u.tipo_consultor, u.azure_oid, u.activo, r.titulo AS rol
-       FROM usuarios u
-       LEFT JOIN roles r ON u.rol_usuario_id = r.id
-       WHERE (u.azure_oid = $1 OR u.email = $2)
-       LIMIT 1`,
-      [oid, email]
-    );
-
-    if (userRes.rows.length > 0 && !userRes.rows[0].activo) {
-      return res.status(403).json({ error: "Tu cuenta está desactivada. Contacta al administrador." });
-    }
-
-    if (userRes.rows.length === 0) {
-      userRes = await pool.query(
-        `INSERT INTO usuarios
-          (nombre_usuario, email, rol_usuario_id, activo, telefono, created_by, azure_oid)
-         VALUES ($1, $2, $3, true, $4, 'ms_sso', $5)
-         RETURNING id, public_id, nombre_usuario, email, rol_usuario_id`,
-        [nombre, email, rolId, telefono, oid]
-      );
-    } else {
-      const user = userRes.rows[0];
-      if (!user.azure_oid) {
-        await pool.query(
-          "UPDATE usuarios SET azure_oid = $1 WHERE id = $2",
-          [oid, user.id]
-        );
-      }
-    }
-
-    const userRow = userRes.rows[0];
-    if (!userRow?.id) {
-      return res.status(500).json({ error: "No se pudo crear o recuperar el usuario de Microsoft en BD" });
-    }
-
+    const client = await pool.connect();
+    let userRow;
     try {
-      await pool.query(
-        "UPDATE usuarios SET ultimo_inicio_sesion = CURRENT_TIMESTAMP WHERE id = $1",
-        [userRow.id]
-      );
-    } catch (err) {
-      console.error("No se pudo actualizar ultimo_inicio_sesion:", err.message);
+      await client.query("BEGIN");
+      userRow = await syncMicrosoftIdentity(client, {
+        oid,
+        email,
+        displayName: nombre,
+        givenName: me.givenName,
+        surname: me.surname,
+        phone: telefono,
+        defaultRoleId: rolId
+      });
+      await client.query("COMMIT");
+    } catch (syncError) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw syncError;
+    } finally {
+      client.release();
     }
 
     const payload = {
@@ -511,6 +491,10 @@ async function loginWithMicrosoft(req, res) {
     }
     console.error("Error auth microsoft (interno):", err.message);
 
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+
     if (err.code === "28P01") {
       return res.status(500).json({ error: "Credenciales de base de datos inválidas (DB_USER/DB_PASSWORD)" });
     }
@@ -523,7 +507,7 @@ async function loginWithMicrosoft(req, res) {
     if (err.code === "42703") {
       return res.status(500).json({
         error:
-          "Falta una columna requerida en la BD. Ejecuta la migracion db/migrations/2026-02-24-add-public-id.sql y reinicia el backend."
+          "Falta una columna requerida en la BD. Ejecuta las migraciones pendientes, incluida 2026-08-19-personas-correo-silver.sql, y reinicia el backend."
       });
     }
     if (err.code === "23505") {

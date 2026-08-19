@@ -442,6 +442,7 @@ CREATE TABLE personas
     -- Contacto principal
     numero_contacto      VARCHAR(50),
     correo_electronico   VARCHAR(255),
+    correo_silver        VARCHAR(255),
     direccion_residencia TEXT,
     barrio               VARCHAR(120),
     ciudad_residencia    VARCHAR(100),
@@ -512,12 +513,16 @@ CREATE TABLE personas
 
 CREATE INDEX idx_personas_documento   ON personas(numero_documento);
 CREATE INDEX idx_personas_correo      ON personas(correo_electronico);
+CREATE UNIQUE INDEX idx_personas_correo_silver_lower
+    ON personas (LOWER(BTRIM(correo_silver)))
+    WHERE NULLIF(BTRIM(correo_silver), '') IS NOT NULL;
 CREATE INDEX idx_personas_estado      ON personas(estado);
 CREATE INDEX idx_personas_cliente     ON personas(cliente_id);
 CREATE INDEX idx_personas_modulo      ON personas(modulo_id);
 CREATE INDEX idx_personas_nombre_trgm ON personas USING gin(nombre gin_trgm_ops);
 
 COMMENT ON TABLE personas IS 'Datos permanentes de personas (físicas o jurídicas) vinculadas al sistema';
+COMMENT ON COLUMN personas.correo_silver IS 'Correo corporativo de Silver usado para vincular la persona con su identidad Microsoft.';
 
 -- Vincular usuarios con personas (FK circular resuelta con ALTER después de crear personas)
 ALTER TABLE usuarios ADD COLUMN persona_id INTEGER REFERENCES personas(id);

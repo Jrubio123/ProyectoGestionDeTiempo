@@ -4202,9 +4202,9 @@ async function mutateContratoDocsFirma(procesoId, mutator) {
       await client.query(
         `UPDATE tokens_firma_contrato
          SET docs_firma = $1::jsonb,
-             estado = $2,
+             estado = $2::varchar,
              firma_completada_notificacion_pendiente_at = CASE
-               WHEN $2 = 'completado'
+               WHEN $2::varchar = 'completado'
                  THEN COALESCE(firma_completada_notificacion_pendiente_at, NOW())
                ELSE firma_completada_notificacion_pendiente_at
              END,

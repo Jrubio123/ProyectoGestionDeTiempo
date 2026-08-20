@@ -110,6 +110,7 @@
 
     <!-- Requerimientos -->
     <section x-show="tab === 'requerimientos' && puedeGestionar" class="space-y-4">
+        <p class="text-sm text-slate-500">Los registros manuales pertenecen a este módulo. De Azure solo se muestran los asignados a integrantes marcados como Fábrica.</p>
         <div class="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-4">
             <input x-model="filtroRequerimiento" type="search" placeholder="Buscar ID, cliente, título…" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
             <select x-model="filtroOrigen" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">

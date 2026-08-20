@@ -423,6 +423,10 @@ async function listRequirements(req, res) {
        LEFT JOIN requerimiento_distribucion_capacidad d ON d.requerimiento_id = r.id
        LEFT JOIN categorias_esfuerzo_capacidad cat ON cat.id = d.categoria_id
        WHERE r.activo = TRUE
+         AND (
+           r.origen = 'MANUAL'
+           OR (r.origen = 'AZURE_DEVOPS' AND p.pertenece_fabrica = TRUE)
+         )
          AND ($1::boolean = TRUE OR e.es_terminal = FALSE)
        GROUP BY r.id, c.id, e.id, p.id
        ORDER BY e.es_terminal, r.prioridad NULLS LAST, r.updated_at DESC`,

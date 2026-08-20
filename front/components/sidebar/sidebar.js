@@ -90,6 +90,7 @@ function initSidebar() {
             "preregistrosCoord",
             "soportes-cuentas-cobro",
             "capacidad-fabrica",
+            "azure-devops-prueba",
             "gestion-consultores"
         ],
         consultor_principal: [

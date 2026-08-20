@@ -2,9 +2,9 @@
     <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
         <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-                <h1 class="text-2xl font-bold text-slate-800">Prueba Azure DevOps</h1>
+                <h1 class="text-2xl font-bold text-slate-800">Azure historial</h1>
                 <p class="text-sm text-slate-500 mt-1">
-                    Consulta de solo lectura usando la aplicación actual de Entra ID.
+                    Consulta general de requerimientos de todos los proyectos de Azure DevOps.
                 </p>
             </div>
             <button
@@ -12,12 +12,12 @@
                 @click="loadProjects()"
                 :disabled="loadingProjects"
                 class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold disabled:opacity-50">
-                <span x-text="loadingProjects ? 'Consultando...' : 'Probar conexión'"></span>
+                <span x-text="loadingProjects ? 'Consultando...' : 'Actualizar proyectos'"></span>
             </button>
         </div>
 
         <div x-show="error" class="mt-4 p-4 rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm">
-            <p class="font-semibold">La prueba no pudo completarse</p>
+            <p class="font-semibold">No se pudo consultar Azure DevOps</p>
             <p class="mt-1" x-text="error"></p>
         </div>
 

@@ -33,7 +33,8 @@ window.roleAccess = (function () {
             "solicitudesCoord",
             "preregistrosCoord",
             "soportes-cuentas-cobro",
-            "capacidad-fabrica"
+            "capacidad-fabrica",
+            "azure-devops-prueba"
         ],
         comercial: [
             "inicio",
@@ -83,7 +84,7 @@ window.roleAccess = (function () {
         { label: "Generar Cuenta Cobro", hash: "#generar-cuenta-cobro" },
         { label: "Catalogos Admin", hash: "#catalogos-admin" },
         { label: "Licencias de Acceso", hash: "#gestion-licencias-admin" },
-        { label: "Prueba Azure DevOps", hash: "#azure-devops-prueba" },
+        { label: "Azure historial", hash: "#azure-devops-prueba" },
         { label: "Capacidad de Fabrica", hash: "#capacidad-fabrica" },
         { label: "Solicitudes RRHH", hash: "#solicitudesCoord" },
         { label: "Contrataciones", hash: "#preregistrosCoord" },

@@ -6,9 +6,9 @@ const {
 } = require("../services/azure-devops.service");
 
 const router = express.Router();
-const ADMIN_ACCESS = requireAccess({ roles: ["Administrador"] });
+const OPERATION_ACCESS = requireAccess({ roles: ["Administrador", "Coordinador"] });
 
-router.get("/projects", ADMIN_ACCESS, getProjects);
-router.get("/work-items", ADMIN_ACCESS, getRecentWorkItems);
+router.get("/projects", OPERATION_ACCESS, getProjects);
+router.get("/work-items", OPERATION_ACCESS, getRecentWorkItems);
 
 module.exports = router;

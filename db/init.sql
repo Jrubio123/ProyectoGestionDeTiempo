@@ -427,6 +427,8 @@ CREATE TABLE personas
     tipo_documento_id INTEGER REFERENCES documento_identidad(id),
     estado            VARCHAR(20) NOT NULL DEFAULT 'activo'
                         CHECK (estado IN ('activo', 'inactivo')),
+    pertenece_fabrica BOOLEAN NOT NULL DEFAULT FALSE,
+    azure_oid         VARCHAR(64),
 
     -- Datos personales
     nombre           VARCHAR(200),
@@ -516,17 +518,203 @@ CREATE INDEX idx_personas_correo      ON personas(correo_electronico);
 CREATE UNIQUE INDEX idx_personas_correo_silver_lower
     ON personas (LOWER(BTRIM(correo_silver)))
     WHERE NULLIF(BTRIM(correo_silver), '') IS NOT NULL;
+CREATE UNIQUE INDEX idx_personas_azure_oid
+    ON personas(azure_oid)
+    WHERE NULLIF(BTRIM(azure_oid), '') IS NOT NULL;
 CREATE INDEX idx_personas_estado      ON personas(estado);
+CREATE INDEX idx_personas_pertenece_fabrica
+    ON personas(pertenece_fabrica)
+    WHERE pertenece_fabrica = TRUE;
 CREATE INDEX idx_personas_cliente     ON personas(cliente_id);
 CREATE INDEX idx_personas_modulo      ON personas(modulo_id);
 CREATE INDEX idx_personas_nombre_trgm ON personas USING gin(nombre gin_trgm_ops);
 
 COMMENT ON TABLE personas IS 'Datos permanentes de personas (físicas o jurídicas) vinculadas al sistema';
 COMMENT ON COLUMN personas.correo_silver IS 'Correo corporativo de Silver usado para vincular la persona con su identidad Microsoft.';
+COMMENT ON COLUMN personas.azure_oid IS 'Identificador estable de la persona en Microsoft Entra ID.';
 
 -- Vincular usuarios con personas (FK circular resuelta con ALTER después de crear personas)
 ALTER TABLE usuarios ADD COLUMN persona_id INTEGER REFERENCES personas(id);
 CREATE UNIQUE INDEX idx_usuarios_persona ON usuarios(persona_id) WHERE persona_id IS NOT NULL;
+
+-- ============================================================================
+-- CAPACIDAD DE FÁBRICA (Azure DevOps + requerimientos manuales)
+-- ============================================================================
+
+CREATE TABLE categorias_esfuerzo_capacidad
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    codigo VARCHAR(40) NOT NULL UNIQUE,
+    nombre VARCHAR(100) NOT NULL UNIQUE,
+    porcentaje_predeterminado NUMERIC(5,2) NOT NULL DEFAULT 0
+        CHECK (porcentaje_predeterminado BETWEEN 0 AND 100),
+    orden SMALLINT NOT NULL DEFAULT 0,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO categorias_esfuerzo_capacidad
+    (codigo, nombre, porcentaje_predeterminado, orden)
+VALUES
+    ('DESARROLLO', 'Desarrollo', 55, 10),
+    ('PRUEBAS', 'Pruebas', 10, 20),
+    ('DOCUMENTACION', 'Documentación', 10, 30),
+    ('SOPORTE', 'Soporte', 5, 40),
+    ('ESTIMACION', 'Estimación', 5, 50),
+    ('REUNIONES', 'Reuniones', 5, 60),
+    ('AJUSTES', 'Ajustes', 5, 70),
+    ('GARANTIA', 'Garantía', 5, 80);
+
+CREATE TABLE estados_requerimiento_capacidad
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    codigo VARCHAR(50) NOT NULL UNIQUE,
+    nombre VARCHAR(120) NOT NULL UNIQUE,
+    consume_capacidad BOOLEAN NOT NULL DEFAULT FALSE,
+    categoria_codigo VARCHAR(40) REFERENCES categorias_esfuerzo_capacidad(codigo),
+    clasificacion VARCHAR(30) NOT NULL
+        CHECK (clasificacion IN ('espera', 'activo', 'pausado', 'completado', 'eliminado')),
+    es_terminal BOOLEAN NOT NULL DEFAULT FALSE,
+    permite_reactivacion BOOLEAN NOT NULL DEFAULT TRUE,
+    orden SMALLINT NOT NULL DEFAULT 0,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK ((consume_capacidad = TRUE AND categoria_codigo IS NOT NULL) OR consume_capacidad = FALSE)
+);
+
+INSERT INTO estados_requerimiento_capacidad
+    (codigo, nombre, consume_capacidad, categoria_codigo, clasificacion, es_terminal, permite_reactivacion, orden)
+VALUES
+    ('EN_ESTIMACION', 'En estimación', FALSE, NULL, 'espera', FALSE, TRUE, 10),
+    ('EN_APROBACION', 'En aprobación', FALSE, NULL, 'espera', FALSE, TRUE, 20),
+    ('APROBADO', 'Aprobado', FALSE, NULL, 'espera', FALSE, TRUE, 30),
+    ('EN_DESARROLLO', 'En desarrollo', TRUE, 'DESARROLLO', 'activo', FALSE, TRUE, 40),
+    ('EN_PRUEBAS', 'En pruebas', FALSE, NULL, 'espera', FALSE, TRUE, 50),
+    ('EN_AJUSTES', 'En ajustes', TRUE, 'AJUSTES', 'activo', FALSE, TRUE, 60),
+    ('PRUEBAS_EXITOSAS', 'Pruebas exitosas', FALSE, NULL, 'espera', FALSE, TRUE, 70),
+    ('CERRADO', 'Cerrado', FALSE, NULL, 'completado', TRUE, FALSE, 80),
+    ('GARANTIA', 'Garantía', TRUE, 'GARANTIA', 'activo', FALSE, TRUE, 90),
+    ('EN_ESPERA_CLIENTE', 'En espera cliente', FALSE, NULL, 'espera', FALSE, TRUE, 100),
+    ('PENDIENTE_PASO_PRD', 'Pendiente paso a PRD', FALSE, NULL, 'espera', FALSE, TRUE, 110),
+    ('REMOVED', 'Removed', FALSE, NULL, 'eliminado', TRUE, FALSE, 120),
+    ('CANCELADO', 'Cancelado', FALSE, NULL, 'pausado', FALSE, TRUE, 130);
+
+CREATE TABLE configuracion_capacidad_fabrica
+(
+    id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    horas_semanales NUMERIC(6,2) NOT NULL DEFAULT 42
+        CHECK (horas_semanales > 0 AND horas_semanales <= 168),
+    updated_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO configuracion_capacidad_fabrica (id, horas_semanales) VALUES (1, 42);
+
+CREATE TABLE personas_fabrica_historial
+(
+    id BIGSERIAL PRIMARY KEY,
+    persona_id INTEGER NOT NULL REFERENCES personas(id) ON DELETE CASCADE,
+    pertenece_fabrica BOOLEAN NOT NULL,
+    valido_desde TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    valido_hasta TIMESTAMPTZ,
+    registrado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    registrado_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX idx_personas_fabrica_version_abierta
+    ON personas_fabrica_historial(persona_id) WHERE valido_hasta IS NULL;
+CREATE INDEX idx_personas_fabrica_corte
+    ON personas_fabrica_historial(persona_id, valido_desde, valido_hasta);
+
+CREATE TABLE requerimientos_capacidad
+(
+    id BIGSERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    origen VARCHAR(20) NOT NULL CHECK (origen IN ('AZURE_DEVOPS', 'MANUAL')),
+    external_id BIGINT,
+    organizacion_azure VARCHAR(255),
+    azure_project_id VARCHAR(100),
+    azure_project_name VARCHAR(255),
+    cliente_id INTEGER REFERENCES clientes(id) ON DELETE RESTRICT,
+    cliente_nombre_origen VARCHAR(255),
+    tipo VARCHAR(120) NOT NULL,
+    titulo TEXT NOT NULL,
+    estado_id INTEGER NOT NULL REFERENCES estados_requerimiento_capacidad(id),
+    estado_origen VARCHAR(120),
+    effort_total NUMERIC(10,2) NOT NULL CHECK (effort_total >= 0),
+    prioridad SMALLINT CHECK (prioridad IS NULL OR prioridad > 0),
+    persona_id INTEGER REFERENCES personas(id) ON DELETE SET NULL,
+    responsable_azure_id VARCHAR(128),
+    responsable_correo VARCHAR(255),
+    responsable_nombre VARCHAR(255),
+    fecha_inicio DATE,
+    fecha_fin DATE,
+    azure_url TEXT,
+    source_created_at TIMESTAMPTZ,
+    source_changed_at TIMESTAMPTZ,
+    last_synced_at TIMESTAMPTZ,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    modified_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (origen, organizacion_azure, external_id),
+    CHECK (
+        (origen = 'AZURE_DEVOPS' AND external_id IS NOT NULL AND organizacion_azure IS NOT NULL)
+        OR (origen = 'MANUAL' AND cliente_id IS NOT NULL)
+    )
+);
+
+CREATE INDEX idx_requerimientos_capacidad_persona ON requerimientos_capacidad(persona_id);
+CREATE INDEX idx_requerimientos_capacidad_estado ON requerimientos_capacidad(estado_id);
+CREATE INDEX idx_requerimientos_capacidad_origen ON requerimientos_capacidad(origen);
+CREATE INDEX idx_requerimientos_capacidad_fecha_fin ON requerimientos_capacidad(fecha_fin);
+
+CREATE TABLE requerimiento_distribucion_capacidad
+(
+    id BIGSERIAL PRIMARY KEY,
+    requerimiento_id BIGINT NOT NULL REFERENCES requerimientos_capacidad(id) ON DELETE CASCADE,
+    categoria_id INTEGER NOT NULL REFERENCES categorias_esfuerzo_capacidad(id) ON DELETE RESTRICT,
+    porcentaje NUMERIC(5,2) NOT NULL CHECK (porcentaje BETWEEN 0 AND 100),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (requerimiento_id, categoria_id)
+);
+
+CREATE INDEX idx_requerimiento_distribucion_requerimiento
+    ON requerimiento_distribucion_capacidad(requerimiento_id);
+
+CREATE TABLE requerimientos_capacidad_historial
+(
+    id BIGSERIAL PRIMARY KEY,
+    requerimiento_id BIGINT NOT NULL REFERENCES requerimientos_capacidad(id) ON DELETE CASCADE,
+    evento VARCHAR(30) NOT NULL
+        CHECK (evento IN ('CREADO', 'SINCRONIZADO', 'ESTADO', 'PLANIFICACION', 'ASIGNACION', 'ARCHIVADO')),
+    estado_id INTEGER NOT NULL REFERENCES estados_requerimiento_capacidad(id),
+    persona_id INTEGER REFERENCES personas(id) ON DELETE SET NULL,
+    effort_total NUMERIC(10,2) NOT NULL,
+    prioridad SMALLINT,
+    fecha_inicio DATE,
+    fecha_fin DATE,
+    porcentajes_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    datos_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    valido_desde TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    valido_hasta TIMESTAMPTZ,
+    source_changed_at TIMESTAMPTZ,
+    registrado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    registrado_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX idx_requerimiento_historial_version_abierta
+    ON requerimientos_capacidad_historial(requerimiento_id) WHERE valido_hasta IS NULL;
+CREATE INDEX idx_requerimiento_historial_corte
+    ON requerimientos_capacidad_historial(requerimiento_id, valido_desde, valido_hasta);
+CREATE INDEX idx_requerimiento_historial_persona
+    ON requerimientos_capacidad_historial(persona_id, valido_desde);
 
 CREATE TABLE exportaciones_personas_auditoria
 (

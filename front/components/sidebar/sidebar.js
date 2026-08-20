@@ -77,7 +77,7 @@ function initSidebar() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "azure-devops-prueba", "firma-contratos-admin", "gestion-personas", "gestion-consultores"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "azure-devops-prueba", "capacidad-fabrica", "firma-contratos-admin", "gestion-personas", "gestion-consultores"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -89,6 +89,7 @@ function initSidebar() {
             "solicitudesCoord",
             "preregistrosCoord",
             "soportes-cuentas-cobro",
+            "capacidad-fabrica",
             "gestion-consultores"
         ],
         consultor_principal: [
@@ -119,7 +120,7 @@ function initSidebar() {
             "soportes-cuentas-cobro",
             "gestion-consultores"
         ],
-        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "gestion-personas", "gestion-consultores"]
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "gestion-personas", "gestion-consultores", "capacidad-fabrica"]
     };
 
     const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);

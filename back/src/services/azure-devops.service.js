@@ -15,7 +15,9 @@ const WORK_ITEM_FIELDS = [
   "System.AreaPath",
   "System.IterationPath",
   "System.CreatedDate",
-  "System.ChangedDate"
+  "System.ChangedDate",
+  "Microsoft.VSTS.Scheduling.StartDate",
+  "Microsoft.VSTS.Scheduling.TargetDate"
 ];
 const tokenCache = {
   accessToken: null,
@@ -233,10 +235,15 @@ function mapWorkItem(item, organization, fallbackProject = "") {
       assignedTo?.displayName ||
       assignedTo?.uniqueName ||
       (typeof assignedTo === "string" ? assignedTo : ""),
+    assignedToId: assignedTo?.id || "",
+    assignedToEmail: assignedTo?.uniqueName || "",
+    assignedToDescriptor: assignedTo?.descriptor || "",
     areaPath: item.fields?.["System.AreaPath"] || "",
     iterationPath: item.fields?.["System.IterationPath"] || "",
     createdDate: item.fields?.["System.CreatedDate"] || null,
     changedDate: item.fields?.["System.ChangedDate"] || null,
+    startDate: item.fields?.["Microsoft.VSTS.Scheduling.StartDate"] || null,
+    targetDate: item.fields?.["Microsoft.VSTS.Scheduling.TargetDate"] || null,
     url: `https://dev.azure.com/${encodeURIComponent(organization)}/${encodedProject}/_workitems/edit/${item.id}`
   };
 }

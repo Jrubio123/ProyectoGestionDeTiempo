@@ -16,6 +16,7 @@ window.roleAccess = (function () {
             "catalogos-admin",
             "gestion-licencias-admin",
             "azure-devops-prueba",
+            "capacidad-fabrica",
             "firma-contratos-admin",
             "temp-crear-usuarios",
             "aprobar-rechazar-coordinador",
@@ -31,7 +32,8 @@ window.roleAccess = (function () {
             "tarifas",
             "solicitudesCoord",
             "preregistrosCoord",
-            "soportes-cuentas-cobro"
+            "soportes-cuentas-cobro",
+            "capacidad-fabrica"
         ],
         comercial: [
             "inicio",
@@ -60,7 +62,7 @@ window.roleAccess = (function () {
             "asignacion-fabrica-mesa-servicio"
         ],
         reclutador: ["inicio", "solicitudesRecl"],
-        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "temp-crear-usuarios"]
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "temp-crear-usuarios", "capacidad-fabrica"]
     };
 
     const searchViews = [
@@ -82,6 +84,7 @@ window.roleAccess = (function () {
         { label: "Catalogos Admin", hash: "#catalogos-admin" },
         { label: "Licencias de Acceso", hash: "#gestion-licencias-admin" },
         { label: "Prueba Azure DevOps", hash: "#azure-devops-prueba" },
+        { label: "Capacidad de Fabrica", hash: "#capacidad-fabrica" },
         { label: "Solicitudes RRHH", hash: "#solicitudesCoord" },
         { label: "Contrataciones", hash: "#preregistrosCoord" },
         { label: "Pool de Solicitudes", hash: "#solicitudesRecl" },

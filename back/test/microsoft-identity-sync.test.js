@@ -25,7 +25,7 @@ function scriptedDb(steps) {
 
 const baseIdentity = {
   oid: "11111111-1111-4111-8111-111111111111",
-  email: " Persona@Silver.com ",
+  email: " Persona@SilverConsulting.com.co ",
   displayName: "Persona Silver",
   givenName: "Persona",
   surname: "Silver",
@@ -34,7 +34,10 @@ const baseIdentity = {
 };
 
 test("normaliza el correo corporativo", () => {
-  assert.equal(normalizeCorporateEmail(" Persona@Silver.com "), "persona@silver.com");
+  assert.equal(
+    normalizeCorporateEmail(" Persona@SilverConsulting.com.co "),
+    "persona@silverconsulting.com.co"
+  );
 });
 
 test("sincroniza un usuario que ya está relacionado con su persona", async () => {
@@ -46,7 +49,7 @@ test("sincroniza un usuario que ya está relacionado con su persona", async () =
         rows: [{
           id: 10,
           public_id: "usuario-10",
-          email: "anterior@silver.com",
+          email: "anterior@silverconsulting.com.co",
           azure_oid: baseIdentity.oid,
           activo: true,
           persona_id: 20,
@@ -62,7 +65,7 @@ test("sincroniza un usuario que ya está relacionado con su persona", async () =
     { match: /FROM usuarios\s+WHERE persona_id = \$1/, result: { rows: [] } },
     {
       match: /UPDATE personas/,
-      result: { rows: [{ id: 20, public_id: "persona-20", correo_silver: "persona@silver.com" }] }
+      result: { rows: [{ id: 20, public_id: "persona-20", correo_silver: "persona@silverconsulting.com.co" }] }
     },
     {
       match: /UPDATE usuarios/,
@@ -71,7 +74,7 @@ test("sincroniza un usuario que ya está relacionado con su persona", async () =
           id: 10,
           public_id: "usuario-10",
           nombre_usuario: "Persona Silver",
-          email: "persona@silver.com",
+          email: "persona@silverconsulting.com.co",
           rol_usuario_id: 3,
           rol: "Consultor",
           activo: true,
@@ -85,10 +88,10 @@ test("sincroniza un usuario que ya está relacionado con su persona", async () =
   const result = await syncMicrosoftIdentity(db, baseIdentity);
 
   assert.equal(result.persona_id, 20);
-  assert.equal(result.email, "persona@silver.com");
+  assert.equal(result.email, "persona@silverconsulting.com.co");
   assert.deepEqual(db.calls.at(-1).params.slice(0, 3), [
     baseIdentity.oid,
-    "persona@silver.com",
+    "persona@silverconsulting.com.co",
     "Persona Silver"
   ]);
 });
@@ -100,14 +103,14 @@ test("vincula una persona existente por correo Silver y crea su usuario", async 
     {
       match: /LOWER\(BTRIM\(correo_silver\)\)/,
       result: {
-        rows: [{ id: 30, public_id: "persona-30", correo_silver: "persona@silver.com" }]
+        rows: [{ id: 30, public_id: "persona-30", correo_silver: "persona@silverconsulting.com.co" }]
       }
     },
     { match: /FROM usuarios\s+WHERE persona_id = \$1/, result: { rows: [] } },
     {
       match: /UPDATE personas/,
       result: {
-        rows: [{ id: 30, public_id: "persona-30", correo_silver: "persona@silver.com" }]
+        rows: [{ id: 30, public_id: "persona-30", correo_silver: "persona@silverconsulting.com.co" }]
       }
     },
     {
@@ -117,7 +120,7 @@ test("vincula una persona existente por correo Silver y crea su usuario", async 
           id: 40,
           public_id: "usuario-40",
           nombre_usuario: "Persona Silver",
-          email: "persona@silver.com",
+          email: "persona@silverconsulting.com.co",
           rol_usuario_id: 3,
           rol: "Consultor",
           activo: true,
@@ -142,7 +145,7 @@ test("crea persona y usuario cuando la identidad no existe", async () => {
     {
       match: /INSERT INTO personas/,
       result: {
-        rows: [{ id: 50, public_id: "persona-50", correo_silver: "persona@silver.com" }]
+        rows: [{ id: 50, public_id: "persona-50", correo_silver: "persona@silverconsulting.com.co" }]
       }
     },
     {
@@ -152,7 +155,7 @@ test("crea persona y usuario cuando la identidad no existe", async () => {
           id: 60,
           public_id: "usuario-60",
           nombre_usuario: "Persona Silver",
-          email: "persona@silver.com",
+          email: "persona@silverconsulting.com.co",
           rol_usuario_id: 3,
           rol: "Consultor",
           activo: true,
@@ -166,7 +169,12 @@ test("crea persona y usuario cuando la identidad no existe", async () => {
   const result = await syncMicrosoftIdentity(db, baseIdentity);
 
   assert.equal(result.persona_id, 50);
-  assert.deepEqual(db.calls[3].params, ["Persona", "Silver", "persona@silver.com"]);
+  assert.deepEqual(db.calls[3].params, [
+    "Persona",
+    "Silver",
+    "persona@silverconsulting.com.co",
+    baseIdentity.oid
+  ]);
 });
 
 test("crea y vincula la persona cuando el usuario ya existe sin persona_id", async () => {
@@ -178,7 +186,7 @@ test("crea y vincula la persona cuando el usuario ya existe sin persona_id", asy
         rows: [{
           id: 65,
           public_id: "usuario-65",
-          email: "persona@silver.com",
+          email: "persona@silverconsulting.com.co",
           azure_oid: baseIdentity.oid,
           activo: true,
           persona_id: null,
@@ -191,7 +199,7 @@ test("crea y vincula la persona cuando el usuario ya existe sin persona_id", asy
     {
       match: /INSERT INTO personas/,
       result: {
-        rows: [{ id: 66, public_id: "persona-66", correo_silver: "persona@silver.com" }]
+        rows: [{ id: 66, public_id: "persona-66", correo_silver: "persona@silverconsulting.com.co" }]
       }
     },
     {
@@ -201,7 +209,7 @@ test("crea y vincula la persona cuando el usuario ya existe sin persona_id", asy
           id: 65,
           public_id: "usuario-65",
           nombre_usuario: "Persona Silver",
-          email: "persona@silver.com",
+          email: "persona@silverconsulting.com.co",
           rol_usuario_id: 3,
           rol: "Consultor",
           activo: true,
@@ -227,7 +235,7 @@ test("rechaza una cuenta desactivada sin modificar la persona", async () => {
       result: {
         rows: [{
           id: 70,
-          email: "persona@silver.com",
+          email: "persona@silverconsulting.com.co",
           azure_oid: baseIdentity.oid,
           activo: false,
           persona_id: 80
@@ -255,7 +263,7 @@ test("rechaza un correo asociado a otro azure_oid", async () => {
       result: {
         rows: [{
           id: 90,
-          email: "persona@silver.com",
+          email: "persona@silverconsulting.com.co",
           azure_oid: "22222222-2222-4222-8222-222222222222",
           activo: true,
           persona_id: null
@@ -272,4 +280,35 @@ test("rechaza un correo asociado a otro azure_oid", async () => {
       return true;
     }
   );
+});
+
+test("materializa una persona de Microsoft sin crear acceso al aplicativo", async () => {
+  const db = scriptedDb([
+    { match: /pg_advisory_xact_lock/ },
+    { match: /FROM usuarios u/, result: { rows: [] } },
+    { match: /FROM personas/, result: { rows: [] } },
+    {
+      match: /INSERT INTO personas/,
+      result: {
+        rows: [{
+          id: 100,
+          public_id: "persona-100",
+          correo_silver: "persona@silverconsulting.com.co",
+          azure_oid: baseIdentity.oid
+        }]
+      }
+    }
+  ]);
+
+  const result = await syncMicrosoftIdentity(db, {
+    ...baseIdentity,
+    defaultRoleId: null,
+    createUser: false,
+    recordLogin: false,
+    requireActiveUser: false
+  });
+
+  assert.equal(result.persona_id, 100);
+  assert.equal(result.id, null);
+  assert.equal(db.calls.length, 4);
 });

@@ -74,10 +74,19 @@ async function findUser(db, oid, email) {
   );
 }
 
+function assertCompatiblePersonAzureOid(person, oid) {
+  if (person?.azure_oid && person.azure_oid !== oid) {
+    throw new MicrosoftIdentitySyncError(
+      "El correo Silver ya está asociado a otra persona de Microsoft.",
+      409
+    );
+  }
+}
+
 async function findPersonById(db, personId) {
   if (!personId) return null;
   const result = await db.query(
-    `SELECT id, public_id, correo_silver
+    `SELECT id, public_id, correo_silver, azure_oid
      FROM personas
      WHERE id = $1
      FOR UPDATE`,
@@ -86,14 +95,15 @@ async function findPersonById(db, personId) {
   return result.rows[0] || null;
 }
 
-async function findPersonByCorporateEmail(db, email) {
+async function findPersonByCorporateIdentity(db, oid, email) {
   const result = await db.query(
-    `SELECT id, public_id, correo_silver
+    `SELECT id, public_id, correo_silver, azure_oid
      FROM personas
-     WHERE LOWER(BTRIM(correo_silver)) = $1
-     ORDER BY id
+     WHERE azure_oid = $1
+        OR LOWER(BTRIM(correo_silver)) = $2
+     ORDER BY CASE WHEN azure_oid = $1 THEN 0 ELSE 1 END, id
      FOR UPDATE`,
-    [email]
+    [oid, email]
   );
 
   return assertSingle(
@@ -121,10 +131,10 @@ async function findUserLinkedToPerson(db, personId, excludeUserId = null) {
 
 async function createPerson(db, identity) {
   const result = await db.query(
-    `INSERT INTO personas (nombre, apellidos, correo_silver, estado)
-     VALUES ($1, $2, $3, 'activo')
-     RETURNING id, public_id, correo_silver`,
-    [identity.firstName, identity.lastName, identity.email]
+    `INSERT INTO personas (nombre, apellidos, correo_silver, azure_oid, estado)
+     VALUES ($1, $2, $3, $4, 'activo')
+     RETURNING id, public_id, correo_silver, azure_oid`,
+    [identity.firstName, identity.lastName, identity.email, identity.oid]
   );
   return result.rows[0];
 }
@@ -133,18 +143,19 @@ async function syncPerson(db, personId, identity) {
   const result = await db.query(
     `UPDATE personas
      SET correo_silver = $1,
+         azure_oid = $2,
          nombre = CASE
-           WHEN NULLIF(BTRIM(COALESCE(nombre, '')), '') IS NULL THEN $2
+           WHEN NULLIF(BTRIM(COALESCE(nombre, '')), '') IS NULL THEN $3
            ELSE nombre
          END,
          apellidos = CASE
-           WHEN NULLIF(BTRIM(COALESCE(apellidos, '')), '') IS NULL THEN $3
+           WHEN NULLIF(BTRIM(COALESCE(apellidos, '')), '') IS NULL THEN $4
            ELSE apellidos
          END,
          updated_at = CURRENT_TIMESTAMP
-     WHERE id = $4
-     RETURNING id, public_id, correo_silver`,
-    [identity.email, identity.firstName, identity.lastName, personId]
+     WHERE id = $5
+     RETURNING id, public_id, correo_silver, azure_oid`,
+    [identity.email, identity.oid, identity.firstName, identity.lastName, personId]
   );
   return result.rows[0];
 }
@@ -182,7 +193,7 @@ async function createUser(db, personId, identity, defaultRoleId) {
   return result.rows[0];
 }
 
-async function syncUser(db, userId, personId, identity) {
+async function syncUser(db, userId, personId, identity, recordLogin = true) {
   const result = await db.query(
     `WITH usuario_actualizado AS (
        UPDATE usuarios
@@ -191,7 +202,7 @@ async function syncUser(db, userId, personId, identity) {
            nombre_usuario = $3,
            telefono = COALESCE($4, telefono),
            persona_id = $5,
-           ultimo_inicio_sesion = CURRENT_TIMESTAMP,
+           ultimo_inicio_sesion = CASE WHEN $7::boolean THEN CURRENT_TIMESTAMP ELSE ultimo_inicio_sesion END,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $6
        RETURNING id, public_id, nombre_usuario, email, rol_usuario_id,
@@ -206,7 +217,8 @@ async function syncUser(db, userId, personId, identity) {
       identity.displayName,
       identity.phone,
       personId,
-      userId
+      userId,
+      recordLogin
     ]
   );
   return result.rows[0];
@@ -217,8 +229,11 @@ async function syncMicrosoftIdentity(db, input) {
   const email = normalizeCorporateEmail(input?.email);
   const displayName = normalizeText(input?.displayName) || email;
   const defaultRoleId = Number(input?.defaultRoleId) || null;
+  const createMissingUser = input?.createUser !== false;
+  const recordLogin = input?.recordLogin !== false;
+  const requireActiveUser = input?.requireActiveUser !== false;
 
-  if (!oid || !email || !defaultRoleId) {
+  if (!oid || !email || (createMissingUser && !defaultRoleId)) {
     throw new MicrosoftIdentitySyncError(
       "La identidad de Microsoft no tiene los datos requeridos.",
       400
@@ -247,7 +262,7 @@ async function syncMicrosoftIdentity(db, input) {
   let user = await findUser(db, oid, email);
   if (user) {
     assertCompatibleAzureOid(user, oid);
-    if (!user.activo) {
+    if (requireActiveUser && !user.activo) {
       throw new MicrosoftIdentitySyncError(
         "Tu cuenta está desactivada. Contacta al administrador.",
         403
@@ -257,15 +272,16 @@ async function syncMicrosoftIdentity(db, input) {
 
   let person = user?.persona_id
     ? await findPersonById(db, user.persona_id)
-    : await findPersonByCorporateEmail(db, email);
+    : await findPersonByCorporateIdentity(db, oid, email);
 
   if (!person) {
     person = await createPerson(db, identity);
   } else {
+    assertCompatiblePersonAzureOid(person, oid);
     const linkedUser = await findUserLinkedToPerson(db, person.id, user?.id || null);
     if (linkedUser) {
       assertCompatibleAzureOid(linkedUser, oid);
-      if (!linkedUser.activo) {
+      if (requireActiveUser && !linkedUser.activo) {
         throw new MicrosoftIdentitySyncError(
           "Tu cuenta está desactivada. Contacta al administrador.",
           403
@@ -282,8 +298,20 @@ async function syncMicrosoftIdentity(db, input) {
     person = await syncPerson(db, person.id, identity);
   }
 
+  if (!user && !createMissingUser) {
+    return {
+      id: null,
+      public_id: null,
+      persona_id: person.id,
+      persona_public_id: person.public_id,
+      email: identity.email,
+      azure_oid: identity.oid,
+      activo: false
+    };
+  }
+
   const syncedUser = user
-    ? await syncUser(db, user.id, person.id, identity)
+    ? await syncUser(db, user.id, person.id, identity, recordLogin)
     : await createUser(db, person.id, identity, defaultRoleId);
 
   if (!syncedUser?.id) {

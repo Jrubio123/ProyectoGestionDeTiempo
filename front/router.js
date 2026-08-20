@@ -18,6 +18,7 @@ const viewScripts = {
     "catalogos-admin":                "/js/catalogos-admin.js",
     "gestion-licencias-admin":        "/js/gestion-licencias-admin.js",
     "azure-devops-prueba":            "/js/azure-devops-prueba.js",
+    "capacidad-fabrica":              "/js/capacidad-fabrica.js",
     "gestion-personas":               "/js/gestion-personas.js",
     "gestion-consultores":            "/js/gestion-consultores.js",
     "firma-contratos-admin":          "/js/firma-contratos-admin.js",
@@ -32,7 +33,7 @@ const viewScripts = {
 // Guardar la promesa (no solo el resultado) evita inyectar el mismo
 // archivo dos veces si llegan dos navegaciones rápidas antes del onload.
 const _scriptPromises = new Map();
-const APP_ASSET_VERSION = "20260812-anexo-estado-firma-nuevo-export";
+const APP_ASSET_VERSION = "20260812-anexo-estado-firma-nuevo-export-20260820-capacidad-fabrica";
 
 function loadScript(src) {
     if (_scriptPromises.has(src)) return _scriptPromises.get(src);
@@ -106,6 +107,7 @@ const routes = {
     "catalogos-admin": "catalogos-admin",
     "gestion-licencias-admin": "gestion-licencias-admin",
     "azure-devops-prueba": "azure-devops-prueba",
+    "capacidad-fabrica": "capacidad-fabrica",
     "gestion-personas": "gestion-personas",
     "gestion-consultores": "gestion-consultores",
     "firma-contratos-admin": "firma-contratos-admin",
@@ -126,7 +128,7 @@ function router() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "azure-devops-prueba", "firma-contratos-admin", "gestion-personas", "gestion-consultores"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "azure-devops-prueba", "capacidad-fabrica", "firma-contratos-admin", "gestion-personas", "gestion-consultores"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -138,6 +140,7 @@ function router() {
             "solicitudesCoord",
             "preregistrosCoord",
             "soportes-cuentas-cobro",
+            "capacidad-fabrica",
             "gestion-consultores"
         ],
         consultor_principal: [
@@ -168,7 +171,7 @@ function router() {
             "soportes-cuentas-cobro",
             "gestion-consultores"
         ],
-        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "gestion-personas", "gestion-consultores"]
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "gestion-personas", "gestion-consultores", "capacidad-fabrica"]
     };
     const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
     if (view && !allowed.has(view)) {

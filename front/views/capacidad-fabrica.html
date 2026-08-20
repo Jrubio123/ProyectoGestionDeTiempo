@@ -1,0 +1,254 @@
+<div x-data="capacidadFabricaApp()" x-init="init()" class="space-y-6 p-4 md:p-6" x-cloak>
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-900">Capacidad de Fábrica</h1>
+            <p class="mt-1 text-sm text-slate-500">Carga semanal de consultores internos con datos de Azure DevOps y requerimientos manuales.</p>
+        </div>
+        <div class="flex flex-wrap gap-2" x-show="puedeGestionar">
+            <button @click="abrirManual()" class="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+                Nuevo manual
+            </button>
+            <button @click="sincronizarAzure()" :disabled="cargando" class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                <span x-text="cargando ? 'Procesando…' : 'Sincronizar Azure'"></span>
+            </button>
+        </div>
+    </div>
+
+    <div x-show="error" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <span x-text="error"></span>
+        <button @click="error = ''" class="float-right font-bold">×</button>
+    </div>
+    <div x-show="mensaje" class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" x-text="mensaje"></div>
+
+    <div class="border-b border-slate-200">
+        <nav class="flex gap-5 overflow-x-auto text-sm font-medium">
+            <button x-show="puedeGestionar" @click="tab = 'dashboard'" class="border-b-2 px-1 py-3" :class="tab === 'dashboard' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'">Capacidad semanal</button>
+            <button x-show="puedeGestionar" @click="tab = 'requerimientos'" class="border-b-2 px-1 py-3" :class="tab === 'requerimientos' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'">Requerimientos</button>
+            <button @click="tab = 'personas'" class="border-b-2 px-1 py-3" :class="tab === 'personas' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'">Integrantes de Fábrica</button>
+        </nav>
+    </div>
+
+    <!-- Capacidad semanal -->
+    <section x-show="tab === 'dashboard' && puedeGestionar" class="space-y-5">
+        <div class="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <label class="block">
+                <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Día de la semana</span>
+                <input type="date" x-model="weekDate" @change="cargarDashboard()" class="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none">
+            </label>
+            <button @click="cargarDashboard(true)" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Actualizar</button>
+            <p class="text-sm text-slate-500" x-show="dashboard.semana?.fecha_inicio">
+                Semana del <strong x-text="formatDate(dashboard.semana.fecha_inicio)"></strong>
+                al <strong x-text="formatDate(dashboard.semana.fecha_fin)"></strong>
+                · corte <span x-text="formatDate(dashboard.semana.corte, true)"></span>
+            </p>
+        </div>
+
+        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Integrantes</p>
+                <p class="mt-2 text-3xl font-bold text-slate-900" x-text="dashboard.resumen?.personas || 0"></p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Capacidad</p>
+                <p class="mt-2 text-3xl font-bold text-slate-900"><span x-text="formatNumber(dashboard.resumen?.horas_capacidad)"></span><span class="text-base font-normal text-slate-500"> h</span></p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Carga activa</p>
+                <p class="mt-2 text-3xl font-bold text-blue-700"><span x-text="formatNumber(dashboard.resumen?.horas_ocupadas)"></span><span class="text-base font-normal text-slate-500"> h</span></p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Ocupación</p>
+                <p class="mt-2 text-3xl font-bold" :class="Number(dashboard.resumen?.porcentaje_ocupacion) > 100 ? 'text-red-600' : 'text-slate-900'">
+                    <span x-text="formatNumber(dashboard.resumen?.porcentaje_ocupacion)"></span>%
+                </p>
+            </div>
+        </div>
+
+        <div class="space-y-4">
+            <template x-for="person in dashboard.personas || []" :key="person.persona_id">
+                <article class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div>
+                            <h3 class="font-semibold text-slate-900" x-text="person.persona"></h3>
+                            <p class="text-sm text-slate-500" x-text="person.correo_silver || 'Sin correo Silver'"></p>
+                        </div>
+                        <div class="text-left md:text-right">
+                            <p class="text-xl font-bold" :class="person.porcentaje_ocupacion > 100 ? 'text-red-600' : 'text-slate-900'">
+                                <span x-text="formatNumber(person.porcentaje_ocupacion)"></span>%
+                            </p>
+                            <p class="text-xs text-slate-500"><span x-text="formatNumber(person.horas_ocupadas)"></span> de <span x-text="formatNumber(person.horas_capacidad)"></span> h</p>
+                        </div>
+                    </div>
+                    <div class="mt-4 h-2.5 overflow-hidden rounded-full bg-slate-100">
+                        <div class="h-full rounded-full" :class="occupancyClass(person.porcentaje_ocupacion)" :style="`width:${Math.min(Number(person.porcentaje_ocupacion), 100)}%`"></div>
+                    </div>
+                    <div class="mt-4 overflow-x-auto" x-show="person.asignaciones?.length">
+                        <table class="min-w-full text-sm">
+                            <thead class="text-left text-xs uppercase text-slate-400">
+                                <tr><th class="pb-2 pr-4">Cliente</th><th class="pb-2 pr-4">Requerimiento</th><th class="pb-2 pr-4">Estado</th><th class="pb-2 text-right">Horas activas</th></tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                                <template x-for="assignment in person.asignaciones" :key="assignment.requerimiento_id">
+                                    <tr>
+                                        <td class="py-2 pr-4 text-slate-600" x-text="assignment.cliente || '—'"></td>
+                                        <td class="py-2 pr-4 font-medium text-slate-800" x-text="assignment.titulo"></td>
+                                        <td class="py-2 pr-4 text-slate-600" x-text="assignment.estado"></td>
+                                        <td class="py-2 text-right font-semibold"><span x-text="formatNumber(assignment.horas_activas)"></span> h</td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p x-show="!person.asignaciones?.length" class="mt-4 text-sm text-emerald-700">Sin requerimientos que consuman capacidad al corte.</p>
+                </article>
+            </template>
+            <div x-show="!cargando && !(dashboard.personas || []).length" class="rounded-xl border border-dashed border-slate-300 p-10 text-center text-slate-500">
+                No hay integrantes de Fábrica para este corte semanal.
+            </div>
+        </div>
+    </section>
+
+    <!-- Requerimientos -->
+    <section x-show="tab === 'requerimientos' && puedeGestionar" class="space-y-4">
+        <div class="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-4">
+            <input x-model="filtroRequerimiento" type="search" placeholder="Buscar ID, cliente, título…" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+            <select x-model="filtroOrigen" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                <option value="">Todos los orígenes</option>
+                <option value="AZURE_DEVOPS">Azure DevOps</option>
+                <option value="MANUAL">Manual</option>
+            </select>
+            <select x-model="filtroEstado" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                <option value="">Todos los estados</option>
+                <template x-for="state in catalogos.estados" :key="state.codigo"><option :value="state.codigo" x-text="state.nombre"></option></template>
+            </select>
+            <label class="flex items-center gap-2 text-sm text-slate-600">
+                <input type="checkbox" x-model="incluirFinalizados" @change="cargarRequerimientos(true)" class="rounded border-slate-300">
+                Incluir cerrados y removidos
+            </label>
+        </div>
+
+        <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+            <table class="min-w-[1180px] w-full text-sm">
+                <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                        <th class="px-4 py-3">ID / origen</th><th class="px-4 py-3">Cliente</th><th class="px-4 py-3">Título</th>
+                        <th class="px-4 py-3">Estado</th><th class="px-4 py-3 text-right">Effort</th><th class="px-4 py-3">Prioridad</th>
+                        <th class="px-4 py-3">Responsable</th><th class="px-4 py-3">Fin</th><th class="px-4 py-3 text-right">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    <template x-for="item in requerimientosFiltrados" :key="item.id">
+                        <tr class="hover:bg-slate-50">
+                            <td class="px-4 py-3">
+                                <a x-show="item.azure_url" :href="item.azure_url" target="_blank" rel="noopener" class="font-semibold text-blue-600" x-text="item.external_id ? `#${item.external_id}` : 'Manual'"></a>
+                                <span x-show="!item.azure_url" class="font-semibold text-slate-700">Manual</span>
+                                <p class="text-xs text-slate-400" x-text="item.origen === 'AZURE_DEVOPS' ? 'Azure' : 'Local'"></p>
+                            </td>
+                            <td class="px-4 py-3 text-slate-600" x-text="item.cliente || '—'"></td>
+                            <td class="max-w-xs px-4 py-3"><p class="font-medium text-slate-900" x-text="item.titulo"></p><p class="text-xs text-slate-400" x-text="item.tipo"></p></td>
+                            <td class="px-4 py-3">
+                                <select x-show="item.origen === 'MANUAL'" :value="item.estado_codigo" @change="const el = $event.target; cambiarEstado(item, el.value).finally(() => el.value = item.estado_codigo)" class="max-w-44 rounded-md border border-slate-300 px-2 py-1.5 text-xs">
+                                    <template x-for="state in catalogos.estados" :key="state.codigo"><option :value="state.codigo" x-text="state.nombre"></option></template>
+                                </select>
+                                <span x-show="item.origen !== 'MANUAL'" class="rounded-full px-2.5 py-1 text-xs font-medium" :class="item.consume_capacidad ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'" x-text="item.estado"></span>
+                            </td>
+                            <td class="px-4 py-3 text-right font-semibold" x-text="formatNumber(item.effort_total)"></td>
+                            <td class="px-4 py-3 text-center" x-text="item.prioridad || '—'"></td>
+                            <td class="px-4 py-3 text-slate-600"><span x-text="item.responsable || 'Sin mapear'"></span><p x-show="!item.persona_id" class="text-xs text-amber-600">No relacionado con persona</p></td>
+                            <td class="px-4 py-3 text-slate-600" x-text="formatDate(item.fecha_fin)"></td>
+                            <td class="px-4 py-3 text-right whitespace-nowrap">
+                                <button @click="abrirDistribucion(item)" class="text-sm font-medium text-blue-600 hover:underline">Distribución</button>
+                                <button @click="verHistorial(item)" class="ml-3 text-sm font-medium text-slate-600 hover:underline">Historial</button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+            <div x-show="!cargando && !requerimientosFiltrados.length" class="p-10 text-center text-slate-500">No hay requerimientos para los filtros seleccionados.</div>
+        </div>
+    </section>
+
+    <!-- Personas -->
+    <section x-show="tab === 'personas'" class="grid gap-5 xl:grid-cols-2">
+        <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="text-lg font-semibold text-slate-900">Personas registradas</h2>
+            <p class="mt-1 text-sm text-slate-500">Marca únicamente a desarrolladores internos que participan en Fábrica.</p>
+            <div class="mt-4 flex gap-2">
+                <input x-model="busquedaPersona" @input.debounce.400ms="cargarPersonas()" type="search" placeholder="Nombre o correo Silver" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                <button @click="cargarPersonas()" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">Buscar</button>
+            </div>
+            <div class="mt-4 max-h-[560px] divide-y divide-slate-100 overflow-y-auto">
+                <template x-for="person in personas" :key="person.id">
+                    <div class="flex items-center justify-between gap-3 py-3">
+                        <div class="min-w-0">
+                            <p class="truncate font-medium text-slate-900" x-text="`${person.nombre || ''} ${person.apellidos || ''}`.trim() || 'Sin nombre'"></p>
+                            <p class="truncate text-sm text-slate-500" x-text="person.correo_silver || 'Sin correo Silver'"></p>
+                            <p class="text-xs text-slate-400"><span x-text="person.cargo || 'Sin cargo'"></span><span x-show="person.azure_oid"> · Microsoft vinculado</span></p>
+                        </div>
+                        <button @click="cambiarPertenencia(person)" class="shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold" :class="person.pertenece_fabrica ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'" x-text="person.pertenece_fabrica ? 'En Fábrica' : 'Agregar'"></button>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="text-lg font-semibold text-slate-900">Buscar en Microsoft 365</h2>
+            <p class="mt-1 text-sm text-slate-500">Si aún no existe en Personas, se crea el vínculo de identidad sin habilitarle acceso.</p>
+            <div class="mt-4 flex gap-2">
+                <input x-model="busquedaMicrosoft" @keydown.enter.prevent="buscarMicrosoft()" type="search" placeholder="Escribe nombre o correo" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                <button @click="buscarMicrosoft()" :disabled="buscandoMicrosoft" class="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Buscar</button>
+            </div>
+            <div class="mt-4 max-h-[560px] divide-y divide-slate-100 overflow-y-auto">
+                <template x-for="person in resultadosMicrosoft" :key="person.azure_oid">
+                    <div class="flex items-center justify-between gap-3 py-3">
+                        <div class="min-w-0"><p class="truncate font-medium text-slate-900" x-text="person.nombre_usuario"></p><p class="truncate text-sm text-slate-500" x-text="person.email"></p></div>
+                        <button @click="agregarDesdeMicrosoft(person)" class="shrink-0 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700">Vincular</button>
+                    </div>
+                </template>
+                <p x-show="!buscandoMicrosoft && busquedaMicrosoft.length >= 2 && !resultadosMicrosoft.length" class="py-8 text-center text-sm text-slate-500">Sin resultados.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Modal requerimiento manual -->
+    <div x-show="modalManual" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" @keydown.escape.window="modalManual = false">
+        <div @click.outside="modalManual = false" class="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+            <div class="flex items-center justify-between"><h2 class="text-xl font-bold text-slate-900">Nuevo requerimiento manual</h2><button @click="modalManual = false" class="text-2xl text-slate-400">×</button></div>
+            <form @submit.prevent="guardarManual()" class="mt-5 space-y-5">
+                <div class="grid gap-4 md:grid-cols-2">
+                    <label class="text-sm font-medium text-slate-700">Cliente<select required x-model="manual.cliente_id" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><option value="">Selecciona</option><template x-for="client in catalogos.clientes" :key="client.id"><option :value="client.id" x-text="client.titulo"></option></template></select></label>
+                    <label class="text-sm font-medium text-slate-700">Responsable<select required x-model="manual.persona_id" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><option value="">Selecciona</option><template x-for="person in integrantesFabrica()" :key="person.id"><option :value="person.id" x-text="`${person.nombre || ''} ${person.apellidos || ''}`.trim()"></option></template></select></label>
+                    <label class="text-sm font-medium text-slate-700">Tipo<input required x-model="manual.tipo" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
+                    <label class="text-sm font-medium text-slate-700">Estado<select required x-model="manual.estado_codigo" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><template x-for="state in catalogos.estados" :key="state.codigo"><option :value="state.codigo" x-text="state.nombre"></option></template></select></label>
+                    <label class="text-sm font-medium text-slate-700 md:col-span-2">Título<input required x-model="manual.titulo" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
+                    <label class="text-sm font-medium text-slate-700">Effort total<input required min="0" step="0.01" type="number" x-model.number="manual.effort_total" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
+                    <label class="text-sm font-medium text-slate-700">Prioridad<select x-model.number="manual.prioridad" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><option :value="1">1 - Alta</option><option :value="2">2 - Media</option><option :value="3">3 - Baja</option></select></label>
+                    <label class="text-sm font-medium text-slate-700">Fecha inicio<input type="date" x-model="manual.fecha_inicio" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
+                    <label class="text-sm font-medium text-slate-700">Fecha fin<input type="date" x-model="manual.fecha_fin" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
+                </div>
+                <div><div class="mb-2 flex justify-between"><h3 class="font-semibold text-slate-800">Distribución del esfuerzo</h3><span class="text-sm font-semibold" :class="Math.abs(totalManual - 100) < 0.001 ? 'text-emerald-600' : 'text-red-600'"><span x-text="formatNumber(totalManual)"></span>%</span></div>
+                    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><template x-for="item in manual.distribucion" :key="item.codigo"><label class="text-xs font-medium text-slate-600"><span x-text="item.nombre"></span><input type="number" min="0" max="100" step="0.01" x-model.number="item.porcentaje" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></label></template></div>
+                </div>
+                <div class="flex justify-end gap-3"><button type="button" @click="modalManual = false" class="rounded-lg border border-slate-300 px-4 py-2 text-sm">Cancelar</button><button type="submit" :disabled="guardandoManual || Math.abs(totalManual - 100) >= 0.001" class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Guardar</button></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal distribución -->
+    <div x-show="modalDistribucion" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" @keydown.escape.window="modalDistribucion = false">
+        <div @click.outside="modalDistribucion = false" class="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl">
+            <div class="flex items-start justify-between"><div><h2 class="text-xl font-bold text-slate-900">Distribución del esfuerzo</h2><p class="mt-1 text-sm text-slate-500" x-text="requerimientoDistribucion?.titulo"></p></div><button @click="modalDistribucion = false" class="text-2xl text-slate-400">×</button></div>
+            <div class="mt-5 grid gap-3 sm:grid-cols-2"><template x-for="item in distribucion" :key="item.codigo"><label class="text-sm font-medium text-slate-700"><span x-text="item.nombre"></span><div class="relative mt-1"><input type="number" min="0" max="100" step="0.01" x-model.number="item.porcentaje" class="w-full rounded-lg border border-slate-300 px-3 py-2 pr-8"><span class="absolute right-3 top-2 text-slate-400">%</span></div></label></template></div>
+            <div class="mt-5 flex items-center justify-between"><p class="font-semibold" :class="Math.abs(totalDistribucion - 100) < 0.001 ? 'text-emerald-600' : 'text-red-600'">Total: <span x-text="formatNumber(totalDistribucion)"></span>%</p><div class="flex gap-3"><button @click="modalDistribucion = false" class="rounded-lg border border-slate-300 px-4 py-2 text-sm">Cancelar</button><button @click="guardarDistribucion()" :disabled="guardandoDistribucion || Math.abs(totalDistribucion - 100) >= 0.001" class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Guardar</button></div></div>
+        </div>
+    </div>
+
+    <!-- Modal historial -->
+    <div x-show="modalHistorial" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" @keydown.escape.window="modalHistorial = false">
+        <div @click.outside="modalHistorial = false" class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+            <div class="flex items-start justify-between"><div><h2 class="text-xl font-bold text-slate-900">Historial</h2><p class="mt-1 text-sm text-slate-500" x-text="historialTitulo"></p></div><button @click="modalHistorial = false" class="text-2xl text-slate-400">×</button></div>
+            <p x-show="cargandoHistorial" class="py-10 text-center text-slate-500">Cargando…</p>
+            <div x-show="!cargandoHistorial" class="mt-5 space-y-3"><template x-for="entry in historial" :key="entry.id"><article class="rounded-lg border border-slate-200 p-4"><div class="flex flex-wrap items-center justify-between gap-2"><div><span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600" x-text="entry.evento"></span><strong class="ml-2 text-sm text-slate-900" x-text="entry.estado"></strong></div><time class="text-xs text-slate-500" x-text="formatDate(entry.valido_desde, true)"></time></div><p class="mt-2 text-sm text-slate-600">Effort: <strong x-text="formatNumber(entry.effort_total)"></strong> · Prioridad: <strong x-text="entry.prioridad || '—'"></strong> · Responsable: <strong x-text="entry.datos_snapshot?.responsable_nombre || 'Sin asignar'"></strong></p></article></template><p x-show="!historial.length" class="py-8 text-center text-slate-500">Sin historial registrado.</p></div>
+        </div>
+    </div>
+</div>

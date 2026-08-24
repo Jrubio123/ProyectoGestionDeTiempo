@@ -116,7 +116,7 @@ test("Nuevo exige tipo y fecha fin, proponiendo el 31 de diciembre editable", (t
 test("la vista busca supervisores en Microsoft 365 y el backend devuelve el contexto libre", () => {
   const html = fs.readFileSync(
     path.resolve(__dirname, "../../front/views/preregistrosCoord.html"),
-    "utf8"
+    "utf8"[capacidad - fabrica.js](c: /Users/JuanPabloRubioMejía / Downloads / ProyectosDesarrollo / ProyectoGestionDeTiempo / front / js / capacidad - fabrica.js)
   );
   const routes = fs.readFileSync(
     path.resolve(__dirname, "../src/contrataciones-routes.js"),

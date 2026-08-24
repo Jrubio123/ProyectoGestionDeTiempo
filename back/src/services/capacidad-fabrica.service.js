@@ -5,6 +5,7 @@ const {
   calculateActiveHours,
   getWeekRange,
   isCorporateSilverEmail,
+  normalizeAzureEffort,
   normalizeStateCode,
   validateDistribution
 } = require("./capacidad-fabrica.domain");
@@ -709,7 +710,8 @@ async function syncAzureRequirements(req, res) {
         creados: 0,
         actualizados: 0,
         sin_cambios: 0,
-        omitidos_sin_effort: 0,
+        effort_pendiente: 0,
+        omitidos_effort_invalido: 0,
         omitidos_estado: 0,
         estados_no_mapeados: {}
       };
@@ -723,11 +725,13 @@ async function syncAzureRequirements(req, res) {
           summary.estados_no_mapeados[label] = (summary.estados_no_mapeados[label] || 0) + 1;
           continue;
         }
-        const effort = numberOrNull(item.effort);
-        if (effort === null || effort < 0) {
-          summary.omitidos_sin_effort += 1;
+        const effortInfo = normalizeAzureEffort(item.effort);
+        if (!effortInfo.valid) {
+          summary.omitidos_effort_invalido += 1;
           continue;
         }
+        const effort = effortInfo.effort;
+        if (effortInfo.pending) summary.effort_pendiente += 1;
 
         const identityCandidates = [item.assignedToId, item.assignedToEmail]
           .filter(Boolean)
@@ -898,7 +902,10 @@ async function getDashboard(req, res) {
       const percentage = Number(
         version.porcentajes_snapshot?.[version.categoria_codigo] || 0
       );
-      const hours = calculateActiveHours(version.effort_total, percentage);
+      const hasEffort = version.effort_total !== null && version.effort_total !== undefined;
+      const hours = hasEffort
+        ? calculateActiveHours(version.effort_total, percentage)
+        : 0;
       const detail = {
         requerimiento_id: version.requerimiento_id,
         titulo: version.datos_snapshot?.titulo || "",
@@ -907,7 +914,8 @@ async function getDashboard(req, res) {
         estado: version.estado,
         estado_codigo: version.estado_codigo,
         categoria: version.categoria_codigo,
-        effort_total: Number(version.effort_total),
+        effort_total: hasEffort ? Number(version.effort_total) : null,
+        effort_pendiente: !hasEffort,
         porcentaje_fase: percentage,
         horas_activas: hours,
         prioridad: version.prioridad,
@@ -924,6 +932,7 @@ async function getDashboard(req, res) {
       const used = Math.round(
         assignments.reduce((sum, item) => sum + item.horas_activas, 0) * 100
       ) / 100;
+      const pendingEffort = assignments.filter((item) => item.effort_pendiente).length;
       return {
         persona_id: person.persona_id,
         persona: person.persona,
@@ -933,6 +942,7 @@ async function getDashboard(req, res) {
         horas_disponibles: Math.round((weeklyHours - used) * 100) / 100,
         porcentaje_ocupacion: Math.round((used / weeklyHours) * 10000) / 100,
         requerimientos_activos: assignments.length,
+        requerimientos_sin_effort: pendingEffort,
         asignaciones: assignments.sort((left, right) =>
           (left.prioridad || 99) - (right.prioridad || 99)
         )
@@ -942,6 +952,10 @@ async function getDashboard(req, res) {
     const totalUsed = Math.round(
       people.reduce((sum, person) => sum + person.horas_ocupadas, 0) * 100
     ) / 100;
+    const totalPendingEffort = people.reduce(
+      (sum, person) => sum + person.requerimientos_sin_effort,
+      0
+    );
     return res.json({
       semana: {
         fecha_inicio: week.startDate,
@@ -954,6 +968,7 @@ async function getDashboard(req, res) {
         horas_capacidad: totalCapacity,
         horas_ocupadas: totalUsed,
         horas_disponibles: Math.round((totalCapacity - totalUsed) * 100) / 100,
+        requerimientos_sin_effort: totalPendingEffort,
         porcentaje_ocupacion: totalCapacity
           ? Math.round((totalUsed / totalCapacity) * 10000) / 100
           : 0

@@ -5,6 +5,7 @@ const {
   calculateActiveHours,
   getWeekRange,
   isCorporateSilverEmail,
+  normalizeAzureEffort,
   normalizeStateCode,
   validateDistribution
 } = require("../src/services/capacidad-fabrica.domain");
@@ -65,4 +66,19 @@ test("valida una distribución completa que suma 100", () => {
 test("calcula las horas activas de la fase actual", () => {
   assert.equal(calculateActiveHours(100, 55), 55);
   assert.equal(calculateActiveHours(42, 5), 2.1);
+  assert.equal(calculateActiveHours(null, 55), 0);
+});
+
+test("acepta elementos Azure con Effort pendiente", () => {
+  assert.deepEqual(normalizeAzureEffort(null), {
+    effort: null,
+    pending: true,
+    valid: true
+  });
+  assert.deepEqual(normalizeAzureEffort(30), {
+    effort: 30,
+    pending: false,
+    valid: true
+  });
+  assert.equal(normalizeAzureEffort(-1).valid, false);
 });

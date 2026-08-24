@@ -128,11 +128,23 @@ function calculateActiveHours(effortTotal, percentage) {
   return Math.round(effort * (percent / 100) * 100) / 100;
 }
 
+function normalizeAzureEffort(value) {
+  if (value === null || value === undefined || value === "") {
+    return { effort: null, pending: true, valid: true };
+  }
+  const effort = Number(value);
+  if (!Number.isFinite(effort) || effort < 0) {
+    return { effort: null, pending: false, valid: false };
+  }
+  return { effort, pending: false, valid: true };
+}
+
 module.exports = {
   calculateActiveHours,
   dateStringInBogota,
   getWeekRange,
   isCorporateSilverEmail,
+  normalizeAzureEffort,
   normalizeLabel,
   normalizeStateCode,
   validateDistribution

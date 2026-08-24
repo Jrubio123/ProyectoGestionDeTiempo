@@ -63,6 +63,9 @@
                 </p>
             </div>
         </div>
+        <div x-show="dashboard.resumen?.requerimientos_sin_effort" class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            Hay <strong x-text="dashboard.resumen?.requerimientos_sin_effort"></strong> requerimiento(s) activo(s) sin Effort. Se muestran, pero todavía no suman horas a la ocupación.
+        </div>
 
         <div class="space-y-4">
             <template x-for="person in dashboard.personas || []" :key="person.persona_id">
@@ -82,6 +85,9 @@
                     <div class="mt-4 h-2.5 overflow-hidden rounded-full bg-slate-100">
                         <div class="h-full rounded-full" :class="occupancyClass(person.porcentaje_ocupacion)" :style="`width:${Math.min(Number(person.porcentaje_ocupacion), 100)}%`"></div>
                     </div>
+                    <p x-show="person.requerimientos_sin_effort" class="mt-3 text-xs font-medium text-amber-700">
+                        <span x-text="person.requerimientos_sin_effort"></span> requerimiento(s) pendiente(s) de Effort.
+                    </p>
                     <div class="mt-4 overflow-x-auto" x-show="person.asignaciones?.length">
                         <table class="min-w-full text-sm">
                             <thead class="text-left text-xs uppercase text-slate-400">
@@ -93,7 +99,10 @@
                                         <td class="py-2 pr-4 text-slate-600" x-text="assignment.cliente || '—'"></td>
                                         <td class="py-2 pr-4 font-medium text-slate-800" x-text="assignment.titulo"></td>
                                         <td class="py-2 pr-4 text-slate-600" x-text="assignment.estado"></td>
-                                        <td class="py-2 text-right font-semibold"><span x-text="formatNumber(assignment.horas_activas)"></span> h</td>
+                                        <td class="py-2 text-right font-semibold">
+                                            <span x-show="!assignment.effort_pendiente"><span x-text="formatNumber(assignment.horas_activas)"></span> h</span>
+                                            <span x-show="assignment.effort_pendiente" class="text-amber-600">Effort pendiente</span>
+                                        </td>
                                     </tr>
                                 </template>
                             </tbody>
@@ -153,7 +162,7 @@
                                 </select>
                                 <span x-show="item.origen !== 'MANUAL'" class="rounded-full px-2.5 py-1 text-xs font-medium" :class="item.consume_capacidad ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'" x-text="item.estado"></span>
                             </td>
-                            <td class="px-4 py-3 text-right font-semibold" x-text="formatNumber(item.effort_total)"></td>
+                            <td class="px-4 py-3 text-right font-semibold" :class="item.effort_total == null ? 'text-amber-600' : ''" x-text="formatNullableNumber(item.effort_total)"></td>
                             <td class="px-4 py-3 text-center" x-text="item.prioridad || '—'"></td>
                             <td class="px-4 py-3 text-slate-600"><span x-text="item.responsable || 'Sin mapear'"></span><p x-show="!item.persona_id" class="text-xs text-amber-600">No relacionado con persona</p></td>
                             <td class="px-4 py-3 text-slate-600" x-text="formatDate(item.fecha_fin)"></td>
@@ -249,7 +258,7 @@
         <div @click.outside="modalHistorial = false" class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
             <div class="flex items-start justify-between"><div><h2 class="text-xl font-bold text-slate-900">Historial</h2><p class="mt-1 text-sm text-slate-500" x-text="historialTitulo"></p></div><button @click="modalHistorial = false" class="text-2xl text-slate-400">×</button></div>
             <p x-show="cargandoHistorial" class="py-10 text-center text-slate-500">Cargando…</p>
-            <div x-show="!cargandoHistorial" class="mt-5 space-y-3"><template x-for="entry in historial" :key="entry.id"><article class="rounded-lg border border-slate-200 p-4"><div class="flex flex-wrap items-center justify-between gap-2"><div><span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600" x-text="entry.evento"></span><strong class="ml-2 text-sm text-slate-900" x-text="entry.estado"></strong></div><time class="text-xs text-slate-500" x-text="formatDate(entry.valido_desde, true)"></time></div><p class="mt-2 text-sm text-slate-600">Effort: <strong x-text="formatNumber(entry.effort_total)"></strong> · Prioridad: <strong x-text="entry.prioridad || '—'"></strong> · Responsable: <strong x-text="entry.datos_snapshot?.responsable_nombre || 'Sin asignar'"></strong></p></article></template><p x-show="!historial.length" class="py-8 text-center text-slate-500">Sin historial registrado.</p></div>
+            <div x-show="!cargandoHistorial" class="mt-5 space-y-3"><template x-for="entry in historial" :key="entry.id"><article class="rounded-lg border border-slate-200 p-4"><div class="flex flex-wrap items-center justify-between gap-2"><div><span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600" x-text="entry.evento"></span><strong class="ml-2 text-sm text-slate-900" x-text="entry.estado"></strong></div><time class="text-xs text-slate-500" x-text="formatDate(entry.valido_desde, true)"></time></div><p class="mt-2 text-sm text-slate-600">Effort: <strong x-text="formatNullableNumber(entry.effort_total)"></strong> · Prioridad: <strong x-text="entry.prioridad || '—'"></strong> · Responsable: <strong x-text="entry.datos_snapshot?.responsable_nombre || 'Sin asignar'"></strong></p></article></template><p x-show="!historial.length" class="py-8 text-center text-slate-500">Sin historial registrado.</p></div>
         </div>
     </div>
 </div>

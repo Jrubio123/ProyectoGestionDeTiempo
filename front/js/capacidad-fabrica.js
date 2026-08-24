@@ -1,6 +1,6 @@
 window.capacidadFabricaApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
-    const CACHE_PREFIX = "capacidad-fabrica:v1";
+    const CACHE_PREFIX = "capacidad-fabrica:v2";
     const CACHE_TTL_MS = 15 * 60 * 1000;
 
     function todayInBogota() {
@@ -199,7 +199,11 @@ window.capacidadFabricaApp = function () {
                 const data = response.data || {};
                 this.clearDataCache();
                 await Promise.all([this.cargarCatalogos(), this.cargarRequerimientos(true), this.cargarDashboard(true)]);
-                this.notify(`Azure sincronizado: ${data.creados || 0} nuevos y ${data.actualizados || 0} actualizados.`);
+                const pending = Number(data.effort_pendiente || 0);
+                this.notify(
+                    `Azure sincronizado: ${data.creados || 0} nuevos, ${data.actualizados || 0} actualizados` +
+                    (pending ? ` y ${pending} con Effort pendiente.` : ".")
+                );
             } catch (error) {
                 this.error = this.errorText(error, "No se pudo sincronizar Azure DevOps.");
             } finally {
@@ -393,6 +397,11 @@ window.capacidadFabricaApp = function () {
 
         formatNumber(value) {
             return new Intl.NumberFormat("es-CO", { maximumFractionDigits: 2 }).format(Number(value || 0));
+        },
+
+        formatNullableNumber(value) {
+            if (value === null || value === undefined || value === "") return "—";
+            return this.formatNumber(value);
         },
 
         formatDate(value, includeTime = false) {

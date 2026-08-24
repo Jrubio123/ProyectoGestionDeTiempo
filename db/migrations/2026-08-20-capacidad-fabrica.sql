@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS estados_requerimiento_capacidad (
 INSERT INTO estados_requerimiento_capacidad
   (codigo, nombre, consume_capacidad, categoria_codigo, clasificacion, es_terminal, permite_reactivacion, orden)
 VALUES
-  ('EN_ESTIMACION', 'En estimación', FALSE, NULL, 'espera', FALSE, TRUE, 10),
+  ('EN_ESTIMACION', 'En estimación', TRUE, 'ESTIMACION', 'activo', FALSE, TRUE, 10),
   ('EN_APROBACION', 'En aprobación', FALSE, NULL, 'espera', FALSE, TRUE, 20),
   ('APROBADO', 'Aprobado', FALSE, NULL, 'espera', FALSE, TRUE, 30),
   ('EN_DESARROLLO', 'En desarrollo', TRUE, 'DESARROLLO', 'activo', FALSE, TRUE, 40),
@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS requerimientos_capacidad (
   titulo TEXT NOT NULL,
   estado_id INTEGER NOT NULL REFERENCES estados_requerimiento_capacidad(id),
   estado_origen VARCHAR(120),
-  effort_total NUMERIC(10,2) NOT NULL CHECK (effort_total >= 0),
+  effort_total NUMERIC(10,2) CHECK (effort_total IS NULL OR effort_total >= 0),
   prioridad SMALLINT CHECK (prioridad IS NULL OR prioridad > 0),
   persona_id INTEGER REFERENCES personas(id) ON DELETE SET NULL,
   responsable_azure_id VARCHAR(128),
@@ -159,6 +159,8 @@ CREATE TABLE IF NOT EXISTS requerimientos_capacidad (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT uq_requerimiento_capacidad_origen_externo
     UNIQUE (origen, organizacion_azure, external_id),
+  CONSTRAINT ck_requerimiento_manual_effort
+    CHECK (origen <> 'MANUAL' OR effort_total IS NOT NULL),
   CHECK (
     (origen = 'AZURE_DEVOPS' AND external_id IS NOT NULL AND organizacion_azure IS NOT NULL)
     OR (origen = 'MANUAL' AND cliente_id IS NOT NULL)
@@ -194,7 +196,7 @@ CREATE TABLE IF NOT EXISTS requerimientos_capacidad_historial (
     CHECK (evento IN ('CREADO', 'SINCRONIZADO', 'ESTADO', 'PLANIFICACION', 'ASIGNACION', 'ARCHIVADO')),
   estado_id INTEGER NOT NULL REFERENCES estados_requerimiento_capacidad(id),
   persona_id INTEGER REFERENCES personas(id) ON DELETE SET NULL,
-  effort_total NUMERIC(10,2) NOT NULL,
+  effort_total NUMERIC(10,2),
   prioridad SMALLINT,
   fecha_inicio DATE,
   fecha_fin DATE,
@@ -214,6 +216,26 @@ CREATE INDEX IF NOT EXISTS idx_requerimiento_historial_corte
   ON requerimientos_capacidad_historial(requerimiento_id, valido_desde, valido_hasta);
 CREATE INDEX IF NOT EXISTS idx_requerimiento_historial_persona
   ON requerimientos_capacidad_historial(persona_id, valido_desde);
+
+ALTER TABLE requerimientos_capacidad
+  ALTER COLUMN effort_total DROP NOT NULL;
+ALTER TABLE requerimientos_capacidad_historial
+  ALTER COLUMN effort_total DROP NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'ck_requerimiento_manual_effort'
+      AND conrelid = 'requerimientos_capacidad'::regclass
+  ) THEN
+    ALTER TABLE requerimientos_capacidad
+      ADD CONSTRAINT ck_requerimiento_manual_effort
+      CHECK (origen <> 'MANUAL' OR effort_total IS NOT NULL);
+  END IF;
+END
+$$;
 
 COMMENT ON COLUMN personas.pertenece_fabrica IS
   'Indica si la persona participa en el cálculo de capacidad del equipo interno de Fábrica.';

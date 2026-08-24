@@ -227,7 +227,8 @@ window.capacidadFabricaApp = function () {
                 distribucion: this.catalogos.categorias.map((item) => ({
                     codigo: item.codigo,
                     nombre: item.nombre,
-                    porcentaje: Number(item.porcentaje_predeterminado)
+                    porcentaje: Number(item.porcentaje_predeterminado),
+                    horas: null
                 }))
             };
             this.modalManual = true;
@@ -237,11 +238,80 @@ window.capacidadFabricaApp = function () {
             return this.manual?.distribucion?.reduce((sum, item) => sum + Number(item.porcentaje || 0), 0) || 0;
         },
 
+        get totalHorasManual() {
+            return this.totalHours(this.manual?.distribucion);
+        },
+
+        roundDistributionValue(value) {
+            return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+        },
+
+        hasEffort(value) {
+            return value !== null
+                && value !== undefined
+                && value !== ""
+                && Number.isFinite(Number(value))
+                && Number(value) >= 0;
+        },
+
+        canEditHours(value) {
+            return this.hasEffort(value) && Number(value) > 0;
+        },
+
+        hoursFromPercentage(effort, percentage) {
+            if (!this.hasEffort(effort)) return null;
+            const normalizedPercentage = Number(percentage);
+            if (!Number.isFinite(normalizedPercentage)) return null;
+            return this.roundDistributionValue(Number(effort) * normalizedPercentage / 100);
+        },
+
+        updateFromPercentage(item, rawPercentage, effort) {
+            item.porcentaje = rawPercentage === "" ? "" : Number(rawPercentage);
+            item.horas = this.hoursFromPercentage(effort, item.porcentaje);
+        },
+
+        updateFromHours(item, rawHours, effort) {
+            item.horas = rawHours === "" ? "" : Number(rawHours);
+            if (!this.canEditHours(effort) || !Number.isFinite(Number(item.horas))) return;
+            item.porcentaje = this.roundDistributionValue(Number(item.horas) / Number(effort) * 100);
+        },
+
+        updateManualEffort(rawEffort) {
+            this.manual.effort_total = rawEffort === "" ? "" : Number(rawEffort);
+            for (const item of this.manual.distribucion || []) {
+                item.horas = this.hoursFromPercentage(this.manual.effort_total, item.porcentaje);
+            }
+        },
+
+        totalHours(distribution = []) {
+            return (distribution || []).reduce((sum, item) => {
+                const hours = Number(item.horas);
+                return sum + (Number.isFinite(hours) ? hours : 0);
+            }, 0);
+        },
+
+        distributionIsValid(distribution, effort) {
+            const percentage = (distribution || []).reduce(
+                (sum, item) => sum + Number(item.porcentaje || 0),
+                0
+            );
+            if (Math.abs(percentage - 100) >= 0.001) return false;
+            if (!this.hasEffort(effort)) return true;
+            return Math.abs(this.totalHours(distribution) - Number(effort)) <= 0.05;
+        },
+
         async guardarManual() {
             this.guardandoManual = true;
             this.error = "";
             try {
-                await axios.post(`${API}/capacidad-fabrica/requerimientos/manual`, this.manual, this.authConfig());
+                const payload = {
+                    ...this.manual,
+                    distribucion: this.manual.distribucion.map((item) => ({
+                        codigo: item.codigo,
+                        porcentaje: Number(item.porcentaje)
+                    }))
+                };
+                await axios.post(`${API}/capacidad-fabrica/requerimientos/manual`, payload, this.authConfig());
                 this.modalManual = false;
                 this.clearDataCache();
                 await Promise.all([this.cargarRequerimientos(true), this.cargarDashboard(true)]);
@@ -274,18 +344,26 @@ window.capacidadFabricaApp = function () {
         abrirDistribucion(item) {
             this.requerimientoDistribucion = item;
             const current = new Map((item.distribucion || []).map((entry) => [entry.codigo, Number(entry.porcentaje)]));
-            this.distribucion = this.catalogos.categorias.map((category) => ({
-                codigo: category.codigo,
-                nombre: category.nombre,
-                porcentaje: current.has(category.codigo)
+            this.distribucion = this.catalogos.categorias.map((category) => {
+                const percentage = current.has(category.codigo)
                     ? current.get(category.codigo)
-                    : Number(category.porcentaje_predeterminado)
-            }));
+                    : Number(category.porcentaje_predeterminado);
+                return {
+                    codigo: category.codigo,
+                    nombre: category.nombre,
+                    porcentaje: percentage,
+                    horas: this.hoursFromPercentage(item.effort_total, percentage)
+                };
+            });
             this.modalDistribucion = true;
         },
 
         get totalDistribucion() {
             return this.distribucion.reduce((sum, item) => sum + Number(item.porcentaje || 0), 0);
+        },
+
+        get totalHorasDistribucion() {
+            return this.totalHours(this.distribucion);
         },
 
         async guardarDistribucion() {
@@ -295,7 +373,12 @@ window.capacidadFabricaApp = function () {
             try {
                 await axios.put(
                     `${API}/capacidad-fabrica/requerimientos/${this.requerimientoDistribucion.id}/distribucion`,
-                    { distribucion: this.distribucion },
+                    {
+                        distribucion: this.distribucion.map((item) => ({
+                            codigo: item.codigo,
+                            porcentaje: Number(item.porcentaje)
+                        }))
+                    },
                     this.authConfig()
                 );
                 this.modalDistribucion = false;

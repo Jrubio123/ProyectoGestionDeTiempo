@@ -33,6 +33,18 @@ function normalizeText(value) {
   return normalized || null;
 }
 
+function normalizeFirstValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(normalizeText).find(Boolean) || null;
+  }
+  if (typeof value === "string" && value.trim().startsWith("[")) {
+    try {
+      return normalizeFirstValue(JSON.parse(value));
+    } catch (_) {}
+  }
+  return normalizeText(value);
+}
+
 function normalizeMatchValue(value) {
   return String(value || "")
     .normalize("NFD")
@@ -51,6 +63,10 @@ function buildNameFingerprint(value) {
     .join(" ");
 }
 
+function normalizeDocumentNumber(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 function parseObject(value) {
   if (value && typeof value === "object" && !Array.isArray(value)) return value;
   if (typeof value !== "string") return {};
@@ -66,8 +82,13 @@ function normalizeWebhookIdentity(input = {}) {
   const oid = normalizeText(input.id_azure || input.azure_oid || input.oid);
   const email = normalizeCorporateEmail(input.correo || input.email || input.mail);
   const displayName = normalizeText(input.nombre || input.displayName || input.nombre_usuario);
-  const personalEmail = normalizeCorporateEmail(input.correo_personal || input.personal_email);
-  const documentNumber = normalizeText(input.numero_documento || input.documento);
+  const personalEmail = normalizeCorporateEmail(normalizeFirstValue(
+    input.correo_personal || input.personal_email || input.otherMails
+  ));
+  const documentNumber = normalizeFirstValue(
+    input.numero_documento || input.documento || input.businessPhones
+  );
+  const phone = normalizeFirstValue(input.telefono_movil || input.mobilePhone || input.telefono);
   const solicitudId = normalizeText(input.solicitud_id || input.solicitud);
 
   if (!oid || oid.length > 64) {
@@ -90,6 +111,7 @@ function normalizeWebhookIdentity(input = {}) {
     displayName,
     personalEmail: personalEmail || null,
     documentNumber,
+    phone,
     solicitudId
   };
 }
@@ -156,7 +178,7 @@ async function resolveAllowedMicrosoftIdentity(input = {}, dependencies = {}) {
     const getToken = dependencies.getGraphAccessToken || getGraphAccessToken;
     const graphRequest = dependencies.graphJsonRequest || graphJsonRequest;
     const token = await getToken();
-    const profilePath = `/v1.0/users/${encodeURIComponent(oid)}?$select=id,displayName,givenName,surname,mail,userPrincipalName`;
+    const profilePath = `/v1.0/users/${encodeURIComponent(oid)}?$select=id,displayName,givenName,surname,mail,userPrincipalName,mobilePhone,businessPhones,otherMails`;
     const [profile, membershipChecks] = await Promise.all([
       graphRequest({ method: "GET", path: profilePath, token }),
       Promise.all(
@@ -185,7 +207,10 @@ async function resolveAllowedMicrosoftIdentity(input = {}, dependencies = {}) {
       ...input,
       id_azure: profile.id || oid,
       nombre: profile.displayName,
-      correo: profile.mail || profile.userPrincipalName
+      correo: profile.mail || profile.userPrincipalName,
+      telefono_movil: profile.mobilePhone,
+      documento: profile.businessPhones,
+      correo_personal: profile.otherMails
     });
   } catch (error) {
     if (error instanceof MicrosoftGroupWebhookError) throw error;
@@ -210,8 +235,8 @@ function selectPendingSolicitud(rows, identity) {
     ));
   } else if (identity.documentNumber) {
     criterion = "numero_documento";
-    const target = normalizeMatchValue(identity.documentNumber);
-    matches = candidates.filter((row) => normalizeMatchValue(row.numero_documento) === target);
+    const target = normalizeDocumentNumber(identity.documentNumber);
+    matches = candidates.filter((row) => normalizeDocumentNumber(row.numero_documento) === target);
   } else if (identity.personalEmail) {
     criterion = "correo_personal";
     matches = candidates.filter((row) => normalizeCorporateEmail(row.correo_personal) === identity.personalEmail);
@@ -340,6 +365,62 @@ async function findSolicitudPerson(db, solicitud) {
     );
   }
   return result.rows[0];
+}
+
+async function relinkMicrosoftPlaceholder(db, { person, identity }) {
+  if (!person?.id) return false;
+  const userResult = await db.query(
+    `SELECT id, persona_id, created_by
+     FROM usuarios
+     WHERE azure_oid = $1 OR LOWER(BTRIM(email)) = $2
+     ORDER BY CASE WHEN azure_oid = $1 THEN 0 ELSE 1 END, id
+     FOR UPDATE`,
+    [identity.oid, identity.email]
+  );
+  if (userResult.rows.length !== 1) return false;
+
+  const user = userResult.rows[0];
+  if (!user.persona_id || Number(user.persona_id) === Number(person.id)) return false;
+  if (String(user.created_by || "").toLowerCase() !== "ms_sso") return false;
+
+  const placeholderResult = await db.query(
+    `SELECT id, numero_documento, preregistro_id, numero_contacto, correo_silver, azure_oid
+     FROM personas
+     WHERE id = $1
+     FOR UPDATE`,
+    [user.persona_id]
+  );
+  const placeholder = placeholderResult.rows[0];
+  const isSafePlaceholder = placeholder &&
+    !normalizeText(placeholder.numero_documento) &&
+    !placeholder.preregistro_id &&
+    String(placeholder.azure_oid || "") === identity.oid &&
+    normalizeCorporateEmail(placeholder.correo_silver) === identity.email;
+  if (!isSafePlaceholder) return false;
+
+  await db.query(
+    `UPDATE personas target
+     SET numero_contacto = COALESCE(NULLIF(BTRIM(target.numero_contacto), ''), $1),
+         updated_at = NOW()
+     WHERE target.id = $2`,
+    [normalizeText(placeholder.numero_contacto) || identity.phone, person.id]
+  );
+  await db.query(
+    `UPDATE personas
+     SET correo_silver = NULL,
+         azure_oid = NULL,
+         estado = 'inactivo',
+         updated_at = NOW()
+     WHERE id = $1`,
+    [placeholder.id]
+  );
+  await db.query(
+    `UPDATE usuarios
+     SET persona_id = $1, updated_at = NOW()
+     WHERE id = $2`,
+    [person.id, user.id]
+  );
+  return true;
 }
 
 async function registerIdentityOnPendingSolicitud(db, { solicitud, person, identity }) {
@@ -537,10 +618,17 @@ async function syncConsultoresGroupMember(input, dependencies = {}) {
 
     const role = await getRole(client, requestedRoleTitle(selected));
 
+    if (selected) {
+      await relinkMicrosoftPlaceholder(client, { person, identity });
+    }
+
     const user = await syncIdentity(client, {
       oid: identity.oid,
       email: identity.email,
       displayName: identity.displayName,
+      phone: identity.phone,
+      personalEmail: identity.personalEmail,
+      documentNumber: identity.documentNumber,
       defaultRoleId: role.id,
       personId: person?.id || null,
       recordLogin: false,
@@ -582,5 +670,6 @@ module.exports = {
   buildNameFingerprint,
   selectPendingSolicitud,
   requestedRoleTitle,
+  relinkMicrosoftPlaceholder,
   syncConsultoresGroupMember
 };

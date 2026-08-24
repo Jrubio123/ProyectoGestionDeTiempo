@@ -7,6 +7,7 @@ const {
   resolveAllowedMicrosoftIdentity,
   selectPendingSolicitud,
   requestedRoleTitle,
+  relinkMicrosoftPlaceholder,
   syncConsultoresGroupMember
 } = require("../src/services/microsoft-group-webhook.service");
 
@@ -23,12 +24,18 @@ test("normaliza el payload enviado por Power Automate", () => {
   const result = normalizeWebhookIdentity({
     id_azure: identity.oid,
     nombre: identity.displayName,
-    correo: " Persona@SilverConsulting.com.co "
+    correo: " Persona@SilverConsulting.com.co ",
+    telefono_movil: "3001234567",
+    documento: ["1012345678"],
+    correo_personal: ["personal@example.com"]
   });
 
   assert.equal(result.oid, identity.oid);
   assert.equal(result.email, identity.email);
   assert.equal(result.displayName, identity.displayName);
+  assert.equal(result.phone, "3001234567");
+  assert.equal(result.documentNumber, "1012345678");
+  assert.equal(result.personalEmail, "personal@example.com");
 });
 
 test("Graph reemplaza nombre y correo del body y confirma AZURE_ALLOWED_GROUPS", async () => {
@@ -36,7 +43,10 @@ test("Graph reemplaza nombre y correo del body y confirma AZURE_ALLOWED_GROUPS",
   const result = await resolveAllowedMicrosoftIdentity({
     id_azure: identity.oid,
     nombre: "Nombre manipulado",
-    correo: "falso@silverconsulting.com.co"
+    correo: "falso@silverconsulting.com.co",
+    telefono_movil: "000",
+    documento: ["999"],
+    correo_personal: "falso@example.com"
   }, {
     allowedGroupIds: ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
     getGraphAccessToken: async () => "graph-token",
@@ -46,7 +56,10 @@ test("Graph reemplaza nombre y correo del body y confirma AZURE_ALLOWED_GROUPS",
         return {
           id: identity.oid,
           displayName: identity.displayName,
-          mail: identity.email
+          mail: identity.email,
+          mobilePhone: "3007654321",
+          businessPhones: ["1098765432"],
+          otherMails: ["graph-personal@example.com"]
         };
       }
       return { value: ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"] };
@@ -55,6 +68,9 @@ test("Graph reemplaza nombre y correo del body y confirma AZURE_ALLOWED_GROUPS",
 
   assert.equal(result.displayName, identity.displayName);
   assert.equal(result.email, identity.email);
+  assert.equal(result.phone, "3007654321");
+  assert.equal(result.documentNumber, "1098765432");
+  assert.equal(result.personalEmail, "graph-personal@example.com");
   assert.match(calls.find((call) => call.method === "POST").path, /checkMemberGroups/);
 });
 
@@ -90,6 +106,18 @@ test("relaciona una solicitud pendiente por nombre sin depender de tildes u orde
   assert.equal(selected.id, 7);
 });
 
+test("prioriza el documento de businessPhones para relacionar la solicitud", () => {
+  const selected = selectPendingSolicitud([
+    { id: 7, nombre: "Nombre distinto", apellidos: "", numero_documento: "10.987.654.32" },
+    { id: 8, nombre: "Maria Jose", apellidos: "Perez Lopez", numero_documento: "555" }
+  ], {
+    ...identity,
+    documentNumber: "1098765432"
+  });
+
+  assert.equal(selected.id, 7);
+});
+
 test("no elige automáticamente cuando hay dos solicitudes con el mismo nombre", () => {
   assert.throws(
     () => selectPendingSolicitud([
@@ -110,8 +138,48 @@ test("resuelve el rol solicitado para externos y vinculados", () => {
   );
 });
 
+test("reutiliza el usuario provisional creado antes de identificar la solicitud", async () => {
+  const calls = [];
+  const db = {
+    async query(sql, params) {
+      const query = String(sql);
+      calls.push({ query, params });
+      if (/SELECT id, persona_id, created_by/.test(query)) {
+        return { rows: [{ id: 40, persona_id: 99, created_by: "ms_sso" }] };
+      }
+      if (/SELECT id, numero_documento, preregistro_id/.test(query)) {
+        return {
+          rows: [{
+            id: 99,
+            numero_documento: null,
+            preregistro_id: null,
+            numero_contacto: "3001234567",
+            correo_silver: identity.email,
+            azure_oid: identity.oid
+          }]
+        };
+      }
+      return { rows: [] };
+    }
+  };
+
+  const relinked = await relinkMicrosoftPlaceholder(db, {
+    person: { id: 20, public_id: "persona-real" },
+    identity: { ...identity, phone: "3001234567" }
+  });
+
+  assert.equal(relinked, true);
+  assert.ok(calls.some(({ query, params }) => /estado = 'inactivo'/.test(query) && params[0] === 99));
+  assert.ok(calls.some(({ query, params }) => /UPDATE usuarios/.test(query) && params[0] === 20 && params[1] === 40));
+});
+
 test("completa Pendiente Correo Silver y vincula persona, usuario y preregistro", async () => {
   const calls = [];
+  const webhookIdentity = {
+    ...identity,
+    phone: "3001234567",
+    documentNumber: "123"
+  };
   const pending = {
     id: 7,
     public_id: "solicitud-7",
@@ -151,10 +219,11 @@ test("completa Pendiente Correo Silver y vincula persona, usuario y preregistro"
   const fakePool = { async connect() { return client; } };
   const result = await syncConsultoresGroupMember({}, {
     pool: fakePool,
-    resolveAllowedMicrosoftIdentity: async () => identity,
+    resolveAllowedMicrosoftIdentity: async () => webhookIdentity,
     syncMicrosoftIdentity: async (_db, input) => {
       assert.equal(input.personId, 20);
       assert.equal(input.defaultRoleId, 5);
+      assert.equal(input.phone, webhookIdentity.phone);
       return { id: 30, public_id: "usuario-30", email: identity.email, azure_oid: identity.oid };
     }
   });

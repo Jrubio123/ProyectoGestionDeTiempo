@@ -211,7 +211,10 @@ test("crea persona y usuario cuando la identidad no existe", async () => {
     "Persona",
     "Silver",
     "persona@silverconsulting.com.co",
-    baseIdentity.oid
+    baseIdentity.oid,
+    null,
+    "3000000000",
+    null
   ]);
 });
 

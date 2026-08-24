@@ -95,15 +95,17 @@ async function findPersonById(db, personId) {
   return result.rows[0] || null;
 }
 
-async function findPersonByCorporateIdentity(db, oid, email) {
+async function findPersonByCorporateIdentity(db, oid, email, documentNumber = null, personalEmail = null) {
   const result = await db.query(
     `SELECT id, public_id, correo_silver, azure_oid
      FROM personas
      WHERE azure_oid = $1
         OR LOWER(BTRIM(correo_silver)) = $2
+        OR ($3::text IS NOT NULL AND BTRIM(numero_documento) = BTRIM($3::text))
+        OR ($4::text IS NOT NULL AND LOWER(BTRIM(correo_electronico)) = $4)
      ORDER BY CASE WHEN azure_oid = $1 THEN 0 ELSE 1 END, id
      FOR UPDATE`,
-    [oid, email]
+    [oid, email, documentNumber, personalEmail]
   );
 
   return assertSingle(
@@ -131,10 +133,21 @@ async function findUserLinkedToPerson(db, personId, excludeUserId = null) {
 
 async function createPerson(db, identity) {
   const result = await db.query(
-    `INSERT INTO personas (nombre, apellidos, correo_silver, azure_oid, estado)
-     VALUES ($1, $2, $3, $4, 'activo')
+    `INSERT INTO personas (
+       nombre, apellidos, correo_silver, azure_oid, estado,
+       numero_documento, numero_contacto, correo_electronico
+     )
+     VALUES ($1, $2, $3, $4, 'activo', $5, $6, $7)
      RETURNING id, public_id, correo_silver, azure_oid`,
-    [identity.firstName, identity.lastName, identity.email, identity.oid]
+    [
+      identity.firstName,
+      identity.lastName,
+      identity.email,
+      identity.oid,
+      identity.documentNumber,
+      identity.phone,
+      identity.personalEmail
+    ]
   );
   return result.rows[0];
 }
@@ -152,10 +165,22 @@ async function syncPerson(db, personId, identity) {
            WHEN NULLIF(BTRIM(COALESCE(apellidos, '')), '') IS NULL THEN $4
            ELSE apellidos
          END,
+         numero_contacto = COALESCE(NULLIF(BTRIM(numero_contacto), ''), $5),
+         correo_electronico = COALESCE(NULLIF(BTRIM(correo_electronico), ''), $6),
+         numero_documento = COALESCE(NULLIF(BTRIM(numero_documento), ''), $7),
          updated_at = CURRENT_TIMESTAMP
-     WHERE id = $5
+     WHERE id = $8
      RETURNING id, public_id, correo_silver, azure_oid`,
-    [identity.email, identity.oid, identity.firstName, identity.lastName, personId]
+    [
+      identity.email,
+      identity.oid,
+      identity.firstName,
+      identity.lastName,
+      identity.phone,
+      identity.personalEmail,
+      identity.documentNumber,
+      personId
+    ]
   );
   return result.rows[0];
 }
@@ -252,6 +277,8 @@ async function syncMicrosoftIdentity(db, input) {
     email,
     displayName,
     phone: normalizeText(input?.phone),
+    personalEmail: normalizeCorporateEmail(input?.personalEmail) || null,
+    documentNumber: normalizeText(input?.documentNumber),
     firstName: names.firstName,
     lastName: names.lastName
   };
@@ -283,7 +310,13 @@ async function syncMicrosoftIdentity(db, input) {
     if (!person) {
       throw new MicrosoftIdentitySyncError("La persona indicada no existe.", 404);
     }
-    const corporatePerson = await findPersonByCorporateIdentity(db, oid, email);
+    const corporatePerson = await findPersonByCorporateIdentity(
+      db,
+      oid,
+      email,
+      identity.documentNumber,
+      identity.personalEmail
+    );
     if (corporatePerson && Number(corporatePerson.id) !== personIdHint) {
       throw new MicrosoftIdentitySyncError(
         "La identidad de Microsoft ya está vinculada a otra persona.",
@@ -293,7 +326,13 @@ async function syncMicrosoftIdentity(db, input) {
   } else {
     person = user?.persona_id
       ? await findPersonById(db, user.persona_id)
-      : await findPersonByCorporateIdentity(db, oid, email);
+      : await findPersonByCorporateIdentity(
+        db,
+        oid,
+        email,
+        identity.documentNumber,
+        identity.personalEmail
+      );
   }
 
   if (!person) {

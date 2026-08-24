@@ -228,6 +228,7 @@ async function syncMicrosoftIdentity(db, input) {
   const oid = normalizeText(input?.oid);
   const email = normalizeCorporateEmail(input?.email);
   const displayName = normalizeText(input?.displayName) || email;
+  const personIdHint = Number(input?.personId) || null;
   const defaultRoleId = Number(input?.defaultRoleId) || null;
   const createMissingUser = input?.createUser !== false;
   const recordLogin = input?.recordLogin !== false;
@@ -270,9 +271,30 @@ async function syncMicrosoftIdentity(db, input) {
     }
   }
 
-  let person = user?.persona_id
-    ? await findPersonById(db, user.persona_id)
-    : await findPersonByCorporateIdentity(db, oid, email);
+  let person = null;
+  if (personIdHint) {
+    if (user?.persona_id && Number(user.persona_id) !== personIdHint) {
+      throw new MicrosoftIdentitySyncError(
+        "La identidad de Microsoft ya está vinculada a otra persona.",
+        409
+      );
+    }
+    person = await findPersonById(db, personIdHint);
+    if (!person) {
+      throw new MicrosoftIdentitySyncError("La persona indicada no existe.", 404);
+    }
+    const corporatePerson = await findPersonByCorporateIdentity(db, oid, email);
+    if (corporatePerson && Number(corporatePerson.id) !== personIdHint) {
+      throw new MicrosoftIdentitySyncError(
+        "La identidad de Microsoft ya está vinculada a otra persona.",
+        409
+      );
+    }
+  } else {
+    person = user?.persona_id
+      ? await findPersonById(db, user.persona_id)
+      : await findPersonByCorporateIdentity(db, oid, email);
+  }
 
   if (!person) {
     person = await createPerson(db, identity);

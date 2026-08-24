@@ -947,10 +947,32 @@ window.preregistrosCoordApp = function () {
             return this.tipoModal === "Nuevo" && this.form.grupo_distribucion === "Vinculados";
         },
 
+        get grupoDistribucionEsTodosSilver() {
+            return this.tipoModal === "Nuevo" && this.form.grupo_distribucion === "Todos Silver";
+        },
+
+        onCrearUsuarioSistemaChange() {
+            if (this.form.crear_usuario_sistema === false) {
+                this.form.grupo_usuario = "";
+                this.form.grupo_usuario_otro = "";
+                return;
+            }
+            if (this.grupoDistribucionEsTodosSilver) {
+                this.form.grupo_usuario = "CONSULTOR";
+                this.form.grupo_usuario_otro = "";
+            }
+        },
+
         onGrupoDistribucionChange() {
-            if (!this.grupoDistribucionEsVinculado) return;
-            this.form.vpn_corona = false;
-            this.form.necesita_s_user = false;
+            if (this.grupoDistribucionEsVinculado) {
+                this.form.vpn_corona = false;
+                this.form.necesita_s_user = false;
+                return;
+            }
+            if (this.grupoDistribucionEsTodosSilver && this.form.crear_usuario_sistema !== false) {
+                this.form.grupo_usuario = "CONSULTOR";
+                this.form.grupo_usuario_otro = "";
+            }
         },
 
         get monedasDisponibles() {

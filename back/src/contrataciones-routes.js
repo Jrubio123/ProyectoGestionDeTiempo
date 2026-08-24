@@ -2076,11 +2076,11 @@ module.exports = function registerContratacionesRoutes(deps) {
       const correoEmpresarial = toNullableString(payload.correo_empresarial);
       const telefono = toNullableString(payload.telefono);
       const ubicacion = toNullableString(payload.ubicacion);
-      const grupoAppTiempos = toNullableString(payload.grupo_app_tiempos);
+      let grupoAppTiempos = toNullableString(payload.grupo_app_tiempos);
       const grupoDistribucion = toNullableString(payload.grupo_distribucion);
       let vpnCorona = payload.vpn_corona === true || payload.vpn_corona === "true" || payload.vpn_corona === 1;
       let necesitaSUser = payload.necesita_s_user === true || payload.necesita_s_user === "true" || payload.necesita_s_user === 1;
-      const grupoUsuarioOtro = toNullableString(payload.grupo_usuario_otro);
+      let grupoUsuarioOtro = toNullableString(payload.grupo_usuario_otro);
       const necesidadTi = toNullableString(payload.necesidad_ti);
       const observaciones = toNullableString(payload.observaciones);
       const enviarCorreos = payload.enviar_correos !== false;
@@ -2095,6 +2095,13 @@ module.exports = function registerContratacionesRoutes(deps) {
       if (tipoSolicitud === TIPO_NUEVO && grupoDistribucion === "Vinculados") {
         vpnCorona = false;
         necesitaSUser = false;
+      }
+      if (tipoSolicitud === TIPO_NUEVO && !crearUsuarioSistema) {
+        grupoAppTiempos = null;
+        grupoUsuarioOtro = null;
+      } else if (tipoSolicitud === TIPO_NUEVO && grupoDistribucion === "Todos Silver") {
+        grupoAppTiempos = "CONSULTOR";
+        grupoUsuarioOtro = null;
       }
 
       if (!nombre || !apellidos) {
@@ -2551,7 +2558,7 @@ module.exports = function registerContratacionesRoutes(deps) {
           payload.correo_empresarial !== undefined ? toNullableString(payload.correo_empresarial) : current.correo_empresarial;
         const telefono = payload.telefono !== undefined ? toNullableString(payload.telefono) : current.telefono;
         const ubicacion = payload.ubicacion !== undefined ? toNullableString(payload.ubicacion) : current.ubicacion;
-        const grupoAppTiempos =
+        let grupoAppTiempos =
           payload.grupo_app_tiempos !== undefined ? toNullableString(payload.grupo_app_tiempos) : current.grupo_app_tiempos;
         const grupoDistribucion =
           payload.grupo_distribucion !== undefined ? toNullableString(payload.grupo_distribucion) : current.grupo_distribucion;
@@ -2563,7 +2570,7 @@ module.exports = function registerContratacionesRoutes(deps) {
           payload.necesita_s_user !== undefined
             ? (payload.necesita_s_user === true || payload.necesita_s_user === "true" || payload.necesita_s_user === 1)
             : Boolean(current.necesita_s_user);
-        const grupoUsuarioOtro =
+        let grupoUsuarioOtro =
           payload.grupo_usuario_otro !== undefined ? toNullableString(payload.grupo_usuario_otro) : current.grupo_usuario_otro;
         const necesidadTi =
           payload.necesidad_ti !== undefined ? toNullableString(payload.necesidad_ti) : current.necesidad_ti;
@@ -2581,6 +2588,13 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (tipoSolicitud === TIPO_NUEVO && grupoDistribucion === "Vinculados") {
           vpnCorona = false;
           necesitaSUser = false;
+        }
+        if (tipoSolicitud === TIPO_NUEVO && !crearUsuarioSistema) {
+          grupoAppTiempos = null;
+          grupoUsuarioOtro = null;
+        } else if (tipoSolicitud === TIPO_NUEVO && grupoDistribucion === "Todos Silver") {
+          grupoAppTiempos = "CONSULTOR";
+          grupoUsuarioOtro = null;
         }
 
         if (!nombre || !apellidos) {

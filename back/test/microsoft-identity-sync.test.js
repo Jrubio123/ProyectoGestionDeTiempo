@@ -137,6 +137,44 @@ test("vincula una persona existente por correo Silver y crea su usuario", async 
   assert.equal(db.calls.at(-1).params.at(-1), 30);
 });
 
+test("vincula por personId la persona materializada durante el onboarding", async () => {
+  const db = scriptedDb([
+    { match: /pg_advisory_xact_lock/ },
+    { match: /FROM usuarios u/, result: { rows: [] } },
+    {
+      match: /FROM personas\s+WHERE id = \$1/,
+      result: { rows: [{ id: 35, public_id: "persona-35", correo_silver: null, azure_oid: null }] }
+    },
+    { match: /LOWER\(BTRIM\(correo_silver\)\)/, result: { rows: [] } },
+    { match: /FROM usuarios\s+WHERE persona_id = \$1/, result: { rows: [] } },
+    {
+      match: /UPDATE personas/,
+      result: { rows: [{ id: 35, public_id: "persona-35", correo_silver: "persona@silverconsulting.com.co" }] }
+    },
+    {
+      match: /INSERT INTO usuarios/,
+      result: {
+        rows: [{
+          id: 45,
+          public_id: "usuario-45",
+          nombre_usuario: "Persona Silver",
+          email: "persona@silverconsulting.com.co",
+          rol_usuario_id: 3,
+          rol: "Consultor",
+          activo: true,
+          persona_id: 35,
+          azure_oid: baseIdentity.oid
+        }]
+      }
+    }
+  ]);
+
+  const result = await syncMicrosoftIdentity(db, { ...baseIdentity, personId: 35 });
+
+  assert.equal(result.persona_id, 35);
+  assert.deepEqual(db.calls[2].params, [35]);
+});
+
 test("crea persona y usuario cuando la identidad no existe", async () => {
   const db = scriptedDb([
     { match: /pg_advisory_xact_lock/ },

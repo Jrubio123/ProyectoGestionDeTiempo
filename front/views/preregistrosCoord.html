@@ -286,8 +286,9 @@
                     <!-- Accesos técnicos -->
                     <p class="text-xs uppercase tracking-wide text-slate-500 font-bold pt-1">Accesos técnicos</p>
                     <div class="form-check mb-3">
-                        <input type="checkbox" id="crear_usuario_sistema" class="form-check-input" x-model="form.crear_usuario_sistema">
-                        <label class="form-check-label text-sm text-slate-700" for="crear_usuario_sistema">¿Esta persona necesita acceso al sistema (Rol Consultor)?</label>
+                        <input type="checkbox" id="crear_usuario_sistema" class="form-check-input"
+                            x-model="form.crear_usuario_sistema" @change="onCrearUsuarioSistemaChange()">
+                        <label class="form-check-label text-sm text-slate-700" for="crear_usuario_sistema">¿Esta persona necesita acceso a la herramienta?</label>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <!-- VPN Corona -->
@@ -317,9 +318,11 @@
                             </div>
                         </div>
                         <!-- Grupo usuario -->
-                        <div class="space-y-2">
-                            <select x-model="form.grupo_usuario" class="w-full px-3 py-2 rounded-xl border border-slate-200">
-                                <option value="">Grupo de usuario</option>
+                        <div class="space-y-2" x-show="form.crear_usuario_sistema" style="display:none">
+                            <label class="text-xs text-slate-500">Rol en la herramienta *</label>
+                            <select x-model="form.grupo_usuario" :disabled="grupoDistribucionEsTodosSilver"
+                                class="w-full px-3 py-2 rounded-xl border border-slate-200 disabled:bg-slate-100 disabled:text-slate-500">
+                                <option value="">Seleccionar rol...</option>
                                 <option value="ADMIN">ADMIN</option>
                                 <option value="COORDINADOR">COORDINADOR</option>
                                 <option value="CONSULTOR">CONSULTOR</option>
@@ -327,6 +330,7 @@
                                 <option value="COMERCIAL">COMERCIAL</option>
                                 <option value="Otro">Otro</option>
                             </select>
+                            <p x-show="grupoDistribucionEsTodosSilver" class="text-xs text-slate-400" style="display:none">Todos Silver se registra automáticamente con rol Consultor.</p>
                             <input x-show="grupoUsuarioEsOtro" x-model="form.grupo_usuario_otro" type="text"
                                 class="w-full px-3 py-2 rounded-xl border border-slate-200" placeholder="Especifica el grupo *" style="display:none">
                         </div>

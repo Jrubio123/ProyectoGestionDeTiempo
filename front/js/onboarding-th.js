@@ -499,12 +499,15 @@ window.onboardingThApp = function () {
         esContratacionEditableTh(item) {
             if (item?.origen_flujo !== "contratacion") return false;
             const estado = this.normalizar(item?.estado);
-            return estado === "pendiente revision th" || estado === "pendiente correo silver";
+            return estado === "pendiente revision th";
         },
 
         accionPrincipalLabel(item) {
             if (this.esContratacionEditableTh(item)) {
-                return item?.estado === "Pendiente Correo Silver" ? "Ingresar correo Silver" : "Completar revision";
+                return "Completar revision";
+            }
+            if (item?.origen_flujo === "contratacion" && item?.estado === "Pendiente Correo Silver") {
+                return "Esperando correo Silver";
             }
             if (item?.origen_flujo !== "preregistro") return "Ver detalle";
             if (item.estado === "Pendiente Revision TH") return "Completar revision";
@@ -579,8 +582,7 @@ window.onboardingThApp = function () {
                 return estado === "Pendiente Revision TH" || estado === "Pendiente Correo Silver";
             }
             if (this.itemActivo?.origen_flujo === "contratacion") {
-                return this.itemActivo?.estado === "Pendiente Revision TH"
-                    || this.itemActivo?.estado === "Pendiente Correo Silver";
+                return this.itemActivo?.estado === "Pendiente Revision TH";
             }
             return false;
         },

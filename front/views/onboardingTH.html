@@ -415,6 +415,9 @@
 
             <section class="prereg-section">
                 <p class="prereg-section-title">Seccion 3 - Datos legales</p>
+                <div x-show="itemActivo?.origen_flujo === 'contratacion' && itemActivo?.estado === 'Pendiente Correo Silver'" class="mb-4 rounded-2xl border border-purple-200 bg-purple-50 p-4 text-sm text-purple-900" style="display: none;">
+                    Talento Humano ya guardo esta revision. El correo se completara automaticamente desde Microsoft o, si eso falla, lo registrara el solicitante original.
+                </div>
                 <div class="prereg-form-grid" :class="{ 'opacity-70': !seccion3Editable }">
                     <input class="prereg-input md:col-span-2" x-model="formS3.direccion" :disabled="!seccion3Editable" placeholder="Direccion completa *">
                     <select class="prereg-input" x-model="formS3.tipo_persona" :disabled="!seccion3Editable">

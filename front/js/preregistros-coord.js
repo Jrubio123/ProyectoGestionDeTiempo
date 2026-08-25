@@ -67,6 +67,11 @@ window.preregistrosCoordApp = function () {
         detalleOpen: false,
         tipoModal: "Nuevo",
         detalle: null,
+        modalCorreoSilver: false,
+        solicitudCorreoSilver: null,
+        correoSilver: "",
+        guardandoCorreoSilver: false,
+        errorCorreoSilver: "",
 
         modoEdicion: false,
         solicitudEditId: null,
@@ -1164,6 +1169,74 @@ window.preregistrosCoordApp = function () {
             );
         },
 
+        puedeAsignarCorreoSilver(item) {
+            if (!item || item.tipo_solicitud !== "Nuevo" || item.crear_usuario_sistema === false) return false;
+            if (item.estado !== "Pendiente Correo Silver") return false;
+            const roleKey = window.auth?.getRoleKey?.() || "other";
+            const currentUserId = String(window.auth?.getUser?.()?.id || "").trim();
+            const ownerId = String(item?.coordinador?.id || "").trim();
+            return roleKey === "admin" || (
+                ["coordinador", "comercial"].includes(roleKey) &&
+                currentUserId && ownerId && currentUserId === ownerId
+            );
+        },
+
+        abrirModalCorreoSilver(item) {
+            if (!this.puedeAsignarCorreoSilver(item)) return;
+            this.solicitudCorreoSilver = { ...item };
+            this.correoSilver = String(item?.correo_empresarial || "").trim().toLowerCase();
+            this.errorCorreoSilver = "";
+            this.modalCorreoSilver = true;
+        },
+
+        cerrarModalCorreoSilver() {
+            if (this.guardandoCorreoSilver) return;
+            this.modalCorreoSilver = false;
+            this.solicitudCorreoSilver = null;
+            this.correoSilver = "";
+            this.errorCorreoSilver = "";
+        },
+
+        async guardarCorreoSilver() {
+            if (!this.solicitudCorreoSilver?.id || this.guardandoCorreoSilver) return;
+            const correo = String(this.correoSilver || "").trim().toLowerCase();
+            if (!/^[^\s@]+@silverconsulting\.com\.co$/i.test(correo)) {
+                this.errorCorreoSilver = "Ingresa un correo valido del dominio @silverconsulting.com.co.";
+                return;
+            }
+
+            this.guardandoCorreoSilver = true;
+            this.errorCorreoSilver = "";
+            try {
+                await axios.patch(
+                    `${API}/contrataciones/solicitudes/${this.solicitudCorreoSilver.id}/correo-silver`,
+                    { correo_silver: correo },
+                    this.getAuthConfig()
+                );
+                await this.cargarSolicitudes();
+                if (this.detalle?.id === this.solicitudCorreoSilver.id) {
+                    this.detalle = this.solicitudes.find((item) => item.id === this.solicitudCorreoSilver.id) || this.detalle;
+                }
+                this.guardandoCorreoSilver = false;
+                this.cerrarModalCorreoSilver();
+                alert("Correo Silver registrado. La contratacion fue completada.");
+            } catch (e) {
+                if ([409, 422].includes(Number(e?.response?.status || 0))) {
+                    await this.cargarSolicitudes();
+                    const actualizado = this.solicitudes.find((item) => item.id === this.solicitudCorreoSilver?.id) || null;
+                    if (actualizado?.estado === "Completado") {
+                        this.guardandoCorreoSilver = false;
+                        this.cerrarModalCorreoSilver();
+                        alert("La contratacion ya fue completada automaticamente.");
+                        return;
+                    }
+                }
+                this.errorCorreoSilver = e?.response?.data?.error || "No se pudo registrar el correo Silver.";
+            } finally {
+                this.guardandoCorreoSilver = false;
+            }
+        },
+
         responsableContinuacion(item) {
             const requesterRole = this.normalizarTexto(
                 item?.coordinador?.rol ||
@@ -1201,6 +1274,7 @@ window.preregistrosCoordApp = function () {
             if (estado === "En Proceso") return "bg-blue-100 text-blue-700";
             if (estado === "Pendiente Coordinador") return "bg-slate-100 text-slate-700";
             if (estado === "Pendiente Comercial") return "bg-orange-100 text-orange-700";
+            if (estado === "Pendiente Correo Silver") return "bg-purple-100 text-purple-700";
             if (estado === "Pendiente") return "bg-slate-100 text-slate-700";
             return "bg-slate-100 text-slate-600";
         },

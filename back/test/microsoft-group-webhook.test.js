@@ -235,7 +235,7 @@ test("completa Pendiente Correo Silver y vincula persona, usuario y preregistro"
   assert.equal(calls.at(-1), "COMMIT");
 });
 
-test("registra la identidad sin completar si TH todavía no llegó a Pendiente Correo Silver", async () => {
+test("registra la identidad sin completar si TH todavia no llego a Pendiente Correo Silver", async () => {
   const calls = [];
   const pending = {
     id: 7,

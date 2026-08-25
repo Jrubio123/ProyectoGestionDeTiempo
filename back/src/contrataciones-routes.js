@@ -15,6 +15,7 @@ module.exports = function registerContratacionesRoutes(deps) {
     getGraphContext,
     sendEmailSafe,
     buildEmailLayout,
+    buildPortalUrl,
     ensurePersistedAnexoFromProceso,
     resolveTalentoHumanoNotificationRecipients
   } = deps;
@@ -1662,6 +1663,32 @@ module.exports = function registerContratacionesRoutes(deps) {
     };
   }
 
+  function buildMailCorreoSilverPendiente(solicitud) {
+    const nombre = `${solicitud?.nombre || ""} ${solicitud?.apellidos || ""}`.trim() || "la persona contratada";
+    const portalUrl = typeof buildPortalUrl === "function" ? buildPortalUrl("preregistrosCoord") : "#";
+    const blocks = [
+      { label: "Persona", value: nombre },
+      { label: "Documento", value: solicitud?.numero_documento || "N/A" },
+      { label: "Estado", value: ESTADOS.pendienteCorreoSilver }
+    ];
+    return {
+      subject: `Accion pendiente: registrar correo Silver de ${nombre}`,
+      text:
+        `Talento Humano ya completo la revision de ${nombre}.\n` +
+        "El sistema intentara registrar el correo automaticamente. Si el caso continua pendiente cuando Mesa de Ayuda te lo informe o reenvie, ingresalo en la plataforma para finalizar la contratacion.\n\n" +
+        blocks.map((item) => `${item.label}: ${item.value}`).join("\n") +
+        `\n\nAbrir contrataciones: ${portalUrl}`,
+      html: buildEmailLayout({
+        title: "Correo Silver pendiente",
+        intro:
+          "Talento Humano ya completo su revision. El sistema intentara registrar el correo automaticamente; si el caso continua pendiente cuando Mesa de Ayuda te lo informe o reenvie, registralo en la plataforma para finalizar la contratacion.",
+        blocks,
+        ctaLabel: "Registrar correo Silver",
+        ctaUrl: portalUrl
+      })
+    };
+  }
+
   async function sendMail(graphContext, recipients, content) {
     const to = Array.isArray(recipients) ? recipients.join(",") : String(recipients || "").trim();
     if (!to) return { ok: false, skipped: true };
@@ -3145,12 +3172,20 @@ module.exports = function registerContratacionesRoutes(deps) {
             error: "El correo Silver debe pertenecer al dominio @silverconsulting.com.co"
           });
         }
+        if (row.estado === ESTADOS.pendienteCorreoSilver && correoSilver) {
+          return res.status(422).json({
+            error: "El correo Silver debe registrarlo el solicitante original desde su bandeja de contrataciones"
+          });
+        }
 
         const bancoPublicId = await resolveBancoPublicId(client, bancoId);
         const debeCrearUsuario = row.crear_usuario_sistema !== false;
         const nextEstado = correoSilver || !debeCrearUsuario
           ? ESTADOS.pendienteRevisionTh
           : ESTADOS.pendienteCorreoSilver;
+        const debeNotificarCorreoSilver =
+          nextEstado === ESTADOS.pendienteCorreoSilver &&
+          row.estado !== ESTADOS.pendienteCorreoSilver;
 
         // Guarda datos bancarios en datos_extra y correo silver en correo_empresarial
         await client.query("BEGIN");
@@ -3162,6 +3197,8 @@ module.exports = function registerContratacionesRoutes(deps) {
             correo_empresarial = COALESCE($1, correo_empresarial),
             datos_extra        = datos_extra || $2::jsonb,
             estado             = $3,
+            revisado_th_por    = COALESCE(revisado_th_por, $5),
+            fecha_revision_th  = COALESCE(fecha_revision_th, NOW()),
             updated_at         = NOW()
           WHERE id = $4
           `,
@@ -3181,7 +3218,8 @@ module.exports = function registerContratacionesRoutes(deps) {
               numero_documento_representante: numeroDocumentoRepresentante
             }),
             nextEstado,
-            internalId
+            internalId,
+            req.user?.id || null
           ]
         );
 
@@ -3194,6 +3232,17 @@ module.exports = function registerContratacionesRoutes(deps) {
         await client.query("COMMIT");
         transactionStarted = false;
         const updated = await syncAnexoDesdeSolicitud(internalId, req.user?.id);
+        if (debeNotificarCorreoSilver && row.coordinador_email) {
+          try {
+            await sendMail(
+              getGraphContext(req),
+              row.coordinador_email,
+              buildMailCorreoSilverPendiente(formatRow(updated))
+            );
+          } catch (mailErr) {
+            console.error("No se pudo notificar correo Silver pendiente al solicitante:", mailErr?.message || mailErr);
+          }
+        }
         return res.json(formatRow(updated));
       } catch (err) {
         if (transactionStarted) {
@@ -3215,19 +3264,18 @@ module.exports = function registerContratacionesRoutes(deps) {
     }
   );
 
-  app.patch(
-    "/contrataciones/solicitudes/:id/revision-th",
-    requireAccess({ roles: ["Administrador", "Talento Humano"] }),
-    async (req, res) => {
+  async function procesarRevisionTh(req, res) {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
 
-        const row = await getByPublicId(client, req.params.id);
-        if (!row) {
+        const initialRow = await getByPublicId(client, req.params.id);
+        if (!initialRow) {
           await client.query("ROLLBACK");
           return res.status(404).json({ error: "Solicitud no encontrada" });
         }
+        await client.query("SELECT id FROM solicitudes_contratacion WHERE id = $1 FOR UPDATE", [initialRow.id]);
+        const row = await getByInternalId(client, initialRow.id);
         const internalId = row.id;
 
         if (row.tipo_solicitud !== TIPO_NUEVO) {
@@ -3240,8 +3288,14 @@ module.exports = function registerContratacionesRoutes(deps) {
             error: `La solicitud debe estar en '${ESTADOS.pendienteRevisionTh}' o '${ESTADOS.pendienteCorreoSilver}' para ser revisada por TH`
           });
         }
+        if (row.estado === ESTADOS.pendienteCorreoSilver && !req.correoSilverSolicitante) {
+          await client.query("ROLLBACK");
+          return res.status(422).json({
+            error: "El correo Silver esta pendiente de registro por parte del solicitante original"
+          });
+        }
         const debeCrearUsuario = row.crear_usuario_sistema !== false;
-        const correoSilver = String(row.correo_empresarial || "").trim().toLowerCase();
+        const correoSilver = String(req.correoSilverSolicitante || row.correo_empresarial || "").trim().toLowerCase();
         if (debeCrearUsuario) {
           if (!correoSilver) {
             await client.query("ROLLBACK");
@@ -3365,57 +3419,128 @@ module.exports = function registerContratacionesRoutes(deps) {
             repLegalContrat,
             tipoDocRepContrat,
             numDocRepContrat,
-            req.user?.id || null
+            req.correoSilverSolicitante ? (row.revisado_th_por || null) : (req.user?.id || null)
           ]
         );
         const personaIdContrat = personaResContrat.rows[0]?.id || null;
+        if (debeCrearUsuario && personaIdContrat) {
+          const personaCorreoDuplicado = await client.query(
+            `SELECT id
+             FROM personas
+             WHERE LOWER(BTRIM(correo_silver)) = LOWER(BTRIM($1))
+               AND id <> $2
+             LIMIT 1`,
+            [correoSilver, personaIdContrat]
+          );
+          if (personaCorreoDuplicado.rows.length) {
+            await client.query("ROLLBACK");
+            return res.status(409).json({ error: "El correo Silver ya pertenece a otra persona" });
+          }
+          await client.query(
+            `UPDATE personas
+             SET correo_silver = $1, updated_at = NOW()
+             WHERE id = $2`,
+            [correoSilver, personaIdContrat]
+          );
+        }
         // ────────────────────────────────────────────────────────────────────
 
         if (debeCrearUsuario) {
           if (!personaUsuarioId) {
-          const dup = await client.query(`SELECT id FROM usuarios WHERE LOWER(email) = LOWER($1) LIMIT 1`, [correoSilver]);
-          if (dup.rows.length > 0) {
-            await client.query("ROLLBACK");
-            return res.status(409).json({ error: "Ya existe un usuario con ese correo Silver" });
-          }
+            const usuarioExistenteRes = await client.query(
+              `SELECT id, public_id, nombre_usuario, email, persona_id
+               FROM usuarios
+               WHERE LOWER(BTRIM(email)) = LOWER(BTRIM($1))
+               LIMIT 1
+               FOR UPDATE`,
+              [correoSilver]
+            );
+            const usuarioExistente = usuarioExistenteRes.rows[0] || null;
+            if (
+              usuarioExistente?.persona_id &&
+              personaIdContrat &&
+              Number(usuarioExistente.persona_id) !== Number(personaIdContrat)
+            ) {
+              await client.query("ROLLBACK");
+              return res.status(409).json({ error: "El correo Silver ya pertenece a otra persona" });
+            }
 
-          const rolRes = await client.query(`SELECT id FROM roles WHERE LOWER(titulo) = LOWER('Consultor') LIMIT 1`);
-          const rolId = rolRes.rows[0]?.id || null;
-          if (!rolId) {
-            await client.query("ROLLBACK");
-            return res.status(500).json({ error: "No existe el rol Consultor" });
-          }
+            const nombreCompleto = `${row.nombre || ""} ${row.apellidos || ""}`.trim();
+            const moneda = normalizeMoneda(row.moneda) || "COP";
+            if (usuarioExistente) {
+              const usuarioRes = await client.query(
+                `UPDATE usuarios
+                 SET activo = true,
+                     persona_id = COALESCE(persona_id, $1),
+                     nro_cuenta_bancaria = COALESCE(nro_cuenta_bancaria, $2),
+                     banco_id = COALESCE(banco_id, $3),
+                     tipo_cuenta_id = COALESCE(tipo_cuenta_id, $4),
+                     tipo_documento_id = COALESCE(tipo_documento_id, $5),
+                     cedula = COALESCE(cedula, $6),
+                     direccion = COALESCE(direccion, $7),
+                     telefono = COALESCE(telefono, $8),
+                     ciudad = COALESCE(ciudad, $9),
+                     tipo_persona = COALESCE(tipo_persona, $10::tipo_persona),
+                     moneda_cobro = COALESCE(moneda_cobro, $11::tipo_moneda),
+                     factura_en_colombia = COALESCE(factura_en_colombia, $12),
+                     updated_at = NOW()
+                 WHERE id = $13
+                 RETURNING id, public_id, nombre_usuario, email`,
+                [
+                  personaIdContrat,
+                  numeroCuenta,
+                  bancoId,
+                  tipoCuenta.id,
+                  row.tipo_documento_id || null,
+                  row.numero_documento || null,
+                  direccion,
+                  row.telefono || null,
+                  row.ubicacion || null,
+                  tipoPersona,
+                  moneda,
+                  facturaEnColombia,
+                  usuarioExistente.id
+                ]
+              );
+              personaUsuarioId = usuarioRes.rows[0]?.id || null;
+            } else {
+              const rolRes = await client.query(`SELECT id FROM roles WHERE LOWER(titulo) = LOWER('Consultor') LIMIT 1`);
+              const rolId = rolRes.rows[0]?.id || null;
+              if (!rolId) {
+                await client.query("ROLLBACK");
+                return res.status(500).json({ error: "No existe el rol Consultor" });
+              }
 
-          const nombreCompleto = `${row.nombre || ""} ${row.apellidos || ""}`.trim();
-          const moneda = normalizeMoneda(row.moneda) || "COP";
-          const usuarioRes = await client.query(
-            `INSERT INTO usuarios
-              (nombre_usuario, email, rol_usuario_id, activo, nro_cuenta_bancaria, banco_id, tipo_cuenta_id, tipo_documento_id, cedula, direccion, telefono, ciudad, tipo_persona, moneda_cobro, factura_en_colombia, persona_id, created_by, azure_oid)
-             VALUES
-              ($1, $2, $3, true, $4, $5, $6, $7, $8, $9, $10, $11, $12::tipo_persona, $13::tipo_moneda, $14, $15, 'contratacion_th', NULL)
-             RETURNING id, public_id, nombre_usuario, email`,
-            [
-              nombreCompleto || correoSilver,
-              correoSilver,
-              rolId,
-              numeroCuenta,
-              bancoId,
-              tipoCuenta.id,
-              row.tipo_documento_id || null,
-              row.numero_documento || null,
-              direccion,
-              row.telefono || null,
-              row.ubicacion || null,
-              tipoPersona,
-              moneda,
-              facturaEnColombia,
-              personaIdContrat
-            ]
-          );
+              const usuarioRes = await client.query(
+                `INSERT INTO usuarios
+                  (nombre_usuario, email, rol_usuario_id, activo, nro_cuenta_bancaria, banco_id, tipo_cuenta_id, tipo_documento_id, cedula, direccion, telefono, ciudad, tipo_persona, moneda_cobro, factura_en_colombia, persona_id, created_by, azure_oid)
+                 VALUES
+                  ($1, $2, $3, true, $4, $5, $6, $7, $8, $9, $10, $11, $12::tipo_persona, $13::tipo_moneda, $14, $15, $16, NULL)
+                 RETURNING id, public_id, nombre_usuario, email`,
+                [
+                  nombreCompleto || correoSilver,
+                  correoSilver,
+                  rolId,
+                  numeroCuenta,
+                  bancoId,
+                  tipoCuenta.id,
+                  row.tipo_documento_id || null,
+                  row.numero_documento || null,
+                  direccion,
+                  row.telefono || null,
+                  row.ubicacion || null,
+                  tipoPersona,
+                  moneda,
+                  facturaEnColombia,
+                  personaIdContrat,
+                  req.correoSilverSolicitante ? "contratacion_solicitante" : "contratacion_th"
+                ]
+              );
 
-          personaUsuarioId = usuarioRes.rows[0]?.id || null;
-          usuarioCreado = usuarioRes.rows[0] || null;
-        } else {
+              personaUsuarioId = usuarioRes.rows[0]?.id || null;
+              usuarioCreado = usuarioRes.rows[0] || null;
+            }
+          } else {
           // Persona ya tenía usuario: vincular persona_id si aún no está seteado
           if (personaIdContrat) {
             await client.query(
@@ -3423,10 +3548,14 @@ module.exports = function registerContratacionesRoutes(deps) {
               [personaIdContrat, personaUsuarioId]
             );
           }
-          }
+        }
         }
 
-        const observaciones = toNullableString(req.body?.observaciones_th);
+        const observaciones = toNullableString(req.body?.observaciones_th) || toNullableString(row.observaciones_th);
+        const actorRevisionTh = req.correoSilverSolicitante
+          ? (row.revisado_th_por || null)
+          : (req.user?.id || null);
+        const correoSilverOrigen = req.correoSilverSolicitante ? "solicitante" : "talento_humano";
 
         await client.query(
           `
@@ -3435,18 +3564,23 @@ module.exports = function registerContratacionesRoutes(deps) {
             estado                = $1,
             persona_usuario_id    = COALESCE($2, persona_usuario_id),
             correo_empresarial    = $3,
-            revisado_th_por       = $4,
-            fecha_revision_th     = NOW(),
+            revisado_th_por       = COALESCE(revisado_th_por, $4),
+            fecha_revision_th     = COALESCE(fecha_revision_th, NOW()),
             observaciones_th      = $5,
+            datos_extra           = COALESCE(datos_extra, '{}'::jsonb) || jsonb_build_object(
+              'correo_silver_origen', $7::text,
+              'correo_silver_registrado_por', $8::int,
+              'correo_silver_registrado_en', NOW()
+            ),
             updated_at            = NOW()
           WHERE id = $6
           `,
-          [ESTADOS.completado, personaUsuarioId, correoEmpresarialFinal, req.user?.id, observaciones, internalId]
+          [ESTADOS.completado, personaUsuarioId, correoEmpresarialFinal, actorRevisionTh, observaciones, internalId, correoSilverOrigen, req.user?.id || null]
         );
 
         const updatedSolicitud = await getByInternalId(client, internalId);
         await syncLinkedPreregistroFromSolicitud(client, updatedSolicitud, {
-          actorUserId: req.user?.id || null,
+          actorUserId: actorRevisionTh,
           markThCompletion: true,
           markApproval: true
         });
@@ -3477,6 +3611,42 @@ module.exports = function registerContratacionesRoutes(deps) {
         return res.status(500).json({ error: "Error procesando revision TH" });
       } finally {
         client.release();
+      }
+  }
+
+  app.patch(
+    "/contrataciones/solicitudes/:id/revision-th",
+    requireAccess({ roles: ["Administrador", "Talento Humano"] }),
+    procesarRevisionTh
+  );
+
+  app.patch(
+    "/contrataciones/solicitudes/:id/correo-silver",
+    requireAccess({ roles: ["Administrador", "Coordinador", "Comercial"] }),
+    async (req, res) => {
+      try {
+        const row = await getByPublicId(pool, req.params.id);
+        if (!row) return res.status(404).json({ error: "Solicitud no encontrada" });
+        if (!requireOwnerIfCoordinator(req, row)) {
+          return res.status(403).json({ error: "Solo el solicitante original puede registrar el correo Silver" });
+        }
+        if (row.tipo_solicitud !== TIPO_NUEVO || row.estado !== ESTADOS.pendienteCorreoSilver) {
+          return res.status(422).json({ error: "La solicitud no esta pendiente de correo Silver" });
+        }
+        if (row.crear_usuario_sistema === false) {
+          return res.status(422).json({ error: "Esta solicitud no requiere crear un usuario Silver" });
+        }
+
+        const correoSilver = String(req.body?.correo_silver || "").trim().toLowerCase();
+        if (!isValidSilverEmail(correoSilver)) {
+          return res.status(400).json({ error: "El correo Silver debe pertenecer al dominio @silverconsulting.com.co" });
+        }
+
+        req.correoSilverSolicitante = correoSilver;
+        return procesarRevisionTh(req, res);
+      } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: "Error registrando correo Silver" });
       }
     }
   );

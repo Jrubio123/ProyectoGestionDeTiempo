@@ -77,6 +77,7 @@
                                 <button type="button" @click="abrirDetalle(item)" class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">Ver</button>
                                 <button type="button" x-show="puedeContinuar(item)" @click="abrirModalDesdeSolicitud(item)" class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Continuar</button>
                                 <button type="button" x-show="puedeEnviarTH(item)" @click="enviarATH(item)" :disabled="enviandoTh" :class="enviandoTh ? 'opacity-60 cursor-not-allowed' : 'hover:bg-indigo-700'" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white" x-text="enviandoTh ? 'Enviando...' : 'Enviar a TH'"></button>
+                                <button type="button" x-show="puedeAsignarCorreoSilver(item)" @click="abrirModalCorreoSilver(item)" class="px-3 py-1.5 rounded-lg bg-purple-600 text-white hover:bg-purple-700">Asignar correo Silver</button>
                             </td>
                         </tr>
                     </template>
@@ -556,9 +557,48 @@
             <div class="flex justify-end gap-2 mt-4">
                 <button type="button" x-show="puedeContinuar(detalle)" @click="abrirModalDesdeSolicitud(detalle)" class="px-4 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700">Continuar flujo</button>
                 <button type="button" x-show="puedeEnviarTH(detalle)" @click="enviarATH(detalle)" :disabled="enviandoTh" :class="enviandoTh ? 'opacity-60 cursor-not-allowed' : 'hover:bg-indigo-700'" class="px-4 py-2 rounded-xl bg-indigo-600 text-white" x-text="enviandoTh ? 'Enviando...' : 'Enviar a TH'"></button>
+                <button type="button" x-show="puedeAsignarCorreoSilver(detalle)" @click="abrirModalCorreoSilver(detalle)" class="px-4 py-2 rounded-xl bg-purple-600 text-white hover:bg-purple-700">Asignar correo Silver</button>
                 <button type="button" @click="cerrarDetalle" class="px-4 py-2 rounded-xl border border-slate-200 text-slate-700">Cerrar</button>
             </div>
             </div><!-- fin scroll body detalle -->
+        </div>
+    </div>
+
+    <div x-show="modalCorreoSilver" class="view-overlay bg-white/30 backdrop-blur-md" style="display: none;">
+        <div class="w-11/12 max-w-lg bg-white rounded-3xl border border-slate-200 shadow-2xl p-6">
+            <div class="flex items-start justify-between gap-4">
+                <div>
+                    <h3 class="text-xl font-bold text-slate-900">Asignar correo Silver</h3>
+                    <p class="text-sm text-slate-600 mt-1">
+                        Si el sistema no lo registro automaticamente, ingresa el correo que te envio Mesa de Ayuda para finalizar la contratacion.
+                    </p>
+                </div>
+                <button type="button" @click="cerrarModalCorreoSilver" :disabled="guardandoCorreoSilver" class="px-3 py-2 rounded-xl border border-slate-200 text-slate-700">Cerrar</button>
+            </div>
+
+            <div class="mt-5 rounded-2xl bg-purple-50 border border-purple-100 p-4">
+                <p class="text-xs uppercase tracking-wide font-bold text-purple-700">Persona</p>
+                <p class="font-semibold text-slate-900 mt-1" x-text="`${solicitudCorreoSilver?.nombre || ''} ${solicitudCorreoSilver?.apellidos || ''}`.trim() || '-' "></p>
+                <p class="text-xs text-slate-600 mt-1" x-text="solicitudCorreoSilver?.numero_documento || 'Sin documento'"></p>
+            </div>
+
+            <label class="block mt-5">
+                <span class="text-sm font-semibold text-slate-700">Correo empresarial</span>
+                <input
+                    type="email"
+                    x-model="correoSilver"
+                    @keydown.enter.prevent="guardarCorreoSilver"
+                    placeholder="nombre@silverconsulting.com.co"
+                    autocomplete="off"
+                    class="mt-2 w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-purple-200"
+                >
+            </label>
+            <p x-show="errorCorreoSilver" x-text="errorCorreoSilver" class="mt-2 text-sm text-rose-600" style="display: none;"></p>
+
+            <div class="flex justify-end gap-2 mt-6">
+                <button type="button" @click="cerrarModalCorreoSilver" :disabled="guardandoCorreoSilver" class="px-4 py-2 rounded-xl border border-slate-200 text-slate-700">Cancelar</button>
+                <button type="button" @click="guardarCorreoSilver" :disabled="guardandoCorreoSilver" :class="guardandoCorreoSilver ? 'opacity-60 cursor-not-allowed' : 'hover:bg-purple-700'" class="px-4 py-2 rounded-xl bg-purple-600 text-white font-semibold" x-text="guardandoCorreoSilver ? 'Guardando...' : 'Guardar y completar'"></button>
+            </div>
         </div>
     </div>
 </div>

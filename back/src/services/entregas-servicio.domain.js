@@ -5,7 +5,6 @@ const TIPOS_SERVICIO = Object.freeze({
 });
 
 const PERFILES_CLIENTE = new Set(["CLAVE", "NO_CLAVE", "POR_DEFINIR"]);
-const MAX_PDF_BYTES = 8 * 1024 * 1024;
 
 class EntregaValidationError extends Error {
   constructor(message, field = null) {
@@ -126,43 +125,34 @@ function validateNewClient(client, tipoServicio) {
   };
 }
 
-function parsePdfDataUrl(value, fileName) {
-  const raw = text(value);
-  const match = raw.match(/^data:application\/pdf;base64,([A-Za-z0-9+/=\r\n]+)$/i);
-  if (!match) {
-    throw new EntregaValidationError(`${fileName || "El archivo"} debe ser un PDF válido.`, "documentos");
-  }
-  const buffer = Buffer.from(match[1].replace(/\s+/g, ""), "base64");
-  if (!buffer.length || buffer.slice(0, 4).toString("utf8") !== "%PDF") {
-    throw new EntregaValidationError(`${fileName || "El archivo"} no contiene un PDF válido.`, "documentos");
-  }
-  if (buffer.length > MAX_PDF_BYTES) {
-    throw new EntregaValidationError(`${fileName || "El archivo"} supera el máximo de 8 MB.`, "documentos");
-  }
-  return buffer;
-}
+function validateLinks(payload, tipoServicio) {
+  const rawLinks = Array.isArray(payload?.enlaces) ? [...payload.enlaces] : [];
 
-function validateDocuments(payload, tipoServicio) {
-  const files = (Array.isArray(payload?.documentos) ? payload.documentos : []).map((item, index) => {
-    const nombre = requiredText(item?.nombre, "El archivo debe tener nombre.", `documentos.${index}.nombre`);
-    if (!/\.pdf$/i.test(nombre)) {
-      throw new EntregaValidationError(`${nombre} debe tener extensión PDF.`, "documentos");
+  const seen = new Set();
+  const links = [];
+  for (const [index, item] of rawLinks.entries()) {
+    const titulo = text(item?.titulo);
+    const rawUrl = text(item?.url);
+    if (!titulo && !rawUrl) continue;
+    const url = requiredText(rawUrl, "El enlace comercial es obligatorio.", `enlaces.${index}.url`);
+    if (!isHttpUrl(url)) {
+      throw new EntregaValidationError("El enlace comercial no es válido.", `enlaces.${index}.url`);
     }
-    return { nombre, buffer: parsePdfDataUrl(item?.base64, nombre) };
-  });
-
-  const propuestaUrl = text(payload?.propuesta_url);
-  if (propuestaUrl && !isHttpUrl(propuestaUrl)) {
-    throw new EntregaValidationError("El enlace de la propuesta no es válido.", "propuesta_url");
+    if (seen.has(url)) continue;
+    seen.add(url);
+    links.push({
+      titulo: titulo || `Enlace comercial ${links.length + 1}`,
+      url
+    });
   }
+
   if (
     [TIPOS_SERVICIO.PROYECTO, TIPOS_SERVICIO.MESA_SERVICIO].includes(tipoServicio)
-    && files.length === 0
-    && !propuestaUrl
+    && links.length === 0
   ) {
-    throw new EntregaValidationError("Adjunta la propuesta comercial o registra su enlace.", "documentos");
+    throw new EntregaValidationError("Registra al menos un enlace comercial.", "enlaces");
   }
-  return { files, propuestaUrl: propuestaUrl || null };
+  return links;
 }
 
 function validateDetail(payload, tipoServicio) {
@@ -231,7 +221,7 @@ function validateEntregaPayload(payload = {}) {
   const detail = validateDetail(payload, tipoServicio);
   const contactoId = text(payload.contacto_id) || null;
   const contactoNuevo = contactoId || clienteNuevo ? null : validateContact(payload.contacto_nuevo, tipoServicio);
-  const documents = validateDocuments(payload, tipoServicio);
+  const links = validateLinks(payload, tipoServicio);
 
   return {
     tipo_servicio: tipoServicio,
@@ -255,17 +245,14 @@ function validateEntregaPayload(payload = {}) {
     contacto_id: contactoId,
     contacto_nuevo: contactoNuevo,
     detalle: detail,
-    documentos: documents.files,
-    propuesta_url: documents.propuestaUrl
+    enlaces: links
   };
 }
 
 module.exports = {
   EntregaValidationError,
-  MAX_PDF_BYTES,
   TIPOS_SERVICIO,
   normalizeNit,
   normalizeTipoServicio,
-  parsePdfDataUrl,
   validateEntregaPayload
 };

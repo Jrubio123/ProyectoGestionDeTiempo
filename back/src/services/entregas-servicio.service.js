@@ -5,7 +5,6 @@ const {
   TIPOS_SERVICIO,
   validateEntregaPayload
 } = require("./entregas-servicio.domain");
-const { uploadEntregaPdf } = require("./entregas-servicio.graph");
 
 const ALLOWED_ROLES = ["Administrador", "Coordinador", "Comercial"];
 const STATUS_TRANSITIONS = Object.freeze({
@@ -35,9 +34,6 @@ function handleError(res, error, context) {
   }
   if (error?.code === "23505") {
     return res.status(409).json({ error: "Ya existe un registro con los mismos datos." });
-  }
-  if (error?.code === "ONEDRIVE_NOT_CONFIGURED") {
-    return res.status(503).json({ error: error.message });
   }
   console.error(`[entregas-servicio] ${context}:`, error);
   return res.status(500).json({ error: `No se pudo ${context}.` });
@@ -96,14 +92,12 @@ const DELIVERY_SELECT = `
     COALESCE((
       SELECT json_agg(json_build_object(
         'id', d.public_id::text,
-        'origen', d.origen,
-        'nombre', d.nombre_archivo,
-        'url', d.web_url,
-        'estado', d.estado_carga
+        'titulo', d.titulo,
+        'url', d.url
       ) ORDER BY d.created_at)
-      FROM entregas_servicio_documentos d
+      FROM entregas_servicio_enlaces d
       WHERE d.entrega_servicio_id = e.id
-    ), '[]'::json) AS documentos,
+    ), '[]'::json) AS enlaces,
     COALESCE((
       SELECT json_build_object(
         'id', cc.public_id::text,
@@ -484,8 +478,8 @@ function buildNotificationContent(delivery) {
     return item.telefono ? `${name} (${item.telefono})` : name;
   }).join(", ") || "Sin asignar";
   const modules = delivery.modulos.map((item) => item.titulo).concat(delivery.modulos_otros).join(", ");
-  const documents = delivery.documentos.map((item) => (
-    `<li><a href="${escapeHtml(item.web_url)}" target="_blank" rel="noopener">${escapeHtml(item.nombre_archivo || "Abrir propuesta")}</a></li>`
+  const links = delivery.enlaces.map((item) => (
+    `<li><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">${escapeHtml(item.titulo || "Abrir enlace")}</a></li>`
   )).join("");
   const url = portalUrl();
   return {
@@ -497,7 +491,7 @@ function buildNotificationContent(delivery) {
       `Módulos: ${modules}`,
       `Consultores: ${consultants}`,
       `Creado por: ${delivery.creador.nombre_usuario}`,
-      ...delivery.documentos.map((item) => `Documento: ${item.web_url}`),
+      ...delivery.enlaces.map((item) => `Enlace: ${item.url}`),
       url ? `Portal: ${url}` : ""
     ].filter(Boolean).join("\n"),
     html: `
@@ -511,7 +505,7 @@ function buildNotificationContent(delivery) {
           <tr><td style="padding:7px;border-bottom:1px solid #e2e8f0"><strong>Consultores</strong></td><td style="padding:7px;border-bottom:1px solid #e2e8f0">${escapeHtml(consultants)}</td></tr>
           <tr><td style="padding:7px"><strong>Entregado por</strong></td><td style="padding:7px">${escapeHtml(delivery.creador.nombre_usuario)}</td></tr>
         </table>
-        ${documents ? `<h3 style="margin:20px 0 8px">Documentos</h3><ul>${documents}</ul>` : ""}
+        ${links ? `<h3 style="margin:20px 0 8px">Enlaces comerciales</h3><ul>${links}</ul>` : ""}
         ${url ? `<p style="margin-top:20px"><a href="${escapeHtml(url)}" style="background:#2563eb;color:#fff;text-decoration:none;padding:10px 16px;border-radius:6px">Ver entrega</a></p>` : ""}
       </div>
     `
@@ -614,37 +608,15 @@ async function createDelivery(req, res) {
       `, [delivery.id, moduleName]);
     }
 
-    const documentRows = [];
-    if (payload.propuesta_url) {
+    const linkRows = [];
+    for (const link of payload.enlaces) {
       const result = await client.query(`
-        INSERT INTO entregas_servicio_documentos
-          (entrega_servicio_id, origen, nombre_archivo, web_url, estado_carga)
-        VALUES ($1, 'LINK_EXTERNO', 'Propuesta comercial', $2, 'DISPONIBLE')
-        RETURNING nombre_archivo, web_url, graph_drive_id, graph_item_id
-      `, [delivery.id, payload.propuesta_url]);
-      documentRows.push(result.rows[0]);
-    }
-    for (const file of payload.documentos) {
-      const uploaded = await uploadEntregaPdf({
-        cliente: cliente.titulo,
-        tipoServicio: payload.tipo_servicio,
-        nombreServicio: payload.nombre_servicio,
-        entregaPublicId: delivery.public_id,
-        file
-      });
-      const result = await client.query(`
-        INSERT INTO entregas_servicio_documentos
-          (entrega_servicio_id, origen, nombre_archivo, web_url, graph_drive_id, graph_item_id, estado_carga)
-        VALUES ($1, 'ONEDRIVE', $2, $3, $4, $5, 'DISPONIBLE')
-        RETURNING nombre_archivo, web_url, graph_drive_id, graph_item_id
-      `, [
-        delivery.id,
-        uploaded.nombre_archivo,
-        uploaded.web_url,
-        uploaded.graph_drive_id,
-        uploaded.graph_item_id
-      ]);
-      documentRows.push(result.rows[0]);
+        INSERT INTO entregas_servicio_enlaces
+          (entrega_servicio_id, titulo, url)
+        VALUES ($1, $2, $3)
+        RETURNING public_id::text AS id, titulo, url
+      `, [delivery.id, link.titulo, link.url]);
+      linkRows.push(result.rows[0]);
     }
 
     const bcc = await getAdminBcc(client, coordinator);
@@ -673,7 +645,7 @@ async function createDelivery(req, res) {
         ],
         modulos: modules,
         modulos_otros: payload.modulos_otros,
-        documentos: documentRows,
+        enlaces: linkRows,
         bcc
       },
       notificationId: notification.rows[0].id,
@@ -724,9 +696,9 @@ async function getNotificationContext(req, publicId) {
         WHERE em.entrega_servicio_id = e.id
       ), '[]'::json) AS modulos,
       COALESCE((
-        SELECT json_agg(json_build_object('nombre_archivo', d.nombre_archivo, 'web_url', d.web_url))
-        FROM entregas_servicio_documentos d WHERE d.entrega_servicio_id = e.id
-      ), '[]'::json) AS documentos
+        SELECT json_agg(json_build_object('titulo', d.titulo, 'url', d.url) ORDER BY d.created_at)
+        FROM entregas_servicio_enlaces d WHERE d.entrega_servicio_id = e.id
+      ), '[]'::json) AS enlaces
     FROM entregas_servicio e
     JOIN clientes c ON c.id = e.cliente_id
     JOIN usuarios coord ON coord.id = e.coordinador_asignado_id
@@ -764,7 +736,7 @@ async function retryNotification(req, res) {
         consultores: row.consultores || [],
         modulos: row.modulos || [],
         modulos_otros: [],
-        documentos: row.documentos || [],
+        enlaces: row.enlaces || [],
         bcc: bccResult.rows.map((item) => item.email)
       },
       notificationId: row.notificacion_id,

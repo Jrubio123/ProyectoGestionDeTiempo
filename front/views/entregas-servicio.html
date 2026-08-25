@@ -190,23 +190,24 @@
             </div>
         </section>
 
-        <section x-show="requierePropuesta" class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 class="text-lg font-semibold text-slate-900">6. Propuesta comercial *</h2>
-            <p class="mt-1 text-sm text-slate-500">Adjunta el PDF o pega el enlace donde ya se encuentra almacenado.</p>
-            <div class="mt-4 grid gap-4 lg:grid-cols-2">
+        <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <label class="mb-1 block text-sm font-medium text-slate-700">Archivo PDF</label>
-                    <input x-ref="propuestaPdf" @change="seleccionarPdf($event)" type="file" accept="application/pdf,.pdf" class="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-blue-700">
-                    <div x-show="form.documentos.length" class="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                        <span x-text="form.documentos[0]?.nombre"></span>
-                        <button type="button" @click="quitarPdf()" class="float-right font-semibold text-red-600">Quitar</button>
-                    </div>
-                    <p class="mt-1 text-xs text-slate-400">Máximo 8 MB.</p>
+                    <h2 class="text-lg font-semibold text-slate-900">6. Enlaces comerciales <span x-show="requierePropuesta">*</span></h2>
+                    <p class="mt-1 text-sm text-slate-500">Agrega enlaces a propuestas o carpetas comerciales. Puedes registrar varios.</p>
                 </div>
-                <label class="block">
-                    <span class="mb-1 block text-sm font-medium text-slate-700">O enlace existente</span>
-                    <input x-model="form.propuesta_url" type="url" placeholder="https://..." class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
-                </label>
+                <button type="button" @click="agregarEnlace()" class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">+ Agregar enlace</button>
+            </div>
+            <div class="mt-4 space-y-3">
+                <template x-for="(enlace, index) in form.enlaces" :key="index">
+                    <div class="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-[minmax(0,0.7fr)_minmax(0,1.5fr)_auto]">
+                        <input x-model="enlace.titulo" type="text" placeholder="Descripción (ej. Propuesta comercial)" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                        <input x-model="enlace.url" type="url" required placeholder="https://..." class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                        <button type="button" @click="quitarEnlace(index)" class="rounded-lg px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50">Quitar</button>
+                    </div>
+                </template>
+                <p x-show="requierePropuesta && !enlacesRegistrados" class="text-sm text-amber-600">Agrega al menos un enlace comercial.</p>
+                <p x-show="!requierePropuesta && !enlacesRegistrados" class="text-sm text-slate-400">Opcional para Outsourcing.</p>
             </div>
         </section>
 
@@ -282,7 +283,7 @@
             <div class="mt-4"><h3 class="font-semibold text-slate-900">Consultores</h3><div class="mt-2 space-y-1"><template x-for="item in detalleSeleccionado?.consultores || []" :key="item.id"><p class="text-sm text-slate-600"><span x-text="item.nombre"></span><span x-show="item.tipo === 'EXTERNO'" class="ml-1 text-slate-400" x-text="`(no registrado · ${item.telefono})`"></span></p></template><p x-show="!(detalleSeleccionado?.consultores || []).length" class="text-sm text-slate-500">Sin asignar</p></div></div>
             <div class="mt-4"><h3 class="font-semibold text-slate-900">Adaptabilidad</h3><p class="mt-1 whitespace-pre-line text-sm text-slate-600" x-text="detalleSeleccionado?.analisis_adaptabilidad"></p></div>
             <div x-show="detalleSeleccionado?.acuerdos_comerciales" class="mt-4"><h3 class="font-semibold text-slate-900">Acuerdos comerciales</h3><p class="mt-1 whitespace-pre-line text-sm text-slate-600" x-text="detalleSeleccionado?.acuerdos_comerciales"></p></div>
-            <div class="mt-5"><h3 class="font-semibold text-slate-900">Documentos</h3><div class="mt-2 space-y-2"><template x-for="doc in detalleSeleccionado?.documentos || []" :key="doc.id || doc.url"><a :href="doc.url" target="_blank" rel="noopener" class="block rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700" x-text="doc.nombre || 'Abrir propuesta'"></a></template></div></div>
+            <div class="mt-5"><h3 class="font-semibold text-slate-900">Enlaces comerciales</h3><div class="mt-2 space-y-2"><template x-for="enlace in detalleSeleccionado?.enlaces || []" :key="enlace.id || enlace.url"><a :href="enlace.url" target="_blank" rel="noopener" class="block rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700" x-text="enlace.titulo || 'Abrir enlace'"></a></template><p x-show="!(detalleSeleccionado?.enlaces || []).length" class="text-sm text-slate-500">Sin enlaces registrados</p></div></div>
         </article>
     </div>
 </div>

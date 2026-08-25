@@ -25,7 +25,7 @@ function fillBase(app) {
 test("el formulario de proyecto valida los campos comerciales", () => {
   const app = createApp();
   fillBase(app);
-  app.form.propuesta_url = "https://empresa.com/propuesta.pdf";
+  app.form.enlaces = [{ titulo: "Propuesta", url: "https://empresa.com/propuesta.pdf" }];
   Object.assign(app.form.detalle, {
     nombre_proyecto: "Proyecto Uno",
     objeto_proyecto: "Implementación",
@@ -34,6 +34,25 @@ test("el formulario de proyecto valida los campos comerciales", () => {
     equipo_estimacion: "Equipo comercial",
     tarifas_consultoria: "100/h"
   });
+  assert.equal(app.formularioValido, true);
+});
+
+test("permite agregar varios enlaces y exige uno en proyecto", () => {
+  const app = createApp();
+  fillBase(app);
+  Object.assign(app.form.detalle, {
+    nombre_proyecto: "Proyecto Uno",
+    objeto_proyecto: "Implementación",
+    valor_total: 100,
+    forma_pago: "Contado",
+    equipo_estimacion: "Equipo comercial",
+    tarifas_consultoria: "100/h"
+  });
+  assert.equal(app.formularioValido, false);
+
+  app.form.enlaces[0] = { titulo: "Propuesta", url: "https://empresa.com/propuesta" };
+  app.agregarEnlace();
+  app.form.enlaces[1] = { titulo: "Carpeta", url: "https://empresa.com/carpeta" };
   assert.equal(app.formularioValido, true);
 });
 

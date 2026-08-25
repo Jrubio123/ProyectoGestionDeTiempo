@@ -30,8 +30,7 @@ window.entregasServicioApp = function () {
         consultores_externos: [],
         modulos_ids: [],
         modulos_otros_texto: "",
-        propuesta_url: "",
-        documentos: [],
+        enlaces: [{ titulo: "", url: "" }],
         detalle: emptyDetail()
     });
 
@@ -131,6 +130,21 @@ window.entregasServicioApp = function () {
                 String(item.nombre || "").trim() && String(item.telefono || "").trim()
             );
         },
+        get enlacesValidos() {
+            return this.form.enlaces.every((item) => {
+                const titulo = String(item.titulo || "").trim();
+                const url = String(item.url || "").trim();
+                if (!titulo && !url) return true;
+                try {
+                    return ["http:", "https:"].includes(new URL(url).protocol);
+                } catch (_) {
+                    return false;
+                }
+            });
+        },
+        get enlacesRegistrados() {
+            return this.form.enlaces.filter((item) => String(item.url || "").trim()).length;
+        },
         get formularioValido() {
             const base = Boolean(
                 (this.form.cliente_id || this.clienteNuevoPreparado) &&
@@ -139,10 +153,11 @@ window.entregasServicioApp = function () {
                 this.form.analisis_adaptabilidad.trim() &&
                 this.contactoValido &&
                 this.consultoresExternosValidos &&
+                this.enlacesValidos &&
                 (this.form.modulos_ids.length || this.modulosOtros.length)
             );
             if (!base) return false;
-            if (this.requierePropuesta && !this.form.propuesta_url.trim() && !this.form.documentos.length) return false;
+            if (this.requierePropuesta && !this.enlacesRegistrados) return false;
             const detail = this.form.detalle;
             if (this.form.tipo_servicio === "PROYECTO") {
                 return Boolean(
@@ -230,37 +245,11 @@ window.entregasServicioApp = function () {
         quitarConsultorExterno(index) {
             this.form.consultores_externos.splice(index, 1);
         },
-        async seleccionarPdf(event) {
-            const input = event?.target;
-            const file = input?.files?.[0];
-            this.form.documentos = [];
-            if (!file) return;
-            if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) {
-                this.error = "La propuesta debe ser un archivo PDF.";
-                input.value = "";
-                return;
-            }
-            if (file.size > 8 * 1024 * 1024) {
-                this.error = "La propuesta supera el máximo de 8 MB.";
-                input.value = "";
-                return;
-            }
-            try {
-                const base64 = await new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onload = () => resolve(String(reader.result || ""));
-                    reader.onerror = () => reject(reader.error || new Error("No se pudo leer el archivo."));
-                    reader.readAsDataURL(file);
-                });
-                this.form.documentos = [{ nombre: file.name, base64 }];
-                this.error = "";
-            } catch (_) {
-                this.error = "No se pudo leer el PDF seleccionado.";
-            }
+        agregarEnlace() {
+            this.form.enlaces.push({ titulo: "", url: "" });
         },
-        quitarPdf() {
-            this.form.documentos = [];
-            if (this.$refs?.propuestaPdf) this.$refs.propuestaPdf.value = "";
+        quitarEnlace(index) {
+            this.form.enlaces.splice(index, 1);
         },
         async guardarEntrega() {
             if (!this.formularioValido || this.guardando) {
@@ -280,14 +269,13 @@ window.entregasServicioApp = function () {
                 const response = await axios.post(`${API}/entregas-servicio`, payload);
                 const notification = response.data?.notificacion;
                 this.mensaje = notification?.estado === "ERROR"
-                    ? "Entrega registrada y archivo cargado. El correo quedó pendiente de reintento."
-                    : "Entrega registrada, propuesta almacenada y coordinador notificado.";
+                    ? "Entrega registrada. El correo quedó pendiente de reintento."
+                    : "Entrega registrada y coordinador notificado.";
                 this.form = emptyForm();
                 this.clienteNuevoPreparado = null;
                 this.contactos = [];
                 this.busquedaModulo = "";
                 this.busquedaConsultor = "";
-                if (this.$refs?.propuestaPdf) this.$refs.propuestaPdf.value = "";
                 await Promise.all([this.cargarCatalogos(), this.cargarEntregas()]);
                 this.tab = "historial";
             } catch (error) {

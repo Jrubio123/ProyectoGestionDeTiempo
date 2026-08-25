@@ -8,10 +8,6 @@ const {
   normalizeNit,
   validateEntregaPayload
 } = require("../src/services/entregas-servicio.domain");
-const {
-  encodeGraphPath,
-  sanitizePathSegment
-} = require("../src/services/entregas-servicio.graph");
 const { _private } = require("../src/services/entregas-servicio.service");
 
 function projectPayload() {
@@ -28,7 +24,9 @@ function projectPayload() {
     },
     consultores_ids: [],
     modulos_ids: ["modulo-public-id"],
-    propuesta_url: "https://empresa.sharepoint.com/propuesta.pdf",
+    enlaces: [
+      { titulo: "Propuesta comercial", url: "https://empresa.sharepoint.com/propuesta.pdf" }
+    ],
     detalle: {
       nombre_proyecto: "Implementación ERP",
       objeto_proyecto: "Implementar los módulos contratados.",
@@ -45,17 +43,19 @@ test("normaliza el NIT antes de persistirlo", () => {
   assert.equal(normalizeNit(" 900.123.456-7 "), "9001234567");
 });
 
-test("acepta una entrega de proyecto con enlace de propuesta", () => {
+test("acepta una entrega de proyecto con enlaces comerciales", () => {
   const payload = validateEntregaPayload(projectPayload());
   assert.equal(payload.tipo_servicio, "PROYECTO");
   assert.equal(payload.nombre_servicio, "Implementación ERP");
-  assert.equal(payload.propuesta_url, "https://empresa.sharepoint.com/propuesta.pdf");
+  assert.deepEqual(payload.enlaces, [
+    { titulo: "Propuesta comercial", url: "https://empresa.sharepoint.com/propuesta.pdf" }
+  ]);
 });
 
 test("exige consultor para outsourcing", () => {
   const payload = projectPayload();
   payload.tipo_servicio = "Outsorcing";
-  payload.propuesta_url = "";
+  payload.enlaces = [];
   payload.detalle = {
     tiempo_descripcion: "6 meses",
     tarifa: 5000000,
@@ -73,7 +73,7 @@ test("exige consultor para outsourcing", () => {
 test("acepta consultores informativos sin crear usuarios", () => {
   const payload = projectPayload();
   payload.tipo_servicio = "Outsourcing";
-  payload.propuesta_url = "";
+  payload.enlaces = [];
   payload.consultores_externos = [
     { nombre: "Consultor por vincular", telefono: "3001234567" },
     { nombre: "Segundo consultor", telefono: "3019876543" }
@@ -97,15 +97,19 @@ test("exige nombre y teléfono para consultores informativos", () => {
   assert.throws(() => validateEntregaPayload(payload), /teléfono del consultor no registrado/i);
 });
 
-test("exige propuesta comercial para proyecto y mesa", () => {
+test("exige un enlace comercial para proyecto y mesa", () => {
   const payload = projectPayload();
-  payload.propuesta_url = "";
-  assert.throws(() => validateEntregaPayload(payload), /Adjunta la propuesta comercial/i);
+  payload.enlaces = [];
+  assert.throws(() => validateEntregaPayload(payload), /al menos un enlace comercial/i);
 });
 
-test("sanitiza nombres y codifica rutas para OneDrive", () => {
-  assert.equal(sanitizePathSegment('Cliente: Norte/Sur?'), "Cliente- Norte-Sur-");
-  assert.equal(encodeGraphPath("EntregaDeServicios/Cliente Uno"), "EntregaDeServicios/Cliente%20Uno");
+test("acepta varios enlaces y rechaza protocolos no seguros", () => {
+  const payload = projectPayload();
+  payload.enlaces.push({ titulo: "Carpeta comercial", url: "https://empresa.sharepoint.com/carpeta" });
+  assert.equal(validateEntregaPayload(payload).enlaces.length, 2);
+
+  payload.enlaces[1].url = "ftp://empresa.com/carpeta";
+  assert.throws(() => validateEntregaPayload(payload), /enlace comercial no es válido/i);
 });
 
 test("la migración crea el núcleo relacional de entregas", () => {
@@ -135,6 +139,15 @@ test("la migración permite consultores informativos separados de usuarios", () 
   assert.match(migration, /ALTER COLUMN consultor_id DROP NOT NULL/);
 });
 
+test("la migración crea almacenamiento exclusivo para varios enlaces", () => {
+  const migration = fs.readFileSync(
+    path.resolve(__dirname, "../../db/migrations/2026-08-25-zz-entregas-enlaces.sql"),
+    "utf8"
+  );
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS entregas_servicio_enlaces/);
+  assert.match(migration, /UNIQUE \(entrega_servicio_id, url\)/);
+});
+
 test("limita la consulta según el rol operativo", () => {
   assert.deepEqual(
     _private.visibilitySql({ user: { rol: "Administrador", id: 1 } }),
@@ -157,4 +170,12 @@ test("la ruta de creación queda reservada para Comercial", () => {
   );
   assert.match(routeSource, /const CREATE = requireAccess\(\{ roles: \["Comercial"\] \}\)/);
   assert.doesNotMatch(routeSource, /const CREATE[^\n]+Administrador/);
+});
+
+test("el servicio no depende de cargas a OneDrive", () => {
+  const serviceSource = fs.readFileSync(
+    path.resolve(__dirname, "../src/services/entregas-servicio.service.js"),
+    "utf8"
+  );
+  assert.doesNotMatch(serviceSource, /uploadEntregaPdf|entregas-servicio\.graph/);
 });

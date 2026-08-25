@@ -173,16 +173,84 @@ async function executeGraphUserActionWithFallback(candidates, action) {
   throw new Error("No fue posible resolver el usuario en Entra ID");
 }
 
-async function getUserLicenseDetails(accessToken, userId) {
-  const encodedUser = encodeURIComponent(userId);
+let subscribedSkuCache = {
+  expiresAt: 0,
+  entries: []
+};
+
+async function getSubscribedSkuMap(accessToken) {
+  const now = Date.now();
+  if (subscribedSkuCache.entries.length && now < subscribedSkuCache.expiresAt) {
+    return new Map(subscribedSkuCache.entries);
+  }
+
   const data = await graphGet(
-    `/v1.0/users/${encodedUser}/licenseDetails?$select=skuId,skuPartNumber`,
+    "/v1.0/subscribedSkus?$select=skuId,skuPartNumber",
     accessToken
   );
-  return (data?.value || []).map((item) => ({
-    skuId: item?.skuId,
-    skuPartNumber: item?.skuPartNumber
-  }));
+  const entries = (data?.value || [])
+    .map((item) => [
+      String(item?.skuId || "").trim().toLowerCase(),
+      String(item?.skuPartNumber || "").trim() || null
+    ])
+    .filter(([skuId]) => skuId);
+
+  subscribedSkuCache = {
+    expiresAt: now + (5 * 60 * 1000),
+    entries
+  };
+  return new Map(entries);
+}
+
+function buildUserAssignedLicenses(userData, skuPartNumberById = new Map()) {
+  const statesBySku = new Map();
+  for (const item of userData?.licenseAssignmentStates || []) {
+    const skuId = String(item?.skuId || "").trim().toLowerCase();
+    if (!skuId) continue;
+    if (!statesBySku.has(skuId)) statesBySku.set(skuId, []);
+    statesBySku.get(skuId).push(item);
+  }
+
+  const assignedSkuIds = normalizeSkuIdList(
+    (userData?.assignedLicenses || []).map((item) => item?.skuId)
+  );
+
+  return assignedSkuIds.map((skuIdOriginal) => {
+    const skuId = String(skuIdOriginal).toLowerCase();
+    const states = statesBySku.get(skuId) || [];
+    const directStates = states.filter((item) => !item?.assignedByGroup);
+    const groupIds = [...new Set(
+      states.map((item) => String(item?.assignedByGroup || "").trim()).filter(Boolean)
+    )];
+    const stateValues = [...new Set(
+      states.map((item) => String(item?.state || "").trim()).filter(Boolean)
+    )];
+
+    let assignmentType = "directa";
+    if (directStates.length && groupIds.length) assignmentType = "mixta";
+    else if (!directStates.length && groupIds.length) assignmentType = "grupo";
+
+    return {
+      skuId: skuIdOriginal,
+      skuPartNumber: skuPartNumberById.get(skuId) || null,
+      assignmentType,
+      removable: directStates.length > 0 || states.length === 0,
+      groupIds,
+      states: stateValues.length ? stateValues : ["Active"]
+    };
+  });
+}
+
+async function getUserAssignedLicenses(accessToken, userId) {
+  const encodedUser = encodeURIComponent(userId);
+  const [userData, skuPartNumberById] = await Promise.all([
+    graphGet(
+      `/v1.0/users/${encodedUser}?$select=id,assignedLicenses,licenseAssignmentStates`,
+      accessToken
+    ),
+    getSubscribedSkuMap(accessToken)
+  ]);
+  return buildUserAssignedLicenses(userData, skuPartNumberById);
 }
 
 // Equivalente a: Set-MgUserLicense -UserId "..." -RemoveLicenses @("sku-id") -AddLicenses @()
@@ -378,6 +446,73 @@ async function listUsuariosLicencias(req, res) {
 }
 
 /**
+ * Consulta bajo demanda las licencias actuales del usuario en Microsoft Graph.
+ */
+async function getUsuarioLicenciasActuales(req, res) {
+  const { id } = req.params;
+
+  try {
+    const userRes = await pool.query(
+      `SELECT public_id, nombre_usuario, email, azure_oid
+       FROM usuarios
+       WHERE public_id = $1`,
+      [id]
+    );
+    if (userRes.rowCount === 0) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    const user = userRes.rows[0];
+    const graphUserCandidates = buildGraphUserCandidates(user.azure_oid, user.email);
+    if (!graphUserCandidates.length) {
+      return res.status(400).json({ error: "El usuario no tiene email ni OID de Azure asociado" });
+    }
+
+    const token = await getGraphAccessToken();
+    const graphResult = await executeGraphUserActionWithFallback(
+      graphUserCandidates,
+      async (candidateUserId) => getUserAssignedLicenses(token, candidateUserId)
+    );
+    const licencias = (graphResult.result || [])
+      .map((item) => ({
+        sku_id: item.skuId,
+        nombre: item.skuPartNumber || item.skuId,
+        asignacion: item.assignmentType,
+        removible: item.removable,
+        grupos: item.groupIds,
+        estados: item.states
+      }))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre));
+
+    return res.json({
+      usuario: {
+        id: user.public_id,
+        nombre: user.nombre_usuario,
+        email: user.email
+      },
+      entra_user_id: graphResult.resolvedUserId,
+      total: licencias.length,
+      total_removibles: licencias.filter((item) => item.removible).length,
+      licencias
+    });
+  } catch (err) {
+    console.error("Error consultando licencias actuales en Entra ID:", err?.message || err);
+    const details = buildGraphErrorDetails(err, "No se pudieron consultar las licencias");
+    const status = details.status === 404 ? 404 : 502;
+    return res.status(status).json({
+      error: details.status === 404
+        ? "El usuario no fue encontrado en Entra ID"
+        : "No se pudieron consultar las licencias en Microsoft Graph",
+      graph: details,
+      hint:
+        details.status === 401 || details.status === 403
+          ? "Verifica User.Read.All y LicenseAssignment.Read.All como permisos de aplicación, con consentimiento de administrador."
+          : null
+    });
+  }
+}
+
+/**
  * Activa o desactiva la cuenta de un usuario y sincroniza con Entra ID
  */
 async function patchUsuarioLicenciaEstado(req, res) {
@@ -498,6 +633,7 @@ async function actualizarRolUsuario(req, res) {
 // Activar / desactivar usuario en BD y en Entra ID (accountEnabled)
 // Requiere permisos de aplicación en Graph:
 // - User.EnableDisableAccount.All + User.Read.All (para accountEnabled)
+// - User.Read.All + LicenseAssignment.Read.All (para consultar licencias)
 // - LicenseAssignment.ReadWrite.All (si se solicita liberar licencias)
 /**
  * Modifica el estado de acceso de un usuario y gestiona sus licencias de Office
@@ -584,11 +720,12 @@ async function actualizarUsuarioActivo(req, res) {
           try {
             const detailsResult = await executeGraphUserActionWithFallback(
               graphUserCandidates,
-              async (candidateUserId) => getUserLicenseDetails(token, candidateUserId)
+              async (candidateUserId) => getUserAssignedLicenses(token, candidateUserId)
             );
             const assignedLicenses = Array.isArray(detailsResult.result) ? detailsResult.result : [];
             const assignedBySku = new Map(
               assignedLicenses
+                .filter((item) => item?.removable)
                 .map((item) => ({
                   skuId: String(item?.skuId || "").trim(),
                   skuPartNumber: String(item?.skuPartNumber || "").trim() || null
@@ -839,4 +976,14 @@ async function getLicenciasHistorial(req, res) {
   }
 }
 
-module.exports = { listUsuariosRoles, listUsuariosLicencias, patchUsuarioLicenciaEstado, actualizarRolUsuario, actualizarUsuarioActivo, asignarLicenciaUsuario, getLicenciasHistorial };
+module.exports = {
+  listUsuariosRoles,
+  listUsuariosLicencias,
+  getUsuarioLicenciasActuales,
+  patchUsuarioLicenciaEstado,
+  actualizarRolUsuario,
+  actualizarUsuarioActivo,
+  asignarLicenciaUsuario,
+  getLicenciasHistorial,
+  buildUserAssignedLicenses
+};

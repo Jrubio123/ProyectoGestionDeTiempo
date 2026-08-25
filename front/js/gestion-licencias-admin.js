@@ -16,7 +16,11 @@ window.gestionLicenciasApp = function () {
             nombre: "",
             activar: false,
             tieneAzure: false,
-            manejarLicencias: true
+            manejarLicencias: true,
+            licenciasCargando: false,
+            licencias: [],
+            licenciasError: "",
+            totalRemovibles: 0
         },
 
         resultado: null,
@@ -58,7 +62,7 @@ window.gestionLicenciasApp = function () {
             });
         },
 
-        abrirConfirmacion(usuario) {
+        async abrirConfirmacion(usuario) {
             this.resultado = null;
             this.modal = {
                 open: true,
@@ -66,12 +70,43 @@ window.gestionLicenciasApp = function () {
                 nombre: usuario.nombre_usuario,
                 activar: !usuario.activo,
                 tieneAzure: !!usuario.azure_oid,
-                manejarLicencias: true
+                manejarLicencias: true,
+                licenciasCargando: false,
+                licencias: [],
+                licenciasError: "",
+                totalRemovibles: 0
             };
+
+            if (!usuario.activo || !usuario.azure_oid) return;
+
+            this.modal.licenciasCargando = true;
+            try {
+                const token = window.auth?.getToken?.() || localStorage.getItem("token");
+                const res = await axios.get(
+                    `${API}/admin/usuarios/${usuario.id}/licencias-actuales`,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                if (this.modal.publicId !== usuario.id) return;
+
+                this.modal.licencias = res.data?.licencias || [];
+                this.modal.totalRemovibles = Number(res.data?.total_removibles || 0);
+                this.modal.manejarLicencias = this.modal.totalRemovibles > 0;
+            } catch (e) {
+                if (this.modal.publicId !== usuario.id) return;
+                this.modal.licenciasError = e?.response?.data?.error
+                    || "No fue posible consultar las licencias en Microsoft Graph";
+                this.modal.manejarLicencias = false;
+            } finally {
+                if (this.modal.publicId === usuario.id) {
+                    this.modal.licenciasCargando = false;
+                }
+            }
         },
 
         async confirmar() {
             if (!this.modal.publicId) return;
+            if (!this.modal.activar && this.modal.manejarLicencias
+                && (this.modal.licenciasCargando || this.modal.licenciasError)) return;
 
             const { publicId, activar, tieneAzure, manejarLicencias } = this.modal;
             this.modal.open = false;

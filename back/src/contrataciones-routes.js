@@ -1,5 +1,6 @@
 const { findCorreoPersonaConflict } = require("./services/persona-identidad.service");
 const { upsertPersonaDesdeContratacion } = require("./services/persona-contratacion.service");
+const { relinkMicrosoftPlaceholder } = require("./services/microsoft-group-webhook.service");
 const {
   resolveTipoCuentaBancaria,
   toLegacyTipoCuentaValue
@@ -3175,7 +3176,20 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
 
         const bancoPublicId = await resolveBancoPublicId(client, bancoId);
-        const nextEstado = ESTADOS.pendienteCorreoSilver;
+        const usuarioExistenteRes = row.persona_usuario_id
+          ? await client.query(
+            `SELECT email
+             FROM usuarios
+             WHERE id = $1 AND activo = true
+             LIMIT 1`,
+            [row.persona_usuario_id]
+          )
+          : { rows: [] };
+        const correoUsuarioExistente = toNullableString(usuarioExistenteRes.rows[0]?.email);
+        const reutilizaUsuarioExistente = isValidSilverEmail(correoUsuarioExistente);
+        const nextEstado = reutilizaUsuarioExistente
+          ? ESTADOS.pendienteRevisionTh
+          : ESTADOS.pendienteCorreoSilver;
         const debeNotificarCorreoSilver =
           nextEstado === ESTADOS.pendienteCorreoSilver &&
           row.estado !== ESTADOS.pendienteCorreoSilver;
@@ -3283,14 +3297,26 @@ module.exports = function registerContratacionesRoutes(deps) {
             error: `La solicitud debe estar en '${ESTADOS.pendienteRevisionTh}' o '${ESTADOS.pendienteCorreoSilver}' para ser revisada por TH`
           });
         }
-        if (!req.correoSilverSolicitante) {
+        const usuarioExistenteRes = row.persona_usuario_id
+          ? await client.query(
+            `SELECT email
+             FROM usuarios
+             WHERE id = $1 AND activo = true
+             LIMIT 1`,
+            [row.persona_usuario_id]
+          )
+          : { rows: [] };
+        const correoUsuarioExistente = toNullableString(usuarioExistenteRes.rows[0]?.email);
+        if (!req.correoSilverSolicitante && !isValidSilverEmail(correoUsuarioExistente)) {
           await client.query("ROLLBACK");
           return res.status(422).json({
             error: "La revisión queda pendiente hasta que el solicitante original registre el correo Silver"
           });
         }
         const debeCrearUsuario = row.crear_usuario_sistema !== false;
-        const correoSilver = String(req.correoSilverSolicitante || row.correo_empresarial || "").trim().toLowerCase();
+        const correoSilver = String(
+          req.correoSilverSolicitante || correoUsuarioExistente || row.correo_empresarial || ""
+        ).trim().toLowerCase();
         if (!correoSilver) {
           await client.query("ROLLBACK");
           return res.status(422).json({ error: "Se requiere el correo Silver antes de completar la revisión TH" });
@@ -3416,6 +3442,36 @@ module.exports = function registerContratacionesRoutes(deps) {
           ]
         );
         const personaIdContrat = personaResContrat.rows[0]?.id || null;
+        const usuarioIdentidadRes = personaIdContrat
+          ? await client.query(
+            `SELECT id, email, azure_oid
+             FROM usuarios
+             WHERE ($1::int IS NOT NULL AND id = $1)
+                OR LOWER(BTRIM(email)) = LOWER(BTRIM($2))
+             ORDER BY CASE WHEN id = $1 THEN 0 ELSE 1 END, id
+             LIMIT 1`,
+            [personaUsuarioId, correoSilver]
+          )
+          : { rows: [] };
+        const usuarioIdentidad = usuarioIdentidadRes.rows[0] || null;
+        if (personaIdContrat && usuarioIdentidad?.azure_oid) {
+          const reconciliado = await relinkMicrosoftPlaceholder(client, {
+            person: { id: personaIdContrat },
+            identity: {
+              oid: usuarioIdentidad.azure_oid,
+              email: correoSilver,
+              phone: row.telefono || null
+            }
+          });
+          if (reconciliado) {
+            await client.query(
+              `UPDATE personas
+               SET azure_oid = $1, updated_at = NOW()
+               WHERE id = $2 AND (azure_oid IS NULL OR azure_oid = $1)`,
+              [usuarioIdentidad.azure_oid, personaIdContrat]
+            );
+          }
+        }
         if (personaIdContrat) {
           const personaCorreoDuplicado = await client.query(
             `SELECT id
@@ -3548,7 +3604,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         const actorRevisionTh = req.correoSilverSolicitante
           ? (row.revisado_th_por || null)
           : (req.user?.id || null);
-        const correoSilverOrigen = req.correoSilverSolicitante ? "solicitante" : "talento_humano";
+        const correoSilverOrigen = req.correoSilverSolicitante ? "solicitante" : "usuario_existente";
 
         await client.query(
           `

@@ -62,6 +62,10 @@ module.exports = function registerContratacionesRoutes(deps) {
       persona.public_id AS persona_public_id,
       persona.nombre_usuario AS persona_nombre,
       persona.email AS persona_email,
+      persona_registro.public_id AS persona_registro_public_id,
+      persona_registro.nombre AS persona_registro_nombre,
+      persona_registro.apellidos AS persona_registro_apellidos,
+      persona_registro.correo_silver AS persona_registro_correo_silver,
       sc.supervisor_id,
       sup.public_id AS supervisor_public_id,
       sup.nombre_usuario AS supervisor_nombre,
@@ -117,6 +121,9 @@ module.exports = function registerContratacionesRoutes(deps) {
     LEFT JOIN usuarios coord ON coord.id = sc.coordinador_solicitante_id
     LEFT JOIN roles coord_rol ON coord_rol.id = coord.rol_usuario_id
     LEFT JOIN usuarios persona ON persona.id = sc.persona_usuario_id
+    LEFT JOIN personas persona_registro
+      ON NULLIF(BTRIM(sc.numero_documento), '') IS NOT NULL
+     AND NULLIF(BTRIM(persona_registro.numero_documento), '') = BTRIM(sc.numero_documento)
     LEFT JOIN usuarios sup ON sup.id = sc.supervisor_id
     LEFT JOIN clientes c ON c.id = sc.cliente_id
     LEFT JOIN documento_identidad di ON di.id = sc.tipo_documento_id
@@ -270,7 +277,11 @@ module.exports = function registerContratacionesRoutes(deps) {
           OR ($2::text IS NOT NULL AND COALESCE(p.numero_documento, '') = $2)
           OR (u.cedula IS NOT NULL AND COALESCE(p.numero_documento, '') = u.cedula)
         ORDER BY
-          CASE WHEN p.id = (SELECT persona_id FROM usuario_base LIMIT 1) THEN 0 ELSE 1 END,
+          CASE
+            WHEN $2::text IS NOT NULL AND COALESCE(p.numero_documento, '') = $2 THEN 0
+            WHEN p.id = (SELECT persona_id FROM usuario_base LIMIT 1) THEN 1
+            ELSE 2
+          END,
           p.updated_at DESC NULLS LAST,
           p.id DESC
         LIMIT 1
@@ -300,6 +311,107 @@ module.exports = function registerContratacionesRoutes(deps) {
     );
 
     return result.rows[0] || null;
+  }
+
+  async function resolvePersonaTarget(
+    db,
+    { personaPublicId = null, numeroDocumento = null, userInternalId = null } = {}
+  ) {
+    if (!personaPublicId && !numeroDocumento && !userInternalId) return null;
+
+    const result = await db.query(
+      `
+      SELECT
+        p.id,
+        p.public_id,
+        p.numero_documento,
+        p.correo_silver,
+        p.azure_oid
+      FROM personas p
+      WHERE
+        ($1::text IS NOT NULL AND p.public_id::text = $1::text)
+        OR ($2::text IS NOT NULL AND NULLIF(BTRIM(p.numero_documento), '') = $2)
+        OR (
+          $3::int IS NOT NULL
+          AND p.id = (SELECT u.persona_id FROM usuarios u WHERE u.id = $3 LIMIT 1)
+        )
+      ORDER BY
+        CASE
+          WHEN $2::text IS NOT NULL AND NULLIF(BTRIM(p.numero_documento), '') = $2 THEN 0
+          WHEN $1::text IS NOT NULL AND p.public_id::text = $1::text THEN 1
+          ELSE 2
+        END,
+        p.updated_at DESC NULLS LAST,
+        p.id DESC
+      LIMIT 1
+      `,
+      [
+        toNullableString(personaPublicId),
+        toNullableString(numeroDocumento),
+        userInternalId || null
+      ]
+    );
+
+    return result.rows[0] || null;
+  }
+
+  async function resolveExistingSilverIdentity(db, row) {
+    if (!row) return null;
+
+    const datosExtra = toObjectOrEmpty(row.datos_extra);
+    const targetPerson = await resolvePersonaTarget(db, {
+      personaPublicId: datosExtra.persona_id,
+      numeroDocumento: row.numero_documento,
+      userInternalId: row.persona_usuario_id
+    });
+
+    const [selectedUserResult, linkedUserResult] = await Promise.all([
+      row.persona_usuario_id
+        ? db.query(
+            `SELECT id, email, azure_oid, persona_id
+             FROM usuarios
+             WHERE id = $1
+             LIMIT 1`,
+            [row.persona_usuario_id]
+          )
+        : Promise.resolve({ rows: [] }),
+      targetPerson?.id
+        ? db.query(
+            `SELECT id, email, azure_oid, persona_id
+             FROM usuarios
+             WHERE persona_id = $1
+             ORDER BY
+               CASE
+                 WHEN LOWER(BTRIM(email)) = LOWER(BTRIM($2)) THEN 0
+                 ELSE 1
+               END,
+               CASE WHEN azure_oid IS NOT NULL THEN 0 ELSE 1 END,
+               CASE WHEN activo = true THEN 0 ELSE 1 END,
+               id
+             LIMIT 1`,
+            [targetPerson.id, targetPerson.correo_silver || null]
+          )
+        : Promise.resolve({ rows: [] })
+    ]);
+
+    const selectedUser = selectedUserResult.rows[0] || null;
+    const linkedUser = linkedUserResult.rows[0] || null;
+    const candidates = [
+      { email: selectedUser?.email, source: "usuario_seleccionado", user: selectedUser },
+      { email: targetPerson?.correo_silver, source: "persona", user: linkedUser },
+      { email: linkedUser?.email, source: "usuario_vinculado", user: linkedUser }
+    ];
+    const match = candidates.find((candidate) => isValidSilverEmail(candidate.email));
+    if (!match) {
+      return targetPerson ? { email: null, source: null, user: null, person: targetPerson } : null;
+    }
+
+    return {
+      email: String(match.email).trim().toLowerCase(),
+      source: match.source,
+      user: match.user || null,
+      person: targetPerson || null
+    };
   }
 
   function mergeLegalContextIntoDatosExtra(datosExtra, legalContext) {
@@ -1213,6 +1325,13 @@ module.exports = function registerContratacionesRoutes(deps) {
             email: row.persona_email || null
           }
         : null,
+      persona_registro: row.persona_registro_public_id
+        ? {
+            id: row.persona_registro_public_id,
+            nombre: `${row.persona_registro_nombre || ""} ${row.persona_registro_apellidos || ""}`.trim(),
+            correo_silver: row.persona_registro_correo_silver || null
+          }
+        : null,
       preregistro_id: row.preregistro_id || null,
       supervisor: row.supervisor_public_id || supervisorNombre || supervisorEmail || supervisorAzureOid
         ? {
@@ -1905,30 +2024,94 @@ module.exports = function registerContratacionesRoutes(deps) {
 
         const result = await pool.query(
           `
-          SELECT
-            u.id AS internal_id,
-            u.public_id AS id,
-            u.nombre_usuario,
-            u.email AS correo_empresarial,
-            u.cedula AS numero_documento,
-            u.telefono,
-            u.moneda_cobro AS moneda,
-            COALESCE(u.activo, false) AS activo,
-            p.estado AS persona_estado,
-            di.public_id AS tipo_documento_id,
-            di.titulo AS tipo_documento,
-            di.codigo AS tipo_documento_codigo
-          FROM usuarios u
-          LEFT JOIN personas p ON p.id = u.persona_id
-          LEFT JOIN documento_identidad di ON di.id = u.tipo_documento_id
-          WHERE (
-            u.nombre_usuario ILIKE $1
-            OR u.email ILIKE $1
-            OR COALESCE(u.cedula, '') ILIKE $1
+          WITH personas_y_usuarios AS (
+            SELECT
+              p.id AS persona_internal_id,
+              p.public_id AS persona_public_id,
+              u.id AS usuario_internal_id,
+              u.public_id AS usuario_public_id,
+              COALESCE(
+                NULLIF(BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)), ''),
+                u.nombre_usuario
+              ) AS nombre_usuario,
+              COALESCE(NULLIF(BTRIM(p.correo_silver), ''), u.email) AS correo_empresarial,
+              p.correo_electronico AS correo_personal,
+              COALESCE(NULLIF(BTRIM(p.numero_documento), ''), NULLIF(BTRIM(u.cedula), '')) AS numero_documento,
+              COALESCE(NULLIF(BTRIM(p.numero_contacto), ''), NULLIF(BTRIM(u.telefono), '')) AS telefono,
+              COALESCE(p.moneda_cobro, u.moneda_cobro) AS moneda,
+              COALESCE(p.factura_en_colombia, u.factura_en_colombia) AS factura_en_colombia,
+              COALESCE(u.activo, p.estado = 'activo', false) AS activo,
+              p.estado AS persona_estado,
+              di.public_id AS tipo_documento_id,
+              di.titulo AS tipo_documento,
+              di.codigo AS tipo_documento_codigo,
+              u.email AS usuario_email,
+              u.azure_oid AS usuario_azure_oid,
+              ROW_NUMBER() OVER (
+                PARTITION BY p.id
+                ORDER BY
+                  CASE
+                    WHEN LOWER(BTRIM(u.email)) = LOWER(BTRIM(p.correo_silver)) THEN 0
+                    ELSE 1
+                  END,
+                  CASE WHEN u.azure_oid IS NOT NULL THEN 0 ELSE 1 END,
+                  CASE WHEN u.activo = true THEN 0 ELSE 1 END,
+                  u.id
+              ) AS prioridad_usuario
+            FROM personas p
+            LEFT JOIN usuarios u ON u.persona_id = p.id
+            LEFT JOIN documento_identidad di ON di.id = COALESCE(p.tipo_documento_id, u.tipo_documento_id)
+            WHERE
+              CONCAT_WS(' ', p.nombre, p.apellidos) ILIKE $1
+              OR COALESCE(p.numero_documento, '') ILIKE $1
+              OR COALESCE(p.correo_electronico, '') ILIKE $1
+              OR COALESCE(p.correo_silver, '') ILIKE $1
+              OR COALESCE(u.nombre_usuario, '') ILIKE $1
+              OR COALESCE(u.email, '') ILIKE $1
+              OR COALESCE(u.cedula, '') ILIKE $1
+          ),
+          usuarios_sin_persona AS (
+            SELECT
+              NULL::int AS persona_internal_id,
+              NULL::uuid AS persona_public_id,
+              u.id AS usuario_internal_id,
+              u.public_id AS usuario_public_id,
+              u.nombre_usuario,
+              u.email AS correo_empresarial,
+              NULL::varchar AS correo_personal,
+              NULLIF(BTRIM(u.cedula), '') AS numero_documento,
+              NULLIF(BTRIM(u.telefono), '') AS telefono,
+              u.moneda_cobro AS moneda,
+              u.factura_en_colombia,
+              COALESCE(u.activo, false) AS activo,
+              NULL::varchar AS persona_estado,
+              di.public_id AS tipo_documento_id,
+              di.titulo AS tipo_documento,
+              di.codigo AS tipo_documento_codigo,
+              u.email AS usuario_email,
+              u.azure_oid AS usuario_azure_oid,
+              1::bigint AS prioridad_usuario
+            FROM usuarios u
+            LEFT JOIN documento_identidad di ON di.id = u.tipo_documento_id
+            WHERE u.persona_id IS NULL
+              AND (
+                u.nombre_usuario ILIKE $1
+                OR u.email ILIKE $1
+                OR COALESCE(u.cedula, '') ILIKE $1
+              )
+          ),
+          candidatos AS (
+            SELECT * FROM personas_y_usuarios WHERE prioridad_usuario = 1
+            UNION ALL
+            SELECT * FROM usuarios_sin_persona
           )
+          SELECT *
+          FROM candidatos
           ORDER BY
-            CASE WHEN COALESCE(u.activo, true) THEN 0 ELSE 1 END,
-            u.nombre_usuario ASC
+            CASE WHEN activo THEN 0 ELSE 1 END,
+            nombre_usuario ASC,
+            persona_internal_id NULLS LAST,
+            usuario_internal_id NULLS LAST
           LIMIT $2
           `,
           [`%${search}%`, limit]
@@ -1936,31 +2119,41 @@ module.exports = function registerContratacionesRoutes(deps) {
         const enriched = await Promise.all(
           (result.rows || []).map(async (row) => {
             const context = await buildPersonaExtensionContext({
-              userInternalId: row.internal_id,
+              userInternalId: row.usuario_internal_id,
               numeroDocumento: row.numero_documento || null,
+              correoPersonal: row.correo_personal || null,
               correoEmpresarial: row.correo_empresarial || null,
-              baseUserRow: {
-                id: row.internal_id,
-                public_id: row.id,
-                nombre_usuario: row.nombre_usuario,
-                email: row.correo_empresarial,
-                cedula: row.numero_documento,
-                telefono: row.telefono,
-                moneda_cobro: row.moneda,
-                tipo_documento_public_id: row.tipo_documento_id,
-                tipo_documento_titulo: row.tipo_documento,
-                tipo_documento_codigo: row.tipo_documento_codigo
-              }
+              baseUserRow: row.usuario_internal_id
+                ? {
+                    id: row.usuario_internal_id,
+                    public_id: row.usuario_public_id,
+                    nombre_usuario: row.nombre_usuario,
+                    email: row.usuario_email || row.correo_empresarial,
+                    cedula: row.numero_documento,
+                    telefono: row.telefono,
+                    moneda_cobro: row.moneda,
+                    tipo_documento_public_id: row.tipo_documento_id,
+                    tipo_documento_titulo: row.tipo_documento,
+                    tipo_documento_codigo: row.tipo_documento_codigo
+                  }
+                : null
             });
 
             return {
-              id: row.id,
+              id: row.usuario_public_id || row.persona_public_id,
+              identity_key: row.persona_public_id
+                ? `persona:${row.persona_public_id}`
+                : `usuario:${row.usuario_public_id}`,
+              usuario_id: row.usuario_public_id || null,
+              persona_id: row.persona_public_id || null,
+              tiene_usuario: Boolean(row.usuario_internal_id),
               nombre_usuario: row.nombre_usuario,
-              correo_empresarial: context?.correo_empresarial || row.correo_empresarial || null,
-              correo_personal: context?.correo_personal || null,
+              correo_empresarial: row.correo_empresarial || context?.correo_empresarial || null,
+              correo_personal: row.correo_personal || context?.correo_personal || null,
               numero_documento: row.numero_documento || null,
               telefono: row.telefono || null,
               moneda: context?.moneda || row.moneda || null,
+              factura_en_colombia: row.factura_en_colombia,
               activo: Boolean(row.activo),
               persona_estado: row.persona_estado || null,
               tipo_documento_id: row.tipo_documento_id || null,
@@ -2232,13 +2425,21 @@ module.exports = function registerContratacionesRoutes(deps) {
             (SELECT id FROM usuarios WHERE public_id::text = $1::text) AS persona_usuario_id,
             (SELECT id FROM usuarios WHERE public_id::text = $2::text) AS supervisor_id,
             (SELECT id FROM documento_identidad WHERE public_id::text = $3::text) AS tipo_documento_id,
-            (SELECT id FROM clientes WHERE public_id::text = $4::text) AS cliente_id
+            (SELECT id FROM clientes WHERE public_id::text = $4::text) AS cliente_id,
+            (SELECT id FROM personas WHERE public_id::text = $5::text) AS persona_id
           `,
-          [payload.persona_usuario_id || null, payload.supervisor_id || null, payload.tipo_documento_id || null, payload.cliente_id || null]
+          [
+            payload.persona_usuario_id || null,
+            payload.supervisor_id || null,
+            payload.tipo_documento_id || null,
+            payload.cliente_id || null,
+            payload.persona_id || null
+          ]
         );
         const refs = refsRes.rows[0];
         
         if (payload.persona_usuario_id && !refs.persona_usuario_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
+        if (payload.persona_id && !refs.persona_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
         if (payload.supervisor_id && !refs.supervisor_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
         if (payload.tipo_documento_id && !refs.tipo_documento_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
         const clienteNombreProspecto = toNullableString(payload.datos_extra?.cliente_nombre);
@@ -2248,6 +2449,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (payload.cliente_id && !refs.cliente_id) throw { code: "PUBLIC_ID_NOT_FOUND" };
 
         const personaUsuarioId = refs.persona_usuario_id || null;
+        const personaSeleccionadaId = refs.persona_id || null;
         const supervisorFallback = toObjectOrEmpty(payload.datos_extra);
         const tieneSupervisorEntra = Boolean(
           toNullableString(supervisorFallback.supervisor_azure_oid) ||
@@ -2259,6 +2461,32 @@ module.exports = function registerContratacionesRoutes(deps) {
         const tipoDocumentoId = refs.tipo_documento_id || null;
         const clienteId = refs.cliente_id || null;
         const monedaFinal = moneda || await resolvePersonaMoneda(pool, personaUsuarioId);
+
+        const personaSeleccionada = personaSeleccionadaId
+          ? (
+              await pool.query(
+                `SELECT numero_documento
+                 FROM personas
+                 WHERE id = $1
+                 LIMIT 1`,
+                [personaSeleccionadaId]
+              )
+            ).rows[0] || null
+          : null;
+        if (
+          personaSeleccionada?.numero_documento &&
+          numeroDocumento &&
+          String(personaSeleccionada.numero_documento).trim() !== String(numeroDocumento).trim()
+        ) {
+          return res.status(422).json({
+            error: "La persona seleccionada no corresponde al numero de documento indicado"
+          });
+        }
+        const personaObjetivo = await resolvePersonaTarget(pool, {
+          personaPublicId: payload.persona_id,
+          numeroDocumento,
+          userInternalId: personaUsuarioId
+        });
 
         if (tipoSolicitud === TIPO_EXTENSION && !numeroDocumento && !personaUsuarioId) {
           return res.status(400).json({
@@ -2335,6 +2563,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (payload.grupo_app_tiempos !== undefined) datosExtra.grupo_usuario = grupoAppTiempos;
         if (payload.grupo_distribucion !== undefined) datosExtra.grupo_distribucion = grupoDistribucion;
         if (tipoSolicitud === TIPO_NUEVO) datosExtra.tipo_asignacion = tipoAnexoNuevo;
+        if (personaObjetivo?.public_id) datosExtra.persona_id = personaObjetivo.public_id;
 
         if (tipoSolicitud === TIPO_NUEVO && (personaUsuarioId || numeroDocumento)) {
           const legalContext = await fetchPersonaLegalContext(pool, { personaUsuarioId, numeroDocumento });
@@ -2398,8 +2627,8 @@ module.exports = function registerContratacionesRoutes(deps) {
           `
           WITH persona_objetivo AS (
             SELECT COALESCE(
-              (SELECT u.persona_id FROM usuarios u WHERE u.id = $4 AND u.persona_id IS NOT NULL LIMIT 1),
-              (SELECT p.id FROM personas p WHERE NULLIF(BTRIM(p.numero_documento), '') = $12 LIMIT 1)
+              (SELECT p.id FROM personas p WHERE NULLIF(BTRIM(p.numero_documento), '') = $12 LIMIT 1),
+              (SELECT u.persona_id FROM usuarios u WHERE u.id = $4 AND u.persona_id IS NOT NULL LIMIT 1)
             ) AS id
           ), persona_reactivada AS (
             UPDATE personas p
@@ -3176,17 +3405,8 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
 
         const bancoPublicId = await resolveBancoPublicId(client, bancoId);
-        const usuarioExistenteRes = row.persona_usuario_id
-          ? await client.query(
-            `SELECT email
-             FROM usuarios
-             WHERE id = $1 AND activo = true
-             LIMIT 1`,
-            [row.persona_usuario_id]
-          )
-          : { rows: [] };
-        const correoUsuarioExistente = toNullableString(usuarioExistenteRes.rows[0]?.email);
-        const reutilizaUsuarioExistente = isValidSilverEmail(correoUsuarioExistente);
+        const identidadSilverExistente = await resolveExistingSilverIdentity(client, row);
+        const reutilizaUsuarioExistente = isValidSilverEmail(identidadSilverExistente?.email);
         const nextEstado = reutilizaUsuarioExistente
           ? ESTADOS.pendienteRevisionTh
           : ESTADOS.pendienteCorreoSilver;
@@ -3201,7 +3421,7 @@ module.exports = function registerContratacionesRoutes(deps) {
           `
           UPDATE solicitudes_contratacion
           SET
-            correo_empresarial = COALESCE($1, correo_empresarial),
+            correo_empresarial = COALESCE($1, $7, correo_empresarial),
             datos_extra        = datos_extra || $2::jsonb,
             estado             = $3,
             revisado_th_por    = COALESCE(revisado_th_por, $5),
@@ -3228,7 +3448,8 @@ module.exports = function registerContratacionesRoutes(deps) {
             nextEstado,
             internalId,
             req.user?.id || null,
-            observacionesTh
+            observacionesTh,
+            identidadSilverExistente?.email || null
           ]
         );
 
@@ -3297,17 +3518,9 @@ module.exports = function registerContratacionesRoutes(deps) {
             error: `La solicitud debe estar en '${ESTADOS.pendienteRevisionTh}' o '${ESTADOS.pendienteCorreoSilver}' para ser revisada por TH`
           });
         }
-        const usuarioExistenteRes = row.persona_usuario_id
-          ? await client.query(
-            `SELECT email
-             FROM usuarios
-             WHERE id = $1 AND activo = true
-             LIMIT 1`,
-            [row.persona_usuario_id]
-          )
-          : { rows: [] };
-        const correoUsuarioExistente = toNullableString(usuarioExistenteRes.rows[0]?.email);
-        if (!req.correoSilverSolicitante && !isValidSilverEmail(correoUsuarioExistente)) {
+        const identidadSilverExistente = await resolveExistingSilverIdentity(client, row);
+        const correoSilverExistente = toNullableString(identidadSilverExistente?.email);
+        if (!req.correoSilverSolicitante && !isValidSilverEmail(correoSilverExistente)) {
           await client.query("ROLLBACK");
           return res.status(422).json({
             error: "La revisión queda pendiente hasta que el solicitante original registre el correo Silver"
@@ -3315,7 +3528,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         }
         const debeCrearUsuario = row.crear_usuario_sistema !== false;
         const correoSilver = String(
-          req.correoSilverSolicitante || correoUsuarioExistente || row.correo_empresarial || ""
+          req.correoSilverSolicitante || correoSilverExistente || row.correo_empresarial || ""
         ).trim().toLowerCase();
         if (!correoSilver) {
           await client.query("ROLLBACK");
@@ -3604,7 +3817,9 @@ module.exports = function registerContratacionesRoutes(deps) {
         const actorRevisionTh = req.correoSilverSolicitante
           ? (row.revisado_th_por || null)
           : (req.user?.id || null);
-        const correoSilverOrigen = req.correoSilverSolicitante ? "solicitante" : "usuario_existente";
+        const correoSilverOrigen = req.correoSilverSolicitante
+          ? "solicitante"
+          : (identidadSilverExistente?.source || "identidad_existente");
 
         await client.query(
           `

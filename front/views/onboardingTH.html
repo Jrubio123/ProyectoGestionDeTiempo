@@ -446,7 +446,13 @@
                     </select>
                     <input class="prereg-input" x-model="formS3.numero_cuenta" :disabled="!seccion3Editable" placeholder="Numero de cuenta *">
                     <div class="md:col-span-2 rounded-xl border border-purple-100 bg-purple-50 px-4 py-3 text-sm text-purple-900">
-                        El correo Silver lo registrará el solicitante original después de que Mesa de Ayuda confirme su creación.
+                        <span x-show="tieneCorreoSilverExistenteContratacion">
+                            Se reutilizará el correo Silver existente:
+                            <strong x-text="correoSilverExistenteContratacion"></strong>.
+                        </span>
+                        <span x-show="!tieneCorreoSilverExistenteContratacion">
+                            El correo Silver lo registrará el solicitante original después de que Mesa de Ayuda confirme su creación.
+                        </span>
                     </div>
                 </div>
             </section>
@@ -473,7 +479,7 @@
                     <span x-text="aprobando ? 'Aprobando...' : 'Aprobar'"></span>
                 </button>
                 <button type="button" x-show="seccion3Editable && itemActivo?.origen_flujo === 'contratacion'" @click="completarRevisionContratacion" :disabled="!puedeCompletarContratacion || aprobando" class="prereg-btn prereg-btn-teal">
-                    <span x-text="aprobando ? 'Completando...' : 'Completar revisión y solicitar correo'"></span>
+                    <span x-text="aprobando ? 'Completando...' : (tieneCorreoSilverExistenteContratacion ? 'Completar revisión' : 'Completar revisión y solicitar correo')"></span>
                 </button>
                 <button type="button" x-show="itemActivo?.origen_flujo === 'preregistro' && itemActivo?.estado !== 'Completado' && itemActivo?.estado !== 'Anulado'" @click="abrirModalAnular" class="prereg-btn prereg-btn-danger">Anular contratacion</button>
             </div>

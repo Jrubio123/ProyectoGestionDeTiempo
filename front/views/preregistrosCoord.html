@@ -119,10 +119,12 @@
                         Buscando...
                     </div>
                     <div x-show="mostrarSugerenciasPersona && personasEncontradas.length" class="absolute z-20 left-0 right-0 mt-1 max-h-52 overflow-auto border border-slate-200 rounded-xl bg-white divide-y divide-slate-100 shadow-lg" style="display: none;">
-                        <template x-for="persona in personasEncontradas" :key="persona.id">
+                        <template x-for="persona in personasEncontradas" :key="persona.identity_key || persona.id">
                             <button type="button" @click="seleccionarPersona(persona)" class="w-full text-left px-3 py-2 hover:bg-slate-50">
                                 <div class="flex items-center gap-2">
                                     <p class="text-sm font-semibold text-slate-800" x-text="persona.nombre_usuario"></p>
+                                    <span class="px-2 py-0.5 rounded-full bg-sky-100 text-[10px] font-bold text-sky-700"
+                                        x-text="persona.tiene_usuario ? 'Persona + usuario' : 'Persona registrada'"></span>
                                     <span x-show="persona.activo === false" class="px-2 py-0.5 rounded-full bg-amber-100 text-[10px] font-bold text-amber-700">Inactivo</span>
                                 </div>
                                 <p class="text-xs text-slate-500" x-text="`${persona.numero_documento || 'Sin doc'} - ${persona.correo_empresarial || 'Sin correo'}`"></p>

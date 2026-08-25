@@ -52,7 +52,7 @@ test("Power Automate conserva la finalizacion automatica y la accion manual qued
   assert.match(backend, /\/contrataciones\/solicitudes\/:id\/correo-silver/);
 });
 
-test("el correo Silver es obligatorio aunque la persona no requiera usuario del aplicativo", () => {
+test("el correo Silver sigue siendo obligatorio para una persona nueva aunque no requiera acceso", () => {
   const section3Start = backend.indexOf('"/contrataciones/solicitudes/:id/seccion-3"');
   const revisionStart = backend.indexOf("async function procesarRevisionTh", section3Start);
   const correoRouteStart = backend.indexOf('"/contrataciones/solicitudes/:id/correo-silver"', revisionStart);
@@ -63,12 +63,27 @@ test("el correo Silver es obligatorio aunque la persona no requiera usuario del 
   const completarStart = thFront.indexOf("async completarRevisionContratacion()");
   const completarEnd = thFront.indexOf("async devolverContratacion()", completarStart);
 
-  assert.match(section3, /const nextEstado = ESTADOS\.pendienteCorreoSilver/);
+  assert.match(section3, /resolveExistingSilverIdentity\(client, row\)/);
+  assert.match(section3, /: ESTADOS\.pendienteCorreoSilver/);
   assert.doesNotMatch(section3, /correoSilver \|\| !debeCrearUsuario/);
   assert.match(revision, /if \(personaIdContrat\)/);
   assert.match(revision, /SET correo_silver = \$1/);
   assert.doesNotMatch(backend.slice(correoRouteStart), /Esta solicitud no requiere crear un usuario Silver/);
   assert.doesNotMatch(coordinacionFront.slice(assignStart, assignEnd), /crear_usuario_sistema === false/);
-  assert.doesNotMatch(thFront.slice(completarStart, completarEnd), /\/revision-th/);
+  assert.match(thFront.slice(completarStart, completarEnd), /estadoDespuesDeGuardar === "Pendiente Revision TH"/);
+  assert.match(thFront.slice(completarStart, completarEnd), /\/revision-th/);
+  assert.match(thView, /tieneCorreoSilverExistenteContratacion/);
   assert.match(thView, /El correo Silver lo registrará el solicitante original/);
+});
+
+test("la contratación directa busca tanto personas como usuarios", () => {
+  const searchStart = backend.indexOf('"/contrataciones/personas"');
+  const searchEnd = backend.indexOf('"/contrataciones/solicitudes"', searchStart);
+  const searchRoute = backend.slice(searchStart, searchEnd);
+
+  assert.match(searchRoute, /FROM personas p/);
+  assert.match(searchRoute, /LEFT JOIN usuarios u ON u\.persona_id = p\.id/);
+  assert.match(searchRoute, /usuarios_sin_persona/);
+  assert.match(searchRoute, /persona_id: row\.persona_public_id/);
+  assert.match(coordinacionFront, /this\.form\.persona_id = persona\.persona_id/);
 });

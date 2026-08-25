@@ -8,6 +8,7 @@ window.preregistrosCoordApp = function () {
 
     const emptyForm = () => ({
         persona_usuario_id: "",
+        persona_id: "",
         tipo_documento_id: "",
         cliente_id: "",
         cliente_nombre_prospecto: "",
@@ -522,7 +523,8 @@ window.preregistrosCoordApp = function () {
             const nombreCompleto = String(persona.nombre_usuario || persona.nombre || "").trim();
             const nombrePartes = this.parseNombreCompleto(nombreCompleto);
 
-            this.form.persona_usuario_id = persona.id || "";
+            this.form.persona_usuario_id = persona.usuario_id || "";
+            this.form.persona_id = persona.persona_id || "";
             this.form.tipo_documento_id = persona.tipo_documento_id || "";
             this.form.numero_documento = persona.numero_documento || "";
             this.form.correo_empresarial = persona.correo_empresarial || "";
@@ -568,6 +570,7 @@ window.preregistrosCoordApp = function () {
             const esClienteProspecto = !clienteId && Boolean(String(clienteNombre || "").trim());
             return {
                 persona_usuario_id: item?.persona?.id || "",
+                persona_id: item?.datos_extra?.persona_id || item?.persona_registro?.id || "",
                 tipo_documento_id: item?.tipo_documento?.id || "",
                 cliente_id: esClienteProspecto ? "__prospecto__" : clienteId,
                 cliente_nombre_prospecto: esClienteProspecto ? clienteNombre : "",
@@ -697,6 +700,7 @@ window.preregistrosCoordApp = function () {
         onInputBusquedaPersona() {
             const q = String(this.busquedaPersona || "").trim();
             this.form.persona_usuario_id = "";
+            this.form.persona_id = "";
             this.personaSeleccionada = null;
 
             if (this.debounceBusquedaPersona) {
@@ -775,6 +779,7 @@ window.preregistrosCoordApp = function () {
 
         limpiarPersonaSeleccionada() {
             this.form.persona_usuario_id = "";
+            this.form.persona_id = "";
             this.form.anexo_item_id = "";
             this.personaSeleccionada = null;
             this.anexosActivos = [];

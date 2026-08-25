@@ -357,7 +357,12 @@ window.onboardingThApp = function () {
                 tipo_cuenta_id: item?.datos_extra?.tipo_cuenta_id || preregistro?.tipo_cuenta_id || null,
                 tipo_cuenta: item?.datos_extra?.tipo_cuenta || preregistro?.tipo_cuenta || null,
                 numero_cuenta: item?.datos_extra?.numero_cuenta || preregistro?.numero_cuenta || null,
-                correo_silver: item?.correo_empresarial || preregistro?.correo_silver || null,
+                correo_silver:
+                    item?.correo_empresarial
+                    || item?.persona_registro?.correo_silver
+                    || item?.persona?.email
+                    || preregistro?.correo_silver
+                    || null,
                 estado: item?.estado || "",
                 creado_por: item?.coordinador?.id || null,
                 creado_por_nombre: item?.coordinador?.nombre || null,
@@ -676,6 +681,15 @@ window.onboardingThApp = function () {
             return this.s3BaseValida;
         },
 
+        get correoSilverExistenteContratacion() {
+            const correo = String(this.itemActivo?.correo_silver || "").trim().toLowerCase();
+            return /^[^\s@]+@silverconsulting\.com\.co$/i.test(correo) ? correo : "";
+        },
+
+        get tieneCorreoSilverExistenteContratacion() {
+            return Boolean(this.correoSilverExistenteContratacion);
+        },
+
         get puedeDevolverContratacion() {
             if (this.itemActivo?.origen_flujo !== "contratacion") return false;
             if (!this.seccion3Editable) return false;
@@ -714,14 +728,26 @@ window.onboardingThApp = function () {
             if (!confirm("Quieres completar la revision TH de esta contratacion?")) return;
             this.aprobando = true;
             try {
-                await axios.patch(
+                const section3Response = await axios.patch(
                     `${API}/contrataciones/solicitudes/${this.itemActivo.id}/seccion-3`,
                     this.buildS3Payload(),
                     this.getAuthConfig()
                 );
+                const estadoDespuesDeGuardar = String(section3Response?.data?.estado || "").trim();
+                if (estadoDespuesDeGuardar === "Pendiente Revision TH") {
+                    await axios.patch(
+                        `${API}/contrataciones/solicitudes/${this.itemActivo.id}/revision-th`,
+                        { observaciones_th: String(this.observacionesRevisionTh || "").trim() || null },
+                        this.getAuthConfig()
+                    );
+                }
                 await this.cargarRegistros();
                 this.cerrarDetalle();
-                alert("Revisión guardada. La solicitud quedó pendiente del correo Silver por parte del solicitante original.");
+                alert(
+                    estadoDespuesDeGuardar === "Pendiente Revision TH"
+                        ? "Revisión completada. Se reutilizó la identidad existente y se agregó el nuevo anexo técnico."
+                        : "Revisión guardada. La solicitud quedó pendiente del correo Silver por parte del solicitante original."
+                );
             } catch (e) {
                 alert(e?.response?.data?.error || "Error completando revision TH");
             } finally {

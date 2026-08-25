@@ -123,6 +123,14 @@ module.exports = function registerPreregistroRoutes(deps) {
       .trim();
   }
 
+  const WORK_LOCATION_MODES = new Set(["remoto", "remote", "presencial", "onsite", "hibrido", "hybrid"]);
+
+  function normalizeResidenceCountry(value) {
+    const raw = String(value || "").trim();
+    if (!raw || WORK_LOCATION_MODES.has(normalizeDocKey(raw))) return null;
+    return raw;
+  }
+
   function classifyTipoDocumento(value) {
     const key = normalizeDocKey(value);
     if (!key) return null;
@@ -481,6 +489,8 @@ module.exports = function registerPreregistroRoutes(deps) {
         : Boolean(preregistroRow.necesita_s_user),
       grupo_usuario: preregistroRow.grupo_usuario || existingDatosExtra.grupo_usuario || null,
       grupo_distribucion: preregistroRow.grupo_distribucion || existingDatosExtra.grupo_distribucion || null,
+      pais_ubicacion: normalizeResidenceCountry(preregistroRow.pais_ubicacion) || existingDatosExtra.pais_ubicacion || null,
+      ciudad_residencia: preregistroRow.ciudad || existingDatosExtra.ciudad_residencia || null,
       pais_pago: preregistroRow.pais_pago || existingDatosExtra.pais_pago || null,
       factura_en_colombia:
         preregistroRow.factura_en_colombia === null || preregistroRow.factura_en_colombia === undefined
@@ -525,7 +535,7 @@ module.exports = function registerPreregistroRoutes(deps) {
         preregistroRow.correo_personal || null,
         preregistroRow.correo_silver || null,
         preregistroRow.telefono || null,
-        preregistroRow.ciudad || preregistroRow.pais_ubicacion || null,
+        normalizeResidenceCountry(preregistroRow.pais_ubicacion),
         preregistroRow.moneda || null,
         preregistroRow.tarifa_hora,
         preregistroRow.tarifa_mes,
@@ -661,7 +671,7 @@ module.exports = function registerPreregistroRoutes(deps) {
           String(numero_documento).trim(),
           telefono || null,
           String(correo_personal).trim().toLowerCase(),
-          pais_ubicacion || null,
+          normalizeResidenceCountry(pais_ubicacion),
           ciudad || null,
           monedaNorm,
           facturaEnColombia,
@@ -788,7 +798,7 @@ module.exports = function registerPreregistroRoutes(deps) {
                 solicitud.perfil || null,
                 String(correo_personal).trim().toLowerCase(),
                 telefono || null,
-                solicitud.ubicacion || pais_ubicacion || null,
+                normalizeResidenceCountry(pais_ubicacion),
                 solicitud.modalidad || null,
                 monedaNorm,
                 tarifaHoraParsed.value,
@@ -979,6 +989,11 @@ module.exports = function registerPreregistroRoutes(deps) {
         if (field === "tarifa_hora") {
           sets.push(`tarifa_hora = $${idx++}`);
           vals.push(nextTarifaHora);
+          continue;
+        }
+        if (field === "pais_ubicacion") {
+          sets.push(`pais_ubicacion = $${idx++}`);
+          vals.push(normalizeResidenceCountry(req.body[field]));
           continue;
         }
         sets.push(`${field} = $${idx++}`);

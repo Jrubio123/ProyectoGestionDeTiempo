@@ -1672,6 +1672,21 @@ function firstDistinctLocationValue(values, duplicatedValue) {
     .find((value) => value && (!duplicatedKey || normalizeTextKey(value) !== duplicatedKey)) || "";
 }
 
+const WORK_LOCATION_MODE_KEYS = new Set([
+  "remoto",
+  "remote",
+  "presencial",
+  "onsite",
+  "hibrido",
+  "hybrid"
+]);
+
+function normalizeResidenceLocationValue(value) {
+  const normalized = toNullableTrimmedString(value);
+  if (!normalized || WORK_LOCATION_MODE_KEYS.has(normalizeTextKey(normalized))) return null;
+  return normalized;
+}
+
 function normalizeAnexoTipoInput(value) {
   const key = normalizeTextKey(value);
   if (!key) return null;
@@ -2483,15 +2498,18 @@ async function resolveContratoPersonaContext(proceso) {
     toNullableTrimmedString(parseJsonObject(solicitud?.datos_extra)?.direccion) ||
     toNullableTrimmedString(personaBase?.usuario_direccion) ||
     "";
+  const solicitudExtra = parseJsonObject(solicitud?.datos_extra);
   const ciudad =
-    toNullableTrimmedString(personaBase?.ciudad_residencia) ||
-    toNullableTrimmedString(preregistro?.ciudad) ||
-    toNullableTrimmedString(solicitud?.ubicacion) ||
-    toNullableTrimmedString(personaBase?.usuario_ciudad) ||
-    CONTRATOS_CIUDAD_SILVER;
+    normalizeResidenceLocationValue(personaBase?.ciudad_residencia) ||
+    normalizeResidenceLocationValue(preregistro?.ciudad) ||
+    normalizeResidenceLocationValue(solicitudExtra.ciudad_residencia || solicitudExtra.ciudad) ||
+    normalizeResidenceLocationValue(personaBase?.usuario_ciudad) ||
+    "";
   const paisUbicacion = firstDistinctLocationValue([
-    personaBase?.pais_residencia,
-    preregistro?.pais_ubicacion
+    normalizeResidenceLocationValue(personaBase?.pais_residencia),
+    normalizeResidenceLocationValue(preregistro?.pais_ubicacion),
+    normalizeResidenceLocationValue(solicitudExtra.pais_ubicacion),
+    normalizeResidenceLocationValue(solicitud?.ubicacion)
   ], ciudad);
 
   // personas/usuarios tienen prioridad aqui porque el formulario publico permite corregir datos antes de firmar.
@@ -3501,11 +3519,24 @@ async function ensurePersistedAnexoFromProceso({ solicitudId = null, preregistro
 
 async function requirePersistedAnexoFromProceso(proceso, personaContext = null) {
   const resolvedContext = personaContext || await resolveContratoPersonaContext(proceso);
-  const items = await listAnexoTecnicoItems({
+  const processItems = await listAnexoTecnicoItems({
     solicitudId: proceso?.solicitud_id || null,
     preregistroId: proceso?.preregistro_id || null,
     numeroDocumento: resolvedContext?.numeroDocumento || null,
     correoPersonal: resolvedContext?.correoPersonal || null
+  });
+  const activePersonItems = resolvedContext
+    ? await listActiveAnexoItemsForPersonaContext(resolvedContext)
+    : [];
+  const selectedItems = activePersonItems.length ? activePersonItems : processItems;
+  const items = Array.from(
+    new Map(
+      selectedItems.map((item) => [String(item?.id || item?.public_id || ""), item])
+    ).values()
+  ).sort((a, b) => {
+    const fechaA = normalizeDateOnlyInput(a?.fecha_inicio) || "9999-12-31";
+    const fechaB = normalizeDateOnlyInput(b?.fecha_inicio) || "9999-12-31";
+    return fechaA.localeCompare(fechaB) || Number(a?.id || 0) - Number(b?.id || 0);
   });
   if (!items.length) {
     throw buildAnexoPersistenciaError(
@@ -12445,13 +12476,13 @@ async function resolveModuloForContratoPersonaForm(db, personaContext, baseRecor
 function buildContratoPersonaFormData(baseRecord, personaContext, moduloRef = null) {
   const ctx = personaContext || {};
   const ciudadResidencia =
-    toNullableTrimmedString(baseRecord?.ciudad_residencia) ||
-    toNullableTrimmedString(ctx.ciudad) ||
-    toNullableTrimmedString(baseRecord?.usuario_ciudad) ||
+    normalizeResidenceLocationValue(baseRecord?.ciudad_residencia) ||
+    normalizeResidenceLocationValue(ctx.ciudad) ||
+    normalizeResidenceLocationValue(baseRecord?.usuario_ciudad) ||
     "";
   const paisResidencia = firstDistinctLocationValue([
-    baseRecord?.pais_residencia,
-    ctx.paisUbicacion
+    normalizeResidenceLocationValue(baseRecord?.pais_residencia),
+    normalizeResidenceLocationValue(ctx.paisUbicacion)
   ], ciudadResidencia);
   return {
     nombre: toNullableTrimmedString(baseRecord?.persona_nombre) || toNullableTrimmedString(ctx.nombre) || "",

@@ -321,7 +321,10 @@ window.onboardingThApp = function () {
                 numero_documento: item?.numero_documento || preregistro?.numero_documento || null,
                 telefono: item?.telefono || preregistro?.telefono || null,
                 correo_personal: item?.correo_personal || preregistro?.correo_personal || null,
-                pais_ubicacion: item?.ubicacion || preregistro?.pais_ubicacion || null,
+                pais_ubicacion:
+                    this.normalizarPaisResidencia(preregistro?.pais_ubicacion) ||
+                    this.normalizarPaisResidencia(item?.ubicacion) ||
+                    null,
                 ciudad: preregistro?.ciudad || null,
                 responsable_supervisor: preregistro?.responsable_supervisor || null,
                 fecha_fin: item?.fecha_fin || preregistro?.fecha_fin || null,
@@ -396,6 +399,14 @@ window.onboardingThApp = function () {
                 .replace(/[\u0300-\u036f]/g, "")
                 .toLowerCase()
                 .trim();
+        },
+
+        normalizarPaisResidencia(value) {
+            const raw = String(value || "").trim();
+            const key = this.normalizar(raw).replace(/[^a-z0-9]+/g, "");
+            return ["remoto", "remote", "presencial", "onsite", "hibrido", "hybrid"].includes(key)
+                ? ""
+                : raw;
         },
 
         normalizarTipoCuenta(value) {

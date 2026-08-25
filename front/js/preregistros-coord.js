@@ -262,6 +262,14 @@ window.preregistrosCoordApp = function () {
                 .trim();
         },
 
+        normalizarPaisResidencia(value) {
+            const raw = String(value || "").trim();
+            const key = this.normalizarTexto(raw).replace(/[^a-z0-9]+/g, "");
+            return ["remoto", "remote", "presencial", "onsite", "hibrido", "hybrid"].includes(key)
+                ? ""
+                : raw;
+        },
+
         normalizarNumero(value) {
             if (value === undefined || value === null || value === "") return null;
             const parsed = Number(value);
@@ -626,8 +634,8 @@ window.preregistrosCoordApp = function () {
                 correo_personal: item?.correo_personal || "",
                 correo_empresarial: item?.correo_empresarial || "",
                 telefono: item?.telefono || "",
-                pais_ubicacion: item?.ubicacion || "",
-                ubicacion: item?.ubicacion || "",
+                pais_ubicacion: this.normalizarPaisResidencia(item?.ubicacion),
+                ubicacion: this.normalizarPaisResidencia(item?.ubicacion),
                 vpn_corona: Boolean(item?.vpn_corona),
                 necesita_s_user: Boolean(item?.necesita_s_user),
                 grupo_usuario: item?.grupo_app_tiempos || "",

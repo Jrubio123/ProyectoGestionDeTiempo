@@ -71,6 +71,8 @@ module.exports = function registerContratacionesRoutes(deps) {
       sup.nombre_usuario AS supervisor_nombre,
       sup.email AS supervisor_email,
       sc.preregistro_id,
+      prereg.ciudad AS preregistro_ciudad,
+      prereg.pais_ubicacion AS preregistro_pais_ubicacion,
       sc.cliente_id,
       c.public_id AS cliente_public_id,
       c.titulo AS cliente_nombre,
@@ -125,6 +127,7 @@ module.exports = function registerContratacionesRoutes(deps) {
       ON NULLIF(BTRIM(sc.numero_documento), '') IS NOT NULL
      AND NULLIF(BTRIM(persona_registro.numero_documento), '') = BTRIM(sc.numero_documento)
     LEFT JOIN usuarios sup ON sup.id = sc.supervisor_id
+    LEFT JOIN preregistro_personas prereg ON prereg.id = sc.preregistro_id
     LEFT JOIN clientes c ON c.id = sc.cliente_id
     LEFT JOIN documento_identidad di ON di.id = sc.tipo_documento_id
     LEFT JOIN usuarios rev_th ON rev_th.id = sc.revisado_th_por
@@ -196,6 +199,27 @@ module.exports = function registerContratacionesRoutes(deps) {
   function toNullableString(value) {
     const raw = String(value || "").trim();
     return raw || null;
+  }
+
+  const WORK_LOCATION_MODES = new Set(["remoto", "remote", "presencial", "onsite", "hibrido", "hybrid"]);
+
+  function normalizeResidenceLocation(value) {
+    const raw = toNullableString(value);
+    if (!raw || WORK_LOCATION_MODES.has(normalizeKey(raw))) return null;
+    return raw;
+  }
+
+  function resolveSolicitudResidence(solicitudRow) {
+    const datosExtra = toObjectOrEmpty(solicitudRow?.datos_extra);
+    return {
+      ciudad:
+        normalizeResidenceLocation(solicitudRow?.preregistro_ciudad) ||
+        normalizeResidenceLocation(datosExtra.ciudad_residencia || datosExtra.ciudad),
+      pais:
+        normalizeResidenceLocation(solicitudRow?.preregistro_pais_ubicacion) ||
+        normalizeResidenceLocation(datosExtra.pais_ubicacion) ||
+        normalizeResidenceLocation(solicitudRow?.ubicacion)
+    };
   }
 
   function toNullableNumber(value) {
@@ -506,6 +530,7 @@ module.exports = function registerContratacionesRoutes(deps) {
 
   async function materializePersonaDesdeSolicitud(db, solicitudRow, actorUserId = null) {
     const datosExtra = toObjectOrEmpty(solicitudRow.datos_extra);
+    const residencia = resolveSolicitudResidence(solicitudRow);
     const [bancoId, moduloId, tipoCuenta] = await Promise.all([
       resolveBancoInternalId(db, datosExtra.banco_id),
       resolveModuloInternalId(db, datosExtra.modulo_id),
@@ -530,7 +555,8 @@ module.exports = function registerContratacionesRoutes(deps) {
       numero_contacto: solicitudRow.telefono,
       correo_electronico: solicitudRow.correo_personal,
       direccion_residencia: toNullableString(datosExtra.direccion),
-      ciudad_residencia: solicitudRow.ubicacion,
+      ciudad_residencia: residencia.ciudad,
+      pais_residencia: residencia.pais,
       tipo_persona: normalizeTipoPersonaForUsuarios(datosExtra.tipo_persona),
       factura_en_colombia: facturaEnColombia,
       banco_id: bancoId,
@@ -663,9 +689,10 @@ module.exports = function registerContratacionesRoutes(deps) {
       values.push(grupoDistribucion);
     }
 
-    if (solicitudRow.ubicacion) {
+    const paisResidencia = resolveSolicitudResidence(solicitudRow).pais;
+    if (paisResidencia) {
       sets.push(`pais_ubicacion = COALESCE($${idx++}, pais_ubicacion)`);
-      values.push(solicitudRow.ubicacion);
+      values.push(paisResidencia);
     }
 
     const supervisorNombre =
@@ -3570,6 +3597,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         const correoEmpresarialFinal = correoSilver;
 
         const datosExtra = toObjectOrEmpty(row.datos_extra);
+        const residenciaContratacion = resolveSolicitudResidence(row);
         const direccion = toNullableString(datosExtra.direccion);
         const bancoId = await resolveBancoInternalId(client, datosExtra.banco_id);
         const tipoCuenta = await resolveTipoCuentaBancaria(client, {
@@ -3665,7 +3693,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             row.telefono || null,
             row.correo_personal || null,
             direccion,
-            row.ubicacion || null,
+            residenciaContratacion.ciudad,
             tipoPersona,
             facturaEnColombia,
             bancoId,
@@ -3786,7 +3814,7 @@ module.exports = function registerContratacionesRoutes(deps) {
                   row.numero_documento || null,
                   direccion,
                   row.telefono || null,
-                  row.ubicacion || null,
+                  residenciaContratacion.ciudad,
                   tipoPersona,
                   moneda,
                   facturaEnColombia,
@@ -3819,7 +3847,7 @@ module.exports = function registerContratacionesRoutes(deps) {
                   row.numero_documento || null,
                   direccion,
                   row.telefono || null,
-                  row.ubicacion || null,
+                  residenciaContratacion.ciudad,
                   tipoPersona,
                   moneda,
                   facturaEnColombia,

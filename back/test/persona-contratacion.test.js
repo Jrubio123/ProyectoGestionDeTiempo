@@ -17,6 +17,7 @@ test("materializa la persona por documento antes de crear su usuario", async () 
   const result = await upsertPersonaDesdeContratacion(db, {
     numero_documento: " 123456 ",
     nombre: "Ana",
+    pais_residencia: "Colombia",
     tipo_persona: "Natural",
     factura_en_colombia: false,
     modulo_otro: "Módulo especial",
@@ -26,9 +27,10 @@ test("materializa la persona por documento antes de crear su usuario", async () 
 
   assert.deepEqual(result, { id: 25, public_id: "persona-public-id" });
   assert.equal(captured.params[0], "123456");
-  assert.equal(captured.params[9], false);
-  assert.equal(captured.params[14], "Módulo especial");
-  assert.equal(captured.params[22], 18);
+  assert.equal(captured.params[8], "Colombia");
+  assert.equal(captured.params[10], false);
+  assert.equal(captured.params[15], "Módulo especial");
+  assert.equal(captured.params[23], 18);
   assert.match(captured.sql, /ON CONFLICT \(numero_documento\) DO UPDATE/);
   assert.match(captured.sql, /estado\s+= 'activo'/);
 });

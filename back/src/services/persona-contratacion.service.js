@@ -11,15 +11,15 @@ async function upsertPersonaDesdeContratacion(db, data = {}) {
     `INSERT INTO personas (
       numero_documento, tipo_documento_id, nombre, apellidos,
       numero_contacto, correo_electronico, direccion_residencia, ciudad_residencia,
-      tipo_persona, factura_en_colombia,
+      pais_residencia, tipo_persona, factura_en_colombia,
       banco_id, tipo_cuenta_id, numero_cuenta,
       modulo_id, modulo_otro, cliente_id, cliente_otro,
       razon_social, nit_empresa, representante_legal,
       tipo_documento_representante, numero_documento_representante,
       preregistro_id, created_by, cargo, jefe_inmediato, moneda_cobro
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9::tipo_persona, $10, $11, $12,
-      $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27::tipo_moneda
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::tipo_persona, $11, $12, $13,
+      $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28::tipo_moneda
     )
     ON CONFLICT (numero_documento) DO UPDATE SET
       tipo_documento_id              = COALESCE(EXCLUDED.tipo_documento_id, personas.tipo_documento_id),
@@ -29,6 +29,7 @@ async function upsertPersonaDesdeContratacion(db, data = {}) {
       correo_electronico             = COALESCE(EXCLUDED.correo_electronico, personas.correo_electronico),
       direccion_residencia           = COALESCE(EXCLUDED.direccion_residencia, personas.direccion_residencia),
       ciudad_residencia              = COALESCE(EXCLUDED.ciudad_residencia, personas.ciudad_residencia),
+      pais_residencia                = COALESCE(EXCLUDED.pais_residencia, personas.pais_residencia),
       tipo_persona                   = COALESCE(EXCLUDED.tipo_persona, personas.tipo_persona),
       factura_en_colombia            = COALESCE(EXCLUDED.factura_en_colombia, personas.factura_en_colombia),
       banco_id                       = COALESCE(EXCLUDED.banco_id, personas.banco_id),
@@ -71,6 +72,7 @@ async function upsertPersonaDesdeContratacion(db, data = {}) {
       data.correo_electronico || null,
       data.direccion_residencia || null,
       data.ciudad_residencia || null,
+      data.pais_residencia || null,
       data.tipo_persona || null,
       data.factura_en_colombia === undefined ? null : data.factura_en_colombia,
       data.banco_id || null,

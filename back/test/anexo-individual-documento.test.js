@@ -262,3 +262,14 @@ test("las fechas del anexo se imprimen en formato dia/mes/ano", () => {
   assert.equal(formatDate(""), "-");
   assert.equal(formatDate(new Date("fecha-invalida")), "-");
 });
+
+test("el anexo del paquete contractual incluye todos los items activos de la persona", () => {
+  const indexSource = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  const start = indexSource.indexOf("async function requirePersistedAnexoFromProceso");
+  const end = indexSource.indexOf("function toAnexoApiRow", start);
+  const source = indexSource.slice(start, end);
+
+  assert.match(source, /listActiveAnexoItemsForPersonaContext\(resolvedContext\)/);
+  assert.match(source, /activePersonItems\.length \? activePersonItems : processItems/);
+  assert.match(source, /fechaA\.localeCompare\(fechaB\)/);
+});

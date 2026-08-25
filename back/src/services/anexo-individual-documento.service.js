@@ -162,7 +162,7 @@ function generateAnexoIndividualManualPdfFromItems({ userRow, items, correoFirma
     doc.rect(0, 0, pageWidth, 72).fill(navy);
     doc.rect(0, 72, pageWidth, 4).fill(cyan);
     doc.font("Helvetica-Bold").fontSize(18).fillColor("#FFFFFF")
-      .text("ANEXO TÉCNICO INDIVIDUAL", left, 20, { width: contentWidth, lineBreak: false });
+      .text("ANEXO TÉCNICO", left, 20, { width: contentWidth, lineBreak: false });
     doc.font("Helvetica").fontSize(8.5).fillColor("#DDEAF2")
       .text("Resumen de asignaciones vigentes", left, 46, { lineBreak: false });
 

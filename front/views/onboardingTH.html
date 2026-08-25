@@ -9,19 +9,18 @@
                                 <h1 class="prereg-title">Talento Humano</h1>
                                 <span class="prereg-role-badge">TH</span>
                             </div>
-                            <p class="prereg-subtitle">Gestión de contrataciones, onboarding y anexo tecnico individual.</p>
+                            <p class="prereg-subtitle">Gestión de contrataciones, onboarding y anexo tecnico individual.
+                            </p>
                         </div>
                     </div>
 
                     <div class="inline-flex p-1 border rounded-2xl border-white/25 bg-white/10 backdrop-blur">
-                        <button type="button"
-                            @click="setVistaActiva('contrataciones')"
+                        <button type="button" @click="setVistaActiva('contrataciones')"
                             class="px-4 py-2 text-sm font-semibold transition rounded-xl"
                             :class="vistaActiva === 'contrataciones' ? 'bg-white text-slate-900 shadow' : 'text-white/85 hover:text-white'">
                             Contrataciones
                         </button>
-                        <button type="button"
-                            @click="setVistaActiva('anexo')"
+                        <button type="button" @click="setVistaActiva('anexo')"
                             class="px-4 py-2 text-sm font-semibold transition rounded-xl"
                             :class="vistaActiva === 'anexo' ? 'bg-white text-slate-900 shadow' : 'text-white/85 hover:text-white'">
                             Anexo tecnico individual
@@ -36,12 +35,11 @@
                 <p class="prereg-stats-label">Filtrar por estado</p>
                 <div class="prereg-stats-grid">
                     <template x-for="card in estadoCards" :key="card.key">
-                        <button type="button"
-                            class="prereg-stat-card"
-                            :class="[card.tone, filtro === card.key ? 'is-active' : '']"
-                            @click="setFiltro(card.key)">
+                        <button type="button" class="prereg-stat-card"
+                            :class="[card.tone, filtro === card.key ? 'is-active' : '']" @click="setFiltro(card.key)">
                             <div class="prereg-stat-dot"></div>
-                            <div class="prereg-stat-count" x-text="String(contarPorKey(card.key)).padStart(2, '0')"></div>
+                            <div class="prereg-stat-count" x-text="String(contarPorKey(card.key)).padStart(2, '0')">
+                            </div>
                             <div class="prereg-stat-name" x-text="card.label"></div>
                         </button>
                     </template>
@@ -52,7 +50,8 @@
                 <div class="prereg-content-header">
                     <span class="prereg-content-title" x-text="tituloFiltro"></span>
                     <div class="prereg-search">
-                        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"
+                            viewBox="0 0 24 24">
                             <circle cx="11" cy="11" r="8"></circle>
                             <path d="m21 21-4.35-4.35"></path>
                         </svg>
@@ -72,11 +71,15 @@
                         <article class="prereg-card" :class="cardTone(p.estado)">
                             <div class="prereg-card-top">
                                 <div>
-                                    <div class="prereg-card-name" x-text="`${p.nombre || ''} ${p.apellidos || ''}`.trim() || '-'"></div>
-                                    <div class="prereg-card-cargo" x-text="`${p.solicitud?.perfil || '-'} · ${p.solicitud?.cliente?.nombre || '-'}`"></div>
+                                    <div class="prereg-card-name"
+                                        x-text="`${p.nombre || ''} ${p.apellidos || ''}`.trim() || '-'"></div>
+                                    <div class="prereg-card-cargo"
+                                        x-text="`${p.solicitud?.perfil || '-'} · ${p.solicitud?.cliente?.nombre || '-'}`">
+                                    </div>
                                     <div class="mt-1 text-[11px] text-slate-500" x-text="flujoLabel(p)"></div>
                                 </div>
-                                <span class="prereg-pill" :class="pillClass(estadoToKey(p.estado))" x-text="pillText(p.estado)"></span>
+                                <span class="prereg-pill" :class="pillClass(estadoToKey(p.estado))"
+                                    x-text="pillText(p.estado)"></span>
                             </div>
 
                             <div class="prereg-meta">
@@ -86,14 +89,19 @@
                                 </div>
                                 <div>
                                     <div class="prereg-meta-label">S2</div>
-                                    <div class="prereg-meta-val" x-text="p.completado_coordinador_por ? `Por ${p.completado_coordinador_por_nombre || 'Coordinador'}` : 'Pendiente'"></div>
+                                    <div class="prereg-meta-val"
+                                        x-text="p.completado_coordinador_por ? `Por ${p.completado_coordinador_por_nombre || 'Coordinador'}` : 'Pendiente'">
+                                    </div>
                                 </div>
                             </div>
 
                             <div class="prereg-card-footer">
-                                <span class="prereg-time" x-text="`Actualizado: ${formatFecha(p.updated_at || p.created_at)}`"></span>
-                                <button type="button" :class="accionPrincipalClass(p)" @click="ejecutarAccionPrincipal(p)" x-text="accionPrincipalLabel(p)"></button>
-                                <button type="button" class="prereg-btn prereg-btn-ghost" @click="abrirDetalleResuelto(p)">Ver</button>
+                                <span class="prereg-time"
+                                    x-text="`Actualizado: ${formatFecha(p.updated_at || p.created_at)}`"></span>
+                                <button type="button" :class="accionPrincipalClass(p)"
+                                    @click="ejecutarAccionPrincipal(p)" x-text="accionPrincipalLabel(p)"></button>
+                                <button type="button" class="prereg-btn prereg-btn-ghost"
+                                    @click="abrirDetalleResuelto(p)">Ver</button>
                             </div>
                         </article>
                     </template>
@@ -106,34 +114,41 @@
                 <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                     <div class="space-y-1">
                         <h2 class="text-xl font-bold text-slate-900">Anexo tecnico individual</h2>
-                        <p class="text-sm text-slate-500">Busca personas Silver activas o inactivas para consultar y mantener su anexo tecnico.</p>
+                        <p class="text-sm text-slate-500">Busca personas Silver activas o inactivas para consultar y
+                            mantener su anexo tecnico.</p>
                     </div>
                     <div class="w-full max-w-xl">
                         <template x-if="!usuarioAnexo">
                             <div class="relative">
-                                <input type="text"
-                                    x-model="anexoBusqueda"
-                                    @input="buscarUsuariosAnexo"
+                                <input type="text" x-model="anexoBusqueda" @input="buscarUsuariosAnexo"
                                     class="w-full px-4 py-3 text-sm transition border outline-none rounded-2xl border-slate-200 bg-slate-50 focus:border-cyan-500 focus:bg-white"
                                     placeholder="Buscar por nombre, correo o documento">
-                                <div x-show="anexoBuscando" class="absolute text-xs right-4 top-3 text-slate-400">Buscando...</div>
-                                <div x-show="anexoResultados.length > 0" x-cloak class="absolute z-20 w-full mt-2 overflow-hidden bg-white border shadow-xl rounded-2xl border-slate-200">
+                                <div x-show="anexoBuscando" class="absolute text-xs right-4 top-3 text-slate-400">
+                                    Buscando...</div>
+                                <div x-show="anexoResultados.length > 0" x-cloak
+                                    class="absolute z-20 w-full mt-2 overflow-hidden bg-white border shadow-xl rounded-2xl border-slate-200">
                                     <template x-for="usuario in anexoResultados" :key="usuario.id">
-                                        <button type="button"
-                                            @click="seleccionarUsuarioAnexo(usuario)"
+                                        <button type="button" @click="seleccionarUsuarioAnexo(usuario)"
                                             class="flex items-center justify-between w-full gap-3 px-4 py-3 text-left transition border-b border-slate-100 last:border-b-0 hover:bg-slate-50">
                                             <div>
                                                 <div class="text-sm font-semibold text-slate-900">
                                                     <span x-text="usuario.nombre"></span>
-                                                    <span x-show="usuario.source === 'persona'" class="badge bg-secondary ms-2">Persona</span>
-                                                    <span x-show="usuario.source !== 'persona'" class="badge bg-primary ms-2">Consultor</span>
-                                                    <span x-show="usuario.activo === false" class="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">Inactivo</span>
+                                                    <span x-show="usuario.source === 'persona'"
+                                                        class="badge bg-secondary ms-2">Persona</span>
+                                                    <span x-show="usuario.source !== 'persona'"
+                                                        class="badge bg-primary ms-2">Consultor</span>
+                                                    <span x-show="usuario.activo === false"
+                                                        class="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">Inactivo</span>
                                                 </div>
                                                 <div class="text-xs text-slate-500" x-text="usuario.email"></div>
                                             </div>
                                             <div class="flex flex-col items-end gap-1">
-                                                <span class="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600" x-text="usuario.tipo_consultor || 'Consultor'"></span>
-                                                <span x-show="usuario.envio_pendiente" class="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-700">Envio pendiente</span>
+                                                <span
+                                                    class="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600"
+                                                    x-text="usuario.tipo_consultor || 'Consultor'"></span>
+                                                <span x-show="usuario.envio_pendiente"
+                                                    class="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-700">Envio
+                                                    pendiente</span>
                                             </div>
                                         </button>
                                     </template>
@@ -142,12 +157,16 @@
                         </template>
 
                         <template x-if="usuarioAnexo">
-                            <div class="flex flex-wrap items-center gap-3 px-4 py-3 border rounded-2xl border-cyan-100 bg-cyan-50">
+                            <div
+                                class="flex flex-wrap items-center gap-3 px-4 py-3 border rounded-2xl border-cyan-100 bg-cyan-50">
                                 <div class="flex-1 min-w-0">
-                                    <div class="text-sm font-semibold truncate text-slate-900" x-text="usuarioAnexo.nombre || usuarioAnexo.email"></div>
+                                    <div class="text-sm font-semibold truncate text-slate-900"
+                                        x-text="usuarioAnexo.nombre || usuarioAnexo.email"></div>
                                     <div class="text-xs truncate text-slate-500" x-text="usuarioAnexo.email"></div>
                                 </div>
-                                <button type="button" class="px-3 py-2 text-xs font-semibold transition bg-white border rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50" @click="limpiarUsuarioAnexo()">
+                                <button type="button"
+                                    class="px-3 py-2 text-xs font-semibold transition bg-white border rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50"
+                                    @click="limpiarUsuarioAnexo()">
                                     Cambiar persona
                                 </button>
                             </div>
@@ -157,17 +176,21 @@
             </section>
 
             <template x-if="anexoError">
-                <div class="px-4 py-3 text-sm border rounded-2xl border-rose-200 bg-rose-50 text-rose-700" x-text="anexoError"></div>
+                <div class="px-4 py-3 text-sm border rounded-2xl border-rose-200 bg-rose-50 text-rose-700"
+                    x-text="anexoError"></div>
             </template>
             <template x-if="anexoSuccess">
-                <div class="px-4 py-3 text-sm border rounded-2xl border-emerald-200 bg-emerald-50 text-emerald-700" x-text="anexoSuccess"></div>
+                <div class="px-4 py-3 text-sm border rounded-2xl border-emerald-200 bg-emerald-50 text-emerald-700"
+                    x-text="anexoSuccess"></div>
             </template>
 
             <template x-if="!usuarioAnexo">
-                <section class="rounded-[28px] border border-dashed border-slate-300 bg-white/80 p-10 text-center shadow-sm">
+                <section
+                    class="rounded-[28px] border border-dashed border-slate-300 bg-white/80 p-10 text-center shadow-sm">
                     <h3 class="text-lg font-bold text-slate-900">Selecciona una persona para continuar</h3>
                     <p class="max-w-2xl mx-auto mt-2 text-sm text-slate-500">
-                        Desde aqui TH puede mantener los items activos del anexo tecnico, revisar el historial y enviar el documento completo a firma.
+                        Desde aqui TH puede mantener los items activos del anexo tecnico, revisar el historial y enviar
+                        el documento completo a firma.
                     </p>
                 </section>
             </template>
@@ -178,28 +201,38 @@
                         <div class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
                             <div class="flex flex-wrap items-start justify-between gap-4">
                                 <div>
-                                    <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Persona seleccionada</p>
-                                    <h3 class="mt-2 text-2xl font-bold text-slate-900" x-text="usuarioAnexo.nombre || '-'"></h3>
+                                    <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Persona
+                                        seleccionada</p>
+                                    <h3 class="mt-2 text-2xl font-bold text-slate-900"
+                                        x-text="usuarioAnexo.nombre || '-'"></h3>
                                     <p class="mt-1 text-sm text-slate-500" x-text="usuarioAnexo.email || '-'"></p>
                                 </div>
                                 <div class="flex flex-wrap gap-2">
-                                    <span class="px-3 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-700" x-text="usuarioAnexo.tipo_consultor || 'Consultor'"></span>
-                                    <span class="px-3 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-700" x-text="usuarioAnexo.cedula || 'Sin documento'"></span>
-                                    <span x-show="usuarioAnexo.activo === false" class="px-3 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-700">Inactivo</span>
+                                    <span
+                                        class="px-3 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-700"
+                                        x-text="usuarioAnexo.tipo_consultor || 'Consultor'"></span>
+                                    <span
+                                        class="px-3 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-700"
+                                        x-text="usuarioAnexo.cedula || 'Sin documento'"></span>
+                                    <span x-show="usuarioAnexo.activo === false"
+                                        class="px-3 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-700">Inactivo</span>
                                 </div>
                             </div>
                         </div>
 
                         <div class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-                            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Resumen rapido</p>
+                            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Resumen rapido
+                            </p>
                             <div class="grid grid-cols-2 gap-3 mt-4">
                                 <div class="p-4 rounded-2xl bg-slate-50">
                                     <div class="text-xs uppercase tracking-[0.15em] text-slate-400">Activos</div>
-                                    <div class="mt-2 text-2xl font-bold text-slate-900" x-text="anexoItemsActivos.length"></div>
+                                    <div class="mt-2 text-2xl font-bold text-slate-900"
+                                        x-text="anexoItemsActivos.length"></div>
                                 </div>
                                 <div class="p-4 rounded-2xl bg-slate-50">
                                     <div class="text-xs uppercase tracking-[0.15em] text-slate-400">Historial</div>
-                                    <div class="mt-2 text-2xl font-bold text-slate-900" x-text="anexoItemsFinalizados.length"></div>
+                                    <div class="mt-2 text-2xl font-bold text-slate-900"
+                                        x-text="anexoItemsFinalizados.length"></div>
                                 </div>
                             </div>
                         </div>
@@ -207,7 +240,8 @@
 
                     <template x-if="anexoTieneCambiosDesdeFirma">
                         <div class="px-4 py-3 text-sm border rounded-2xl border-amber-200 bg-amber-50 text-amber-800">
-                            Hay items modificados desde la ultima firma. El proximo envio incluira el estado actual completo.
+                            Hay items modificados desde la ultima firma. El proximo envio incluira el estado actual
+                            completo.
                         </div>
                     </template>
 
@@ -215,13 +249,19 @@
                         <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                             <div>
                                 <h3 class="text-lg font-bold text-slate-900">Items activos</h3>
-                                <p class="text-sm text-slate-500">Cada envio siempre incluye todos los items activos de la persona.</p>
+                                <p class="text-sm text-slate-500">Cada envio siempre incluye todos los items activos de
+                                    la persona.</p>
                             </div>
                             <div class="flex flex-wrap gap-2">
-                                <button type="button" class="px-4 py-2 text-sm font-semibold transition bg-white border rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50" @click="toggleHistorialAnexo()">
-                                    <span x-text="anexoMostrarHistorial ? 'Ocultar historial' : 'Ver historial completo'"></span>
+                                <button type="button"
+                                    class="px-4 py-2 text-sm font-semibold transition bg-white border rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50"
+                                    @click="toggleHistorialAnexo()">
+                                    <span
+                                        x-text="anexoMostrarHistorial ? 'Ocultar historial' : 'Ver historial completo'"></span>
                                 </button>
-                                <button type="button" class="px-4 py-2 text-sm font-semibold text-white transition rounded-xl bg-slate-900 hover:bg-slate-800" @click="abrirModalNuevoItemAnexo()">
+                                <button type="button"
+                                    class="px-4 py-2 text-sm font-semibold text-white transition rounded-xl bg-slate-900 hover:bg-slate-800"
+                                    @click="abrirModalNuevoItemAnexo()">
                                     Agregar item
                                 </button>
                             </div>
@@ -229,7 +269,8 @@
 
                         <div class="mt-6 overflow-x-auto">
                             <table class="min-w-full text-sm divide-y divide-slate-200">
-                                <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                <thead
+                                    class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                                     <tr>
                                         <th class="px-4 py-3">Cliente</th>
                                         <th class="px-4 py-3">Tipo</th>
@@ -245,7 +286,8 @@
                                 <tbody class="divide-y divide-slate-100">
                                     <template x-if="anexoCargandoItems">
                                         <tr>
-                                            <td colspan="9" class="px-4 py-8 text-sm text-center text-slate-500">Cargando items...</td>
+                                            <td colspan="9" class="px-4 py-8 text-sm text-center text-slate-500">
+                                                Cargando items...</td>
                                         </tr>
                                     </template>
                                     <template x-if="!anexoCargandoItems && !anexoItemsActivos.length">
@@ -257,24 +299,37 @@
                                     </template>
                                     <template x-for="item in anexoItemsActivos" :key="item.id">
                                         <tr class="align-top">
-                                            <td class="px-4 py-4 text-slate-700" x-text="item.cliente_nombre || '-'"></td>
-                                            <td class="px-4 py-4 font-medium text-slate-900" x-text="labelTipoAnexo(item.tipo_asignacion)"></td>
-                                            <td class="px-4 py-4 text-slate-700" x-text="item.modulo_nombre || '-'"></td>
+                                            <td class="px-4 py-4 text-slate-700" x-text="item.cliente_nombre || '-'">
+                                            </td>
+                                            <td class="px-4 py-4 font-medium text-slate-900"
+                                                x-text="labelTipoAnexo(item.tipo_asignacion)"></td>
+                                            <td class="px-4 py-4 text-slate-700" x-text="item.modulo_nombre || '-'">
+                                            </td>
                                             <td class="px-4 py-4 text-slate-700" x-text="textoValorAnexo(item)"></td>
-                                            <td class="px-4 py-4 text-slate-700" x-text="formatFecha(item.fecha_inicio)"></td>
-                                            <td class="px-4 py-4 text-slate-700" x-text="formatFecha(item.fecha_fin)"></td>
-                                            <td class="px-4 py-4">
-                                                <span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="origenBadgeClass(item.origen)" x-text="origenBadgeText(item.origen)"></span>
+                                            <td class="px-4 py-4 text-slate-700"
+                                                x-text="formatFecha(item.fecha_inicio)"></td>
+                                            <td class="px-4 py-4 text-slate-700" x-text="formatFecha(item.fecha_fin)">
                                             </td>
                                             <td class="px-4 py-4">
-                                                <span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="estadoFirmaBadgeClass(item.estado_firma)" x-text="estadoFirmaBadgeText(item.estado_firma)"></span>
+                                                <span class="rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                                                    :class="origenBadgeClass(item.origen)"
+                                                    x-text="origenBadgeText(item.origen)"></span>
+                                            </td>
+                                            <td class="px-4 py-4">
+                                                <span class="rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                                                    :class="estadoFirmaBadgeClass(item.estado_firma)"
+                                                    x-text="estadoFirmaBadgeText(item.estado_firma)"></span>
                                             </td>
                                             <td class="px-4 py-4">
                                                 <div class="flex justify-end gap-2">
-                                                    <button type="button" class="px-3 py-2 text-xs font-semibold transition border rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50" @click="abrirModalEditarItemAnexo(item)">
+                                                    <button type="button"
+                                                        class="px-3 py-2 text-xs font-semibold transition border rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50"
+                                                        @click="abrirModalEditarItemAnexo(item)">
                                                         Editar
                                                     </button>
-                                                    <button type="button" class="px-3 py-2 text-xs font-semibold transition border rounded-xl border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" @click="abrirModalFinalizarAnexo(item)">
+                                                    <button type="button"
+                                                        class="px-3 py-2 text-xs font-semibold transition border rounded-xl border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                                                        @click="abrirModalFinalizarAnexo(item)">
                                                         Finalizar
                                                     </button>
                                                 </div>
@@ -287,21 +342,34 @@
 
                         <div class="flex flex-col gap-3 pt-5 mt-6 border-t border-slate-100">
                             <template x-if="anexoTokenActivo">
-                                <div class="flex flex-col gap-3 px-4 py-4 border rounded-2xl border-amber-200 bg-amber-50 md:flex-row md:items-center md:justify-between">
+                                <div
+                                    class="flex flex-col gap-3 px-4 py-4 border rounded-2xl border-amber-200 bg-amber-50 md:flex-row md:items-center md:justify-between">
                                     <div>
                                         <div class="text-sm font-semibold text-amber-800">Envio pendiente</div>
-                                        <div class="text-sm text-amber-700" x-text="`Desde ${formatFechaHora(anexoTokenActivo.created_at)}`"></div>
-                                        <div class="text-xs text-amber-700/90" x-text="`Firmante: ${anexoTokenActivo.correo_firmante || 'Sin correo'}`"></div>
-                                        <div x-show="anexoTokenActivo.invitacion_enviada_at" class="text-xs font-medium text-emerald-700" x-text="`Correo enviado a ${anexoTokenActivo.invitacion_enviada_a || anexoTokenActivo.correo_firmante}`"></div>
-                                        <div x-show="anexoTokenActivo.invitacion_error" class="text-xs font-medium text-rose-700" x-text="`Correo no enviado: ${anexoTokenActivo.invitacion_error}`"></div>
+                                        <div class="text-sm text-amber-700"
+                                            x-text="`Desde ${formatFechaHora(anexoTokenActivo.created_at)}`"></div>
+                                        <div class="text-xs text-amber-700/90"
+                                            x-text="`Firmante: ${anexoTokenActivo.correo_firmante || 'Sin correo'}`">
+                                        </div>
+                                        <div x-show="anexoTokenActivo.invitacion_enviada_at"
+                                            class="text-xs font-medium text-emerald-700"
+                                            x-text="`Correo enviado a ${anexoTokenActivo.invitacion_enviada_a || anexoTokenActivo.correo_firmante}`">
+                                        </div>
+                                        <div x-show="anexoTokenActivo.invitacion_error"
+                                            class="text-xs font-medium text-rose-700"
+                                            x-text="`Correo no enviado: ${anexoTokenActivo.invitacion_error}`"></div>
                                     </div>
                                     <div class="flex flex-wrap gap-2">
                                         <template x-if="anexoTokenActivo.url_firma">
-                                            <button type="button" class="px-4 py-2 text-sm font-semibold transition border rounded-xl border-amber-200 bg-amber-100 text-amber-800 hover:bg-amber-200" @click="copiarEnlaceFirmaAnexo(anexoTokenActivo.url_firma)">
+                                            <button type="button"
+                                                class="px-4 py-2 text-sm font-semibold transition border rounded-xl border-amber-200 bg-amber-100 text-amber-800 hover:bg-amber-200"
+                                                @click="copiarEnlaceFirmaAnexo(anexoTokenActivo.url_firma)">
                                                 Copiar enlace
                                             </button>
                                         </template>
-                                        <button type="button" class="px-4 py-2 text-sm font-semibold transition bg-white rounded-xl text-amber-800 hover:bg-amber-100" @click="abrirModalCancelarAnexo()">
+                                        <button type="button"
+                                            class="px-4 py-2 text-sm font-semibold transition bg-white rounded-xl text-amber-800 hover:bg-amber-100"
+                                            @click="abrirModalCancelarAnexo()">
                                             Cancelar envio actual
                                         </button>
                                     </div>
@@ -315,13 +383,13 @@
                                             <span>Todo vigente. Puedes generar un nuevo ciclo si lo necesitas.</span>
                                         </template>
                                         <template x-if="!anexoTodoVigente">
-                                            <span>El envio a firma se habilita cuando haya al menos un item activo.</span>
+                                            <span>El envio a firma se habilita cuando haya al menos un item
+                                                activo.</span>
                                         </template>
                                     </div>
                                     <button type="button"
                                         class="px-5 py-3 text-sm font-semibold text-white transition rounded-xl bg-cyan-600 hover:bg-cyan-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                        :disabled="!puedeEnviarAnexo"
-                                        @click="abrirModalFirmaAnexo()">
+                                        :disabled="!puedeEnviarAnexo" @click="abrirModalFirmaAnexo()">
                                         Enviar anexo tecnico a firma
                                     </button>
                                 </div>
@@ -333,12 +401,14 @@
                         <section class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
                             <div>
                                 <h3 class="text-lg font-bold text-slate-900">Historial de asignaciones</h3>
-                                <p class="text-sm text-slate-500">Aqui se conservan los items que ya no participan en nuevos envios.</p>
+                                <p class="text-sm text-slate-500">Aqui se conservan los items que ya no participan en
+                                    nuevos envios.</p>
                             </div>
 
                             <div class="mt-6 overflow-x-auto">
                                 <table class="min-w-full text-sm divide-y divide-slate-200">
-                                    <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                    <thead
+                                        class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                                         <tr>
                                             <th class="px-4 py-3">Cliente</th>
                                             <th class="px-4 py-3">Tipo</th>
@@ -352,17 +422,24 @@
                                     <tbody class="divide-y divide-slate-100">
                                         <template x-if="!anexoItemsFinalizados.length">
                                             <tr>
-                                                <td colspan="7" class="px-4 py-8 text-sm text-center text-slate-500">No hay items cerrados para esta persona.</td>
+                                                <td colspan="7" class="px-4 py-8 text-sm text-center text-slate-500">No
+                                                    hay items cerrados para esta persona.</td>
                                             </tr>
                                         </template>
                                         <template x-for="item in anexoItemsFinalizados" :key="item.id">
                                             <tr>
-                                                <td class="px-4 py-4 text-slate-700" x-text="item.cliente_nombre || '-'"></td>
-                                                <td class="px-4 py-4 font-medium text-slate-900" x-text="labelTipoAnexo(item.tipo_asignacion)"></td>
-                                                <td class="px-4 py-4 text-slate-700" x-text="item.modulo_nombre || '-'"></td>
-                                                <td class="px-4 py-4 text-slate-700" x-text="textoValorAnexo(item)"></td>
-                                                <td class="px-4 py-4 text-slate-700" x-text="formatFecha(item.fecha_inicio)"></td>
-                                                <td class="px-4 py-4 text-slate-700" x-text="formatFecha(item.fecha_fin)"></td>
+                                                <td class="px-4 py-4 text-slate-700"
+                                                    x-text="item.cliente_nombre || '-'"></td>
+                                                <td class="px-4 py-4 font-medium text-slate-900"
+                                                    x-text="labelTipoAnexo(item.tipo_asignacion)"></td>
+                                                <td class="px-4 py-4 text-slate-700" x-text="item.modulo_nombre || '-'">
+                                                </td>
+                                                <td class="px-4 py-4 text-slate-700" x-text="textoValorAnexo(item)">
+                                                </td>
+                                                <td class="px-4 py-4 text-slate-700"
+                                                    x-text="formatFecha(item.fecha_inicio)"></td>
+                                                <td class="px-4 py-4 text-slate-700"
+                                                    x-text="formatFecha(item.fecha_fin)"></td>
                                                 <td class="px-4 py-4">
                                                     <span class="rounded-full px-2.5 py-1 text-[11px] font-semibold"
                                                         :class="estadoHistorialBadgeClass(item.estado)"
@@ -381,11 +458,13 @@
     </div>
 
     <div x-show="modalDetalle" x-cloak class="view-overlay bg-white/30 backdrop-blur-md">
-        <div class="w-11/12 max-w-5xl bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh] relative">
+        <div
+            class="w-11/12 max-w-5xl bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh] relative">
             <div class="prereg-modal-head">
                 <div>
                     <h3 class="prereg-modal-title">Detalle de contratacion</h3>
-                    <p class="prereg-modal-subtitle" x-text="`${itemActivo?.estado || '-'} · ${flujoLabel(itemActivo)}`"></p>
+                    <p class="prereg-modal-subtitle"
+                        x-text="`${itemActivo?.estado || '-'} · ${flujoLabel(itemActivo)}`"></p>
                 </div>
                 <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarDetalle">Cerrar</button>
             </div>
@@ -393,44 +472,93 @@
             <section class="prereg-section">
                 <p class="prereg-section-title">Seccion 1 - Datos personales</p>
                 <div class="prereg-info-grid">
-                    <div class="prereg-info-card"><p class="prereg-info-label">Nombre completo</p><p class="prereg-info-value" x-text="`${itemActivo?.nombre || ''} ${itemActivo?.apellidos || ''}`.trim() || '-'"></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Documento</p><p class="prereg-info-value" x-text="`${itemActivo?.tipo_documento || '-'} · ${itemActivo?.numero_documento || '-'}`"></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Telefono</p><p class="prereg-info-value" x-text="itemActivo?.telefono || '-'"></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Correo personal</p><p class="prereg-info-value" x-text="itemActivo?.correo_personal || '-'"></p></div>
+                    <div class="prereg-info-card">
+                        <p class="prereg-info-label">Nombre completo</p>
+                        <p class="prereg-info-value"
+                            x-text="`${itemActivo?.nombre || ''} ${itemActivo?.apellidos || ''}`.trim() || '-'"></p>
+                    </div>
+                    <div class="prereg-info-card">
+                        <p class="prereg-info-label">Documento</p>
+                        <p class="prereg-info-value"
+                            x-text="`${itemActivo?.tipo_documento || '-'} · ${itemActivo?.numero_documento || '-'}`">
+                        </p>
+                    </div>
+                    <div class="prereg-info-card">
+                        <p class="prereg-info-label">Telefono</p>
+                        <p class="prereg-info-value" x-text="itemActivo?.telefono || '-'"></p>
+                    </div>
+                    <div class="prereg-info-card">
+                        <p class="prereg-info-label">Correo personal</p>
+                        <p class="prereg-info-value" x-text="itemActivo?.correo_personal || '-'"></p>
+                    </div>
                 </div>
             </section>
 
             <section class="prereg-section">
                 <p class="prereg-section-title">Seccion 2 - Datos del puesto</p>
                 <div class="prereg-info-grid">
-                    <div class="prereg-info-card"><p class="prereg-info-label">Cliente</p><p class="prereg-info-value" x-text="itemActivo?.solicitud?.cliente?.nombre || '-'"></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Perfil / Nivel</p><p class="prereg-info-value" x-text="`${itemActivo?.solicitud?.perfil || '-'} · ${itemActivo?.solicitud?.nivel || '-'}`"></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Tipo contrato</p><p class="prereg-info-value" x-text="modalidadContratoDetalle()"></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Valor a pagar</p><p class="prereg-info-value" x-text="tarifaPrincipalDetalle()"></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Moneda</p><p class="prereg-info-value" x-text="itemActivo?.moneda || '-'"></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Factura en Colombia</p><p class="prereg-info-value" x-text="itemActivo?.factura_en_colombia === true ? 'Si' : itemActivo?.factura_en_colombia === false ? 'No' : '-'"></p></div>
-                    <div class="prereg-info-card"><p class="prereg-info-label">Coordinador</p><p class="prereg-info-value" x-text="itemActivo?.solicitud?.coordinador?.nombre || '-'"></p></div>
+                    <div class="prereg-info-card">
+                        <p class="prereg-info-label">Cliente</p>
+                        <p class="prereg-info-value" x-text="itemActivo?.solicitud?.cliente?.nombre || '-'"></p>
+                    </div>
+                    <div class="prereg-info-card">
+                        <p class="prereg-info-label">Perfil / Nivel</p>
+                        <p class="prereg-info-value"
+                            x-text="`${itemActivo?.solicitud?.perfil || '-'} · ${itemActivo?.solicitud?.nivel || '-'}`">
+                        </p>
+                    </div>
+                    <div class="prereg-info-card">
+                        <p class="prereg-info-label">Tipo contrato</p>
+                        <p class="prereg-info-value" x-text="modalidadContratoDetalle()"></p>
+                    </div>
+                    <div class="prereg-info-card">
+                        <p class="prereg-info-label">Valor a pagar</p>
+                        <p class="prereg-info-value" x-text="tarifaPrincipalDetalle()"></p>
+                    </div>
+                    <div class="prereg-info-card">
+                        <p class="prereg-info-label">Moneda</p>
+                        <p class="prereg-info-value" x-text="itemActivo?.moneda || '-'"></p>
+                    </div>
+                    <div class="prereg-info-card">
+                        <p class="prereg-info-label">Factura en Colombia</p>
+                        <p class="prereg-info-value"
+                            x-text="itemActivo?.factura_en_colombia === true ? 'Si' : itemActivo?.factura_en_colombia === false ? 'No' : '-'">
+                        </p>
+                    </div>
+                    <div class="prereg-info-card">
+                        <p class="prereg-info-label">Coordinador</p>
+                        <p class="prereg-info-value" x-text="itemActivo?.solicitud?.coordinador?.nombre || '-'"></p>
+                    </div>
                 </div>
             </section>
 
             <section class="prereg-section">
                 <p class="prereg-section-title">Seccion 3 - Datos legales</p>
-                <div x-show="itemActivo?.origen_flujo === 'contratacion' && itemActivo?.estado === 'Pendiente Correo Silver'" class="mb-4 rounded-2xl border border-purple-200 bg-purple-50 p-4 text-sm text-purple-900" style="display: none;">
-                    Talento Humano ya guardo esta revision. El correo se completara automaticamente desde Microsoft o, si eso falla, lo registrara el solicitante original.
+                <div x-show="itemActivo?.origen_flujo === 'contratacion' && itemActivo?.estado === 'Pendiente Correo Silver'"
+                    class="mb-4 rounded-2xl border border-purple-200 bg-purple-50 p-4 text-sm text-purple-900"
+                    style="display: none;">
+                    Talento Humano ya guardo esta revision. El correo se completara automaticamente desde Microsoft o,
+                    si eso falla, lo registrara el solicitante original.
                 </div>
                 <div class="prereg-form-grid" :class="{ 'opacity-70': !seccion3Editable }">
-                    <input class="prereg-input md:col-span-2" x-model="formS3.direccion" :disabled="!seccion3Editable" placeholder="Direccion completa *">
+                    <input class="prereg-input md:col-span-2" x-model="formS3.direccion" :disabled="!seccion3Editable"
+                        placeholder="Direccion completa *">
                     <select class="prereg-input" x-model="formS3.tipo_persona" :disabled="!seccion3Editable">
                         <option value="Natural">Natural</option>
                         <option value="Juridica">Juridica</option>
                     </select>
                     <div class="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3"
                         x-show="normalizar(formS3.tipo_persona) === 'juridica'" x-cloak>
-                        <input class="prereg-input md:col-span-2" x-model="formS3.razon_social" :disabled="!seccion3Editable" placeholder="Razon social *">
-                        <input class="prereg-input" x-model="formS3.nit_empresa" :disabled="!seccion3Editable" placeholder="NIT de la empresa *">
-                        <input class="prereg-input" x-model="formS3.representante_legal" :disabled="!seccion3Editable" placeholder="Representante legal *">
-                        <input class="prereg-input" x-model="formS3.tipo_documento_representante" :disabled="!seccion3Editable" placeholder="Tipo documento representante *">
-                        <input class="prereg-input" x-model="formS3.numero_documento_representante" :disabled="!seccion3Editable" placeholder="Numero documento representante *">
+                        <input class="prereg-input md:col-span-2" x-model="formS3.razon_social"
+                            :disabled="!seccion3Editable" placeholder="Razon social *">
+                        <input class="prereg-input" x-model="formS3.nit_empresa" :disabled="!seccion3Editable"
+                            placeholder="NIT de la empresa *">
+                        <input class="prereg-input" x-model="formS3.representante_legal" :disabled="!seccion3Editable"
+                            placeholder="Representante legal *">
+                        <input class="prereg-input" x-model="formS3.tipo_documento_representante"
+                            :disabled="!seccion3Editable" placeholder="Tipo documento representante *">
+                        <input class="prereg-input" x-model="formS3.numero_documento_representante"
+                            :disabled="!seccion3Editable" placeholder="Numero documento representante *">
                     </div>
                     <select class="prereg-input" x-model="formS3.banco_id" :disabled="!seccion3Editable">
                         <option value="">Banco *</option>
@@ -444,14 +572,17 @@
                             <option :value="String(tipoCuenta.id)" x-text="tipoCuenta.titulo"></option>
                         </template>
                     </select>
-                    <input class="prereg-input" x-model="formS3.numero_cuenta" :disabled="!seccion3Editable" placeholder="Numero de cuenta *">
-                    <div class="md:col-span-2 rounded-xl border border-purple-100 bg-purple-50 px-4 py-3 text-sm text-purple-900">
+                    <input class="prereg-input" x-model="formS3.numero_cuenta" :disabled="!seccion3Editable"
+                        placeholder="Numero de cuenta *">
+                    <div
+                        class="md:col-span-2 rounded-xl border border-purple-100 bg-purple-50 px-4 py-3 text-sm text-purple-900">
                         <span x-show="tieneCorreoSilverExistenteContratacion">
                             Se reutilizará el correo Silver existente:
                             <strong x-text="correoSilverExistenteContratacion"></strong>.
                         </span>
                         <span x-show="!tieneCorreoSilverExistenteContratacion">
-                            El correo Silver lo registrará el solicitante original después de que Mesa de Ayuda confirme su creación.
+                            El correo Silver lo registrará el solicitante original después de que Mesa de Ayuda confirme
+                            su creación.
                         </span>
                     </div>
                 </div>
@@ -459,39 +590,51 @@
 
             <section class="prereg-section" x-show="itemActivo?.origen_flujo === 'contratacion'">
                 <p class="prereg-section-title">Observaciones TH</p>
-                <textarea
-                    class="prereg-input min-h-[120px]"
-                    x-model="observacionesRevisionTh"
+                <textarea class="prereg-input min-h-[120px]" x-model="observacionesRevisionTh"
                     :disabled="!seccion3Editable"
-                    placeholder="Describe aqui los ajustes requeridos si vas a devolver la contratacion al coordinador."
-                ></textarea>
+                    placeholder="Describe aqui los ajustes requeridos si vas a devolver la contratacion al coordinador."></textarea>
             </section>
 
             <div class="prereg-modal-footer">
                 <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarDetalle">Cancelar</button>
-                <button type="button" x-show="seccion3Editable" @click="guardarS3" :disabled="guardandoS3" class="prereg-btn prereg-btn-ghost">
+                <button type="button" x-show="seccion3Editable" @click="guardarS3" :disabled="guardandoS3"
+                    class="prereg-btn prereg-btn-ghost">
                     <span x-text="guardandoS3 ? 'Guardando...' : 'Guardar'"></span>
                 </button>
-                <button type="button" x-show="seccion3Editable && itemActivo?.origen_flujo === 'contratacion'" @click="devolverContratacion" :disabled="!puedeDevolverContratacion || aprobando" class="prereg-btn prereg-btn-danger">
-                    <span x-text="aprobando ? 'Devolviendo...' : 'Devolver a coordinador'"></span>
+                <button type="button" x-show="seccion3Editable && itemActivo?.origen_flujo === 'contratacion'"
+                    @click="devolverContratacion" :disabled="!puedeDevolverContratacion || aprobando"
+                    class="prereg-btn prereg-btn-danger">
+                    <span x-text="aprobando ? 'Devolviendo...' : 'Devolver al solicitante'"></span>
                 </button>
-                <button type="button" x-show="seccion3Editable && itemActivo?.origen_flujo === 'preregistro'" @click="aprobarPreregistro" :disabled="!puedeAprobar || aprobando" class="prereg-btn prereg-btn-teal">
+                <button type="button" x-show="seccion3Editable && itemActivo?.origen_flujo === 'preregistro'"
+                    @click="aprobarPreregistro" :disabled="!puedeAprobar || aprobando"
+                    class="prereg-btn prereg-btn-teal">
                     <span x-text="aprobando ? 'Aprobando...' : 'Aprobar'"></span>
                 </button>
-                <button type="button" x-show="seccion3Editable && itemActivo?.origen_flujo === 'contratacion'" @click="completarRevisionContratacion" :disabled="!puedeCompletarContratacion || aprobando" class="prereg-btn prereg-btn-teal">
-                    <span x-text="aprobando ? 'Completando...' : (tieneCorreoSilverExistenteContratacion ? 'Completar revisión' : 'Completar revisión y solicitar correo')"></span>
+                <button type="button" x-show="seccion3Editable && itemActivo?.origen_flujo === 'contratacion'"
+                    @click="completarRevisionContratacion" :disabled="!puedeCompletarContratacion || aprobando"
+                    class="prereg-btn prereg-btn-teal">
+                    <span
+                        x-text="aprobando ? 'Completando...' : (tieneCorreoSilverExistenteContratacion ? 'Completar revisión' : 'Completar revisión y solicitar correo')"></span>
                 </button>
-                <button type="button" x-show="itemActivo?.origen_flujo === 'preregistro' && itemActivo?.estado !== 'Completado' && itemActivo?.estado !== 'Anulado'" @click="abrirModalAnular" class="prereg-btn prereg-btn-danger">Anular contratacion</button>
+                <button type="button"
+                    x-show="itemActivo?.origen_flujo === 'preregistro' && itemActivo?.estado !== 'Completado' && itemActivo?.estado !== 'Anulado'"
+                    @click="abrirModalAnular" class="prereg-btn prereg-btn-danger">Anular contratacion</button>
             </div>
 
-            <div x-show="modalAnular" x-cloak class="absolute inset-0 z-[300] flex items-center justify-center bg-white/30 backdrop-blur-md rounded-3xl">
-                <div class="w-11/12 max-w-md bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[80vh]">
+            <div x-show="modalAnular" x-cloak
+                class="absolute inset-0 z-[300] flex items-center justify-center bg-white/30 backdrop-blur-md rounded-3xl">
+                <div
+                    class="w-11/12 max-w-md bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[80vh]">
                     <h4 class="prereg-mini-title">Confirmar anulacion</h4>
                     <p class="prereg-mini-subtitle">Esta accion no se puede deshacer.</p>
-                    <textarea rows="4" class="mt-3 prereg-input" x-model="motivoAnulacion" placeholder="Motivo (minimo 20 caracteres)"></textarea>
+                    <textarea rows="4" class="mt-3 prereg-input" x-model="motivoAnulacion"
+                        placeholder="Motivo (minimo 20 caracteres)"></textarea>
                     <div class="prereg-mini-footer">
-                        <button type="button" @click="modalAnular = false" class="prereg-btn prereg-btn-ghost">Cancelar</button>
-                        <button type="button" @click="confirmarAnulacion" :disabled="anulando" class="prereg-btn prereg-btn-danger">Confirmar anulacion</button>
+                        <button type="button" @click="modalAnular = false"
+                            class="prereg-btn prereg-btn-ghost">Cancelar</button>
+                        <button type="button" @click="confirmarAnulacion" :disabled="anulando"
+                            class="prereg-btn prereg-btn-danger">Confirmar anulacion</button>
                     </div>
                 </div>
             </div>
@@ -499,23 +642,30 @@
     </div>
 
     <div x-show="anexoModalItem.open" x-cloak class="view-overlay bg-white/30 backdrop-blur-md">
-        <div class="w-11/12 max-w-4xl bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
+        <div
+            class="w-11/12 max-w-4xl bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
             <div class="prereg-modal-head">
                 <div>
-                    <h3 class="prereg-modal-title" x-text="anexoModalItem.mode === 'edit' ? 'Editar item del anexo' : 'Agregar item al anexo'"></h3>
+                    <h3 class="prereg-modal-title"
+                        x-text="anexoModalItem.mode === 'edit' ? 'Editar item del anexo' : 'Agregar item al anexo'">
+                    </h3>
                     <p class="prereg-modal-subtitle" x-text="usuarioAnexo?.nombre || '-'"></p>
                 </div>
-                <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarModalItemAnexo()">Cerrar</button>
+                <button type="button" class="prereg-btn prereg-btn-ghost"
+                    @click="cerrarModalItemAnexo()">Cerrar</button>
             </div>
 
-            <template x-if="anexoModalItem.mode === 'edit' && anexoItemsActivos.find((item) => item.id === anexoModalItem.itemId)?.origen === 'automatico'">
+            <template
+                x-if="anexoModalItem.mode === 'edit' && anexoItemsActivos.find((item) => item.id === anexoModalItem.itemId)?.origen === 'automatico'">
                 <div class="px-4 py-3 mb-4 text-sm border rounded-2xl border-sky-200 bg-sky-50 text-sky-800">
-                    Este item fue generado automaticamente por contratacion. Los cambios quedaran registrados con tu usuario y fecha actual.
+                    Este item fue generado automaticamente por contratacion. Los cambios quedaran registrados con tu
+                    usuario y fecha actual.
                 </div>
             </template>
 
             <template x-if="anexoModalItem.error">
-                <div class="px-4 py-3 mb-4 text-sm border rounded-2xl border-rose-200 bg-rose-50 text-rose-700" x-text="anexoModalItem.error"></div>
+                <div class="px-4 py-3 mb-4 text-sm border rounded-2xl border-rose-200 bg-rose-50 text-rose-700"
+                    x-text="anexoModalItem.error"></div>
             </template>
 
             <template x-if="anexoModalItem.loading">
@@ -527,9 +677,9 @@
                     <div class="grid gap-4 md:grid-cols-2">
                         <div class="space-y-2">
                             <label class="text-sm font-semibold text-slate-700">Tipo de asignacion</label>
-                            <select class="w-full px-4 py-3 text-sm transition bg-white border outline-none rounded-2xl border-slate-200 text-slate-800 focus:border-cyan-500"
-                                x-model="anexoModalItem.form.tipo_asignacion"
-                                @change="onTipoAnexoChange()">
+                            <select
+                                class="w-full px-4 py-3 text-sm transition bg-white border outline-none rounded-2xl border-slate-200 text-slate-800 focus:border-cyan-500"
+                                x-model="anexoModalItem.form.tipo_asignacion" @change="onTipoAnexoChange()">
                                 <option value="full_time">180/160 Horas</option>
                                 <option value="medio_tiempo">80/90 Horas</option>
                                 <option value="proyecto">Proyecto</option>
@@ -540,7 +690,8 @@
 
                         <div class="space-y-2">
                             <label class="text-sm font-semibold text-slate-700">Modulo</label>
-                            <select class="w-full px-4 py-3 text-sm transition bg-white border outline-none rounded-2xl border-slate-200 text-slate-800 focus:border-cyan-500"
+                            <select
+                                class="w-full px-4 py-3 text-sm transition bg-white border outline-none rounded-2xl border-slate-200 text-slate-800 focus:border-cyan-500"
                                 x-model="anexoModalItem.form.modulo_id">
                                 <option value="">Selecciona un modulo</option>
                                 <template x-for="modulo in anexoCatalogos.modulos" :key="modulo.id">
@@ -552,7 +703,8 @@
                         <template x-if="tipoAnexoRequiereCliente(anexoModalItem.form.tipo_asignacion)">
                             <div class="space-y-2 md:col-span-2">
                                 <label class="text-sm font-semibold text-slate-700">Cliente</label>
-                                <select class="w-full px-4 py-3 text-sm transition bg-white border outline-none rounded-2xl border-slate-200 text-slate-800 focus:border-cyan-500"
+                                <select
+                                    class="w-full px-4 py-3 text-sm transition bg-white border outline-none rounded-2xl border-slate-200 text-slate-800 focus:border-cyan-500"
                                     x-model="anexoModalItem.form.cliente_id">
                                     <option value="">Selecciona un cliente</option>
                                     <template x-for="cliente in anexoCatalogos.clientes" :key="cliente.id">
@@ -564,7 +716,8 @@
 
                         <div class="space-y-2">
                             <label class="text-sm font-semibold text-slate-700">Moneda</label>
-                            <select class="w-full px-4 py-3 text-sm transition bg-white border outline-none rounded-2xl border-slate-200 text-slate-800 focus:border-cyan-500"
+                            <select
+                                class="w-full px-4 py-3 text-sm transition bg-white border outline-none rounded-2xl border-slate-200 text-slate-800 focus:border-cyan-500"
                                 x-model="anexoModalItem.form.moneda">
                                 <option value="COP">COP</option>
                                 <option value="USD">USD</option>
@@ -575,20 +728,16 @@
                         <div class="space-y-2">
                             <label class="text-sm font-semibold text-slate-700"
                                 x-text="tipoAnexoEsAnual(anexoModalItem.form.tipo_asignacion) ? 'Valor por hora' : 'Valor tarifa mensual'"></label>
-                            <input type="number"
-                                min="0"
-                                step="0.01"
+                            <input type="number" min="0" step="0.01"
                                 class="w-full px-4 py-3 text-sm transition bg-white border outline-none rounded-2xl border-slate-200 text-slate-800 focus:border-cyan-500"
-                                x-model="anexoModalItem.form.valor_tarifa"
-                                placeholder="0.00">
+                                x-model="anexoModalItem.form.valor_tarifa" placeholder="0.00">
                         </div>
 
                         <div class="space-y-2">
                             <label class="text-sm font-semibold text-slate-700">Fecha de inicio</label>
                             <input type="date"
                                 class="w-full px-4 py-3 text-sm transition bg-white border outline-none rounded-2xl border-slate-200 text-slate-800 focus:border-cyan-500"
-                                x-model="anexoModalItem.form.fecha_inicio"
-                                @change="onFechaInicioAnexoChange()">
+                                x-model="anexoModalItem.form.fecha_inicio" @change="onFechaInicioAnexoChange()">
                         </div>
 
                         <div class="space-y-2">
@@ -605,21 +754,21 @@
                             <label class="text-sm font-semibold text-slate-700">Correo personal de referencia</label>
                             <input type="email"
                                 class="w-full px-4 py-3 text-sm transition bg-white border outline-none rounded-2xl border-slate-200 text-slate-800 focus:border-cyan-500"
-                                x-model="anexoModalItem.form.correo_personal"
-                                placeholder="persona@correo.com">
+                                x-model="anexoModalItem.form.correo_personal" placeholder="persona@correo.com">
                             <p class="text-xs text-slate-500">
-                                Este correo se usa como sugerencia para el siguiente envio a firma y para mantener contexto del item.
+                                Este correo se usa como sugerencia para el siguiente envio a firma y para mantener
+                                contexto del item.
                             </p>
                         </div>
                     </div>
 
                     <div class="prereg-modal-footer">
-                        <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarModalItemAnexo()">Cancelar</button>
-                        <button type="button"
-                            class="prereg-btn prereg-btn-teal"
-                            :disabled="anexoModalItem.saving"
+                        <button type="button" class="prereg-btn prereg-btn-ghost"
+                            @click="cerrarModalItemAnexo()">Cancelar</button>
+                        <button type="button" class="prereg-btn prereg-btn-teal" :disabled="anexoModalItem.saving"
                             @click="guardarItemAnexo()">
-                            <span x-text="anexoModalItem.saving ? 'Guardando...' : (anexoModalItem.mode === 'edit' ? 'Guardar cambios' : 'Crear item')"></span>
+                            <span
+                                x-text="anexoModalItem.saving ? 'Guardando...' : (anexoModalItem.mode === 'edit' ? 'Guardar cambios' : 'Crear item')"></span>
                         </button>
                     </div>
                 </div>
@@ -628,13 +777,15 @@
     </div>
 
     <div x-show="anexoModalFirma.open" x-cloak class="view-overlay bg-white/30 backdrop-blur-md">
-        <div class="w-11/12 max-w-4xl bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
+        <div
+            class="w-11/12 max-w-4xl bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
             <div class="prereg-modal-head">
                 <div>
                     <h3 class="prereg-modal-title">Confirmar envio a firma</h3>
                     <p class="prereg-modal-subtitle" x-text="usuarioAnexo?.nombre || '-'"></p>
                 </div>
-                <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarModalFirmaAnexo()">Cerrar</button>
+                <button type="button" class="prereg-btn prereg-btn-ghost"
+                    @click="cerrarModalFirmaAnexo()">Cerrar</button>
             </div>
 
             <p class="text-sm text-slate-500">
@@ -642,12 +793,14 @@
             </p>
 
             <template x-if="anexoModalFirma.error">
-                <div class="px-4 py-3 mt-4 text-sm border rounded-2xl border-rose-200 bg-rose-50 text-rose-700" x-text="anexoModalFirma.error"></div>
+                <div class="px-4 py-3 mt-4 text-sm border rounded-2xl border-rose-200 bg-rose-50 text-rose-700"
+                    x-text="anexoModalFirma.error"></div>
             </template>
 
             <div class="mt-5 overflow-x-auto border rounded-2xl border-slate-200">
                 <table class="min-w-full text-sm divide-y divide-slate-200">
-                    <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <thead
+                        class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                         <tr>
                             <th class="px-4 py-3">Cliente</th>
                             <th class="px-4 py-3">Tipo</th>
@@ -660,10 +813,12 @@
                         <template x-for="item in anexoItemsActivos" :key="`firma-${item.id}`">
                             <tr>
                                 <td class="px-4 py-4 text-slate-700" x-text="item.cliente_nombre || '-'"></td>
-                                <td class="px-4 py-4 font-medium text-slate-900" x-text="labelTipoAnexo(item.tipo_asignacion)"></td>
+                                <td class="px-4 py-4 font-medium text-slate-900"
+                                    x-text="labelTipoAnexo(item.tipo_asignacion)"></td>
                                 <td class="px-4 py-4 text-slate-700" x-text="item.modulo_nombre || '-'"></td>
                                 <td class="px-4 py-4 text-slate-700" x-text="textoValorAnexo(item)"></td>
-                                <td class="px-4 py-4 text-slate-700" x-text="`${formatFecha(item.fecha_inicio)} al ${formatFecha(item.fecha_fin)}`"></td>
+                                <td class="px-4 py-4 text-slate-700"
+                                    x-text="`${formatFecha(item.fecha_inicio)} al ${formatFecha(item.fecha_fin)}`"></td>
                             </tr>
                         </template>
                     </tbody>
@@ -674,8 +829,7 @@
                 <label class="text-sm font-semibold text-slate-700">Correo personal del firmante</label>
                 <input type="email"
                     class="w-full px-4 py-3 text-sm transition bg-white border outline-none rounded-2xl border-slate-200 text-slate-800 focus:border-cyan-500"
-                    x-model="anexoModalFirma.correo_firmante"
-                    placeholder="persona@correo.com">
+                    x-model="anexoModalFirma.correo_firmante" placeholder="persona@correo.com">
                 <p class="text-xs text-slate-500">
                     ClickSign enviara el enlace de firma a este correo.
                 </p>
@@ -685,15 +839,13 @@
             </div>
 
             <div class="gap-3 prereg-modal-footer">
-                <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarModalFirmaAnexo()">Cancelar</button>
-                <button type="button"
-                    class="prereg-btn prereg-btn-ghost"
-                    :disabled="anexoModalFirma.saving || anexoModalFirma.downloading"
-                    @click="descargarPreviewAnexo()">
+                <button type="button" class="prereg-btn prereg-btn-ghost"
+                    @click="cerrarModalFirmaAnexo()">Cancelar</button>
+                <button type="button" class="prereg-btn prereg-btn-ghost"
+                    :disabled="anexoModalFirma.saving || anexoModalFirma.downloading" @click="descargarPreviewAnexo()">
                     <span x-text="anexoModalFirma.downloading ? 'Descargando...' : 'Descargar anexo'"></span>
                 </button>
-                <button type="button"
-                    class="prereg-btn prereg-btn-teal"
+                <button type="button" class="prereg-btn prereg-btn-teal"
                     :disabled="anexoModalFirma.saving || anexoModalFirma.downloading"
                     @click="confirmarEnvioFirmaAnexo()">
                     <span x-text="anexoModalFirma.saving ? 'Enviando...' : 'Confirmar y enviar'"></span>
@@ -703,19 +855,20 @@
     </div>
 
     <div x-show="anexoModalCancelar.open" x-cloak class="view-overlay bg-white/30 backdrop-blur-md">
-        <div class="w-11/12 max-w-md bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
+        <div
+            class="w-11/12 max-w-md bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
             <h4 class="prereg-mini-title">Cancelar envio pendiente</h4>
             <p class="prereg-mini-subtitle">Los items volveran a estado Pendiente de firma.</p>
 
             <template x-if="anexoModalCancelar.error">
-                <div class="px-4 py-3 mt-4 text-sm border rounded-2xl border-rose-200 bg-rose-50 text-rose-700" x-text="anexoModalCancelar.error"></div>
+                <div class="px-4 py-3 mt-4 text-sm border rounded-2xl border-rose-200 bg-rose-50 text-rose-700"
+                    x-text="anexoModalCancelar.error"></div>
             </template>
 
             <div class="prereg-mini-footer">
-                <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarModalCancelarAnexo()">Cancelar</button>
-                <button type="button"
-                    class="prereg-btn prereg-btn-danger"
-                    :disabled="anexoModalCancelar.saving"
+                <button type="button" class="prereg-btn prereg-btn-ghost"
+                    @click="cerrarModalCancelarAnexo()">Cancelar</button>
+                <button type="button" class="prereg-btn prereg-btn-danger" :disabled="anexoModalCancelar.saving"
                     @click="confirmarCancelarFirmaAnexo()">
                     <span x-text="anexoModalCancelar.saving ? 'Cancelando...' : 'Confirmar'"></span>
                 </button>
@@ -724,27 +877,29 @@
     </div>
 
     <div x-show="anexoModalFinalizar.open" x-cloak class="view-overlay bg-white/30 backdrop-blur-md">
-        <div class="w-11/12 max-w-md bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
+        <div
+            class="w-11/12 max-w-md bg-white/80 backdrop-blur-lg rounded-3xl border border-white/60 shadow-2xl p-6 overflow-y-auto max-h-[85vh]">
             <h4 class="prereg-mini-title">Finalizar item</h4>
             <p class="prereg-mini-subtitle">
                 Este item dejara de aparecer en el anexo activo y pasara al historial.
             </p>
 
             <div class="px-4 py-3 mt-4 text-sm border rounded-2xl border-slate-200 bg-slate-50 text-slate-700">
-                <div class="font-semibold text-slate-900" x-text="anexoModalFinalizar.item?.cliente_nombre || 'Sin cliente'"></div>
+                <div class="font-semibold text-slate-900"
+                    x-text="anexoModalFinalizar.item?.cliente_nombre || 'Sin cliente'"></div>
                 <div class="mt-1" x-text="labelTipoAnexo(anexoModalFinalizar.item?.tipo_asignacion)"></div>
                 <div class="mt-1" x-text="anexoModalFinalizar.item?.modulo_nombre || '-'"></div>
             </div>
 
             <template x-if="anexoModalFinalizar.error">
-                <div class="px-4 py-3 mt-4 text-sm border rounded-2xl border-rose-200 bg-rose-50 text-rose-700" x-text="anexoModalFinalizar.error"></div>
+                <div class="px-4 py-3 mt-4 text-sm border rounded-2xl border-rose-200 bg-rose-50 text-rose-700"
+                    x-text="anexoModalFinalizar.error"></div>
             </template>
 
             <div class="prereg-mini-footer">
-                <button type="button" class="prereg-btn prereg-btn-ghost" @click="cerrarModalFinalizarAnexo()">Cancelar</button>
-                <button type="button"
-                    class="prereg-btn prereg-btn-danger"
-                    :disabled="anexoModalFinalizar.saving"
+                <button type="button" class="prereg-btn prereg-btn-ghost"
+                    @click="cerrarModalFinalizarAnexo()">Cancelar</button>
+                <button type="button" class="prereg-btn prereg-btn-danger" :disabled="anexoModalFinalizar.saving"
                     @click="confirmarFinalizarAnexo()">
                     <span x-text="anexoModalFinalizar.saving ? 'Finalizando...' : 'Finalizar item'"></span>
                 </button>

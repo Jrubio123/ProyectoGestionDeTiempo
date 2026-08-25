@@ -1937,6 +1937,7 @@ CREATE INDEX idx_registro_asignaciones_compuesto ON registro_asignaciones(
 -- Módulo de entregas de servicio. Se mantiene separado para compartir exactamente
 -- el mismo esquema entre instalaciones nuevas y bases existentes.
 \ir migrations/2026-08-25-entregas-servicio.sql
+\ir migrations/2026-08-25-z-entregas-consultores-externos.sql
 
 
 

@@ -73,13 +73,15 @@ const DELIVERY_SELECT = `
     creador.nombre_usuario AS creado_por,
     COALESCE((
       SELECT json_agg(json_build_object(
-        'id', u.public_id::text,
-        'nombre', u.nombre_usuario,
+        'id', COALESCE(u.public_id::text, ec.public_id::text),
+        'tipo', CASE WHEN ec.consultor_id IS NULL THEN 'EXTERNO' ELSE 'USUARIO' END,
+        'nombre', COALESCE(u.nombre_usuario, ec.nombre_externo),
         'email', u.email,
+        'telefono', ec.telefono_externo,
         'es_principal', ec.es_principal
-      ) ORDER BY ec.es_principal DESC, u.nombre_usuario)
+      ) ORDER BY ec.es_principal DESC, COALESCE(u.nombre_usuario, ec.nombre_externo))
       FROM entregas_servicio_consultores ec
-      JOIN usuarios u ON u.id = ec.consultor_id
+      LEFT JOIN usuarios u ON u.id = ec.consultor_id
       WHERE ec.entrega_servicio_id = e.id
     ), '[]'::json) AS consultores,
     COALESCE((
@@ -477,7 +479,10 @@ function portalUrl() {
 }
 
 function buildNotificationContent(delivery) {
-  const consultants = delivery.consultores.map((item) => item.nombre_usuario).join(", ") || "Sin asignar";
+  const consultants = delivery.consultores.map((item) => {
+    const name = item.nombre_usuario || "Consultor";
+    return item.telefono ? `${name} (${item.telefono})` : name;
+  }).join(", ") || "Sin asignar";
   const modules = delivery.modulos.map((item) => item.titulo).concat(delivery.modulos_otros).join(", ");
   const documents = delivery.documentos.map((item) => (
     `<li><a href="${escapeHtml(item.web_url)}" target="_blank" rel="noopener">${escapeHtml(item.nombre_archivo || "Abrir propuesta")}</a></li>`
@@ -589,6 +594,13 @@ async function createDelivery(req, res) {
         VALUES ($1, $2, $3)
       `, [delivery.id, consultant.id, index === 0]);
     }
+    for (const [index, consultant] of payload.consultores_externos.entries()) {
+      await client.query(`
+        INSERT INTO entregas_servicio_consultores
+          (entrega_servicio_id, consultor_id, nombre_externo, telefono_externo, es_principal)
+        VALUES ($1, NULL, $2, $3, $4)
+      `, [delivery.id, consultant.nombre, consultant.telefono, consultants.length === 0 && index === 0]);
+    }
     for (const module of modules) {
       await client.query(`
         INSERT INTO entregas_servicio_modulos (entrega_servicio_id, modulo_id)
@@ -651,7 +663,14 @@ async function createDelivery(req, res) {
         cliente,
         coordinador: coordinator,
         creador: { nombre_usuario: req.user.nombre_usuario || req.user.email || "Comercial" },
-        consultores,
+        consultores: [
+          ...consultants,
+          ...payload.consultores_externos.map((item) => ({
+            nombre_usuario: item.nombre,
+            telefono: item.telefono,
+            tipo: "EXTERNO"
+          }))
+        ],
         modulos: modules,
         modulos_otros: payload.modulos_otros,
         documentos: documentRows,
@@ -689,8 +708,14 @@ async function getNotificationContext(req, publicId) {
       creador.nombre_usuario AS creador_nombre,
       n.id AS notificacion_id,
       COALESCE((
-        SELECT json_agg(json_build_object('nombre_usuario', u.nombre_usuario, 'email', u.email, 'es_principal', ec.es_principal))
-        FROM entregas_servicio_consultores ec JOIN usuarios u ON u.id = ec.consultor_id
+        SELECT json_agg(json_build_object(
+          'nombre_usuario', COALESCE(u.nombre_usuario, ec.nombre_externo),
+          'email', u.email,
+          'telefono', ec.telefono_externo,
+          'tipo', CASE WHEN ec.consultor_id IS NULL THEN 'EXTERNO' ELSE 'USUARIO' END,
+          'es_principal', ec.es_principal
+        ) ORDER BY ec.es_principal DESC, COALESCE(u.nombre_usuario, ec.nombre_externo))
+        FROM entregas_servicio_consultores ec LEFT JOIN usuarios u ON u.id = ec.consultor_id
         WHERE ec.entrega_servicio_id = e.id
       ), '[]'::json) AS consultores,
       COALESCE((

@@ -69,6 +69,29 @@ function normalizeIdList(value) {
   return [...new Set(value.map(text).filter(Boolean))];
 }
 
+function normalizeExternalConsultants(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const result = [];
+  for (const [index, item] of value.entries()) {
+    const nombre = requiredText(
+      item?.nombre,
+      "El nombre del consultor no registrado es obligatorio.",
+      `consultores_externos.${index}.nombre`
+    );
+    const telefono = requiredText(
+      item?.telefono,
+      "El teléfono del consultor no registrado es obligatorio.",
+      `consultores_externos.${index}.telefono`
+    );
+    const key = `${nombre.toLowerCase()}|${telefono}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({ nombre, telefono });
+  }
+  return result;
+}
+
 function isHttpUrl(value) {
   try {
     const parsed = new URL(text(value));
@@ -188,7 +211,12 @@ function validateEntregaPayload(payload = {}) {
   }
 
   const consultoresIds = normalizeIdList(payload.consultores_ids);
-  if (tipoServicio === TIPOS_SERVICIO.OUTSOURCING && consultoresIds.length === 0) {
+  const consultoresExternos = normalizeExternalConsultants(payload.consultores_externos);
+  if (
+    tipoServicio === TIPOS_SERVICIO.OUTSOURCING
+    && consultoresIds.length === 0
+    && consultoresExternos.length === 0
+  ) {
     throw new EntregaValidationError("Outsourcing requiere al menos un consultor.", "consultores_ids");
   }
 
@@ -221,6 +249,7 @@ function validateEntregaPayload(payload = {}) {
     ),
     acuerdos_comerciales: text(payload.acuerdos_comerciales) || null,
     consultores_ids: consultoresIds,
+    consultores_externos: consultoresExternos,
     modulos_ids: modulosIds,
     modulos_otros: modulosOtros,
     contacto_id: contactoId,

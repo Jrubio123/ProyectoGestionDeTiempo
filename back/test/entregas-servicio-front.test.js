@@ -52,6 +52,24 @@ test("el frontend exige consultor en outsourcing", () => {
   assert.equal(app.formularioValido, true);
 });
 
+test("un consultor no registrado completo satisface outsourcing", () => {
+  const app = createApp();
+  fillBase(app);
+  app.form.tipo_servicio = "OUTSOURCING";
+  Object.assign(app.form.detalle, {
+    tiempo_descripcion: "6 meses",
+    tarifa: 100,
+    valor_cliente: 150,
+    tiene_contrato: "false"
+  });
+  app.agregarConsultorExterno();
+  app.form.consultores_externos[0] = { nombre: "Consultor externo", telefono: "3001234567" };
+
+  assert.equal(app.formularioValido, true);
+  app.form.consultores_externos[0].telefono = "";
+  assert.equal(app.formularioValido, false);
+});
+
 test("solo Comercial puede abrir nuevas entregas", () => {
   const app = createApp();
   assert.equal(app.puedeCrear, true);

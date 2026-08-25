@@ -27,6 +27,7 @@ window.entregasServicioApp = function () {
         contacto_id: "",
         contacto_nuevo: emptyContact(),
         consultores_ids: [],
+        consultores_externos: [],
         modulos_ids: [],
         modulos_otros_texto: "",
         propuesta_url: "",
@@ -125,6 +126,11 @@ window.entregasServicioApp = function () {
             const cargoValido = this.form.tipo_servicio === "OUTSOURCING" || contact.cargo.trim();
             return Boolean(contact.nombre.trim() && contact.telefono.trim() && cargoValido);
         },
+        get consultoresExternosValidos() {
+            return this.form.consultores_externos.every((item) =>
+                String(item.nombre || "").trim() && String(item.telefono || "").trim()
+            );
+        },
         get formularioValido() {
             const base = Boolean(
                 (this.form.cliente_id || this.clienteNuevoPreparado) &&
@@ -132,6 +138,7 @@ window.entregasServicioApp = function () {
                 this.form.perfil_cliente &&
                 this.form.analisis_adaptabilidad.trim() &&
                 this.contactoValido &&
+                this.consultoresExternosValidos &&
                 (this.form.modulos_ids.length || this.modulosOtros.length)
             );
             if (!base) return false;
@@ -148,7 +155,8 @@ window.entregasServicioApp = function () {
                 return Boolean(detail.detalle_tarifas.trim() && detail.forma_pago.trim());
             }
             return Boolean(
-                this.form.consultores_ids.length && detail.tiempo_descripcion.trim() &&
+                (this.form.consultores_ids.length || this.form.consultores_externos.length) &&
+                detail.tiempo_descripcion.trim() &&
                 detail.tarifa !== "" && detail.valor_cliente !== "" && detail.tiene_contrato !== ""
             );
         },
@@ -215,6 +223,12 @@ window.entregasServicioApp = function () {
         usarContactoNuevo() {
             this.form.contacto_id = "";
             this.form.contacto_nuevo = emptyContact();
+        },
+        agregarConsultorExterno() {
+            this.form.consultores_externos.push({ nombre: "", telefono: "" });
+        },
+        quitarConsultorExterno(index) {
+            this.form.consultores_externos.splice(index, 1);
         },
         async seleccionarPdf(event) {
             const input = event?.target;

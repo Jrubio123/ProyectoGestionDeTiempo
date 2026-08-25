@@ -70,6 +70,33 @@ test("exige consultor para outsourcing", () => {
   );
 });
 
+test("acepta consultores informativos sin crear usuarios", () => {
+  const payload = projectPayload();
+  payload.tipo_servicio = "Outsourcing";
+  payload.propuesta_url = "";
+  payload.consultores_externos = [
+    { nombre: "Consultor por vincular", telefono: "3001234567" },
+    { nombre: "Segundo consultor", telefono: "3019876543" }
+  ];
+  payload.detalle = {
+    tiempo_descripcion: "6 meses",
+    tarifa: 5000000,
+    valor_cliente: 7000000,
+    moneda: "COP",
+    tiene_contrato: false
+  };
+
+  const normalized = validateEntregaPayload(payload);
+  assert.equal(normalized.consultores_ids.length, 0);
+  assert.deepEqual(normalized.consultores_externos, payload.consultores_externos);
+});
+
+test("exige nombre y teléfono para consultores informativos", () => {
+  const payload = projectPayload();
+  payload.consultores_externos = [{ nombre: "Consultor sin teléfono", telefono: "" }];
+  assert.throws(() => validateEntregaPayload(payload), /teléfono del consultor no registrado/i);
+});
+
 test("exige propuesta comercial para proyecto y mesa", () => {
   const payload = projectPayload();
   payload.propuesta_url = "";
@@ -96,6 +123,16 @@ test("la migración crea el núcleo relacional de entregas", () => {
   ]) {
     assert.match(migration, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
   }
+});
+
+test("la migración permite consultores informativos separados de usuarios", () => {
+  const migration = fs.readFileSync(
+    path.resolve(__dirname, "../../db/migrations/2026-08-25-z-entregas-consultores-externos.sql"),
+    "utf8"
+  );
+  assert.match(migration, /nombre_externo VARCHAR\(255\)/);
+  assert.match(migration, /telefono_externo VARCHAR\(50\)/);
+  assert.match(migration, /ALTER COLUMN consultor_id DROP NOT NULL/);
 });
 
 test("limita la consulta según el rol operativo", () => {

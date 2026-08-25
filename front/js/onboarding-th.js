@@ -624,7 +624,8 @@ window.onboardingThApp = function () {
                 tipo_cuenta_id: tipoCuenta?.id || null,
                 tipo_cuenta: tipoCuenta?.titulo || null,
                 numero_cuenta: String(this.formS3.numero_cuenta || "").trim(),
-                correo_silver: String(this.formS3.correo_silver || "").trim() || null,
+                correo_silver: null,
+                observaciones_th: String(this.observacionesRevisionTh || "").trim() || null,
                 razon_social: juridica ? String(this.formS3.razon_social || "").trim() : null,
                 nit_empresa: juridica ? String(this.formS3.nit_empresa || "").trim() : null,
                 representante_legal: juridica ? String(this.formS3.representante_legal || "").trim() : null,
@@ -672,8 +673,7 @@ window.onboardingThApp = function () {
         get puedeCompletarContratacion() {
             if (this.itemActivo?.origen_flujo !== "contratacion") return false;
             if (!this.seccion3Editable) return false;
-            if (this.itemActivo?.crear_usuario_sistema === false) return this.s3BaseValida;
-            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(this.formS3.correo_silver || "").trim());
+            return this.s3BaseValida;
         },
 
         get puedeDevolverContratacion() {
@@ -719,13 +719,9 @@ window.onboardingThApp = function () {
                     this.buildS3Payload(),
                     this.getAuthConfig()
                 );
-                await axios.patch(
-                    `${API}/contrataciones/solicitudes/${this.itemActivo.id}/revision-th`,
-                    { observaciones_th: String(this.observacionesRevisionTh || "").trim() || null },
-                    this.getAuthConfig()
-                );
                 await this.cargarRegistros();
                 this.cerrarDetalle();
+                alert("Revisión guardada. La solicitud quedó pendiente del correo Silver por parte del solicitante original.");
             } catch (e) {
                 alert(e?.response?.data?.error || "Error completando revision TH");
             } finally {

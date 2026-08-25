@@ -1170,7 +1170,7 @@ window.preregistrosCoordApp = function () {
         },
 
         puedeAsignarCorreoSilver(item) {
-            if (!item || item.tipo_solicitud !== "Nuevo" || item.crear_usuario_sistema === false) return false;
+            if (!item || item.tipo_solicitud !== "Nuevo") return false;
             if (item.estado !== "Pendiente Correo Silver") return false;
             const roleKey = window.auth?.getRoleKey?.() || "other";
             const currentUserId = String(window.auth?.getUser?.()?.id || "").trim();

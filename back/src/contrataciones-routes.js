@@ -3144,6 +3144,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         const representanteLegal = toNullableString(req.body?.representante_legal);
         const tipoDocumentoRepresentante = toNullableString(req.body?.tipo_documento_representante);
         const numeroDocumentoRepresentante = toNullableString(req.body?.numero_documento_representante);
+        const observacionesTh = toNullableString(req.body?.observaciones_th);
 
         if (!bancoId) {
           return res.status(400).json({ error: "Banco no válido" });
@@ -3167,22 +3168,14 @@ module.exports = function registerContratacionesRoutes(deps) {
             error: "Para persona juridica son obligatorios razon social, NIT y datos del representante legal"
           });
         }
-        if (correoSilver && !isValidSilverEmail(correoSilver)) {
-          return res.status(400).json({
-            error: "El correo Silver debe pertenecer al dominio @silverconsulting.com.co"
-          });
-        }
-        if (row.estado === ESTADOS.pendienteCorreoSilver && correoSilver) {
+        if (correoSilver) {
           return res.status(422).json({
             error: "El correo Silver debe registrarlo el solicitante original desde su bandeja de contrataciones"
           });
         }
 
         const bancoPublicId = await resolveBancoPublicId(client, bancoId);
-        const debeCrearUsuario = row.crear_usuario_sistema !== false;
-        const nextEstado = correoSilver || !debeCrearUsuario
-          ? ESTADOS.pendienteRevisionTh
-          : ESTADOS.pendienteCorreoSilver;
+        const nextEstado = ESTADOS.pendienteCorreoSilver;
         const debeNotificarCorreoSilver =
           nextEstado === ESTADOS.pendienteCorreoSilver &&
           row.estado !== ESTADOS.pendienteCorreoSilver;
@@ -3199,6 +3192,7 @@ module.exports = function registerContratacionesRoutes(deps) {
             estado             = $3,
             revisado_th_por    = COALESCE(revisado_th_por, $5),
             fecha_revision_th  = COALESCE(fecha_revision_th, NOW()),
+            observaciones_th   = $6,
             updated_at         = NOW()
           WHERE id = $4
           `,
@@ -3219,7 +3213,8 @@ module.exports = function registerContratacionesRoutes(deps) {
             }),
             nextEstado,
             internalId,
-            req.user?.id || null
+            req.user?.id || null,
+            observacionesTh
           ]
         );
 
@@ -3288,25 +3283,23 @@ module.exports = function registerContratacionesRoutes(deps) {
             error: `La solicitud debe estar en '${ESTADOS.pendienteRevisionTh}' o '${ESTADOS.pendienteCorreoSilver}' para ser revisada por TH`
           });
         }
-        if (row.estado === ESTADOS.pendienteCorreoSilver && !req.correoSilverSolicitante) {
+        if (!req.correoSilverSolicitante) {
           await client.query("ROLLBACK");
           return res.status(422).json({
-            error: "El correo Silver esta pendiente de registro por parte del solicitante original"
+            error: "La revisión queda pendiente hasta que el solicitante original registre el correo Silver"
           });
         }
         const debeCrearUsuario = row.crear_usuario_sistema !== false;
         const correoSilver = String(req.correoSilverSolicitante || row.correo_empresarial || "").trim().toLowerCase();
-        if (debeCrearUsuario) {
-          if (!correoSilver) {
-            await client.query("ROLLBACK");
-            return res.status(422).json({ error: "Se requiere el correo Silver antes de completar la revisión TH" });
-          }
-          if (!isValidSilverEmail(correoSilver)) {
-            await client.query("ROLLBACK");
-            return res.status(422).json({ error: "El correo Silver debe pertenecer al dominio @silverconsulting.com.co" });
-          }
+        if (!correoSilver) {
+          await client.query("ROLLBACK");
+          return res.status(422).json({ error: "Se requiere el correo Silver antes de completar la revisión TH" });
         }
-        const correoEmpresarialFinal = debeCrearUsuario ? correoSilver : toNullableString(row.correo_empresarial);
+        if (!isValidSilverEmail(correoSilver)) {
+          await client.query("ROLLBACK");
+          return res.status(422).json({ error: "El correo Silver debe pertenecer al dominio @silverconsulting.com.co" });
+        }
+        const correoEmpresarialFinal = correoSilver;
 
         const datosExtra = toObjectOrEmpty(row.datos_extra);
         const direccion = toNullableString(datosExtra.direccion);
@@ -3423,7 +3416,7 @@ module.exports = function registerContratacionesRoutes(deps) {
           ]
         );
         const personaIdContrat = personaResContrat.rows[0]?.id || null;
-        if (debeCrearUsuario && personaIdContrat) {
+        if (personaIdContrat) {
           const personaCorreoDuplicado = await client.query(
             `SELECT id
              FROM personas
@@ -3633,10 +3626,6 @@ module.exports = function registerContratacionesRoutes(deps) {
         if (row.tipo_solicitud !== TIPO_NUEVO || row.estado !== ESTADOS.pendienteCorreoSilver) {
           return res.status(422).json({ error: "La solicitud no esta pendiente de correo Silver" });
         }
-        if (row.crear_usuario_sistema === false) {
-          return res.status(422).json({ error: "Esta solicitud no requiere crear un usuario Silver" });
-        }
-
         const correoSilver = String(req.body?.correo_silver || "").trim().toLowerCase();
         if (!isValidSilverEmail(correoSilver)) {
           return res.status(400).json({ error: "El correo Silver debe pertenecer al dominio @silverconsulting.com.co" });

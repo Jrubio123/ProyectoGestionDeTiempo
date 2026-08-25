@@ -4,6 +4,7 @@ window.gestionPersonasApp = function () {
 
     return {
         puedeEditar: false,
+        puedeCambiarActivo: false,
         puedeAgregar: false,
         puedeExportar: false,
         puedeExportarCompleto: false,
@@ -79,6 +80,7 @@ window.gestionPersonasApp = function () {
 
             const roleKey = window.auth?.getRoleKey?.() || "other";
             this.puedeEditar = roleKey === "admin" || roleKey === "talento_humano";
+            this.puedeCambiarActivo = roleKey === "admin";
             this.puedeAgregar = this.puedeEditar;
             this.puedeExportar = this.puedeEditar;
             this.puedeExportarCompleto = roleKey === "talento_humano";
@@ -468,6 +470,14 @@ window.gestionPersonasApp = function () {
             this.guardando[seccion] = true;
             this.errores[seccion] = null;
             const payload = { ...this.draft[seccion] };
+
+            if (seccion === "identidad") {
+                if (this.puedeCambiarActivo) {
+                    payload.activo = payload.activo === true || String(payload.activo).toLowerCase() === "true";
+                } else {
+                    delete payload.activo;
+                }
+            }
 
             Object.keys(payload).forEach((k) => {
                 if (payload[k] === "") payload[k] = null;

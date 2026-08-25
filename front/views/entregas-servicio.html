@@ -1,0 +1,269 @@
+<div x-data="entregasServicioApp()" x-init="init()" class="space-y-6 p-4 md:p-6" x-cloak>
+    <header class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-900">Entregas de servicio</h1>
+            <p class="mt-1 text-sm text-slate-500">Registra la venta, asigna al coordinador y almacena la propuesta comercial.</p>
+        </div>
+        <div class="flex gap-2">
+            <button x-show="puedeCrear" @click="tab = 'nueva'; limpiarAlertas()" class="rounded-lg px-4 py-2 text-sm font-semibold" :class="tab === 'nueva' ? 'bg-blue-600 text-white' : 'border border-slate-300 bg-white text-slate-700'">
+                Nueva entrega
+            </button>
+            <button @click="tab = 'historial'; limpiarAlertas()" class="rounded-lg px-4 py-2 text-sm font-semibold" :class="tab === 'historial' ? 'bg-blue-600 text-white' : 'border border-slate-300 bg-white text-slate-700'">
+                Entregas registradas
+            </button>
+        </div>
+    </header>
+
+    <div x-show="error" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <span x-text="error"></span>
+        <button @click="error = ''" class="float-right font-bold">×</button>
+    </div>
+    <div x-show="mensaje" class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+        <span x-text="mensaje"></span>
+        <button @click="mensaje = ''" class="float-right font-bold">×</button>
+    </div>
+
+    <form x-show="tab === 'nueva' && puedeCrear" @submit.prevent="guardarEntrega()" class="space-y-5">
+        <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="text-lg font-semibold text-slate-900">1. Cliente y responsable</h2>
+            <div class="mt-4 grid gap-4 lg:grid-cols-2">
+                <div>
+                    <label class="mb-1 block text-sm font-medium text-slate-700">Cliente *</label>
+                    <div class="flex gap-2">
+                        <select x-model="form.cliente_id" @change="cambiarCliente()" :disabled="Boolean(clienteNuevoPreparado)" class="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-100">
+                            <option value="">Selecciona un cliente</option>
+                            <template x-for="cliente in catalogos.clientes" :key="cliente.id">
+                                <option :value="cliente.id" x-text="`${cliente.nombre} · ${cliente.nit}`"></option>
+                            </template>
+                        </select>
+                        <button type="button" @click="abrirClienteNuevo()" class="shrink-0 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">+ Crear cliente</button>
+                    </div>
+                    <div x-show="clienteNuevoPreparado" class="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                        <strong x-text="clienteNuevoPreparado?.titulo"></strong>
+                        <span> · NIT </span><span x-text="clienteNuevoPreparado?.nit"></span>
+                        <button type="button" @click="cancelarClienteNuevoPreparado()" class="float-right font-semibold text-red-600">Quitar</button>
+                    </div>
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm font-medium text-slate-700">Coordinador o administrador asignado *</label>
+                    <select x-model="form.coordinador_id" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                        <option value="">Selecciona responsable</option>
+                        <template x-for="item in catalogos.coordinadores" :key="item.id">
+                            <option :value="item.id" x-text="`${item.nombre} · ${item.rol}`"></option>
+                        </template>
+                    </select>
+                </div>
+            </div>
+
+            <div x-show="!clienteNuevoPreparado && form.cliente_id" class="mt-5 border-t border-slate-100 pt-4">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h3 class="font-semibold text-slate-800">Interventor / contacto del servicio</h3>
+                    <button type="button" @click="usarContactoNuevo()" class="text-sm font-semibold text-blue-600">+ Registrar otro contacto</button>
+                </div>
+                <select x-show="contactos.length" x-model="form.contacto_id" class="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                    <option value="">Usar un contacto nuevo</option>
+                    <template x-for="contacto in contactos" :key="contacto.id">
+                        <option :value="contacto.id" x-text="`${contacto.nombre} · ${contacto.cargo || 'Sin cargo'} · ${contacto.telefono || 'Sin teléfono'}`"></option>
+                    </template>
+                </select>
+                <div x-show="!form.contacto_id" class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <input x-model="form.contacto_nuevo.nombre" type="text" placeholder="Nombre *" class="rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                    <input x-model="form.contacto_nuevo.cargo" type="text" :placeholder="form.tipo_servicio === 'OUTSOURCING' ? 'Cargo' : 'Cargo *'" class="rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                    <input x-model="form.contacto_nuevo.telefono" type="tel" placeholder="Teléfono *" class="rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                    <input x-model="form.contacto_nuevo.email" type="email" placeholder="Correo" class="rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                </div>
+            </div>
+            <div x-show="clienteNuevoPreparado" class="mt-4 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                Se usará como interventor el contacto principal registrado con el cliente nuevo.
+            </div>
+        </section>
+
+        <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="text-lg font-semibold text-slate-900">2. Información comercial</h2>
+            <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <label class="block">
+                    <span class="mb-1 block text-sm font-medium text-slate-700">Tipo de servicio *</span>
+                    <select x-model="form.tipo_servicio" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                        <option value="PROYECTO">Proyecto</option>
+                        <option value="MESA_SERVICIO">Mesa / Fábrica / Requerimiento por demanda</option>
+                        <option value="OUTSOURCING">Outsourcing</option>
+                    </select>
+                </label>
+                <label class="block">
+                    <span class="mb-1 block text-sm font-medium text-slate-700">Perfil del cliente *</span>
+                    <select x-model="form.perfil_cliente" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                        <option value="">Selecciona perfil</option>
+                        <option value="CLAVE">Cliente clave</option>
+                        <option value="NO_CLAVE">No clave</option>
+                        <option value="POR_DEFINIR">Por definir</option>
+                    </select>
+                </label>
+                <label x-show="form.tipo_servicio !== 'PROYECTO'" class="block">
+                    <span class="mb-1 block text-sm font-medium text-slate-700">Nombre del servicio</span>
+                    <input x-model="form.nombre_servicio" type="text" :placeholder="form.tipo_servicio === 'OUTSOURCING' ? 'Ej. Consultoría SAP FI' : 'Ej. Mesa SAP 2026'" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                </label>
+            </div>
+            <div class="mt-4 grid gap-4 lg:grid-cols-2">
+                <label class="block">
+                    <span class="mb-1 block text-sm font-medium text-slate-700">Análisis de adaptabilidad *</span>
+                    <textarea x-model="form.analisis_adaptabilidad" rows="3" placeholder="Características relevantes del cliente y su adaptación al servicio" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea>
+                </label>
+                <label class="block">
+                    <span class="mb-1 block text-sm font-medium text-slate-700">Acuerdos comerciales importantes</span>
+                    <textarea x-model="form.acuerdos_comerciales" rows="3" placeholder="Condiciones, compromisos o excepciones acordadas" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea>
+                </label>
+            </div>
+        </section>
+
+        <section class="grid gap-5 xl:grid-cols-2">
+            <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-lg font-semibold text-slate-900">3. Módulos *</h2>
+                <input x-model="busquedaModulo" type="search" placeholder="Buscar módulo" class="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                <div class="mt-3 grid max-h-48 gap-2 overflow-y-auto rounded-lg border border-slate-200 p-3 sm:grid-cols-2">
+                    <template x-for="modulo in modulosFiltrados" :key="modulo.id">
+                        <label class="flex items-center gap-2 text-sm text-slate-700">
+                            <input type="checkbox" :value="modulo.id" x-model="form.modulos_ids" class="rounded border-slate-300 text-blue-600">
+                            <span x-text="modulo.nombre"></span>
+                        </label>
+                    </template>
+                </div>
+                <label class="mt-3 block">
+                    <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Otros módulos</span>
+                    <input x-model="form.modulos_otros_texto" type="text" placeholder="Separa varios con coma" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                </label>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div class="flex items-center justify-between gap-2">
+                    <h2 class="text-lg font-semibold text-slate-900">4. Consultores</h2>
+                    <span class="text-xs font-medium" :class="form.tipo_servicio === 'OUTSOURCING' ? 'text-red-600' : 'text-slate-400'" x-text="form.tipo_servicio === 'OUTSOURCING' ? 'Obligatorio' : 'Opcional'"></span>
+                </div>
+                <input x-model="busquedaConsultor" type="search" placeholder="Buscar por nombre o correo" class="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                <div class="mt-3 max-h-64 space-y-2 overflow-y-auto rounded-lg border border-slate-200 p-3">
+                    <template x-for="consultor in consultoresFiltrados" :key="consultor.id">
+                        <label class="flex items-start gap-2 text-sm text-slate-700">
+                            <input type="checkbox" :value="consultor.id" x-model="form.consultores_ids" class="mt-0.5 rounded border-slate-300 text-blue-600">
+                            <span><strong class="block font-medium" x-text="consultor.nombre"></strong><span class="text-xs text-slate-400" x-text="consultor.email"></span></span>
+                        </label>
+                    </template>
+                </div>
+            </div>
+        </section>
+
+        <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="text-lg font-semibold text-slate-900">5. Detalle del servicio</h2>
+
+            <div x-show="form.tipo_servicio === 'PROYECTO'" class="mt-4 grid gap-4 md:grid-cols-2">
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Nombre del proyecto *</span><input x-model="form.detalle.nombre_proyecto" type="text" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></label>
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Valor total *</span><div class="flex"><select x-model="form.detalle.moneda" class="rounded-l-lg border border-r-0 border-slate-300 px-2 text-sm"><option>COP</option><option>USD</option><option>EUR</option></select><input x-model="form.detalle.valor_total" type="number" min="0" step="0.01" class="min-w-0 flex-1 rounded-r-lg border border-slate-300 px-3 py-2.5 text-sm"></div></label>
+                <label class="block md:col-span-2"><span class="mb-1 block text-sm font-medium text-slate-700">Objeto del proyecto *</span><textarea x-model="form.detalle.objeto_proyecto" rows="3" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea></label>
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Forma de pago *</span><textarea x-model="form.detalle.forma_pago" rows="2" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea></label>
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Equipo con quien se estimó *</span><textarea x-model="form.detalle.equipo_estimacion" rows="2" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea></label>
+                <label class="block md:col-span-2"><span class="mb-1 block text-sm font-medium text-slate-700">Tarifas de consultoría *</span><textarea x-model="form.detalle.tarifas_consultoria" rows="2" placeholder="Describe perfiles, valores y condiciones" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea></label>
+            </div>
+
+            <div x-show="form.tipo_servicio === 'MESA_SERVICIO'" class="mt-4 grid gap-4 md:grid-cols-2">
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Tarifas ofrecidas *</span><textarea x-model="form.detalle.detalle_tarifas" rows="3" placeholder="Valores, bolsas de horas o tarifas por perfil" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea></label>
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Forma de pago *</span><textarea x-model="form.detalle.forma_pago" rows="3" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea></label>
+            </div>
+
+            <div x-show="form.tipo_servicio === 'OUTSOURCING'" class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Tiempo *</span><input x-model="form.detalle.tiempo_descripcion" type="text" placeholder="Ej. 6 meses / tiempo completo" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></label>
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Tarifa *</span><input x-model="form.detalle.tarifa" type="number" min="0" step="0.01" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></label>
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Valor cliente *</span><input x-model="form.detalle.valor_cliente" type="number" min="0" step="0.01" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></label>
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Tiene contrato *</span><select x-model="form.detalle.tiene_contrato" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"><option value="">Selecciona</option><option value="true">Sí</option><option value="false">No</option></select></label>
+            </div>
+        </section>
+
+        <section x-show="requierePropuesta" class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="text-lg font-semibold text-slate-900">6. Propuesta comercial *</h2>
+            <p class="mt-1 text-sm text-slate-500">Adjunta el PDF o pega el enlace donde ya se encuentra almacenado.</p>
+            <div class="mt-4 grid gap-4 lg:grid-cols-2">
+                <div>
+                    <label class="mb-1 block text-sm font-medium text-slate-700">Archivo PDF</label>
+                    <input x-ref="propuestaPdf" @change="seleccionarPdf($event)" type="file" accept="application/pdf,.pdf" class="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-blue-700">
+                    <div x-show="form.documentos.length" class="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                        <span x-text="form.documentos[0]?.nombre"></span>
+                        <button type="button" @click="quitarPdf()" class="float-right font-semibold text-red-600">Quitar</button>
+                    </div>
+                    <p class="mt-1 text-xs text-slate-400">Máximo 8 MB.</p>
+                </div>
+                <label class="block">
+                    <span class="mb-1 block text-sm font-medium text-slate-700">O enlace existente</span>
+                    <input x-model="form.propuesta_url" type="url" placeholder="https://..." class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                </label>
+            </div>
+        </section>
+
+        <div class="flex items-center justify-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <span x-show="!formularioValido" class="mr-auto text-sm text-amber-600">Completa los campos marcados con *.</span>
+            <button type="submit" :disabled="!formularioValido || guardando" class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50" x-text="guardando ? 'Guardando y notificando…' : 'Registrar entrega'"></button>
+        </div>
+    </form>
+
+    <section x-show="tab === 'historial'" class="space-y-4">
+        <div class="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-3">
+            <input x-model="filtro.q" type="search" placeholder="Buscar cliente, servicio o coordinador" class="rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+            <select x-model="filtro.tipo" class="rounded-lg border border-slate-300 px-3 py-2.5 text-sm"><option value="">Todos los tipos</option><option value="PROYECTO">Proyecto</option><option value="MESA_SERVICIO">Mesa / Fábrica / Demanda</option><option value="OUTSOURCING">Outsourcing</option></select>
+            <select x-model="filtro.estado" class="rounded-lg border border-slate-300 px-3 py-2.5 text-sm"><option value="">Todos los estados</option><option value="REGISTRADA">Registrada</option><option value="ACEPTADA">Aceptada</option><option value="EN_PROCESO">En proceso</option><option value="CERRADA">Cerrada</option><option value="CANCELADA">Cancelada</option></select>
+        </div>
+
+        <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+            <table class="min-w-[1050px] w-full text-sm">
+                <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500"><tr><th class="px-4 py-3">Cliente / servicio</th><th class="px-4 py-3">Tipo</th><th class="px-4 py-3">Coordinador</th><th class="px-4 py-3">Estado</th><th class="px-4 py-3">Notificación</th><th class="px-4 py-3">Fecha</th><th class="px-4 py-3 text-right">Acciones</th></tr></thead>
+                <tbody class="divide-y divide-slate-100">
+                    <template x-for="item in entregasFiltradas" :key="item.id">
+                        <tr class="hover:bg-slate-50">
+                            <td class="px-4 py-3"><strong class="block text-slate-900" x-text="item.cliente"></strong><span class="text-slate-500" x-text="item.nombre_servicio"></span></td>
+                            <td class="px-4 py-3 text-slate-600" x-text="typeLabel(item.tipo_servicio)"></td>
+                            <td class="px-4 py-3 text-slate-600" x-text="item.coordinador"></td>
+                            <td class="px-4 py-3"><span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700" x-text="statusLabel(item.estado)"></span></td>
+                            <td class="px-4 py-3"><span class="text-xs font-semibold" :class="item.notificacion?.estado === 'ENVIADA' ? 'text-emerald-600' : 'text-amber-600'" x-text="item.notificacion?.estado || 'PENDIENTE'"></span></td>
+                            <td class="px-4 py-3 text-slate-500" x-text="formatDate(item.created_at)"></td>
+                            <td class="px-4 py-3 text-right whitespace-nowrap">
+                                <button @click="abrirDetalle(item)" class="font-semibold text-blue-600">Ver</button>
+                                <button x-show="item.notificacion?.estado === 'ERROR'" @click="reintentarNotificacion(item)" class="ml-3 font-semibold text-amber-600">Reenviar</button>
+                                <select x-show="puedeCambiarEstado && nextStatuses(item).length" @change="const value = $event.target.value; $event.target.value = ''; cambiarEstado(item, value)" class="ml-3 rounded-md border border-slate-300 px-2 py-1 text-xs"><option value="">Cambiar estado</option><template x-for="estado in nextStatuses(item)" :key="estado"><option :value="estado" x-text="statusLabel(estado)"></option></template></select>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+            <div x-show="!cargando && !entregasFiltradas.length" class="p-10 text-center text-slate-500">No hay entregas para mostrar.</div>
+            <div x-show="cargando" class="p-10 text-center text-slate-500">Cargando entregas…</div>
+        </div>
+    </section>
+
+    <!-- Cliente nuevo: se persiste junto con la entrega para no dejar clientes incompletos. -->
+    <div x-show="clienteNuevo.open" x-transition.opacity class="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/60 p-4" @keydown.escape.window="clienteNuevo.open = false">
+        <div @click.outside="clienteNuevo.open = false" class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
+            <div class="flex items-start justify-between gap-3"><div><h2 class="text-xl font-bold text-slate-900">Crear cliente nuevo</h2><p class="mt-1 text-sm text-slate-500">El cliente se guardará cuando registres la entrega.</p></div><button type="button" @click="clienteNuevo.open = false" class="text-2xl text-slate-400">×</button></div>
+            <div class="mt-5 grid gap-4 md:grid-cols-2">
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Nombre del cliente *</span><input x-model="clienteNuevo.data.titulo" type="text" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></label>
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">NIT *</span><input x-model="clienteNuevo.data.nit" type="text" placeholder="Sin puntos ni espacios" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></label>
+                <label class="block md:col-span-2"><span class="mb-1 block text-sm font-medium text-slate-700">Ubicación / dirección *</span><input x-model="clienteNuevo.data.direccion" type="text" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></label>
+            </div>
+            <h3 class="mt-6 border-t border-slate-200 pt-5 font-semibold text-slate-900">Contacto principal</h3>
+            <div class="mt-3 grid gap-4 md:grid-cols-2">
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Nombre *</span><input x-model="clienteNuevo.data.contacto.nombre" type="text" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></label>
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Cargo *</span><input x-model="clienteNuevo.data.contacto.cargo" type="text" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></label>
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Teléfono *</span><input x-model="clienteNuevo.data.contacto.telefono" type="tel" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></label>
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Correo</span><input x-model="clienteNuevo.data.contacto.email" type="email" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></label>
+            </div>
+            <div class="mt-6 flex justify-end gap-3"><button type="button" @click="clienteNuevo.open = false" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button><button type="button" @click="prepararClienteNuevo()" :disabled="!clienteNuevoValido" class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Usar este cliente</button></div>
+        </div>
+    </div>
+
+    <div x-show="detalleSeleccionado" x-transition.opacity class="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/60 p-4" @keydown.escape.window="detalleSeleccionado = null">
+        <article @click.outside="detalleSeleccionado = null" class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
+            <div class="flex items-start justify-between"><div><p class="text-sm font-semibold text-blue-600" x-text="typeLabel(detalleSeleccionado?.tipo_servicio)"></p><h2 class="text-xl font-bold text-slate-900" x-text="detalleSeleccionado?.nombre_servicio"></h2><p class="text-sm text-slate-500" x-text="detalleSeleccionado?.cliente"></p></div><button @click="detalleSeleccionado = null" class="text-2xl text-slate-400">×</button></div>
+            <dl class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-4 md:grid-cols-2"><div><dt class="text-xs font-semibold uppercase text-slate-400">Coordinador</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.coordinador"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Estado</dt><dd class="mt-1 text-sm text-slate-800" x-text="statusLabel(detalleSeleccionado?.estado)"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Interventor</dt><dd class="mt-1 text-sm text-slate-800" x-text="`${detalleSeleccionado?.interventor?.nombre || '—'} · ${detalleSeleccionado?.interventor?.telefono || '—'}`"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Perfil</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.perfil_cliente"></dd></div></dl>
+            <div class="mt-5"><h3 class="font-semibold text-slate-900">Módulos</h3><p class="mt-1 text-sm text-slate-600" x-text="(detalleSeleccionado?.modulos || []).map(item => item.nombre).join(', ') || '—'"></p></div>
+            <div class="mt-4"><h3 class="font-semibold text-slate-900">Consultores</h3><p class="mt-1 text-sm text-slate-600" x-text="(detalleSeleccionado?.consultores || []).map(item => item.nombre).join(', ') || 'Sin asignar'"></p></div>
+            <div class="mt-4"><h3 class="font-semibold text-slate-900">Adaptabilidad</h3><p class="mt-1 whitespace-pre-line text-sm text-slate-600" x-text="detalleSeleccionado?.analisis_adaptabilidad"></p></div>
+            <div x-show="detalleSeleccionado?.acuerdos_comerciales" class="mt-4"><h3 class="font-semibold text-slate-900">Acuerdos comerciales</h3><p class="mt-1 whitespace-pre-line text-sm text-slate-600" x-text="detalleSeleccionado?.acuerdos_comerciales"></p></div>
+            <div class="mt-5"><h3 class="font-semibold text-slate-900">Documentos</h3><div class="mt-2 space-y-2"><template x-for="doc in detalleSeleccionado?.documentos || []" :key="doc.id || doc.url"><a :href="doc.url" target="_blank" rel="noopener" class="block rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700" x-text="doc.nombre || 'Abrir propuesta'"></a></template></div></div>
+        </article>
+    </div>
+</div>
+

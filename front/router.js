@@ -1,6 +1,7 @@
 // Mapa ruta -> script de vista. null = no necesita JS propio.
 const viewScripts = {
     inicio:                           null,
+    "entregas-servicio":             "/js/entregas-servicio.js",
     cliente:                          "/js/cliente.js",
     tarifas:                          "/js/tarifas.js",
     "permisos-coordinador":           null,
@@ -33,7 +34,7 @@ const viewScripts = {
 // Guardar la promesa (no solo el resultado) evita inyectar el mismo
 // archivo dos veces si llegan dos navegaciones rápidas antes del onload.
 const _scriptPromises = new Map();
-const APP_ASSET_VERSION = "20260812-anexo-estado-firma-nuevo-export-20260824-capacidad-modal-margin-20260825-licencias-entra";
+const APP_ASSET_VERSION = "20260812-anexo-estado-firma-nuevo-export-20260824-capacidad-modal-margin-20260825-licencias-entra-20260825-entregas-servicio-v1";
 
 function loadScript(src) {
     if (_scriptPromises.has(src)) return _scriptPromises.get(src);
@@ -90,6 +91,7 @@ async function loadView(view) {
 
 const routes = {
     inicio: "inicio",
+    "entregas-servicio": "entregas-servicio",
     cliente: "cliente",
     tarifas: "tarifas",
     "permisos-coordinador": "permisos-coordinador",
@@ -128,9 +130,10 @@ function router() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "azure-devops-prueba", "capacidad-fabrica", "firma-contratos-admin", "gestion-personas", "gestion-consultores"],
+        admin: ["inicio", "entregas-servicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "azure-devops-prueba", "capacidad-fabrica", "firma-contratos-admin", "gestion-personas", "gestion-consultores"],
         coordinador: [
             "inicio",
+            "entregas-servicio",
             "asignacion-consultor",
             "cliente",
             "aprobar-rechazar-coordinador",
@@ -161,6 +164,7 @@ function router() {
         reclutador: ["inicio", "solicitudesRecl"],
         comercial: [
             "inicio",
+            "entregas-servicio",
             "asignacion-consultor",
             "cliente",
             "aprobar-rechazar-coordinador",

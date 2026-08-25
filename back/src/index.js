@@ -173,6 +173,7 @@ app.use("/registro-asignaciones", require("./routes/registro-asignaciones.routes
 app.use(require("./routes/reportes.routes"));
 app.use("/azure-devops", require("./routes/azure-devops.routes"));
 app.use("/capacidad-fabrica", require("./routes/capacidad-fabrica.routes"));
+app.use("/entregas-servicio", require("./routes/entregas-servicio.routes"));
 app.use(require("./routes/anexo-individual.routes"));
 app.use("/admin/firma-contratos", require("./routes/firma-contratos.routes"));
 app.use("/cuentas-cobro", require("./routes/cuentas-cobro.routes"));

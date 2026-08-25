@@ -87,3 +87,15 @@ test("la contratación directa busca tanto personas como usuarios", () => {
   assert.match(searchRoute, /persona_id: row\.persona_public_id/);
   assert.match(coordinacionFront, /this\.form\.persona_id = persona\.persona_id/);
 });
+
+test("la busqueda de personas recupera documento y telefono desde el historial", () => {
+  const searchStart = backend.indexOf('"/contrataciones/personas"');
+  const searchEnd = backend.indexOf('"/contrataciones/solicitudes"', searchStart);
+  const searchRoute = backend.slice(searchStart, searchEnd);
+
+  assert.match(searchRoute, /context\?\.numero_documento/);
+  assert.match(searchRoute, /context\?\.telefono/);
+  assert.match(searchRoute, /context\?\.tipo_documento_id/);
+  assert.match(coordinacionFront, /resolverTipoDocumentoId\(persona\)/);
+  assert.match(coordinacionFront, /persona\.numero_contacto/);
+});

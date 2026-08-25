@@ -9,6 +9,11 @@ const {
 
 const SILVER_EMAIL_DOMAIN = "@silverconsulting.com.co";
 const PENDING_SILVER_STATE = "Pendiente Correo Silver";
+const SAFE_AUTOMATIC_USER_ORIGINS = new Set([
+  "contratacion_th",
+  "contratacion_solicitante",
+  "preregistro_th"
+]);
 const ACTIVE_ONBOARDING_STATES = [
   "Pendiente",
   "Pendiente Coordinador",
@@ -397,6 +402,38 @@ async function relinkMicrosoftPlaceholder(db, { person, identity }) {
     String(placeholder.azure_oid || "") === identity.oid &&
     normalizeCorporateEmail(placeholder.correo_silver) === identity.email;
   if (!isSafePlaceholder) return false;
+
+  const targetUserResult = await db.query(
+    `SELECT id, email, azure_oid, created_by, activo
+     FROM usuarios
+     WHERE persona_id = $1 AND id <> $2
+     ORDER BY id
+     FOR UPDATE`,
+    [person.id, user.id]
+  );
+  const targetUser = targetUserResult.rows[0] || null;
+  if (targetUser) {
+    const targetOrigin = String(targetUser.created_by || "").trim().toLowerCase();
+    const canArchiveTargetUser =
+      !normalizeText(targetUser.azure_oid) &&
+      SAFE_AUTOMATIC_USER_ORIGINS.has(targetOrigin);
+    if (!canArchiveTargetUser) {
+      throw new MicrosoftGroupWebhookError(
+        "La persona ya está vinculada a otro usuario que requiere revisión manual.",
+        409,
+        "PERSON_USER_CONFLICT"
+      );
+    }
+
+    await db.query(
+      `UPDATE usuarios
+       SET persona_id = NULL,
+           activo = false,
+           updated_at = NOW()
+       WHERE id = $1 AND persona_id = $2`,
+      [targetUser.id, person.id]
+    );
+  }
 
   await db.query(
     `UPDATE personas target

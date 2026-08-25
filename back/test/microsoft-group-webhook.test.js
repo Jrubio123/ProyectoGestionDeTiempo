@@ -173,6 +173,99 @@ test("reutiliza el usuario provisional creado antes de identificar la solicitud"
   assert.ok(calls.some(({ query, params }) => /UPDATE usuarios/.test(query) && params[0] === 20 && params[1] === 40));
 });
 
+test("consolida el usuario automático anterior antes de vincular la identidad SSO", async () => {
+  const calls = [];
+  const db = {
+    async query(sql, params) {
+      const query = String(sql);
+      calls.push({ query, params });
+      if (/SELECT id, persona_id, created_by/.test(query)) {
+        return { rows: [{ id: 1, persona_id: 6, created_by: "ms_sso" }] };
+      }
+      if (/SELECT id, numero_documento, preregistro_id/.test(query)) {
+        return {
+          rows: [{
+            id: 6,
+            numero_documento: null,
+            preregistro_id: null,
+            numero_contacto: "3126204046",
+            correo_silver: identity.email,
+            azure_oid: identity.oid
+          }]
+        };
+      }
+      if (/WHERE persona_id = \$1 AND id <> \$2/.test(query)) {
+        return {
+          rows: [{
+            id: 21,
+            email: "prueba@silverconsulting.com.co",
+            azure_oid: null,
+            created_by: "contratacion_th",
+            activo: true
+          }]
+        };
+      }
+      return { rows: [] };
+    }
+  };
+
+  const relinked = await relinkMicrosoftPlaceholder(db, {
+    person: { id: 1, public_id: "persona-real" },
+    identity: { ...identity, phone: "3126204046" }
+  });
+
+  assert.equal(relinked, true);
+  assert.ok(calls.some(({ query, params }) =>
+    /SET persona_id = NULL/.test(query) && params[0] === 21 && params[1] === 1
+  ));
+  assert.ok(calls.some(({ query, params }) =>
+    /SET persona_id = \$1/.test(query) && params[0] === 1 && params[1] === 1
+  ));
+});
+
+test("no desvincula automáticamente un usuario de origen manual", async () => {
+  const db = {
+    async query(sql) {
+      const query = String(sql);
+      if (/SELECT id, persona_id, created_by/.test(query)) {
+        return { rows: [{ id: 1, persona_id: 6, created_by: "ms_sso" }] };
+      }
+      if (/SELECT id, numero_documento, preregistro_id/.test(query)) {
+        return {
+          rows: [{
+            id: 6,
+            numero_documento: null,
+            preregistro_id: null,
+            numero_contacto: null,
+            correo_silver: identity.email,
+            azure_oid: identity.oid
+          }]
+        };
+      }
+      if (/WHERE persona_id = \$1 AND id <> \$2/.test(query)) {
+        return {
+          rows: [{
+            id: 21,
+            email: "persona@silverconsulting.com.co",
+            azure_oid: null,
+            created_by: "admin_manual",
+            activo: true
+          }]
+        };
+      }
+      return { rows: [] };
+    }
+  };
+
+  await assert.rejects(
+    () => relinkMicrosoftPlaceholder(db, {
+      person: { id: 1 },
+      identity
+    }),
+    (error) => error.code === "PERSON_USER_CONFLICT" && error.statusCode === 409
+  );
+});
+
 test("completa Pendiente Correo Silver y vincula persona, usuario y preregistro", async () => {
   const calls = [];
   const webhookIdentity = {

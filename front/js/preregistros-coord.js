@@ -276,6 +276,38 @@ window.preregistrosCoordApp = function () {
             return (this.modulos || []).find((modulo) => String(modulo?.id || "") === String(id || "")) || null;
         },
 
+        resolverTipoDocumentoId(persona) {
+            const documentos = Array.isArray(this.documentos) ? this.documentos : [];
+            const id = this.pickFirst(
+                persona?.tipo_documento_id,
+                persona?.tipo_documento?.id,
+                persona?.user?.tipo_documento_id
+            );
+            const porId = documentos.find((doc) => String(doc?.id || "") === String(id || ""));
+            if (porId) return String(porId.id);
+
+            const codigo = this.pickFirst(
+                persona?.tipo_documento_codigo,
+                persona?.tipo_documento?.codigo,
+                persona?.user?.tipo_documento_codigo
+            );
+            if (codigo) {
+                const porCodigo = documentos.find(
+                    (doc) => this.normalizarTexto(doc?.codigo) === this.normalizarTexto(codigo)
+                );
+                if (porCodigo) return String(porCodigo.id);
+            }
+
+            const titulo = typeof persona?.tipo_documento === "string"
+                ? persona.tipo_documento
+                : this.pickFirst(persona?.tipo_documento?.titulo, persona?.user?.tipo_documento_titulo);
+            if (!titulo) return "";
+            const porTitulo = documentos.find(
+                (doc) => this.normalizarTexto(doc?.titulo) === this.normalizarTexto(titulo)
+            );
+            return porTitulo ? String(porTitulo.id) : "";
+        },
+
         resolverDatosPerfil({ moduloId = "", perfil = "" } = {}) {
             const modulo = this.buscarModuloPorId(moduloId);
             if (modulo) {
@@ -525,11 +557,19 @@ window.preregistrosCoordApp = function () {
 
             this.form.persona_usuario_id = persona.usuario_id || "";
             this.form.persona_id = persona.persona_id || "";
-            this.form.tipo_documento_id = persona.tipo_documento_id || "";
-            this.form.numero_documento = persona.numero_documento || "";
+            this.form.tipo_documento_id = this.resolverTipoDocumentoId(persona);
+            this.form.numero_documento = this.pickFirst(
+                persona.numero_documento,
+                persona.cedula,
+                persona.user?.numero_documento
+            ) || "";
             this.form.correo_empresarial = persona.correo_empresarial || "";
-            if (persona.correo_personal) this.form.correo_personal = persona.correo_personal;
-            if (persona.telefono) this.form.telefono = persona.telefono;
+            this.form.correo_personal = this.pickFirst(persona.correo_personal, persona.user?.correo_personal) || "";
+            this.form.telefono = this.pickFirst(
+                persona.telefono,
+                persona.numero_contacto,
+                persona.user?.telefono
+            ) || "";
             if (persona.moneda) this.form.moneda = persona.moneda;
             if (persona.factura_en_colombia === true) this.form.factura_en_colombia = "true";
             if (persona.factura_en_colombia === false) this.form.factura_en_colombia = "false";

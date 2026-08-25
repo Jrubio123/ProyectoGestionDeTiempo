@@ -972,6 +972,11 @@ module.exports = function registerContratacionesRoutes(deps) {
         sc.public_id,
         sc.tipo_solicitud,
         sc.perfil,
+        sc.numero_documento,
+        sc.telefono,
+        di.public_id AS tipo_documento_public_id,
+        di.titulo AS tipo_documento_titulo,
+        di.codigo AS tipo_documento_codigo,
         sc.correo_personal,
         sc.correo_empresarial,
         sc.moneda,
@@ -996,6 +1001,7 @@ module.exports = function registerContratacionesRoutes(deps) {
       FROM solicitudes_contratacion sc
       LEFT JOIN usuarios sup ON sup.id = sc.supervisor_id
       LEFT JOIN clientes c ON c.id = sc.cliente_id
+      LEFT JOIN documento_identidad di ON di.id = sc.tipo_documento_id
       WHERE sc.tipo_solicitud <> $4
         AND (
           ($1::int IS NOT NULL AND sc.persona_usuario_id = $1)
@@ -1017,6 +1023,11 @@ module.exports = function registerContratacionesRoutes(deps) {
       SELECT
         pp.id,
         pp.public_id,
+        pp.numero_documento,
+        pp.telefono,
+        di.public_id AS tipo_documento_public_id,
+        di.titulo AS tipo_documento_titulo,
+        di.codigo AS tipo_documento_codigo,
         pp.correo_personal,
         pp.moneda,
         pp.tarifa_hora,
@@ -1034,6 +1045,7 @@ module.exports = function registerContratacionesRoutes(deps) {
       LEFT JOIN solicitudes_rrhh sr ON sr.id = pp.id_solicitud_rrhh
       LEFT JOIN modulo m ON m.id = sr.modulo_id
       LEFT JOIN clientes c ON c.id = sr.cliente_id
+      LEFT JOIN documento_identidad di ON di.id = pp.tipo_documento_id
       WHERE (
           ($1::int IS NOT NULL AND pp.id_usuario_creado = $1)
           OR ($2::text IS NOT NULL AND pp.numero_documento = $2)
@@ -1110,6 +1122,23 @@ module.exports = function registerContratacionesRoutes(deps) {
         : null,
       correo_personal: pickFirst(anexoActivo?.correo_personal, solicitudActual?.correo_personal, preregistroActual?.correo_personal, correoPersonal),
       correo_empresarial: pickFirst(baseUser?.email, solicitudActual?.correo_empresarial, correoEmpresarial),
+      numero_documento: pickFirst(baseUser?.cedula, solicitudActual?.numero_documento, preregistroActual?.numero_documento, resolvedDocumento),
+      telefono: pickFirst(baseUser?.telefono, solicitudActual?.telefono, preregistroActual?.telefono),
+      tipo_documento_id: pickFirst(
+        baseUser?.tipo_documento_public_id,
+        solicitudActual?.tipo_documento_public_id,
+        preregistroActual?.tipo_documento_public_id
+      ),
+      tipo_documento_titulo: pickFirst(
+        baseUser?.tipo_documento_titulo,
+        solicitudActual?.tipo_documento_titulo,
+        preregistroActual?.tipo_documento_titulo
+      ),
+      tipo_documento_codigo: pickFirst(
+        baseUser?.tipo_documento_codigo,
+        solicitudActual?.tipo_documento_codigo,
+        preregistroActual?.tipo_documento_codigo
+      ),
       cliente_id: pickFirst(anexoActivo?.cliente_public_id, solicitudActual?.cliente_public_id, preregistroActual?.cliente_public_id),
       cliente_nombre: pickFirst(anexoActivo?.cliente_nombre, solicitudActual?.cliente_nombre, preregistroActual?.cliente_nombre),
       supervisor_id: solicitudActual?.supervisor_public_id || null,
@@ -2150,15 +2179,15 @@ module.exports = function registerContratacionesRoutes(deps) {
               nombre_usuario: row.nombre_usuario,
               correo_empresarial: row.correo_empresarial || context?.correo_empresarial || null,
               correo_personal: row.correo_personal || context?.correo_personal || null,
-              numero_documento: row.numero_documento || null,
-              telefono: row.telefono || null,
+              numero_documento: row.numero_documento || context?.numero_documento || null,
+              telefono: row.telefono || context?.telefono || null,
               moneda: context?.moneda || row.moneda || null,
               factura_en_colombia: row.factura_en_colombia,
               activo: Boolean(row.activo),
               persona_estado: row.persona_estado || null,
-              tipo_documento_id: row.tipo_documento_id || null,
-              tipo_documento: row.tipo_documento || null,
-              tipo_documento_codigo: row.tipo_documento_codigo || null,
+              tipo_documento_id: row.tipo_documento_id || context?.tipo_documento_id || null,
+              tipo_documento: row.tipo_documento || context?.tipo_documento_titulo || null,
+              tipo_documento_codigo: row.tipo_documento_codigo || context?.tipo_documento_codigo || null,
               cliente_id: context?.cliente_id || null,
               cliente_nombre: context?.cliente_nombre || null,
               supervisor_id: context?.supervisor_id || null,
@@ -3865,8 +3894,14 @@ module.exports = function registerContratacionesRoutes(deps) {
         try {
           await client.query("ROLLBACK");
         } catch (_) {}
+        if (err?.statusCode && Number(err.statusCode) >= 400 && Number(err.statusCode) < 500) {
+          return res.status(Number(err.statusCode)).json({ error: err.message, code: err.code || null });
+        }
         if (err?.code === "23505") {
-          return res.status(409).json({ error: "Conflicto de unicidad creando usuario" });
+          const message = err?.constraint === "idx_usuarios_persona"
+            ? "La persona ya está vinculada a otro usuario"
+            : "Conflicto de unicidad creando usuario";
+          return res.status(409).json({ error: message, constraint: err?.constraint || null });
         }
         if (err?.code === "TIPO_CUENTA_INVALIDO") {
           return res.status(err.status || 400).json({ error: err.message });

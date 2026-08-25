@@ -18,6 +18,7 @@ async function loadComponent(containerId, url, initFnName) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-    loadComponent("navbar-container", "/components/navbar/navbar.html", "initNavbar");
-    loadComponent("sidebar-container", "/components/sidebar/sidebar.html", "initSidebar");
+    const version = "20260825-entregas-servicio";
+    loadComponent("navbar-container", `/components/navbar/navbar.html?v=${version}`, "initNavbar");
+    loadComponent("sidebar-container", `/components/sidebar/sidebar.html?v=${version}`, "initSidebar");
 });

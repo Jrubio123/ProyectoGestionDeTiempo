@@ -790,5 +790,6 @@ module.exports = {
   listClientContacts,
   listDeliveries,
   retryNotification,
-  updateDeliveryStatus
+  updateDeliveryStatus,
+  _private: { visibilitySql }
 };

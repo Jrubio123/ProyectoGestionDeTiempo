@@ -52,10 +52,20 @@ test("el frontend exige consultor en outsourcing", () => {
   assert.equal(app.formularioValido, true);
 });
 
-test("solo Comercial y Administrador pueden abrir nuevas entregas", () => {
+test("solo Comercial puede abrir nuevas entregas", () => {
   const app = createApp();
   assert.equal(app.puedeCrear, true);
   global.window.auth.getRoleKey = () => "coordinador";
   assert.equal(app.puedeCrear, false);
+  global.window.auth.getRoleKey = () => "admin";
+  assert.equal(app.puedeCrear, false);
 });
 
+test("adapta el historial al rol que consulta", () => {
+  const app = createApp();
+  assert.equal(app.historialTitulo, "Mis entregas realizadas");
+  global.window.auth.getRoleKey = () => "coordinador";
+  assert.equal(app.historialTitulo, "Servicios entregados a mí");
+  global.window.auth.getRoleKey = () => "admin";
+  assert.equal(app.historialTitulo, "Todas las entregas de servicio");
+});

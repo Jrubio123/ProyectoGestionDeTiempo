@@ -12,6 +12,7 @@ const {
   encodeGraphPath,
   sanitizePathSegment
 } = require("../src/services/entregas-servicio.graph");
+const { _private } = require("../src/services/entregas-servicio.service");
 
 function projectPayload() {
   return {
@@ -97,3 +98,26 @@ test("la migración crea el núcleo relacional de entregas", () => {
   }
 });
 
+test("limita la consulta según el rol operativo", () => {
+  assert.deepEqual(
+    _private.visibilitySql({ user: { rol: "Administrador", id: 1 } }),
+    { clause: "", params: [] }
+  );
+  assert.deepEqual(
+    _private.visibilitySql({ user: { rol: "Coordinador", id: 20 } }),
+    { clause: "AND e.coordinador_asignado_id = $1", params: [20] }
+  );
+  assert.deepEqual(
+    _private.visibilitySql({ user: { rol: "Comercial", id: 30 } }),
+    { clause: "AND e.creado_por = $1", params: [30] }
+  );
+});
+
+test("la ruta de creación queda reservada para Comercial", () => {
+  const routeSource = fs.readFileSync(
+    path.resolve(__dirname, "../src/routes/entregas-servicio.routes.js"),
+    "utf8"
+  );
+  assert.match(routeSource, /const CREATE = requireAccess\(\{ roles: \["Comercial"\] \}\)/);
+  assert.doesNotMatch(routeSource, /const CREATE[^\n]+Administrador/);
+});

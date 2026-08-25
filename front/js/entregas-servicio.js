@@ -58,10 +58,20 @@ window.entregasServicioApp = function () {
             return window.auth?.getRoleKey?.() || "other";
         },
         get puedeCrear() {
-            return ["admin", "comercial"].includes(this.roleKey);
+            return this.roleKey === "comercial";
         },
         get puedeCambiarEstado() {
             return ["admin", "coordinador"].includes(this.roleKey);
+        },
+        get historialTitulo() {
+            if (this.roleKey === "admin") return "Todas las entregas de servicio";
+            if (this.roleKey === "coordinador") return "Servicios entregados a mí";
+            return "Mis entregas realizadas";
+        },
+        get historialDescripcion() {
+            if (this.roleKey === "admin") return "Consulta quién realizó cada entrega y a qué coordinador fue asignada.";
+            if (this.roleKey === "coordinador") return "Consulta quién te entregó cada servicio y su información comercial.";
+            return "Consulta los servicios que entregaste al equipo de operaciones.";
         },
         get requierePropuesta() {
             return ["PROYECTO", "MESA_SERVICIO"].includes(this.form.tipo_servicio);
@@ -322,4 +332,3 @@ window.entregasServicioApp = function () {
         }
     };
 };
-

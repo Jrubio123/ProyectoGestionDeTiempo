@@ -1,7 +1,9 @@
 const https = require("https");
 const { getGraphAccessToken } = require("../email");
 
-const ONEDRIVE_TARGET_USER = String(process.env.ONEDRIVE_TARGET_USER || "").trim();
+const ONEDRIVE_TARGET_USER = String(
+  process.env.ONEDRIVE_TARGET_USER || "admin.apps@silverconsulting.com.co"
+).trim();
 const ONEDRIVE_ENTREGAS_ROOT_FOLDER = String(
   process.env.ONEDRIVE_ENTREGAS_ROOT_FOLDER || "EntregaDeServicios"
 ).trim();

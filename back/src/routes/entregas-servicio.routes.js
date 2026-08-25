@@ -4,7 +4,7 @@ const service = require("../services/entregas-servicio.service");
 
 const router = express.Router();
 const ACCESS = requireAccess({ roles: service.ALLOWED_ROLES });
-const CREATE = requireAccess({ roles: ["Administrador", "Comercial"] });
+const CREATE = requireAccess({ roles: ["Comercial"] });
 
 router.get("/catalogos", ACCESS, service.getCatalogs);
 router.get("/clientes/:clienteId/contactos", ACCESS, service.listClientContacts);

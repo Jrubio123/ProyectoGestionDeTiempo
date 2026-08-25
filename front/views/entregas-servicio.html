@@ -202,6 +202,10 @@
     </form>
 
     <section x-show="tab === 'historial'" class="space-y-4">
+        <div>
+            <h2 class="text-lg font-semibold text-slate-900" x-text="historialTitulo"></h2>
+            <p class="mt-1 text-sm text-slate-500" x-text="historialDescripcion"></p>
+        </div>
         <div class="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-3">
             <input x-model="filtro.q" type="search" placeholder="Buscar cliente, servicio o coordinador" class="rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
             <select x-model="filtro.tipo" class="rounded-lg border border-slate-300 px-3 py-2.5 text-sm"><option value="">Todos los tipos</option><option value="PROYECTO">Proyecto</option><option value="MESA_SERVICIO">Mesa / Fábrica / Demanda</option><option value="OUTSOURCING">Outsourcing</option></select>
@@ -209,13 +213,14 @@
         </div>
 
         <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-            <table class="min-w-[1050px] w-full text-sm">
-                <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500"><tr><th class="px-4 py-3">Cliente / servicio</th><th class="px-4 py-3">Tipo</th><th class="px-4 py-3">Coordinador</th><th class="px-4 py-3">Estado</th><th class="px-4 py-3">Notificación</th><th class="px-4 py-3">Fecha</th><th class="px-4 py-3 text-right">Acciones</th></tr></thead>
+            <table class="min-w-[1180px] w-full text-sm">
+                <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500"><tr><th class="px-4 py-3">Cliente / servicio</th><th class="px-4 py-3">Tipo</th><th class="px-4 py-3">Entregado por</th><th class="px-4 py-3">Asignado a</th><th class="px-4 py-3">Estado</th><th class="px-4 py-3">Notificación</th><th class="px-4 py-3">Fecha</th><th class="px-4 py-3 text-right">Acciones</th></tr></thead>
                 <tbody class="divide-y divide-slate-100">
                     <template x-for="item in entregasFiltradas" :key="item.id">
                         <tr class="hover:bg-slate-50">
                             <td class="px-4 py-3"><strong class="block text-slate-900" x-text="item.cliente"></strong><span class="text-slate-500" x-text="item.nombre_servicio"></span></td>
                             <td class="px-4 py-3 text-slate-600" x-text="typeLabel(item.tipo_servicio)"></td>
+                            <td class="px-4 py-3 text-slate-600" x-text="item.creado_por"></td>
                             <td class="px-4 py-3 text-slate-600" x-text="item.coordinador"></td>
                             <td class="px-4 py-3"><span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700" x-text="statusLabel(item.estado)"></span></td>
                             <td class="px-4 py-3"><span class="text-xs font-semibold" :class="item.notificacion?.estado === 'ENVIADA' ? 'text-emerald-600' : 'text-amber-600'" x-text="item.notificacion?.estado || 'PENDIENTE'"></span></td>
@@ -257,7 +262,7 @@
     <div x-show="detalleSeleccionado" x-transition.opacity class="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/60 p-4" @keydown.escape.window="detalleSeleccionado = null">
         <article @click.outside="detalleSeleccionado = null" class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
             <div class="flex items-start justify-between"><div><p class="text-sm font-semibold text-blue-600" x-text="typeLabel(detalleSeleccionado?.tipo_servicio)"></p><h2 class="text-xl font-bold text-slate-900" x-text="detalleSeleccionado?.nombre_servicio"></h2><p class="text-sm text-slate-500" x-text="detalleSeleccionado?.cliente"></p></div><button @click="detalleSeleccionado = null" class="text-2xl text-slate-400">×</button></div>
-            <dl class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-4 md:grid-cols-2"><div><dt class="text-xs font-semibold uppercase text-slate-400">Coordinador</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.coordinador"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Estado</dt><dd class="mt-1 text-sm text-slate-800" x-text="statusLabel(detalleSeleccionado?.estado)"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Interventor</dt><dd class="mt-1 text-sm text-slate-800" x-text="`${detalleSeleccionado?.interventor?.nombre || '—'} · ${detalleSeleccionado?.interventor?.telefono || '—'}`"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Perfil</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.perfil_cliente"></dd></div></dl>
+            <dl class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-4 md:grid-cols-2"><div><dt class="text-xs font-semibold uppercase text-slate-400">Entregado por</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.creado_por"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Asignado a</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.coordinador"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Estado</dt><dd class="mt-1 text-sm text-slate-800" x-text="statusLabel(detalleSeleccionado?.estado)"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Perfil</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.perfil_cliente"></dd></div><div class="md:col-span-2"><dt class="text-xs font-semibold uppercase text-slate-400">Interventor</dt><dd class="mt-1 text-sm text-slate-800" x-text="`${detalleSeleccionado?.interventor?.nombre || '—'} · ${detalleSeleccionado?.interventor?.cargo || '—'} · ${detalleSeleccionado?.interventor?.telefono || '—'}`"></dd></div></dl>
             <div class="mt-5"><h3 class="font-semibold text-slate-900">Módulos</h3><p class="mt-1 text-sm text-slate-600" x-text="(detalleSeleccionado?.modulos || []).map(item => item.nombre).join(', ') || '—'"></p></div>
             <div class="mt-4"><h3 class="font-semibold text-slate-900">Consultores</h3><p class="mt-1 text-sm text-slate-600" x-text="(detalleSeleccionado?.consultores || []).map(item => item.nombre).join(', ') || 'Sin asignar'"></p></div>
             <div class="mt-4"><h3 class="font-semibold text-slate-900">Adaptabilidad</h3><p class="mt-1 whitespace-pre-line text-sm text-slate-600" x-text="detalleSeleccionado?.analisis_adaptabilidad"></p></div>
@@ -266,4 +271,3 @@
         </article>
     </div>
 </div>
-

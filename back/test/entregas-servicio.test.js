@@ -32,7 +32,8 @@ function projectPayload() {
       objeto_proyecto: "Implementar los módulos contratados.",
       valor_total: 1000000,
       moneda: "COP",
-      forma_pago: "50% inicial y 50% contra entrega",
+      valor_forma_pago: 500000,
+      moneda_forma_pago: "COP",
       equipo_estimacion: "Comercial y consultoría",
       tarifa_consultoria: 200000,
       moneda_tarifa_consultoria: "COP"
@@ -53,6 +54,8 @@ test("acepta una entrega de proyecto con enlaces comerciales", () => {
   ]);
   assert.equal(payload.detalle.tarifa_consultoria, 200000);
   assert.equal(payload.detalle.moneda_tarifa_consultoria, "COP");
+  assert.equal(payload.detalle.valor_forma_pago, 500000);
+  assert.equal(payload.detalle.moneda_forma_pago, "COP");
 });
 
 test("valida tarifa de consultoría monetaria en COP, USD o EUR", () => {
@@ -62,6 +65,15 @@ test("valida tarifa de consultoría monetaria en COP, USD o EUR", () => {
 
   payload.detalle.moneda_tarifa_consultoria = "GBP";
   assert.throws(() => validateEntregaPayload(payload), /moneda de la tarifa de consultoría no es válida/i);
+});
+
+test("valida forma de pago monetaria en COP, USD o EUR", () => {
+  const payload = projectPayload();
+  payload.detalle.moneda_forma_pago = "EUR";
+  assert.equal(validateEntregaPayload(payload).detalle.moneda_forma_pago, "EUR");
+
+  payload.detalle.moneda_forma_pago = "GBP";
+  assert.throws(() => validateEntregaPayload(payload), /moneda de la forma de pago no es válida/i);
 });
 
 test("exige consultor para outsourcing", () => {
@@ -167,6 +179,17 @@ test("la migración agrega valor y moneda a la tarifa de consultoría", () => {
   );
   assert.match(migration, /tarifa_consultoria NUMERIC\(18,2\)/);
   assert.match(migration, /moneda_tarifa_consultoria VARCHAR\(3\)/);
+});
+
+test("la migración reemplaza la forma de pago textual por valor y moneda", () => {
+  const migration = fs.readFileSync(
+    path.resolve(__dirname, "../../db/migrations/2026-08-26-z-entregas-forma-pago-monetaria.sql"),
+    "utf8"
+  );
+  assert.match(migration, /valor_forma_pago NUMERIC\(18,2\)/);
+  assert.match(migration, /moneda_forma_pago VARCHAR\(3\)/);
+  assert.match(migration, /DROP COLUMN IF EXISTS forma_pago/);
+  assert.match(migration, /DROP COLUMN IF EXISTS tarifas_consultoria/);
 });
 
 test("limita la consulta según el rol operativo", () => {

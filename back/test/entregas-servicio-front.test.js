@@ -30,7 +30,8 @@ test("el formulario de proyecto valida los campos comerciales", () => {
     nombre_proyecto: "Proyecto Uno",
     objeto_proyecto: "Implementación",
     valor_total: 100,
-    forma_pago: "Contado",
+    valor_forma_pago: 50,
+    moneda_forma_pago: "USD",
     equipo_estimacion: "Equipo comercial",
     tarifa_consultoria: 100,
     moneda_tarifa_consultoria: "COP"
@@ -45,7 +46,8 @@ test("permite agregar varios enlaces y exige uno en proyecto", () => {
     nombre_proyecto: "Proyecto Uno",
     objeto_proyecto: "Implementación",
     valor_total: 100,
-    forma_pago: "Contado",
+    valor_forma_pago: 50,
+    moneda_forma_pago: "COP",
     equipo_estimacion: "Equipo comercial",
     tarifa_consultoria: 100,
     moneda_tarifa_consultoria: "EUR"

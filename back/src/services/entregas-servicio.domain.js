@@ -163,6 +163,13 @@ function validateDetail(payload, tipoServicio) {
   }
 
   if (tipoServicio === TIPOS_SERVICIO.PROYECTO) {
+    const monedaFormaPago = text(detail.moneda_forma_pago || "COP").toUpperCase();
+    if (!new Set(["COP", "USD", "EUR"]).has(monedaFormaPago)) {
+      throw new EntregaValidationError(
+        "La moneda de la forma de pago no es válida.",
+        "detalle.moneda_forma_pago"
+      );
+    }
     const monedaTarifaConsultoria = text(detail.moneda_tarifa_consultoria || "COP").toUpperCase();
     if (!new Set(["COP", "USD", "EUR"]).has(monedaTarifaConsultoria)) {
       throw new EntregaValidationError(
@@ -175,7 +182,12 @@ function validateDetail(payload, tipoServicio) {
       objeto_proyecto: requiredText(detail.objeto_proyecto, "El objeto del proyecto es obligatorio.", "detalle.objeto_proyecto"),
       valor_total: parseMoney(detail.valor_total, "El valor total del proyecto no es válido.", "detalle.valor_total"),
       moneda,
-      forma_pago: requiredText(detail.forma_pago, "La forma de pago es obligatoria.", "detalle.forma_pago"),
+      valor_forma_pago: parseMoney(
+        detail.valor_forma_pago,
+        "El valor de la forma de pago no es válido.",
+        "detalle.valor_forma_pago"
+      ),
+      moneda_forma_pago: monedaFormaPago,
       equipo_estimacion: requiredText(detail.equipo_estimacion, "Indica el equipo con quien se estimó.", "detalle.equipo_estimacion"),
       tarifa_consultoria: parseMoney(
         detail.tarifa_consultoria,

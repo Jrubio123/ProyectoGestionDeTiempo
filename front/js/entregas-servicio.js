@@ -7,6 +7,8 @@ window.entregasServicioApp = function () {
         objeto_proyecto: "",
         valor_total: "",
         moneda: "COP",
+        valor_forma_pago: "",
+        moneda_forma_pago: "COP",
         forma_pago: "",
         equipo_estimacion: "",
         tarifa_consultoria: "",
@@ -164,7 +166,7 @@ window.entregasServicioApp = function () {
             if (this.form.tipo_servicio === "PROYECTO") {
                 return Boolean(
                     detail.nombre_proyecto.trim() && detail.objeto_proyecto.trim() &&
-                    detail.valor_total !== "" && detail.forma_pago.trim() &&
+                    detail.valor_total !== "" && detail.valor_forma_pago !== "" &&
                     detail.equipo_estimacion.trim() && detail.tarifa_consultoria !== ""
                 );
             }
@@ -366,10 +368,7 @@ window.entregasServicioApp = function () {
             return new Intl.NumberFormat("es-CO", { style: "currency", currency }).format(Number(value));
         },
         formatProjectConsultingRate(detail) {
-            if (detail?.tarifa_consultoria !== null && detail?.tarifa_consultoria !== undefined) {
-                return this.formatMoney(detail.tarifa_consultoria, detail.moneda_tarifa_consultoria || "COP");
-            }
-            return detail?.tarifas_consultoria_legacy || "—";
+            return this.formatMoney(detail?.tarifa_consultoria, detail?.moneda_tarifa_consultoria || "COP");
         }
     };
 };

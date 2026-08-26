@@ -2,7 +2,7 @@
     <header class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
             <h1 class="text-2xl font-bold text-slate-900">Entregas de servicio</h1>
-            <p class="mt-1 text-sm text-slate-500">Registra la venta, asigna al coordinador y almacena la propuesta comercial.</p>
+            <p class="mt-1 text-sm text-slate-500">Registra la venta, sus enlaces comerciales y el responsable inicial.</p>
         </div>
         <div class="flex gap-2">
             <button x-show="puedeCrear" @click="tab = 'nueva'; limpiarAlertas()" class="rounded-lg px-4 py-2 text-sm font-semibold" :class="tab === 'nueva' ? 'bg-blue-600 text-white' : 'border border-slate-300 bg-white text-slate-700'">
@@ -52,6 +52,7 @@
                             <option :value="item.id" x-text="`${item.nombre} · ${item.rol}`"></option>
                         </template>
                     </select>
+                    <p class="mt-1 text-xs text-slate-500">Puedes asignar directamente a un coordinador o enviarla a un administrador para que la distribuya.</p>
                 </div>
             </div>
 
@@ -174,7 +175,7 @@
                 <label class="block md:col-span-2"><span class="mb-1 block text-sm font-medium text-slate-700">Objeto del proyecto *</span><textarea x-model="form.detalle.objeto_proyecto" rows="3" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea></label>
                 <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Forma de pago *</span><textarea x-model="form.detalle.forma_pago" rows="2" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea></label>
                 <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Equipo con quien se estimó *</span><textarea x-model="form.detalle.equipo_estimacion" rows="2" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea></label>
-                <label class="block md:col-span-2"><span class="mb-1 block text-sm font-medium text-slate-700">Tarifas de consultoría *</span><textarea x-model="form.detalle.tarifas_consultoria" rows="2" placeholder="Describe perfiles, valores y condiciones" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea></label>
+                <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Tarifa de consultoría *</span><div class="flex"><select x-model="form.detalle.moneda_tarifa_consultoria" class="rounded-l-lg border border-r-0 border-slate-300 px-2 text-sm"><option>COP</option><option>USD</option><option>EUR</option></select><input x-model="form.detalle.tarifa_consultoria" type="number" min="0" step="0.01" class="min-w-0 flex-1 rounded-r-lg border border-slate-300 px-3 py-2.5 text-sm"></div></label>
             </div>
 
             <div x-show="form.tipo_servicio === 'MESA_SERVICIO'" class="mt-4 grid gap-4 md:grid-cols-2">
@@ -223,9 +224,9 @@
             <p class="mt-1 text-sm text-slate-500" x-text="historialDescripcion"></p>
         </div>
         <div class="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-3">
-            <input x-model="filtro.q" type="search" placeholder="Buscar cliente, servicio o coordinador" class="rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+            <input x-model="filtro.q" type="search" placeholder="Buscar cliente, servicio o responsable" class="rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
             <select x-model="filtro.tipo" class="rounded-lg border border-slate-300 px-3 py-2.5 text-sm"><option value="">Todos los tipos</option><option value="PROYECTO">Proyecto</option><option value="MESA_SERVICIO">Mesa / Fábrica / Demanda</option><option value="OUTSOURCING">Outsourcing</option></select>
-            <select x-model="filtro.estado" class="rounded-lg border border-slate-300 px-3 py-2.5 text-sm"><option value="">Todos los estados</option><option value="REGISTRADA">Registrada</option><option value="ACEPTADA">Aceptada</option><option value="EN_PROCESO">En proceso</option><option value="CERRADA">Cerrada</option><option value="CANCELADA">Cancelada</option></select>
+            <select x-model="filtro.estado" class="rounded-lg border border-slate-300 px-3 py-2.5 text-sm"><option value="">Todos los estados</option><option value="REGISTRADA">Pendiente de aceptación</option><option value="ACEPTADA">Aceptada</option><option value="EN_PROCESO">En proceso</option><option value="CERRADA">Cerrada</option><option value="CANCELADA">Devuelta</option></select>
         </div>
 
         <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -244,7 +245,14 @@
                             <td class="px-4 py-3 text-right whitespace-nowrap">
                                 <button @click="abrirDetalle(item)" class="font-semibold text-blue-600">Ver</button>
                                 <button x-show="item.notificacion?.estado === 'ERROR'" @click="reintentarNotificacion(item)" class="ml-3 font-semibold text-amber-600">Reenviar</button>
-                                <select x-show="puedeCambiarEstado && nextStatuses(item).length" @change="const value = $event.target.value; $event.target.value = ''; cambiarEstado(item, value)" class="ml-3 rounded-md border border-slate-300 px-2 py-1 text-xs"><option value="">Cambiar estado</option><template x-for="estado in nextStatuses(item)" :key="estado"><option :value="estado" x-text="statusLabel(estado)"></option></template></select>
+                                <div x-show="puedeReasignar(item)" class="mt-2 flex justify-end gap-2">
+                                    <select x-model="reasignaciones[item.id]" class="max-w-56 rounded-md border border-slate-300 px-2 py-1 text-xs">
+                                        <template x-for="responsable in catalogos.coordinadores" :key="responsable.id"><option :value="responsable.id" :disabled="responsable.rol === 'Administrador' && !responsable.es_actual" x-text="`${responsable.nombre} · ${responsable.rol}`"></option></template>
+                                    </select>
+                                    <button @click="reasignar(item)" :disabled="!reasignaciones[item.id] || reasignaciones[item.id] === item.coordinador_id" class="rounded-md bg-slate-700 px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-40">Asignar y notificar</button>
+                                </div>
+                                <button x-show="puedeAceptar(item)" @click="cambiarEstado(item, 'ACEPTADA')" class="ml-3 mt-2 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">Aceptar</button>
+                                <button x-show="puedeDevolver(item)" @click="cambiarEstado(item, 'CANCELADA')" class="ml-2 mt-2 rounded-md bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700">Devolver</button>
                             </td>
                         </tr>
                     </template>
@@ -279,6 +287,7 @@
         <article @click.outside="detalleSeleccionado = null" class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
             <div class="flex items-start justify-between"><div><p class="text-sm font-semibold text-blue-600" x-text="typeLabel(detalleSeleccionado?.tipo_servicio)"></p><h2 class="text-xl font-bold text-slate-900" x-text="detalleSeleccionado?.nombre_servicio"></h2><p class="text-sm text-slate-500" x-text="detalleSeleccionado?.cliente"></p></div><button @click="detalleSeleccionado = null" class="text-2xl text-slate-400">×</button></div>
             <dl class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-4 md:grid-cols-2"><div><dt class="text-xs font-semibold uppercase text-slate-400">Entregado por</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.creado_por"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Asignado a</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.coordinador"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Estado</dt><dd class="mt-1 text-sm text-slate-800" x-text="statusLabel(detalleSeleccionado?.estado)"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Perfil</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.perfil_cliente"></dd></div><div class="md:col-span-2"><dt class="text-xs font-semibold uppercase text-slate-400">Interventor</dt><dd class="mt-1 text-sm text-slate-800" x-text="`${detalleSeleccionado?.interventor?.nombre || '—'} · ${detalleSeleccionado?.interventor?.cargo || '—'} · ${detalleSeleccionado?.interventor?.telefono || '—'}`"></dd></div></dl>
+            <dl x-show="detalleSeleccionado?.tipo_servicio === 'PROYECTO'" class="mt-4 grid gap-4 rounded-xl border border-slate-200 p-4 md:grid-cols-2"><div><dt class="text-xs font-semibold uppercase text-slate-400">Valor total</dt><dd class="mt-1 text-sm font-semibold text-slate-800" x-text="formatMoney(detalleSeleccionado?.detalle?.valor_total, detalleSeleccionado?.detalle?.moneda)"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Tarifa de consultoría</dt><dd class="mt-1 text-sm font-semibold text-slate-800" x-text="formatProjectConsultingRate(detalleSeleccionado?.detalle)"></dd></div></dl>
             <div class="mt-5"><h3 class="font-semibold text-slate-900">Módulos</h3><p class="mt-1 text-sm text-slate-600" x-text="(detalleSeleccionado?.modulos || []).map(item => item.nombre).join(', ') || '—'"></p></div>
             <div class="mt-4"><h3 class="font-semibold text-slate-900">Consultores</h3><div class="mt-2 space-y-1"><template x-for="item in detalleSeleccionado?.consultores || []" :key="item.id"><p class="text-sm text-slate-600"><span x-text="item.nombre"></span><span x-show="item.tipo === 'EXTERNO'" class="ml-1 text-slate-400" x-text="`(no registrado · ${item.telefono})`"></span></p></template><p x-show="!(detalleSeleccionado?.consultores || []).length" class="text-sm text-slate-500">Sin asignar</p></div></div>
             <div class="mt-4"><h3 class="font-semibold text-slate-900">Adaptabilidad</h3><p class="mt-1 whitespace-pre-line text-sm text-slate-600" x-text="detalleSeleccionado?.analisis_adaptabilidad"></p></div>

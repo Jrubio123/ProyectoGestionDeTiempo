@@ -32,7 +32,8 @@ test("el formulario de proyecto valida los campos comerciales", () => {
     valor_total: 100,
     forma_pago: "Contado",
     equipo_estimacion: "Equipo comercial",
-    tarifas_consultoria: "100/h"
+    tarifa_consultoria: 100,
+    moneda_tarifa_consultoria: "COP"
   });
   assert.equal(app.formularioValido, true);
 });
@@ -46,7 +47,8 @@ test("permite agregar varios enlaces y exige uno en proyecto", () => {
     valor_total: 100,
     forma_pago: "Contado",
     equipo_estimacion: "Equipo comercial",
-    tarifas_consultoria: "100/h"
+    tarifa_consultoria: 100,
+    moneda_tarifa_consultoria: "EUR"
   });
   assert.equal(app.formularioValido, false);
 
@@ -105,4 +107,23 @@ test("adapta el historial al rol que consulta", () => {
   assert.equal(app.historialTitulo, "Servicios entregados a mí");
   global.window.auth.getRoleKey = () => "admin";
   assert.equal(app.historialTitulo, "Todas las entregas de servicio");
+});
+
+test("coordinador solo acepta y administrador asignado puede aceptar o devolver", () => {
+  const app = createApp();
+  const item = { id: "entrega", estado: "REGISTRADA", coordinador_id: "admin" };
+
+  global.window.auth.getRoleKey = () => "coordinador";
+  assert.equal(app.puedeAceptar(item), true);
+  assert.equal(app.puedeDevolver(item), false);
+
+  global.window.auth.getRoleKey = () => "admin";
+  app.catalogos.coordinadores = [{ id: "admin", es_actual: true }];
+  assert.equal(app.puedeAceptar(item), true);
+  assert.equal(app.puedeDevolver(item), true);
+  assert.equal(app.puedeReasignar(item), true);
+
+  item.coordinador_id = "otro";
+  assert.equal(app.puedeAceptar(item), false);
+  assert.equal(app.puedeDevolver(item), false);
 });

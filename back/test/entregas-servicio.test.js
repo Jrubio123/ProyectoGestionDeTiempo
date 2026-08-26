@@ -34,7 +34,8 @@ function projectPayload() {
       moneda: "COP",
       forma_pago: "50% inicial y 50% contra entrega",
       equipo_estimacion: "Comercial y consultoría",
-      tarifas_consultoria: "Consultor senior: 200.000/hora"
+      tarifa_consultoria: 200000,
+      moneda_tarifa_consultoria: "COP"
     }
   };
 }
@@ -50,6 +51,17 @@ test("acepta una entrega de proyecto con enlaces comerciales", () => {
   assert.deepEqual(payload.enlaces, [
     { titulo: "Propuesta comercial", url: "https://empresa.sharepoint.com/propuesta.pdf" }
   ]);
+  assert.equal(payload.detalle.tarifa_consultoria, 200000);
+  assert.equal(payload.detalle.moneda_tarifa_consultoria, "COP");
+});
+
+test("valida tarifa de consultoría monetaria en COP, USD o EUR", () => {
+  const payload = projectPayload();
+  payload.detalle.moneda_tarifa_consultoria = "USD";
+  assert.equal(validateEntregaPayload(payload).detalle.moneda_tarifa_consultoria, "USD");
+
+  payload.detalle.moneda_tarifa_consultoria = "GBP";
+  assert.throws(() => validateEntregaPayload(payload), /moneda de la tarifa de consultoría no es válida/i);
 });
 
 test("exige consultor para outsourcing", () => {
@@ -148,6 +160,15 @@ test("la migración crea almacenamiento exclusivo para varios enlaces", () => {
   assert.match(migration, /UNIQUE \(entrega_servicio_id, url\)/);
 });
 
+test("la migración agrega valor y moneda a la tarifa de consultoría", () => {
+  const migration = fs.readFileSync(
+    path.resolve(__dirname, "../../db/migrations/2026-08-26-entregas-tarifa-consultoria.sql"),
+    "utf8"
+  );
+  assert.match(migration, /tarifa_consultoria NUMERIC\(18,2\)/);
+  assert.match(migration, /moneda_tarifa_consultoria VARCHAR\(3\)/);
+});
+
 test("limita la consulta según el rol operativo", () => {
   assert.deepEqual(
     _private.visibilitySql({ user: { rol: "Administrador", id: 1 } }),
@@ -163,6 +184,12 @@ test("limita la consulta según el rol operativo", () => {
   );
 });
 
+test("coordinador solo acepta y administrador puede aceptar o devolver", () => {
+  assert.deepEqual(_private.allowedReceptionStatuses("Coordinador"), ["ACEPTADA"]);
+  assert.deepEqual(_private.allowedReceptionStatuses("Administrador"), ["ACEPTADA", "CANCELADA"]);
+  assert.deepEqual(_private.allowedReceptionStatuses("Comercial"), []);
+});
+
 test("la ruta de creación queda reservada para Comercial", () => {
   const routeSource = fs.readFileSync(
     path.resolve(__dirname, "../src/routes/entregas-servicio.routes.js"),
@@ -170,6 +197,7 @@ test("la ruta de creación queda reservada para Comercial", () => {
   );
   assert.match(routeSource, /const CREATE = requireAccess\(\{ roles: \["Comercial"\] \}\)/);
   assert.doesNotMatch(routeSource, /const CREATE[^\n]+Administrador/);
+  assert.match(routeSource, /router\.patch\("\/:id\/asignacion", ADMIN, service\.reassignDelivery\)/);
 });
 
 test("el servicio no depende de cargas a OneDrive", () => {

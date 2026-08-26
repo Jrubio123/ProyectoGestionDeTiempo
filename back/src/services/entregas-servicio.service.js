@@ -9,14 +9,21 @@ const {
 const ALLOWED_ROLES = ["Administrador", "Coordinador", "Comercial"];
 const STATUS_TRANSITIONS = Object.freeze({
   REGISTRADA: ["ACEPTADA", "CANCELADA"],
-  ACEPTADA: ["EN_PROCESO", "CANCELADA"],
-  EN_PROCESO: ["CERRADA", "CANCELADA"],
+  ACEPTADA: [],
+  EN_PROCESO: [],
   CERRADA: [],
   CANCELADA: []
 });
 
 function normalizeRole(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function allowedReceptionStatuses(role) {
+  const normalized = normalizeRole(role);
+  if (normalized === "coordinador") return ["ACEPTADA"];
+  if (normalized === "administrador") return ["ACEPTADA", "CANCELADA"];
+  return [];
 }
 
 function escapeHtml(value) {
@@ -65,6 +72,7 @@ const DELIVERY_SELECT = `
     coord.public_id::text AS coordinador_id,
     coord.nombre_usuario AS coordinador,
     coord.email AS coordinador_email,
+    coord_rol.titulo AS coordinador_rol,
     creador.public_id::text AS creado_por_id,
     creador.nombre_usuario AS creado_por,
     COALESCE((
@@ -132,7 +140,9 @@ const DELIVERY_SELECT = `
           'moneda', p.moneda,
           'forma_pago', p.forma_pago,
           'equipo_estimacion', p.equipo_estimacion,
-          'tarifas_consultoria', p.tarifas_consultoria
+          'tarifa_consultoria', p.tarifa_consultoria,
+          'moneda_tarifa_consultoria', p.moneda_tarifa_consultoria,
+          'tarifas_consultoria_legacy', p.tarifas_consultoria
         ) FROM entregas_servicio_proyecto p WHERE p.entrega_servicio_id = e.id
       )
       WHEN 'MESA_SERVICIO' THEN (
@@ -154,6 +164,7 @@ const DELIVERY_SELECT = `
   FROM entregas_servicio e
   JOIN clientes c ON c.id = e.cliente_id
   JOIN usuarios coord ON coord.id = e.coordinador_asignado_id
+  JOIN roles coord_rol ON coord_rol.id = coord.rol_usuario_id
   JOIN usuarios creador ON creador.id = e.creado_por
 `;
 
@@ -165,13 +176,14 @@ async function getCatalogs(req, res) {
         FROM clientes WHERE activo = true ORDER BY titulo
       `),
       pool.query(`
-        SELECT u.public_id::text AS id, u.nombre_usuario AS nombre, u.email, r.titulo AS rol
+        SELECT u.public_id::text AS id, u.nombre_usuario AS nombre, u.email, r.titulo AS rol,
+               (u.id = $1) AS es_actual
         FROM usuarios u
         JOIN roles r ON r.id = u.rol_usuario_id
         WHERE u.activo = true AND r.activo = true
           AND r.titulo IN ('Administrador', 'Coordinador')
-        ORDER BY u.nombre_usuario
-      `),
+        ORDER BY r.titulo, u.nombre_usuario
+      `, [req.user.id]),
       pool.query(`
         SELECT u.public_id::text AS id, u.nombre_usuario AS nombre, u.email
         FROM usuarios u
@@ -410,8 +422,9 @@ async function insertServiceDetail(client, entregaId, payload) {
   if (payload.tipo_servicio === TIPOS_SERVICIO.PROYECTO) {
     await client.query(`
       INSERT INTO entregas_servicio_proyecto
-        (entrega_servicio_id, objeto_proyecto, valor_total, moneda, forma_pago, equipo_estimacion, tarifas_consultoria)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+        (entrega_servicio_id, objeto_proyecto, valor_total, moneda, forma_pago, equipo_estimacion,
+         tarifa_consultoria, moneda_tarifa_consultoria)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     `, [
       entregaId,
       detail.objeto_proyecto,
@@ -419,7 +432,8 @@ async function insertServiceDetail(client, entregaId, payload) {
       detail.moneda,
       detail.forma_pago,
       detail.equipo_estimacion,
-      detail.tarifas_consultoria
+      detail.tarifa_consultoria,
+      detail.moneda_tarifa_consultoria
     ]);
     return;
   }
@@ -473,6 +487,7 @@ function portalUrl() {
 }
 
 function buildNotificationContent(delivery) {
+  const assignerName = delivery.asignador?.nombre_usuario || delivery.creador.nombre_usuario || "Comercial";
   const consultants = delivery.consultores.map((item) => {
     const name = item.nombre_usuario || "Consultor";
     return item.telefono ? `${name} (${item.telefono})` : name;
@@ -485,7 +500,7 @@ function buildNotificationContent(delivery) {
   return {
     subject: `Nueva entrega de servicio: ${delivery.cliente.titulo} - ${delivery.nombre_servicio}`,
     text: [
-      `Comercial entregó un nuevo servicio a ${delivery.coordinador.nombre_usuario}.`,
+      `${assignerName} asignó un nuevo servicio a ${delivery.coordinador.nombre_usuario}.`,
       `Cliente: ${delivery.cliente.titulo}`,
       `Servicio: ${typeLabel(delivery.tipo_servicio)} - ${delivery.nombre_servicio}`,
       `Módulos: ${modules}`,
@@ -497,7 +512,7 @@ function buildNotificationContent(delivery) {
     html: `
       <div style="font-family:Arial,sans-serif;color:#1e293b;line-height:1.5">
         <h2 style="margin:0 0 16px">Nueva entrega de servicio</h2>
-        <p>Hola <strong>${escapeHtml(delivery.coordinador.nombre_usuario)}</strong>, Comercial te asignó una nueva entrega.</p>
+        <p>Hola <strong>${escapeHtml(delivery.coordinador.nombre_usuario)}</strong>, <strong>${escapeHtml(assignerName)}</strong> te asignó una nueva entrega.</p>
         <table style="border-collapse:collapse;width:100%;max-width:680px">
           <tr><td style="padding:7px;border-bottom:1px solid #e2e8f0"><strong>Cliente</strong></td><td style="padding:7px;border-bottom:1px solid #e2e8f0">${escapeHtml(delivery.cliente.titulo)}</td></tr>
           <tr><td style="padding:7px;border-bottom:1px solid #e2e8f0"><strong>Servicio</strong></td><td style="padding:7px;border-bottom:1px solid #e2e8f0">${escapeHtml(typeLabel(delivery.tipo_servicio))} - ${escapeHtml(delivery.nombre_servicio)}</td></tr>
@@ -635,6 +650,7 @@ async function createDelivery(req, res) {
         cliente,
         coordinador: coordinator,
         creador: { nombre_usuario: req.user.nombre_usuario || req.user.email || "Comercial" },
+        asignador: { nombre_usuario: req.user.nombre_usuario || req.user.email || "Comercial" },
         consultores: [
           ...consultants,
           ...payload.consultores_externos.map((item) => ({
@@ -748,30 +764,128 @@ async function retryNotification(req, res) {
   }
 }
 
+async function reassignDelivery(req, res) {
+  let client;
+  let transactionOpen = false;
+  try {
+    if (normalizeRole(req.user?.rol) !== "administrador") {
+      return res.status(403).json({ error: "Solo un administrador puede reasignar la entrega." });
+    }
+    const assigneePublicId = String(req.body?.coordinador_id || "").trim();
+    if (!assigneePublicId) {
+      return res.status(422).json({ error: "Selecciona el nuevo responsable." });
+    }
+
+    client = await pool.connect();
+    await client.query("BEGIN");
+    transactionOpen = true;
+    const current = await client.query(`
+      SELECT id, estado, coordinador_asignado_id
+      FROM entregas_servicio
+      WHERE public_id::text = $1
+      FOR UPDATE
+    `, [String(req.params.id || "")]);
+    if (!current.rows[0]) {
+      await client.query("ROLLBACK");
+      transactionOpen = false;
+      return res.status(404).json({ error: "Entrega de servicio no encontrada." });
+    }
+    if (current.rows[0].estado !== "REGISTRADA") {
+      await client.query("ROLLBACK");
+      transactionOpen = false;
+      return res.status(422).json({ error: "Solo se pueden reasignar entregas pendientes de aceptación." });
+    }
+
+    const assignee = await resolveCoordinator(client, assigneePublicId);
+    if (normalizeRole(assignee.rol) === "administrador" && Number(assignee.id) !== Number(req.user.id)) {
+      throw new EntregaValidationError(
+        "El administrador solo puede asignarse la entrega a sí mismo o enviarla a un coordinador.",
+        "coordinador_id"
+      );
+    }
+    if (Number(current.rows[0].coordinador_asignado_id) === Number(assignee.id)) {
+      await client.query("COMMIT");
+      transactionOpen = false;
+      return res.json({ ok: true, responsable: assignee.nombre_usuario, sin_cambios: true });
+    }
+
+    await client.query(`
+      UPDATE entregas_servicio
+      SET coordinador_asignado_id = $2, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+    `, [current.rows[0].id, assignee.id]);
+    const bcc = await getAdminBcc(client, assignee);
+    const notification = await client.query(`
+      INSERT INTO entregas_servicio_notificaciones
+        (entrega_servicio_id, destinatarios, estado)
+      VALUES ($1, $2::jsonb, 'PENDIENTE')
+      RETURNING id
+    `, [current.rows[0].id, JSON.stringify({ to: [assignee.email], bcc })]);
+    await client.query("COMMIT");
+    transactionOpen = false;
+
+    const row = await getNotificationContext(req, String(req.params.id || ""));
+    const notificationResult = await sendAssignmentNotification({
+      delivery: {
+        tipo_servicio: row.tipo_servicio,
+        nombre_servicio: row.nombre_servicio,
+        cliente: { titulo: row.titulo },
+        coordinador: { nombre_usuario: row.coordinador_nombre, email: row.coordinador_email },
+        creador: { nombre_usuario: row.creador_nombre },
+        asignador: { nombre_usuario: req.user.nombre_usuario || req.user.email || "Administrador" },
+        consultores: row.consultores || [],
+        modulos: row.modulos || [],
+        modulos_otros: [],
+        enlaces: row.enlaces || [],
+        bcc
+      },
+      notificationId: notification.rows[0].id,
+      graphAccessToken: String(req.headers["x-graph-access-token"] || "").trim() || null
+    });
+    return res.json({
+      ok: true,
+      responsable: assignee.nombre_usuario,
+      coordinador_id: assignee.public_id,
+      notificacion: notificationResult
+    });
+  } catch (error) {
+    if (client && transactionOpen) await client.query("ROLLBACK").catch(() => {});
+    return handleError(res, error, "reasignar la entrega de servicio");
+  } finally {
+    if (client) client.release();
+  }
+}
+
 async function updateDeliveryStatus(req, res) {
   try {
     const role = normalizeRole(req.user?.rol);
-    if (!new Set(["administrador", "coordinador"]).has(role)) {
-      return res.status(403).json({ error: "Solo el coordinador asignado o un administrador puede cambiar el estado." });
-    }
     const nextStatus = String(req.body?.estado || "").trim().toUpperCase();
-    const params = [String(req.params.id || "")];
-    let access = "";
-    if (role === "coordinador") {
-      params.push(req.user.id);
-      access = "AND coordinador_asignado_id = $2";
+    if (!allowedReceptionStatuses(role).includes(nextStatus)) {
+      return res.status(403).json({
+        error: role === "coordinador"
+          ? "El coordinador solo puede aceptar la entrega."
+          : "Solo un administrador puede aceptar o devolver la entrega."
+      });
     }
     const current = await pool.query(`
       SELECT id, estado FROM entregas_servicio
-      WHERE public_id::text = $1 ${access}
-    `, params);
-    if (!current.rows[0]) return res.status(404).json({ error: "Entrega de servicio no encontrada." });
+      WHERE public_id::text = $1 AND coordinador_asignado_id = $2
+    `, [String(req.params.id || ""), req.user.id]);
+    if (!current.rows[0]) {
+      return res.status(404).json({ error: "La entrega no está asignada al usuario actual." });
+    }
     if (!(STATUS_TRANSITIONS[current.rows[0].estado] || []).includes(nextStatus)) {
       return res.status(422).json({ error: `No se puede pasar de ${current.rows[0].estado} a ${nextStatus}.` });
     }
-    await pool.query(`
-      UPDATE entregas_servicio SET estado = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1
-    `, [current.rows[0].id, nextStatus]);
+    const updated = await pool.query(`
+      UPDATE entregas_servicio
+      SET estado = $2, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND estado = $3 AND coordinador_asignado_id = $4
+      RETURNING id
+    `, [current.rows[0].id, nextStatus, current.rows[0].estado, req.user.id]);
+    if (!updated.rows[0]) {
+      return res.status(409).json({ error: "La entrega cambió mientras realizabas la acción. Actualiza e intenta nuevamente." });
+    }
     return res.json({ ok: true, estado: nextStatus });
   } catch (error) {
     return handleError(res, error, "actualizar el estado de la entrega");
@@ -786,7 +900,8 @@ module.exports = {
   getDelivery,
   listClientContacts,
   listDeliveries,
+  reassignDelivery,
   retryNotification,
   updateDeliveryStatus,
-  _private: { visibilitySql }
+  _private: { allowedReceptionStatuses, visibilitySql }
 };

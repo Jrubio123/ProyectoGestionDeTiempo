@@ -9,7 +9,8 @@ window.entregasServicioApp = function () {
         moneda: "COP",
         forma_pago: "",
         equipo_estimacion: "",
-        tarifas_consultoria: "",
+        tarifa_consultoria: "",
+        moneda_tarifa_consultoria: "COP",
         detalle_tarifas: "",
         tiempo_descripcion: "",
         tarifa: "",
@@ -43,6 +44,7 @@ window.entregasServicioApp = function () {
         catalogos: { clientes: [], coordinadores: [], consultores: [], modulos: [] },
         contactos: [],
         entregas: [],
+        reasignaciones: {},
         detalleSeleccionado: null,
         filtro: { q: "", tipo: "", estado: "" },
         busquedaModulo: "",
@@ -60,16 +62,13 @@ window.entregasServicioApp = function () {
         get puedeCrear() {
             return this.roleKey === "comercial";
         },
-        get puedeCambiarEstado() {
-            return ["admin", "coordinador"].includes(this.roleKey);
-        },
         get historialTitulo() {
             if (this.roleKey === "admin") return "Todas las entregas de servicio";
             if (this.roleKey === "coordinador") return "Servicios entregados a mí";
             return "Mis entregas realizadas";
         },
         get historialDescripcion() {
-            if (this.roleKey === "admin") return "Consulta quién realizó cada entrega y a qué coordinador fue asignada.";
+            if (this.roleKey === "admin") return "Consulta quién realizó cada entrega, su responsable y reasígnala mientras esté pendiente.";
             if (this.roleKey === "coordinador") return "Consulta quién te entregó cada servicio y su información comercial.";
             return "Consulta los servicios que entregaste al equipo de operaciones.";
         },
@@ -106,6 +105,9 @@ window.entregasServicioApp = function () {
         get clienteActualNombre() {
             if (this.clienteNuevoPreparado) return this.clienteNuevoPreparado.titulo;
             return this.catalogos.clientes.find((item) => item.id === this.form.cliente_id)?.nombre || "";
+        },
+        get responsableActual() {
+            return this.catalogos.coordinadores.find((item) => item.es_actual) || null;
         },
         get clienteNuevoValido() {
             const item = this.clienteNuevo.data;
@@ -163,7 +165,7 @@ window.entregasServicioApp = function () {
                 return Boolean(
                     detail.nombre_proyecto.trim() && detail.objeto_proyecto.trim() &&
                     detail.valor_total !== "" && detail.forma_pago.trim() &&
-                    detail.equipo_estimacion.trim() && detail.tarifas_consultoria.trim()
+                    detail.equipo_estimacion.trim() && detail.tarifa_consultoria !== ""
                 );
             }
             if (this.form.tipo_servicio === "MESA_SERVICIO") {
@@ -197,6 +199,9 @@ window.entregasServicioApp = function () {
             try {
                 const response = await axios.get(`${API}/entregas-servicio`);
                 this.entregas = response.data;
+                this.reasignaciones = Object.fromEntries(
+                    this.entregas.map((item) => [item.id, item.coordinador_id])
+                );
             } catch (error) {
                 this.error = error?.response?.data?.error || "No se pudieron cargar las entregas.";
             } finally {
@@ -270,7 +275,7 @@ window.entregasServicioApp = function () {
                 const notification = response.data?.notificacion;
                 this.mensaje = notification?.estado === "ERROR"
                     ? "Entrega registrada. El correo quedó pendiente de reintento."
-                    : "Entrega registrada y coordinador notificado.";
+                    : "Entrega registrada y responsable notificado.";
                 this.form = emptyForm();
                 this.clienteNuevoPreparado = null;
                 this.contactos = [];
@@ -297,19 +302,47 @@ window.entregasServicioApp = function () {
                 this.error = error?.response?.data?.error || "No se pudo reenviar la notificación.";
             }
         },
-        nextStatuses(item) {
-            return {
-                REGISTRADA: ["ACEPTADA", "CANCELADA"],
-                ACEPTADA: ["EN_PROCESO", "CANCELADA"],
-                EN_PROCESO: ["CERRADA", "CANCELADA"]
-            }[item?.estado] || [];
+        esAsignadaAlActual(item) {
+            return Boolean(this.responsableActual?.id && item?.coordinador_id === this.responsableActual.id);
+        },
+        puedeAceptar(item) {
+            if (item?.estado !== "REGISTRADA") return false;
+            if (this.roleKey === "coordinador") return true;
+            return this.roleKey === "admin" && this.esAsignadaAlActual(item);
+        },
+        puedeDevolver(item) {
+            return this.roleKey === "admin" && item?.estado === "REGISTRADA" && this.esAsignadaAlActual(item);
+        },
+        puedeReasignar(item) {
+            return this.roleKey === "admin" && item?.estado === "REGISTRADA";
+        },
+        async reasignar(item) {
+            const coordinadorId = this.reasignaciones[item.id];
+            if (!coordinadorId || coordinadorId === item.coordinador_id) return;
+            const responsable = this.catalogos.coordinadores.find((entry) => entry.id === coordinadorId);
+            if (!confirm(`¿Asignar esta entrega a ${responsable?.nombre || "la persona seleccionada"} y notificarle?`)) return;
+            this.limpiarAlertas();
+            try {
+                const response = await axios.patch(`${API}/entregas-servicio/${item.id}/asignacion`, {
+                    coordinador_id: coordinadorId
+                });
+                this.mensaje = response.data?.notificacion?.estado === "ERROR"
+                    ? "Entrega reasignada. El correo quedó pendiente de reintento."
+                    : "Entrega reasignada y responsable notificado.";
+                await this.cargarEntregas();
+            } catch (error) {
+                this.error = error?.response?.data?.error || "No se pudo reasignar la entrega.";
+            }
         },
         async cambiarEstado(item, estado) {
-            if (!estado || !confirm(`¿Cambiar la entrega a ${this.statusLabel(estado)}?`)) return;
+            const accion = estado === "CANCELADA" ? "devolver" : "aceptar";
+            if (!estado || !confirm(`¿Deseas ${accion} esta entrega?`)) return;
             this.limpiarAlertas();
             try {
                 await axios.patch(`${API}/entregas-servicio/${item.id}/estado`, { estado });
-                this.mensaje = "Estado actualizado correctamente.";
+                this.mensaje = estado === "CANCELADA"
+                    ? "Entrega devuelta correctamente."
+                    : "Entrega aceptada correctamente.";
                 await this.cargarEntregas();
             } catch (error) {
                 this.error = error?.response?.data?.error || "No se pudo actualizar el estado.";
@@ -320,8 +353,8 @@ window.entregasServicioApp = function () {
         },
         statusLabel(value) {
             return {
-                REGISTRADA: "Registrada", ACEPTADA: "Aceptada", EN_PROCESO: "En proceso",
-                CERRADA: "Cerrada", CANCELADA: "Cancelada"
+                REGISTRADA: "Pendiente de aceptación", ACEPTADA: "Aceptada", EN_PROCESO: "En proceso",
+                CERRADA: "Cerrada", CANCELADA: "Devuelta"
             }[value] || value;
         },
         formatDate(value) {
@@ -331,6 +364,12 @@ window.entregasServicioApp = function () {
         formatMoney(value, currency = "COP") {
             if (value === null || value === undefined || value === "") return "—";
             return new Intl.NumberFormat("es-CO", { style: "currency", currency }).format(Number(value));
+        },
+        formatProjectConsultingRate(detail) {
+            if (detail?.tarifa_consultoria !== null && detail?.tarifa_consultoria !== undefined) {
+                return this.formatMoney(detail.tarifa_consultoria, detail.moneda_tarifa_consultoria || "COP");
+            }
+            return detail?.tarifas_consultoria_legacy || "—";
         }
     };
 };

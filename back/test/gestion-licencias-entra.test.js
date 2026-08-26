@@ -50,9 +50,10 @@ test("distingue licencias directas, heredadas y mixtas", () => {
   );
 });
 
-test("consulta las licencias solo al abrir la desactivacion", () => {
+test("consulta licencias por OID o correo al abrir la desactivacion", () => {
   assert.match(routesSource, /\/admin\/usuarios\/:id\/licencias-actuales/);
   assert.match(frontSource, /async abrirConfirmacion\(usuario\)/);
   assert.match(frontSource, /\/licencias-actuales/);
-  assert.match(frontSource, /if \(!usuario\.activo \|\| !usuario\.azure_oid\) return/);
+  assert.match(frontSource, /puedeConsultarEntra: !!\(usuario\.azure_oid \|\| usuario\.email\)/);
+  assert.match(frontSource, /if \(!usuario\.activo \|\| !this\.modal\.puedeConsultarEntra\) return/);
 });

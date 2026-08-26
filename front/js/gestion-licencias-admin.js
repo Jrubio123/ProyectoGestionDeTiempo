@@ -16,6 +16,7 @@ window.gestionLicenciasApp = function () {
             nombre: "",
             activar: false,
             tieneAzure: false,
+            puedeConsultarEntra: false,
             manejarLicencias: true,
             licenciasCargando: false,
             licencias: [],
@@ -70,6 +71,7 @@ window.gestionLicenciasApp = function () {
                 nombre: usuario.nombre_usuario,
                 activar: !usuario.activo,
                 tieneAzure: !!usuario.azure_oid,
+                puedeConsultarEntra: !!(usuario.azure_oid || usuario.email),
                 manejarLicencias: true,
                 licenciasCargando: false,
                 licencias: [],
@@ -77,7 +79,7 @@ window.gestionLicenciasApp = function () {
                 totalRemovibles: 0
             };
 
-            if (!usuario.activo || !usuario.azure_oid) return;
+            if (!usuario.activo || !this.modal.puedeConsultarEntra) return;
 
             this.modal.licenciasCargando = true;
             try {
@@ -91,6 +93,7 @@ window.gestionLicenciasApp = function () {
                 this.modal.licencias = res.data?.licencias || [];
                 this.modal.totalRemovibles = Number(res.data?.total_removibles || 0);
                 this.modal.manejarLicencias = this.modal.totalRemovibles > 0;
+                this.modal.tieneAzure = !!res.data?.entra_user_id;
             } catch (e) {
                 if (this.modal.publicId !== usuario.id) return;
                 this.modal.licenciasError = e?.response?.data?.error
@@ -108,7 +111,7 @@ window.gestionLicenciasApp = function () {
             if (!this.modal.activar && this.modal.manejarLicencias
                 && (this.modal.licenciasCargando || this.modal.licenciasError)) return;
 
-            const { publicId, activar, tieneAzure, manejarLicencias } = this.modal;
+            const { publicId, activar, puedeConsultarEntra, manejarLicencias } = this.modal;
             this.modal.open = false;
             this.resultado = null;
             this.procesando = publicId;
@@ -117,7 +120,7 @@ window.gestionLicenciasApp = function () {
                 const token = window.auth?.getToken?.() || localStorage.getItem("token");
 
                 const body = { activo: activar };
-                if (tieneAzure && manejarLicencias) {
+                if (puedeConsultarEntra && manejarLicencias) {
                     if (!activar) body.liberar_licencias = true;
                     else          body.restaurar_licencias = true;
                 }

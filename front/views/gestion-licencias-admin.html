@@ -212,12 +212,16 @@
                     : 'El usuario no podrá ingresar al sistema.'">
                 </span>
             </p>
-            <p x-show="!modal.tieneAzure" class="text-xs text-gray-400 bg-gray-50 rounded-lg p-2 mb-4">
-                Este usuario solo tiene acceso local — el cambio aplica únicamente en la BD.
+            <p x-show="!modal.puedeConsultarEntra" class="text-xs text-gray-400 bg-gray-50 rounded-lg p-2 mb-4">
+                Este usuario no tiene OID ni correo para buscarlo en Microsoft 365; el cambio aplica únicamente en la BD.
             </p>
 
-            <div x-show="modal.tieneAzure" class="rounded-xl border border-blue-100 bg-blue-50/60 p-3 mb-4 space-y-2">
-                <p class="text-xs text-blue-700 font-semibold">Este usuario tiene cuenta en Entra ID</p>
+            <div x-show="modal.puedeConsultarEntra" class="rounded-xl border border-blue-100 bg-blue-50/60 p-3 mb-4 space-y-2">
+                <p class="text-xs text-blue-700 font-semibold"
+                   x-text="modal.tieneAzure
+                     ? 'Usuario encontrado en Microsoft 365'
+                     : 'Buscando en Microsoft 365 mediante el correo registrado'">
+                </p>
 
                 <div x-show="!modal.activar" class="rounded-lg bg-white/80 border border-blue-100 p-3 space-y-2">
                     <div class="flex items-center justify-between gap-2">

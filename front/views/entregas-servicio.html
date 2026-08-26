@@ -264,7 +264,7 @@
     </section>
 
     <!-- Cliente nuevo: se persiste junto con la entrega para no dejar clientes incompletos. -->
-    <div x-show="clienteNuevo.open" x-transition.opacity class="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/60 p-4" @keydown.escape.window="clienteNuevo.open = false">
+    <div x-show="clienteNuevo.open" x-transition.opacity class="fixed inset-0 z-[80] !m-0 flex items-center justify-center bg-slate-900/60 p-4" @keydown.escape.window="clienteNuevo.open = false">
         <div @click.outside="clienteNuevo.open = false" class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
             <div class="flex items-start justify-between gap-3"><div><h2 class="text-xl font-bold text-slate-900">Crear cliente nuevo</h2><p class="mt-1 text-sm text-slate-500">El cliente se guardará cuando registres la entrega.</p></div><button type="button" @click="clienteNuevo.open = false" class="text-2xl text-slate-400">×</button></div>
             <div class="mt-5 grid gap-4 md:grid-cols-2">
@@ -283,7 +283,7 @@
         </div>
     </div>
 
-    <div x-show="detalleSeleccionado" x-transition.opacity class="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/60 p-4" @keydown.escape.window="detalleSeleccionado = null">
+    <div x-show="detalleSeleccionado" x-transition.opacity class="fixed inset-0 z-[80] !m-0 flex items-center justify-center bg-slate-900/60 p-4" @keydown.escape.window="detalleSeleccionado = null">
         <article @click.outside="detalleSeleccionado = null" class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
             <div class="flex items-start justify-between"><div><p class="text-sm font-semibold text-blue-600" x-text="typeLabel(detalleSeleccionado?.tipo_servicio)"></p><h2 class="text-xl font-bold text-slate-900" x-text="detalleSeleccionado?.nombre_servicio"></h2><p class="text-sm text-slate-500" x-text="detalleSeleccionado?.cliente"></p></div><button @click="detalleSeleccionado = null" class="text-2xl text-slate-400">×</button></div>
             <dl class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-4 md:grid-cols-2"><div><dt class="text-xs font-semibold uppercase text-slate-400">Entregado por</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.creado_por"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Asignado a</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.coordinador"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Estado</dt><dd class="mt-1 text-sm text-slate-800" x-text="statusLabel(detalleSeleccionado?.estado)"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Perfil</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.perfil_cliente"></dd></div><div class="md:col-span-2"><dt class="text-xs font-semibold uppercase text-slate-400">Interventor</dt><dd class="mt-1 text-sm text-slate-800" x-text="`${detalleSeleccionado?.interventor?.nombre || '—'} · ${detalleSeleccionado?.interventor?.cargo || '—'} · ${detalleSeleccionado?.interventor?.telefono || '—'}`"></dd></div></dl>

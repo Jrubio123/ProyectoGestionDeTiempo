@@ -32,8 +32,7 @@ function projectPayload() {
       objeto_proyecto: "Implementar los módulos contratados.",
       valor_total: 1000000,
       moneda: "COP",
-      valor_forma_pago: 500000,
-      moneda_forma_pago: "COP",
+      forma_pago: "50% inicial y 50% contra entrega",
       equipo_estimacion: "Comercial y consultoría",
       tarifa_consultoria: 200000,
       moneda_tarifa_consultoria: "COP"
@@ -54,8 +53,7 @@ test("acepta una entrega de proyecto con enlaces comerciales", () => {
   ]);
   assert.equal(payload.detalle.tarifa_consultoria, 200000);
   assert.equal(payload.detalle.moneda_tarifa_consultoria, "COP");
-  assert.equal(payload.detalle.valor_forma_pago, 500000);
-  assert.equal(payload.detalle.moneda_forma_pago, "COP");
+  assert.equal(payload.detalle.forma_pago, "50% inicial y 50% contra entrega");
 });
 
 test("valida tarifa de consultoría monetaria en COP, USD o EUR", () => {
@@ -65,15 +63,6 @@ test("valida tarifa de consultoría monetaria en COP, USD o EUR", () => {
 
   payload.detalle.moneda_tarifa_consultoria = "GBP";
   assert.throws(() => validateEntregaPayload(payload), /moneda de la tarifa de consultoría no es válida/i);
-});
-
-test("valida forma de pago monetaria en COP, USD o EUR", () => {
-  const payload = projectPayload();
-  payload.detalle.moneda_forma_pago = "EUR";
-  assert.equal(validateEntregaPayload(payload).detalle.moneda_forma_pago, "EUR");
-
-  payload.detalle.moneda_forma_pago = "GBP";
-  assert.throws(() => validateEntregaPayload(payload), /moneda de la forma de pago no es válida/i);
 });
 
 test("exige consultor para outsourcing", () => {
@@ -181,15 +170,15 @@ test("la migración agrega valor y moneda a la tarifa de consultoría", () => {
   assert.match(migration, /moneda_tarifa_consultoria VARCHAR\(3\)/);
 });
 
-test("la migración reemplaza la forma de pago textual por valor y moneda", () => {
+test("la migración correctiva restaura la forma de pago textual", () => {
   const migration = fs.readFileSync(
-    path.resolve(__dirname, "../../db/migrations/2026-08-26-z-entregas-forma-pago-monetaria.sql"),
+    path.resolve(__dirname, "../../db/migrations/2026-08-26-zz-restaurar-forma-pago-texto.sql"),
     "utf8"
   );
-  assert.match(migration, /valor_forma_pago NUMERIC\(18,2\)/);
-  assert.match(migration, /moneda_forma_pago VARCHAR\(3\)/);
-  assert.match(migration, /DROP COLUMN IF EXISTS forma_pago/);
-  assert.match(migration, /DROP COLUMN IF EXISTS tarifas_consultoria/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS forma_pago TEXT/);
+  assert.match(migration, /ALTER COLUMN forma_pago SET NOT NULL/);
+  assert.match(migration, /DROP COLUMN IF EXISTS valor_forma_pago/);
+  assert.match(migration, /DROP COLUMN IF EXISTS moneda_forma_pago/);
 });
 
 test("limita la consulta según el rol operativo", () => {

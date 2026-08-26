@@ -7,8 +7,6 @@ window.entregasServicioApp = function () {
         objeto_proyecto: "",
         valor_total: "",
         moneda: "COP",
-        valor_forma_pago: "",
-        moneda_forma_pago: "COP",
         forma_pago: "",
         equipo_estimacion: "",
         tarifa_consultoria: "",
@@ -166,7 +164,7 @@ window.entregasServicioApp = function () {
             if (this.form.tipo_servicio === "PROYECTO") {
                 return Boolean(
                     detail.nombre_proyecto.trim() && detail.objeto_proyecto.trim() &&
-                    detail.valor_total !== "" && detail.valor_forma_pago !== "" &&
+                    detail.valor_total !== "" && detail.forma_pago.trim() &&
                     detail.equipo_estimacion.trim() && detail.tarifa_consultoria !== ""
                 );
             }

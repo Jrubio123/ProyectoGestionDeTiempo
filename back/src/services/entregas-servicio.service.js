@@ -138,8 +138,7 @@ const DELIVERY_SELECT = `
           'objeto_proyecto', p.objeto_proyecto,
           'valor_total', p.valor_total,
           'moneda', p.moneda,
-          'valor_forma_pago', p.valor_forma_pago,
-          'moneda_forma_pago', p.moneda_forma_pago,
+          'forma_pago', p.forma_pago,
           'equipo_estimacion', p.equipo_estimacion,
           'tarifa_consultoria', p.tarifa_consultoria,
           'moneda_tarifa_consultoria', p.moneda_tarifa_consultoria
@@ -422,16 +421,15 @@ async function insertServiceDetail(client, entregaId, payload) {
   if (payload.tipo_servicio === TIPOS_SERVICIO.PROYECTO) {
     await client.query(`
       INSERT INTO entregas_servicio_proyecto
-        (entrega_servicio_id, objeto_proyecto, valor_total, moneda, valor_forma_pago, moneda_forma_pago,
+        (entrega_servicio_id, objeto_proyecto, valor_total, moneda, forma_pago,
          equipo_estimacion, tarifa_consultoria, moneda_tarifa_consultoria)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     `, [
       entregaId,
       detail.objeto_proyecto,
       detail.valor_total,
       detail.moneda,
-      detail.valor_forma_pago,
-      detail.moneda_forma_pago,
+      detail.forma_pago,
       detail.equipo_estimacion,
       detail.tarifa_consultoria,
       detail.moneda_tarifa_consultoria

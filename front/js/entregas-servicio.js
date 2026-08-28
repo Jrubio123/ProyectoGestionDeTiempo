@@ -9,11 +9,8 @@ window.entregasServicioApp = function () {
         moneda: "COP",
         forma_pago: "",
         equipo_estimacion: "",
-        tarifa_consultoria: "",
-        moneda_tarifa_consultoria: "COP",
         detalle_tarifas: "",
         tiempo_descripcion: "",
-        tarifa: "",
         valor_cliente: "",
         tiene_contrato: ""
     });
@@ -23,11 +20,11 @@ window.entregasServicioApp = function () {
         coordinador_id: "",
         nombre_servicio: "",
         perfil_cliente: "",
-        analisis_adaptabilidad: "",
         acuerdos_comerciales: "",
         contacto_id: "",
         contacto_nuevo: emptyContact(),
         consultores_ids: [],
+        consultores_tarifas: {},
         consultores_externos: [],
         modulos_ids: [],
         modulos_otros_texto: "",
@@ -93,6 +90,10 @@ window.entregasServicioApp = function () {
                 `${item.nombre || ""} ${item.email || ""}`.toLowerCase().includes(query)
             );
         },
+        get consultoresSeleccionados() {
+            const selected = new Set(this.form.consultores_ids);
+            return this.catalogos.consultores.filter((item) => selected.has(item.id));
+        },
         get entregasFiltradas() {
             const query = this.filtro.q.trim().toLowerCase();
             return this.entregas.filter((item) => {
@@ -129,7 +130,14 @@ window.entregasServicioApp = function () {
         },
         get consultoresExternosValidos() {
             return this.form.consultores_externos.every((item) =>
-                String(item.nombre || "").trim() && String(item.telefono || "").trim()
+                String(item.nombre || "").trim() &&
+                String(item.telefono || "").trim() &&
+                this.tarifaConsultorValida(item)
+            );
+        },
+        get tarifasConsultoresValidas() {
+            return this.form.consultores_ids.every((id) =>
+                this.tarifaConsultorValida(this.form.consultores_tarifas[id])
             );
         },
         get enlacesValidos() {
@@ -152,8 +160,8 @@ window.entregasServicioApp = function () {
                 (this.form.cliente_id || this.clienteNuevoPreparado) &&
                 this.form.coordinador_id &&
                 this.form.perfil_cliente &&
-                this.form.analisis_adaptabilidad.trim() &&
                 this.contactoValido &&
+                this.tarifasConsultoresValidas &&
                 this.consultoresExternosValidos &&
                 this.enlacesValidos &&
                 (this.form.modulos_ids.length || this.modulosOtros.length)
@@ -165,7 +173,7 @@ window.entregasServicioApp = function () {
                 return Boolean(
                     detail.nombre_proyecto.trim() && detail.objeto_proyecto.trim() &&
                     detail.valor_total !== "" && detail.forma_pago.trim() &&
-                    detail.equipo_estimacion.trim() && detail.tarifa_consultoria !== ""
+                    detail.equipo_estimacion.trim()
                 );
             }
             if (this.form.tipo_servicio === "MESA_SERVICIO") {
@@ -174,7 +182,7 @@ window.entregasServicioApp = function () {
             return Boolean(
                 (this.form.consultores_ids.length || this.form.consultores_externos.length) &&
                 detail.tiempo_descripcion.trim() &&
-                detail.tarifa !== "" && detail.valor_cliente !== "" && detail.tiene_contrato !== ""
+                detail.valor_cliente !== "" && detail.tiene_contrato !== ""
             );
         },
 
@@ -185,6 +193,12 @@ window.entregasServicioApp = function () {
         limpiarAlertas() {
             this.error = "";
             this.mensaje = "";
+        },
+        tarifaConsultorValida(item) {
+            const rawValue = String(item?.tarifa_consultoria ?? "").trim();
+            const currency = String(item?.moneda_tarifa_consultoria || "").toUpperCase();
+            return rawValue !== "" && Number.isFinite(Number(rawValue)) && Number(rawValue) >= 0 &&
+                ["COP", "USD", "EUR"].includes(currency);
         },
         async cargarCatalogos() {
             try {
@@ -213,6 +227,8 @@ window.entregasServicioApp = function () {
             this.form.contacto_id = "";
             this.form.contacto_nuevo = emptyContact();
             this.contactos = [];
+            const cliente = this.catalogos.clientes.find((item) => item.id === this.form.cliente_id);
+            this.form.perfil_cliente = cliente?.perfil_cliente || "";
             if (!this.form.cliente_id) return;
             try {
                 const response = await axios.get(`${API}/entregas-servicio/clientes/${this.form.cliente_id}/contactos`);
@@ -233,22 +249,41 @@ window.entregasServicioApp = function () {
             if (!this.clienteNuevoValido) return;
             this.clienteNuevoPreparado = JSON.parse(JSON.stringify(this.clienteNuevo.data));
             this.form.cliente_id = "";
+            this.form.perfil_cliente = "";
             this.form.contacto_id = "";
             this.contactos = [];
             this.clienteNuevo.open = false;
         },
         cancelarClienteNuevoPreparado() {
             this.clienteNuevoPreparado = null;
+            this.form.perfil_cliente = "";
         },
         usarContactoNuevo() {
             this.form.contacto_id = "";
             this.form.contacto_nuevo = emptyContact();
         },
         agregarConsultorExterno() {
-            this.form.consultores_externos.push({ nombre: "", telefono: "" });
+            this.form.consultores_externos.push({
+                nombre: "",
+                telefono: "",
+                tarifa_consultoria: "",
+                moneda_tarifa_consultoria: "COP"
+            });
         },
         quitarConsultorExterno(index) {
             this.form.consultores_externos.splice(index, 1);
+        },
+        actualizarSeleccionConsultor(consultorId, seleccionado = this.form.consultores_ids.includes(consultorId)) {
+            if (seleccionado) {
+                if (!this.form.consultores_tarifas[consultorId]) {
+                    this.form.consultores_tarifas[consultorId] = {
+                        tarifa_consultoria: "",
+                        moneda_tarifa_consultoria: "COP"
+                    };
+                }
+                return;
+            }
+            delete this.form.consultores_tarifas[consultorId];
         },
         agregarEnlace() {
             this.form.enlaces.push({ titulo: "", url: "" });
@@ -364,9 +399,6 @@ window.entregasServicioApp = function () {
         formatMoney(value, currency = "COP") {
             if (value === null || value === undefined || value === "") return "—";
             return new Intl.NumberFormat("es-CO", { style: "currency", currency }).format(Number(value));
-        },
-        formatProjectConsultingRate(detail) {
-            return this.formatMoney(detail?.tarifa_consultoria, detail?.moneda_tarifa_consultoria || "COP");
         }
     };
 };

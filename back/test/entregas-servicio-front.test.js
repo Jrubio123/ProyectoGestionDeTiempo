@@ -17,7 +17,6 @@ function fillBase(app) {
   app.form.cliente_id = "cliente";
   app.form.coordinador_id = "coordinador";
   app.form.perfil_cliente = "CLAVE";
-  app.form.analisis_adaptabilidad = "Adaptable";
   app.form.contacto_nuevo = { nombre: "Contacto", cargo: "Interventor", telefono: "300", email: "" };
   app.form.modulos_ids = ["modulo"];
 }
@@ -31,9 +30,7 @@ test("el formulario de proyecto valida los campos comerciales", () => {
     objeto_proyecto: "Implementación",
     valor_total: 100,
     forma_pago: "50% al inicio y 50% al finalizar",
-    equipo_estimacion: "Equipo comercial",
-    tarifa_consultoria: 100,
-    moneda_tarifa_consultoria: "COP"
+    equipo_estimacion: "Equipo comercial"
   });
   assert.equal(app.formularioValido, true);
 });
@@ -46,9 +43,7 @@ test("permite agregar varios enlaces y exige uno en proyecto", () => {
     objeto_proyecto: "Implementación",
     valor_total: 100,
     forma_pago: "Contado",
-    equipo_estimacion: "Equipo comercial",
-    tarifa_consultoria: 100,
-    moneda_tarifa_consultoria: "EUR"
+    equipo_estimacion: "Equipo comercial"
   });
   assert.equal(app.formularioValido, false);
 
@@ -64,12 +59,12 @@ test("el frontend exige consultor en outsourcing", () => {
   app.form.tipo_servicio = "OUTSOURCING";
   Object.assign(app.form.detalle, {
     tiempo_descripcion: "6 meses",
-    tarifa: 100,
     valor_cliente: 150,
     tiene_contrato: "true"
   });
   assert.equal(app.formularioValido, false);
   app.form.consultores_ids = ["consultor"];
+  app.form.consultores_tarifas.consultor = { tarifa_consultoria: 100, moneda_tarifa_consultoria: "COP" };
   assert.equal(app.formularioValido, true);
 });
 
@@ -79,16 +74,51 @@ test("un consultor no registrado completo satisface outsourcing", () => {
   app.form.tipo_servicio = "OUTSOURCING";
   Object.assign(app.form.detalle, {
     tiempo_descripcion: "6 meses",
-    tarifa: 100,
     valor_cliente: 150,
     tiene_contrato: "false"
   });
   app.agregarConsultorExterno();
-  app.form.consultores_externos[0] = { nombre: "Consultor externo", telefono: "3001234567" };
+  app.form.consultores_externos[0] = {
+    nombre: "Consultor externo",
+    telefono: "3001234567",
+    tarifa_consultoria: 100,
+    moneda_tarifa_consultoria: "USD"
+  };
 
   assert.equal(app.formularioValido, true);
   app.form.consultores_externos[0].telefono = "";
   assert.equal(app.formularioValido, false);
+});
+
+test("exige tarifa para cada consultor agregado en cualquier tipo", () => {
+  const app = createApp();
+  fillBase(app);
+  app.form.enlaces = [{ titulo: "Propuesta", url: "https://empresa.com/propuesta" }];
+  Object.assign(app.form.detalle, {
+    nombre_proyecto: "Proyecto Uno",
+    objeto_proyecto: "Implementación",
+    valor_total: 100,
+    forma_pago: "Contado",
+    equipo_estimacion: "Equipo comercial"
+  });
+  app.form.consultores_ids = ["consultor"];
+  assert.equal(app.formularioValido, false);
+  app.form.consultores_tarifas.consultor = { tarifa_consultoria: 250, moneda_tarifa_consultoria: "EUR" };
+  assert.equal(app.formularioValido, true);
+});
+
+test("carga el perfil almacenado al seleccionar un cliente existente", async () => {
+  const app = createApp();
+  global.axios = { get: async () => ({ data: [] }) };
+  app.catalogos.clientes = [
+    { id: "cliente", nombre: "Cliente Uno", perfil_cliente: "NO_CLAVE" }
+  ];
+  app.form.cliente_id = "cliente";
+
+  await app.cambiarCliente();
+
+  assert.equal(app.form.perfil_cliente, "NO_CLAVE");
+  delete global.axios;
 });
 
 test("solo Comercial puede abrir nuevas entregas", () => {

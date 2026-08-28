@@ -1938,6 +1938,11 @@ CREATE INDEX idx_registro_asignaciones_compuesto ON registro_asignaciones(
 -- el mismo esquema entre instalaciones nuevas y bases existentes.
 \ir migrations/2026-08-25-entregas-servicio.sql
 \ir migrations/2026-08-25-z-entregas-consultores-externos.sql
+\ir migrations/2026-08-25-zz-entregas-enlaces.sql
+\ir migrations/2026-08-26-entregas-tarifa-consultoria.sql
+\ir migrations/2026-08-26-z-entregas-forma-pago-monetaria.sql
+\ir migrations/2026-08-26-zz-restaurar-forma-pago-texto.sql
+\ir migrations/2026-08-28-entregas-perfil-tarifas-consultor.sql
 
 
 

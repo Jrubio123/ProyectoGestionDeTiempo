@@ -16,7 +16,6 @@ function projectPayload() {
     cliente_id: "cliente-public-id",
     coordinador_id: "coordinador-public-id",
     perfil_cliente: "CLAVE",
-    analisis_adaptabilidad: "El cliente tiene equipo interno disponible.",
     contacto_nuevo: {
       nombre: "Ana Cliente",
       cargo: "Interventora",
@@ -33,9 +32,7 @@ function projectPayload() {
       valor_total: 1000000,
       moneda: "COP",
       forma_pago: "50% inicial y 50% contra entrega",
-      equipo_estimacion: "Comercial y consultoría",
-      tarifa_consultoria: 200000,
-      moneda_tarifa_consultoria: "COP"
+      equipo_estimacion: "Comercial y consultoría"
     }
   };
 }
@@ -51,18 +48,23 @@ test("acepta una entrega de proyecto con enlaces comerciales", () => {
   assert.deepEqual(payload.enlaces, [
     { titulo: "Propuesta comercial", url: "https://empresa.sharepoint.com/propuesta.pdf" }
   ]);
-  assert.equal(payload.detalle.tarifa_consultoria, 200000);
-  assert.equal(payload.detalle.moneda_tarifa_consultoria, "COP");
   assert.equal(payload.detalle.forma_pago, "50% inicial y 50% contra entrega");
+  assert.equal("analisis_adaptabilidad" in payload, false);
 });
 
-test("valida tarifa de consultoría monetaria en COP, USD o EUR", () => {
+test("valida una tarifa por cada consultor seleccionado", () => {
   const payload = projectPayload();
-  payload.detalle.moneda_tarifa_consultoria = "USD";
-  assert.equal(validateEntregaPayload(payload).detalle.moneda_tarifa_consultoria, "USD");
+  payload.consultores_ids = ["consultor-public-id"];
+  payload.consultores_tarifas = {
+    "consultor-public-id": { tarifa_consultoria: 200000, moneda_tarifa_consultoria: "USD" }
+  };
+  assert.deepEqual(validateEntregaPayload(payload).consultores_tarifas, payload.consultores_tarifas);
 
-  payload.detalle.moneda_tarifa_consultoria = "GBP";
+  payload.consultores_tarifas["consultor-public-id"].moneda_tarifa_consultoria = "GBP";
   assert.throws(() => validateEntregaPayload(payload), /moneda de la tarifa de consultoría no es válida/i);
+
+  payload.consultores_tarifas["consultor-public-id"] = { tarifa_consultoria: "", moneda_tarifa_consultoria: "COP" };
+  assert.throws(() => validateEntregaPayload(payload), /tarifa de cada consultor seleccionado es obligatoria/i);
 });
 
 test("exige consultor para outsourcing", () => {
@@ -71,7 +73,6 @@ test("exige consultor para outsourcing", () => {
   payload.enlaces = [];
   payload.detalle = {
     tiempo_descripcion: "6 meses",
-    tarifa: 5000000,
     valor_cliente: 7000000,
     moneda: "COP",
     tiene_contrato: true
@@ -88,12 +89,11 @@ test("acepta consultores informativos sin crear usuarios", () => {
   payload.tipo_servicio = "Outsourcing";
   payload.enlaces = [];
   payload.consultores_externos = [
-    { nombre: "Consultor por vincular", telefono: "3001234567" },
-    { nombre: "Segundo consultor", telefono: "3019876543" }
+    { nombre: "Consultor por vincular", telefono: "3001234567", tarifa_consultoria: 5000000, moneda_tarifa_consultoria: "COP" },
+    { nombre: "Segundo consultor", telefono: "3019876543", tarifa_consultoria: 4500, moneda_tarifa_consultoria: "USD" }
   ];
   payload.detalle = {
     tiempo_descripcion: "6 meses",
-    tarifa: 5000000,
     valor_cliente: 7000000,
     moneda: "COP",
     tiene_contrato: false
@@ -104,10 +104,13 @@ test("acepta consultores informativos sin crear usuarios", () => {
   assert.deepEqual(normalized.consultores_externos, payload.consultores_externos);
 });
 
-test("exige nombre y teléfono para consultores informativos", () => {
+test("exige identificación y tarifa para consultores informativos", () => {
   const payload = projectPayload();
-  payload.consultores_externos = [{ nombre: "Consultor sin teléfono", telefono: "" }];
+  payload.consultores_externos = [{ nombre: "Consultor sin teléfono", telefono: "", tarifa_consultoria: 100, moneda_tarifa_consultoria: "COP" }];
   assert.throws(() => validateEntregaPayload(payload), /teléfono del consultor no registrado/i);
+
+  payload.consultores_externos = [{ nombre: "Consultor sin tarifa", telefono: "300", tarifa_consultoria: "", moneda_tarifa_consultoria: "COP" }];
+  assert.throws(() => validateEntregaPayload(payload), /tarifa del consultor no registrado es obligatoria/i);
 });
 
 test("exige un enlace comercial para proyecto y mesa", () => {
@@ -179,6 +182,18 @@ test("la migración correctiva restaura la forma de pago textual", () => {
   assert.match(migration, /ALTER COLUMN forma_pago SET NOT NULL/);
   assert.match(migration, /DROP COLUMN IF EXISTS valor_forma_pago/);
   assert.match(migration, /DROP COLUMN IF EXISTS moneda_forma_pago/);
+});
+
+test("la migración mueve perfil y tarifa a sus entidades correctas", () => {
+  const migration = fs.readFileSync(
+    path.resolve(__dirname, "../../db/migrations/2026-08-28-entregas-perfil-tarifas-consultor.sql"),
+    "utf8"
+  );
+  assert.match(migration, /ALTER TABLE clientes[\s\S]+perfil_cliente VARCHAR\(20\)/);
+  assert.match(migration, /ALTER TABLE entregas_servicio_consultores[\s\S]+tarifa_consultoria NUMERIC\(18,2\)/);
+  assert.match(migration, /ALTER COLUMN analisis_adaptabilidad DROP NOT NULL/);
+  assert.match(migration, /ALTER COLUMN tarifa DROP NOT NULL/);
+  assert.match(migration, /^BEGIN;[\s\S]+COMMIT;\s*$/);
 });
 
 test("limita la consulta según el rol operativo", () => {

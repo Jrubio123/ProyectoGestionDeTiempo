@@ -61,8 +61,7 @@ const DELIVERY_SELECT = `
     e.tipo_servicio,
     e.nombre_servicio,
     e.estado,
-    e.perfil_cliente,
-    e.analisis_adaptabilidad,
+    c.perfil_cliente,
     e.acuerdos_comerciales,
     e.created_at,
     e.updated_at,
@@ -82,6 +81,8 @@ const DELIVERY_SELECT = `
         'nombre', COALESCE(u.nombre_usuario, ec.nombre_externo),
         'email', u.email,
         'telefono', ec.telefono_externo,
+        'tarifa_consultoria', ec.tarifa_consultoria,
+        'moneda_tarifa_consultoria', ec.moneda_tarifa_consultoria,
         'es_principal', ec.es_principal
       ) ORDER BY ec.es_principal DESC, COALESCE(u.nombre_usuario, ec.nombre_externo))
       FROM entregas_servicio_consultores ec
@@ -139,9 +140,7 @@ const DELIVERY_SELECT = `
           'valor_total', p.valor_total,
           'moneda', p.moneda,
           'forma_pago', p.forma_pago,
-          'equipo_estimacion', p.equipo_estimacion,
-          'tarifa_consultoria', p.tarifa_consultoria,
-          'moneda_tarifa_consultoria', p.moneda_tarifa_consultoria
+          'equipo_estimacion', p.equipo_estimacion
         ) FROM entregas_servicio_proyecto p WHERE p.entrega_servicio_id = e.id
       )
       WHEN 'MESA_SERVICIO' THEN (
@@ -153,7 +152,6 @@ const DELIVERY_SELECT = `
       ELSE (
         SELECT json_build_object(
           'tiempo_descripcion', o.tiempo_descripcion,
-          'tarifa', o.tarifa,
           'valor_cliente', o.valor_cliente,
           'moneda', o.moneda,
           'tiene_contrato', o.tiene_contrato
@@ -171,7 +169,7 @@ async function getCatalogs(req, res) {
   try {
     const [clientes, coordinadores, consultores, modulos] = await Promise.all([
       pool.query(`
-        SELECT public_id::text AS id, titulo AS nombre, nit, direccion
+        SELECT public_id::text AS id, titulo AS nombre, nit, direccion, perfil_cliente
         FROM clientes WHERE activo = true ORDER BY titulo
       `),
       pool.query(`
@@ -308,9 +306,11 @@ async function insertContact(client, clienteId, contact, createdBy, principal = 
 async function resolveOrCreateClient(client, payload, createdBy) {
   if (payload.cliente_id) {
     const result = await client.query(`
-      SELECT id, public_id::text AS public_id, titulo, nit
-      FROM clientes WHERE public_id::text = $1 AND activo = true
-    `, [payload.cliente_id]);
+      UPDATE clientes
+      SET perfil_cliente = $2, updated_at = CURRENT_TIMESTAMP
+      WHERE public_id::text = $1 AND activo = true
+      RETURNING id, public_id::text AS public_id, titulo, nit, perfil_cliente
+    `, [payload.cliente_id, payload.perfil_cliente]);
     if (!result.rows[0]) throw new EntregaValidationError("El cliente seleccionado no existe o está inactivo.", "cliente_id");
     return { cliente: result.rows[0], principalContact: null };
   }
@@ -334,14 +334,15 @@ async function resolveOrCreateClient(client, payload, createdBy) {
   const correlation = await client.query("SELECT COALESCE(MAX(correlativo), 0) + 1 AS next_value FROM clientes");
   const inserted = await client.query(`
     INSERT INTO clientes
-      (titulo, nit, correlativo, activo, direccion, requiere_confirmacion_cliente)
-    VALUES ($1, $2, $3, true, $4, false)
-    RETURNING id, public_id::text AS public_id, titulo, nit
+      (titulo, nit, correlativo, activo, direccion, requiere_confirmacion_cliente, perfil_cliente)
+    VALUES ($1, $2, $3, true, $4, false, $5)
+    RETURNING id, public_id::text AS public_id, titulo, nit, perfil_cliente
   `, [
     payload.cliente_nuevo.titulo,
     payload.cliente_nuevo.nit,
     correlation.rows[0].next_value,
-    payload.cliente_nuevo.direccion
+    payload.cliente_nuevo.direccion,
+    payload.perfil_cliente
   ]);
   const principalContact = await insertContact(
     client,
@@ -421,18 +422,15 @@ async function insertServiceDetail(client, entregaId, payload) {
   if (payload.tipo_servicio === TIPOS_SERVICIO.PROYECTO) {
     await client.query(`
       INSERT INTO entregas_servicio_proyecto
-        (entrega_servicio_id, objeto_proyecto, valor_total, moneda, forma_pago,
-         equipo_estimacion, tarifa_consultoria, moneda_tarifa_consultoria)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        (entrega_servicio_id, objeto_proyecto, valor_total, moneda, forma_pago, equipo_estimacion)
+      VALUES ($1, $2, $3, $4, $5, $6)
     `, [
       entregaId,
       detail.objeto_proyecto,
       detail.valor_total,
       detail.moneda,
       detail.forma_pago,
-      detail.equipo_estimacion,
-      detail.tarifa_consultoria,
-      detail.moneda_tarifa_consultoria
+      detail.equipo_estimacion
     ]);
     return;
   }
@@ -445,12 +443,11 @@ async function insertServiceDetail(client, entregaId, payload) {
   }
   await client.query(`
     INSERT INTO entregas_servicio_outsourcing
-      (entrega_servicio_id, tiempo_descripcion, tarifa, valor_cliente, moneda, tiene_contrato)
-    VALUES ($1, $2, $3, $4, $5, $6)
+      (entrega_servicio_id, tiempo_descripcion, valor_cliente, moneda, tiene_contrato)
+    VALUES ($1, $2, $3, $4, $5)
   `, [
     entregaId,
     detail.tiempo_descripcion,
-    detail.tarifa,
     detail.valor_cliente,
     detail.moneda,
     detail.tiene_contrato
@@ -573,16 +570,14 @@ async function createDelivery(req, res) {
     const inserted = await client.query(`
       INSERT INTO entregas_servicio
         (cliente_id, coordinador_asignado_id, tipo_servicio, nombre_servicio, estado,
-         perfil_cliente, analisis_adaptabilidad, acuerdos_comerciales, creado_por)
-      VALUES ($1, $2, $3, $4, 'REGISTRADA', $5, $6, $7, $8)
+         acuerdos_comerciales, creado_por)
+      VALUES ($1, $2, $3, $4, 'REGISTRADA', $5, $6)
       RETURNING id, public_id::text AS public_id, created_at
     `, [
       cliente.id,
       coordinator.id,
       payload.tipo_servicio,
       payload.nombre_servicio,
-      payload.perfil_cliente,
-      payload.analisis_adaptabilidad,
       payload.acuerdos_comerciales,
       req.user.id
     ]);
@@ -596,18 +591,34 @@ async function createDelivery(req, res) {
     `, [delivery.id, contact.id]);
 
     for (const [index, consultant] of consultants.entries()) {
+      const rate = payload.consultores_tarifas[consultant.public_id];
       await client.query(`
         INSERT INTO entregas_servicio_consultores
-          (entrega_servicio_id, consultor_id, es_principal)
-        VALUES ($1, $2, $3)
-      `, [delivery.id, consultant.id, index === 0]);
+          (entrega_servicio_id, consultor_id, tarifa_consultoria,
+           moneda_tarifa_consultoria, es_principal)
+        VALUES ($1, $2, $3, $4, $5)
+      `, [
+        delivery.id,
+        consultant.id,
+        rate.tarifa_consultoria,
+        rate.moneda_tarifa_consultoria,
+        index === 0
+      ]);
     }
     for (const [index, consultant] of payload.consultores_externos.entries()) {
       await client.query(`
         INSERT INTO entregas_servicio_consultores
-          (entrega_servicio_id, consultor_id, nombre_externo, telefono_externo, es_principal)
-        VALUES ($1, NULL, $2, $3, $4)
-      `, [delivery.id, consultant.nombre, consultant.telefono, consultants.length === 0 && index === 0]);
+          (entrega_servicio_id, consultor_id, nombre_externo, telefono_externo,
+           tarifa_consultoria, moneda_tarifa_consultoria, es_principal)
+        VALUES ($1, NULL, $2, $3, $4, $5, $6)
+      `, [
+        delivery.id,
+        consultant.nombre,
+        consultant.telefono,
+        consultant.tarifa_consultoria,
+        consultant.moneda_tarifa_consultoria,
+        consultants.length === 0 && index === 0
+      ]);
     }
     for (const module of modules) {
       await client.query(`

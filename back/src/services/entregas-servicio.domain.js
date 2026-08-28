@@ -5,6 +5,7 @@ const TIPOS_SERVICIO = Object.freeze({
 });
 
 const PERFILES_CLIENTE = new Set(["CLAVE", "NO_CLAVE", "POR_DEFINIR"]);
+const MONEDAS = new Set(["COP", "USD", "EUR"]);
 
 class EntregaValidationError extends Error {
   constructor(message, field = null) {
@@ -55,6 +56,14 @@ function parseMoney(value, message, field) {
   return parsed;
 }
 
+function normalizeCurrency(value, field) {
+  const normalized = text(value || "COP").toUpperCase();
+  if (!MONEDAS.has(normalized)) {
+    throw new EntregaValidationError("La moneda de la tarifa de consultoría no es válida.", field);
+  }
+  return normalized;
+}
+
 function parseBoolean(value, message, field) {
   if (value === true || value === false) return value;
   const normalized = text(value).toLowerCase();
@@ -83,12 +92,44 @@ function normalizeExternalConsultants(value) {
       "El teléfono del consultor no registrado es obligatorio.",
       `consultores_externos.${index}.telefono`
     );
+    const tarifaConsultoria = parseMoney(
+      item?.tarifa_consultoria,
+      "La tarifa del consultor no registrado es obligatoria y debe ser válida.",
+      `consultores_externos.${index}.tarifa_consultoria`
+    );
+    const monedaTarifaConsultoria = normalizeCurrency(
+      item?.moneda_tarifa_consultoria,
+      `consultores_externos.${index}.moneda_tarifa_consultoria`
+    );
     const key = `${nombre.toLowerCase()}|${telefono}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    result.push({ nombre, telefono });
+    result.push({
+      nombre,
+      telefono,
+      tarifa_consultoria: tarifaConsultoria,
+      moneda_tarifa_consultoria: monedaTarifaConsultoria
+    });
   }
   return result;
+}
+
+function normalizeRegisteredConsultantRates(publicIds, value) {
+  const rates = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return Object.fromEntries(publicIds.map((publicId) => {
+    const item = rates[publicId] || {};
+    return [publicId, {
+      tarifa_consultoria: parseMoney(
+        item.tarifa_consultoria,
+        "La tarifa de cada consultor seleccionado es obligatoria y debe ser válida.",
+        `consultores_tarifas.${publicId}.tarifa_consultoria`
+      ),
+      moneda_tarifa_consultoria: normalizeCurrency(
+        item.moneda_tarifa_consultoria,
+        `consultores_tarifas.${publicId}.moneda_tarifa_consultoria`
+      )
+    }];
+  }));
 }
 
 function isHttpUrl(value) {
@@ -158,31 +199,18 @@ function validateLinks(payload, tipoServicio) {
 function validateDetail(payload, tipoServicio) {
   const detail = payload?.detalle || {};
   const moneda = text(detail.moneda || "COP").toUpperCase();
-  if (!new Set(["COP", "USD", "EUR"]).has(moneda)) {
+  if (!MONEDAS.has(moneda)) {
     throw new EntregaValidationError("La moneda no es válida.", "detalle.moneda");
   }
 
   if (tipoServicio === TIPOS_SERVICIO.PROYECTO) {
-    const monedaTarifaConsultoria = text(detail.moneda_tarifa_consultoria || "COP").toUpperCase();
-    if (!new Set(["COP", "USD", "EUR"]).has(monedaTarifaConsultoria)) {
-      throw new EntregaValidationError(
-        "La moneda de la tarifa de consultoría no es válida.",
-        "detalle.moneda_tarifa_consultoria"
-      );
-    }
     return {
       nombre_proyecto: requiredText(detail.nombre_proyecto, "El nombre del proyecto es obligatorio.", "detalle.nombre_proyecto"),
       objeto_proyecto: requiredText(detail.objeto_proyecto, "El objeto del proyecto es obligatorio.", "detalle.objeto_proyecto"),
       valor_total: parseMoney(detail.valor_total, "El valor total del proyecto no es válido.", "detalle.valor_total"),
       moneda,
       forma_pago: requiredText(detail.forma_pago, "La forma de pago es obligatoria.", "detalle.forma_pago"),
-      equipo_estimacion: requiredText(detail.equipo_estimacion, "Indica el equipo con quien se estimó.", "detalle.equipo_estimacion"),
-      tarifa_consultoria: parseMoney(
-        detail.tarifa_consultoria,
-        "La tarifa de consultoría no es válida.",
-        "detalle.tarifa_consultoria"
-      ),
-      moneda_tarifa_consultoria: monedaTarifaConsultoria
+      equipo_estimacion: requiredText(detail.equipo_estimacion, "Indica el equipo con quien se estimó.", "detalle.equipo_estimacion")
     };
   }
 
@@ -195,7 +223,6 @@ function validateDetail(payload, tipoServicio) {
 
   return {
     tiempo_descripcion: requiredText(detail.tiempo_descripcion, "El tiempo del servicio es obligatorio.", "detalle.tiempo_descripcion"),
-    tarifa: parseMoney(detail.tarifa, "La tarifa no es válida.", "detalle.tarifa"),
     valor_cliente: parseMoney(detail.valor_cliente, "El valor para el cliente no es válido.", "detalle.valor_cliente"),
     moneda,
     tiene_contrato: parseBoolean(detail.tiene_contrato, "Indica si tiene contrato.", "detalle.tiene_contrato")
@@ -213,6 +240,7 @@ function validateEntregaPayload(payload = {}) {
   }
 
   const consultoresIds = normalizeIdList(payload.consultores_ids);
+  const consultoresTarifas = normalizeRegisteredConsultantRates(consultoresIds, payload.consultores_tarifas);
   const consultoresExternos = normalizeExternalConsultants(payload.consultores_externos);
   if (
     tipoServicio === TIPOS_SERVICIO.OUTSOURCING
@@ -244,13 +272,9 @@ function validateEntregaPayload(payload = {}) {
       ? detail.nombre_proyecto
       : text(payload.nombre_servicio) || (tipoServicio === TIPOS_SERVICIO.MESA_SERVICIO ? "Mesa de servicios" : "Outsourcing"),
     perfil_cliente: perfilCliente,
-    analisis_adaptabilidad: requiredText(
-      payload.analisis_adaptabilidad,
-      "El análisis de adaptabilidad es obligatorio.",
-      "analisis_adaptabilidad"
-    ),
     acuerdos_comerciales: text(payload.acuerdos_comerciales) || null,
     consultores_ids: consultoresIds,
+    consultores_tarifas: consultoresTarifas,
     consultores_externos: consultoresExternos,
     modulos_ids: modulosIds,
     modulos_otros: modulosOtros,

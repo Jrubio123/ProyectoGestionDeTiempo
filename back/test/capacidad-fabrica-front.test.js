@@ -86,3 +86,12 @@ test("limita los estados disponibles para actividades puntuales", () => {
     ["PLANIFICADO", "CERRADO", "CANCELADO"]
   );
 });
+
+test("bloquea actividades puntuales cerradas o canceladas", () => {
+  const app = createApp();
+
+  assert.equal(app.actividadFinalizada({ tipo_registro: "ACTIVIDAD", estado_codigo: "CERRADO" }), true);
+  assert.equal(app.actividadFinalizada({ tipo_registro: "ACTIVIDAD", estado_codigo: "CANCELADO" }), true);
+  assert.equal(app.actividadFinalizada({ tipo_registro: "ACTIVIDAD", estado_codigo: "PLANIFICADO" }), false);
+  assert.equal(app.actividadFinalizada({ tipo_registro: "REQUERIMIENTO", estado_codigo: "CERRADO" }), false);
+});

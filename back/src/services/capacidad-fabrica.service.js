@@ -641,6 +641,20 @@ async function updateManualRequirement(req, res) {
         );
       }
 
+      const requestedStateCode = payload.estado_codigo
+        ? normalizeStateCode(payload.estado_codigo) || String(payload.estado_codigo).toUpperCase()
+        : current.estado_codigo_actual;
+      if (
+        current.tipo_registro === "ACTIVIDAD"
+        && ["CERRADO", "CANCELADO"].includes(current.estado_codigo_actual)
+        && requestedStateCode !== current.estado_codigo_actual
+      ) {
+        throw new CapacityError(
+          "Una actividad cerrada o cancelada no puede cambiar de estado.",
+          409
+        );
+      }
+
       const state = payload.estado_codigo
         ? await getStateByCode(client, payload.estado_codigo)
         : { id: current.estado_id, nombre: current.estado_origen };
@@ -1009,7 +1023,7 @@ async function getDashboard(req, res) {
           && endDate >= week.startDate;
         if (
           !overlapsWeek
-          || !["PLANIFICADO", "CERRADO"].includes(version.estado_codigo)
+          || version.estado_codigo !== "PLANIFICADO"
         ) continue;
       } else if (!version.consume_capacidad) {
         continue;

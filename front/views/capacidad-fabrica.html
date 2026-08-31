@@ -160,9 +160,10 @@
                             <td class="px-4 py-3 text-slate-600" x-text="item.cliente || '—'"></td>
                             <td class="max-w-xs px-4 py-3"><p class="font-medium text-slate-900" x-text="item.titulo"></p><p class="text-xs text-slate-400" x-text="item.tipo"></p></td>
                             <td class="px-4 py-3">
-                                <select x-show="item.origen === 'MANUAL'" :value="item.estado_codigo" @change="const el = $event.target; cambiarEstado(item, el.value).finally(() => el.value = item.estado_codigo)" class="max-w-44 rounded-md border border-slate-300 px-2 py-1.5 text-xs">
+                                <select x-show="item.origen === 'MANUAL' && !actividadFinalizada(item)" :value="item.estado_codigo" @change="const el = $event.target; cambiarEstado(item, el.value).finally(() => el.value = item.estado_codigo)" class="max-w-44 rounded-md border border-slate-300 px-2 py-1.5 text-xs">
                                     <template x-for="state in estadosParaItem(item)" :key="state.codigo"><option :value="state.codigo" x-text="state.nombre"></option></template>
                                 </select>
+                                <span x-show="actividadFinalizada(item)" class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600" x-text="item.estado"></span>
                                 <span x-show="item.origen !== 'MANUAL'" class="rounded-full px-2.5 py-1 text-xs font-medium" :class="item.consume_capacidad ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'" x-text="item.estado"></span>
                             </td>
                             <td class="px-4 py-3 text-right font-semibold" :class="item.effort_total == null ? 'text-amber-600' : ''" x-text="formatNullableNumber(item.effort_total)"></td>

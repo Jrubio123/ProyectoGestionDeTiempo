@@ -523,6 +523,11 @@ window.capacidadFabricaApp = function () {
             return this.estadosRequerimientoManual();
         },
 
+        actividadFinalizada(item) {
+            return item?.tipo_registro === "ACTIVIDAD"
+                && ["CERRADO", "CANCELADO"].includes(item.estado_codigo);
+        },
+
         occupancyClass(value) {
             const percentage = Number(value || 0);
             if (percentage > 100) return "bg-red-500";

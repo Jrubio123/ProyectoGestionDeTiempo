@@ -2,6 +2,10 @@ const { pool } = require("../db");
 const { listRecentWorkItemsAllProjects } = require("./azure-devops.service");
 const { syncMicrosoftIdentity } = require("./microsoft-identity-sync.service");
 const {
+  listUserCalendarView,
+  normalizeCalendarEvent
+} = require("./microsoft-calendar.service");
+const {
   calculateActiveHours,
   getWeekRange,
   isCorporateSilverEmail,
@@ -72,6 +76,18 @@ function dateOnly(value) {
   if (!value) return null;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+}
+
+function getCalendarWeekWindow(week) {
+  const start = new Date(`${week.startDate}T00:00:00.000-05:00`);
+  const end = new Date(`${week.endDate}T00:00:00.000-05:00`);
+  end.setUTCDate(end.getUTCDate() + 1);
+  return {
+    start,
+    end,
+    startIso: start.toISOString(),
+    endIso: end.toISOString()
+  };
 }
 
 async function withTransaction(callback) {
@@ -792,6 +808,259 @@ async function updateRequirementDistribution(req, res) {
   }
 }
 
+async function loadCalendarSyncContext() {
+  const [peopleResult, coordinatorsResult] = await Promise.all([
+    pool.query(
+      `SELECT p.id, p.public_id::text AS persona_id,
+              CONCAT_WS(' ', p.nombre, p.apellidos) AS nombre,
+              LOWER(BTRIM(p.correo_silver)) AS correo_silver,
+              p.azure_oid
+       FROM personas p
+       WHERE p.estado = 'activo'
+         AND p.pertenece_fabrica = TRUE
+         AND (
+           NULLIF(BTRIM(p.azure_oid), '') IS NOT NULL
+           OR NULLIF(BTRIM(p.correo_silver), '') IS NOT NULL
+         )
+       ORDER BY p.id`
+    ),
+    pool.query(
+      `SELECT u.id, LOWER(BTRIM(u.email)) AS email, u.nombre_usuario
+       FROM usuarios u
+       JOIN roles r ON r.id = u.rol_usuario_id
+       WHERE u.activo = TRUE
+         AND NULLIF(BTRIM(u.email), '') IS NOT NULL
+         AND LOWER(BTRIM(r.titulo)) = 'coordinador'`
+    )
+  ]);
+  return {
+    people: peopleResult.rows,
+    coordinatorsByEmail: new Map(
+      coordinatorsResult.rows.map((coordinator) => [coordinator.email, coordinator])
+    )
+  };
+}
+
+async function persistCalendarPersonSync({
+  person,
+  meetings,
+  window,
+  actorId
+}) {
+  return withTransaction(async (client) => {
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtext($1))",
+      [`capacidad-calendario:${person.id}:${window.startIso}`]
+    );
+    const summary = { creadas: 0, actualizadas: 0, sin_cambios: 0, desactivadas: 0 };
+    const seenIds = [];
+
+    for (const meeting of meetings) {
+      seenIds.push(meeting.graphEventId);
+      const changed = await client.query(
+        `INSERT INTO actividades_calendario_capacidad (
+           persona_id, coordinador_id, graph_event_id, graph_ical_uid,
+           categoria_codigo, titulo, organizador_nombre, organizador_correo,
+           inicio, fin, horas, estado_respuesta, mostrar_como, sensibilidad,
+           tipo_evento, series_master_id, web_url, source_changed_at,
+           last_synced_at, activo, sincronizado_por
+         ) VALUES (
+           $1, $2, $3, $4, 'REUNIONES', $5, $6, $7,
+           $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+           CURRENT_TIMESTAMP, TRUE, $18
+         )
+         ON CONFLICT (persona_id, graph_event_id)
+         DO UPDATE SET
+           coordinador_id = EXCLUDED.coordinador_id,
+           graph_ical_uid = EXCLUDED.graph_ical_uid,
+           titulo = EXCLUDED.titulo,
+           organizador_nombre = EXCLUDED.organizador_nombre,
+           organizador_correo = EXCLUDED.organizador_correo,
+           inicio = EXCLUDED.inicio,
+           fin = EXCLUDED.fin,
+           horas = EXCLUDED.horas,
+           estado_respuesta = EXCLUDED.estado_respuesta,
+           mostrar_como = EXCLUDED.mostrar_como,
+           sensibilidad = EXCLUDED.sensibilidad,
+           tipo_evento = EXCLUDED.tipo_evento,
+           series_master_id = EXCLUDED.series_master_id,
+           web_url = EXCLUDED.web_url,
+           source_changed_at = EXCLUDED.source_changed_at,
+           last_synced_at = CURRENT_TIMESTAMP,
+           activo = TRUE,
+           sincronizado_por = EXCLUDED.sincronizado_por,
+           updated_at = CURRENT_TIMESTAMP
+         WHERE (
+           actividades_calendario_capacidad.coordinador_id,
+           actividades_calendario_capacidad.graph_ical_uid,
+           actividades_calendario_capacidad.titulo,
+           actividades_calendario_capacidad.organizador_nombre,
+           actividades_calendario_capacidad.organizador_correo,
+           actividades_calendario_capacidad.inicio,
+           actividades_calendario_capacidad.fin,
+           actividades_calendario_capacidad.horas,
+           actividades_calendario_capacidad.estado_respuesta,
+           actividades_calendario_capacidad.mostrar_como,
+           actividades_calendario_capacidad.sensibilidad,
+           actividades_calendario_capacidad.tipo_evento,
+           actividades_calendario_capacidad.series_master_id,
+           actividades_calendario_capacidad.web_url,
+           actividades_calendario_capacidad.source_changed_at,
+           actividades_calendario_capacidad.activo
+         ) IS DISTINCT FROM (
+           EXCLUDED.coordinador_id,
+           EXCLUDED.graph_ical_uid,
+           EXCLUDED.titulo,
+           EXCLUDED.organizador_nombre,
+           EXCLUDED.organizador_correo,
+           EXCLUDED.inicio,
+           EXCLUDED.fin,
+           EXCLUDED.horas,
+           EXCLUDED.estado_respuesta,
+           EXCLUDED.mostrar_como,
+           EXCLUDED.sensibilidad,
+           EXCLUDED.tipo_evento,
+           EXCLUDED.series_master_id,
+           EXCLUDED.web_url,
+           EXCLUDED.source_changed_at,
+           TRUE
+         )
+         RETURNING (xmax = 0) AS insertada`,
+        [
+          person.id,
+          meeting.coordinatorId,
+          meeting.graphEventId,
+          meeting.graphICalUid,
+          meeting.title,
+          meeting.organizerName,
+          meeting.organizerEmail,
+          meeting.start,
+          meeting.end,
+          meeting.hours,
+          meeting.responseStatus,
+          meeting.showAs,
+          meeting.sensitivity,
+          meeting.eventType,
+          meeting.seriesMasterId,
+          meeting.webUrl,
+          meeting.sourceChangedAt,
+          actorId || null
+        ]
+      );
+      if (changed.rows[0]?.insertada) {
+        summary.creadas += 1;
+      } else if (changed.rows[0]) {
+        summary.actualizadas += 1;
+      } else {
+        summary.sin_cambios += 1;
+        await client.query(
+          `UPDATE actividades_calendario_capacidad
+           SET last_synced_at = CURRENT_TIMESTAMP,
+               sincronizado_por = $3
+           WHERE persona_id = $1 AND graph_event_id = $2`,
+          [person.id, meeting.graphEventId, actorId || null]
+        );
+      }
+    }
+
+    const deactivated = await client.query(
+      `UPDATE actividades_calendario_capacidad
+       SET activo = FALSE,
+           last_synced_at = CURRENT_TIMESTAMP,
+           sincronizado_por = $5,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE persona_id = $1
+         AND activo = TRUE
+         AND inicio < $3
+         AND fin > $2
+         AND NOT (graph_event_id = ANY($4::text[]))`,
+      [person.id, window.startIso, window.endIso, seenIds, actorId || null]
+    );
+    summary.desactivadas = deactivated.rowCount;
+    return summary;
+  });
+}
+
+async function syncCalendarMeetings(referenceDate, actorId, dependencies = {}) {
+  const week = getWeekRange(referenceDate);
+  const window = getCalendarWeekWindow(week);
+  const { people, coordinatorsByEmail } = await loadCalendarSyncContext();
+  const summary = {
+    semana_inicio: week.startDate,
+    semana_fin: week.endDate,
+    personas: people.length,
+    personas_sincronizadas: 0,
+    personas_con_error: 0,
+    recibidas: 0,
+    creadas: 0,
+    actualizadas: 0,
+    sin_cambios: 0,
+    desactivadas: 0,
+    omitidas_no_coordinador: 0,
+    omitidas_no_ocupan: 0,
+    errores: []
+  };
+
+  for (const person of people) {
+    try {
+      const identifier = person.azure_oid || person.correo_silver;
+      const graphEvents = await (dependencies.listUserCalendarView || listUserCalendarView)(
+        identifier,
+        window.startIso,
+        window.endIso
+      );
+      summary.recibidas += graphEvents.length;
+      const meetingsById = new Map();
+      for (const graphEvent of graphEvents) {
+        const normalized = normalizeCalendarEvent(graphEvent, window.start, window.end);
+        if (!normalized.included) {
+          summary.omitidas_no_ocupan += 1;
+          continue;
+        }
+        const coordinator = coordinatorsByEmail.get(normalized.event.organizerEmail);
+        if (!coordinator) {
+          summary.omitidas_no_coordinador += 1;
+          continue;
+        }
+        meetingsById.set(normalized.event.graphEventId, {
+          ...normalized.event,
+          coordinatorId: coordinator.id
+        });
+      }
+      const persisted = await persistCalendarPersonSync({
+        person,
+        meetings: [...meetingsById.values()],
+        window,
+        actorId
+      });
+      summary.personas_sincronizadas += 1;
+      for (const key of ["creadas", "actualizadas", "sin_cambios", "desactivadas"]) {
+        summary[key] += persisted[key];
+      }
+    } catch (error) {
+      if ([401, 403].includes(Number(error.statusCode))) throw error;
+      summary.personas_con_error += 1;
+      summary.errores.push({
+        persona: person.nombre,
+        error: cleanText(error.message, 300) || "No fue posible consultar el calendario."
+      });
+    }
+  }
+
+  if (
+    summary.personas > 0
+    && summary.personas_sincronizadas === 0
+    && summary.personas_con_error > 0
+  ) {
+    throw new CapacityError(
+      summary.errores[0]?.error || "No fue posible consultar los calendarios de Microsoft 365.",
+      502
+    );
+  }
+
+  return summary;
+}
+
 async function syncAzureRequirements(req, res) {
   try {
     const azureData = await listRecentWorkItemsAllProjects();
@@ -963,10 +1232,22 @@ async function syncAzureRequirements(req, res) {
       }
       return summary;
     });
+    let calendario;
+    try {
+      calendario = await syncCalendarMeetings(req.body?.fecha, req.user?.id);
+    } catch (error) {
+      console.error("Error sincronizando calendarios de Microsoft 365", error);
+      calendario = {
+        error: error.statusCode === 403
+          ? "La aplicación de Entra ID requiere Calendars.ReadBasic o Calendars.Read como permiso de aplicación, con consentimiento de administrador."
+          : cleanText(error.message, 300) || "No fue posible sincronizar los calendarios."
+      };
+    }
     return res.json({
       organizacion: azureData.organization,
       proyectos: azureData.projectCount,
-      ...result
+      ...result,
+      calendario
     });
   } catch (error) {
     return handleError(res, error, "Error sincronizando Azure DevOps");
@@ -981,6 +1262,7 @@ async function getDashboard(req, res) {
     } catch (error) {
       throw new CapacityError(error.message);
     }
+    const calendarWindow = getCalendarWeekWindow(week);
     const configResult = await pool.query(
       `SELECT horas_semanales::float8 AS horas_semanales
        FROM configuracion_capacidad_fabrica WHERE id = 1`
@@ -1009,6 +1291,20 @@ async function getDashboard(req, res) {
        WHERE h.valido_desde <= $1
          AND (h.valido_hasta IS NULL OR h.valido_hasta > $1)`,
       [week.cutoff]
+    );
+    const calendarResult = await pool.query(
+      `SELECT a.public_id::text AS actividad_id, a.persona_id, a.titulo,
+              a.categoria_codigo, a.organizador_nombre, a.organizador_correo,
+              a.inicio, a.fin, a.web_url,
+              ROUND((EXTRACT(EPOCH FROM (
+                LEAST(a.fin, $2::timestamptz) - GREATEST(a.inicio, $1::timestamptz)
+              )) / 3600)::numeric, 2)::float8 AS horas_activas
+       FROM actividades_calendario_capacidad a
+       WHERE a.activo = TRUE
+         AND a.inicio < $2::timestamptz
+         AND a.fin > $1::timestamptz
+       ORDER BY a.inicio, a.id`,
+      [calendarWindow.startIso, calendarWindow.endIso]
     );
 
     const assignmentsByPerson = new Map();
@@ -1059,6 +1355,31 @@ async function getDashboard(req, res) {
         assignmentsByPerson.set(version.persona_id, []);
       }
       assignmentsByPerson.get(version.persona_id).push(detail);
+    }
+
+    for (const meeting of calendarResult.rows) {
+      if (!assignmentsByPerson.has(meeting.persona_id)) {
+        assignmentsByPerson.set(meeting.persona_id, []);
+      }
+      assignmentsByPerson.get(meeting.persona_id).push({
+        requerimiento_id: `calendario:${meeting.actividad_id}`,
+        titulo: meeting.titulo,
+        cliente: "",
+        origen: "MICROSOFT_365",
+        estado: "Programada",
+        estado_codigo: "PLANIFICADO",
+        categoria: "REUNIONES",
+        tipo_registro: "ACTIVIDAD_CALENDARIO",
+        effort_total: Number(meeting.horas_activas),
+        effort_pendiente: false,
+        porcentaje_fase: 100,
+        horas_activas: Number(meeting.horas_activas),
+        prioridad: 2,
+        fecha_inicio: meeting.inicio,
+        fecha_fin: meeting.fin,
+        organizador: meeting.organizador_nombre || meeting.organizador_correo,
+        web_url: meeting.web_url
+      });
     }
 
     const people = membersResult.rows.map((person) => {
@@ -1154,6 +1475,7 @@ module.exports = {
   listRequirements,
   materializeMicrosoftPerson,
   syncAzureRequirements,
+  syncCalendarMeetings,
   updateFactoryMembership,
   updateManualRequirement,
   updateRequirementDistribution

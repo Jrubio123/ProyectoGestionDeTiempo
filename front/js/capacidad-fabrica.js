@@ -198,14 +198,28 @@ window.capacidadFabricaApp = function () {
             this.cargando = true;
             this.error = "";
             try {
-                const response = await axios.post(`${API}/capacidad-fabrica/sincronizar-azure`, {}, this.authConfig());
+                const response = await axios.post(
+                    `${API}/capacidad-fabrica/sincronizar-azure`,
+                    { fecha: this.weekDate },
+                    this.authConfig()
+                );
                 const data = response.data || {};
                 this.clearDataCache();
                 await Promise.all([this.cargarCatalogos(), this.cargarRequerimientos(true), this.cargarDashboard(true)]);
                 const pending = Number(data.effort_pendiente || 0);
+                const calendar = data.calendario || {};
+                if (calendar.error) {
+                    this.error = `Azure DevOps se sincronizó, pero Microsoft 365 no: ${calendar.error}`;
+                } else if (Number(calendar.personas_con_error || 0) > 0) {
+                    this.error = `Microsoft 365 no pudo consultar ${calendar.personas_con_error} calendario(s).`;
+                }
+                const calendarSummary = calendar.error
+                    ? ""
+                    : ` Microsoft 365: ${calendar.creadas || 0} reuniones nuevas, ${calendar.actualizadas || 0} actualizadas y ${calendar.desactivadas || 0} retiradas.`;
                 this.notify(
                     `Azure sincronizado: ${data.creados || 0} nuevos, ${data.actualizados || 0} actualizados` +
-                    (pending ? ` y ${pending} con Effort pendiente.` : ".")
+                    (pending ? ` y ${pending} con Effort pendiente.` : ".") +
+                    calendarSummary
                 );
             } catch (error) {
                 this.error = this.errorText(error, "No se pudo sincronizar Azure DevOps.");

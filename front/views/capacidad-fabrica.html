@@ -2,7 +2,7 @@
     <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
             <h1 class="text-2xl font-bold text-slate-900">Capacidad de Fábrica</h1>
-            <p class="mt-1 text-sm text-slate-500">Carga semanal de consultores internos con datos de Azure DevOps y requerimientos manuales.</p>
+            <p class="mt-1 text-sm text-slate-500">Carga semanal con Azure DevOps, reuniones de Microsoft 365 y actividades manuales.</p>
         </div>
         <div class="flex flex-wrap gap-2" x-show="puedeGestionar">
             <button @click="abrirActividad()" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
@@ -12,7 +12,7 @@
                 Nuevo requerimiento
             </button>
             <button @click="sincronizarAzure()" :disabled="cargando" class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-                <span x-text="cargando ? 'Procesando…' : 'Sincronizar Azure'"></span>
+                <span x-text="cargando ? 'Procesando…' : 'Sincronizar capacidad'"></span>
             </button>
         </div>
     </div>
@@ -100,7 +100,11 @@
                                 <template x-for="assignment in person.asignaciones" :key="assignment.requerimiento_id">
                                     <tr>
                                         <td class="py-2 pr-4 text-slate-600" x-text="assignment.cliente || '—'"></td>
-                                        <td class="py-2 pr-4 font-medium text-slate-800" x-text="assignment.titulo"></td>
+                                        <td class="py-2 pr-4 font-medium text-slate-800">
+                                            <a x-show="assignment.web_url" :href="assignment.web_url" target="_blank" rel="noopener" class="text-blue-700 hover:underline" x-text="assignment.titulo"></a>
+                                            <span x-show="!assignment.web_url" x-text="assignment.titulo"></span>
+                                            <p x-show="assignment.origen === 'MICROSOFT_365'" class="text-xs font-normal text-slate-400">Microsoft 365 · Reuniones</p>
+                                        </td>
                                         <td class="py-2 pr-4 text-slate-600" x-text="assignment.estado"></td>
                                         <td class="py-2 text-right font-semibold">
                                             <span x-show="!assignment.effort_pendiente"><span x-text="formatNumber(assignment.horas_activas)"></span> h</span>

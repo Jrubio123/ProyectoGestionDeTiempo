@@ -1,4 +1,6 @@
 const STATE_ALIASES = new Map([
+  ["planificado", "PLANIFICADO"],
+  ["planificada", "PLANIFICADO"],
   ["en estimacion", "EN_ESTIMACION"],
   ["en aprobacion", "EN_APROBACION"],
   ["aprobado", "APROBADO"],

@@ -188,6 +188,20 @@ window.entregasServicioApp = function () {
 
         async init() {
             if (!this.puedeCrear) this.tab = "historial";
+            
+            this.$watch('form.consultores_ids', (newIds) => {
+                newIds.forEach(id => {
+                    if (!this.form.consultores_tarifas[id]) {
+                        this.form.consultores_tarifas[id] = { tarifa_consultoria: "", moneda_tarifa_consultoria: "COP" };
+                    }
+                });
+                Object.keys(this.form.consultores_tarifas).forEach(id => {
+                    if (!newIds.includes(id)) {
+                        delete this.form.consultores_tarifas[id];
+                    }
+                });
+            });
+
             await Promise.all([this.cargarCatalogos(), this.cargarEntregas()]);
         },
         limpiarAlertas() {
@@ -273,18 +287,7 @@ window.entregasServicioApp = function () {
         quitarConsultorExterno(index) {
             this.form.consultores_externos.splice(index, 1);
         },
-        actualizarSeleccionConsultor(consultorId, seleccionado = this.form.consultores_ids.includes(consultorId)) {
-            if (seleccionado) {
-                if (!this.form.consultores_tarifas[consultorId]) {
-                    this.form.consultores_tarifas[consultorId] = {
-                        tarifa_consultoria: "",
-                        moneda_tarifa_consultoria: "COP"
-                    };
-                }
-                return;
-            }
-            delete this.form.consultores_tarifas[consultorId];
-        },
+
         agregarEnlace() {
             this.form.enlaces.push({ titulo: "", url: "" });
         },
@@ -305,6 +308,25 @@ window.entregasServicioApp = function () {
                     contacto_nuevo: this.form.contacto_id || this.clienteNuevoPreparado ? null : this.form.contacto_nuevo,
                     modulos_otros: this.modulosOtros
                 };
+
+                // Asegurar que las tarifas se envíen como números para evitar error 422
+                if (payload.consultores_tarifas) {
+                    const tarifasLimpias = {};
+                    for (const [id, t] of Object.entries(payload.consultores_tarifas)) {
+                        tarifasLimpias[id] = {
+                            ...t,
+                            tarifa_consultoria: t.tarifa_consultoria === "" ? null : Number(t.tarifa_consultoria)
+                        };
+                    }
+                    payload.consultores_tarifas = tarifasLimpias;
+                }
+                if (payload.consultores_externos) {
+                    payload.consultores_externos = payload.consultores_externos.map(c => ({
+                        ...c,
+                        tarifa_consultoria: c.tarifa_consultoria === "" ? null : Number(c.tarifa_consultoria)
+                    }));
+                }
+                
                 delete payload.modulos_otros_texto;
                 const response = await axios.post(`${API}/entregas-servicio`, payload);
                 const notification = response.data?.notificacion;

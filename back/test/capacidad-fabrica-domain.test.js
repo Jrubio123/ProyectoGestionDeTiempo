@@ -11,6 +11,7 @@ const {
 } = require("../src/services/capacidad-fabrica.domain");
 
 test("normaliza los estados configurados de Azure DevOps", () => {
+  assert.equal(normalizeStateCode("Planificada"), "PLANIFICADO");
   assert.equal(normalizeStateCode("En estimación"), "EN_ESTIMACION");
   assert.equal(normalizeStateCode("En desarollo"), "EN_DESARROLLO");
   assert.equal(normalizeStateCode("Garantía"), "GARANTIA");

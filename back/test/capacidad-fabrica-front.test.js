@@ -55,3 +55,34 @@ test("recalcula las horas manuales cuando cambia el Effort", () => {
   assert.equal(app.manual.effort_total, 80);
   assert.equal(app.manual.distribucion[0].horas, 20);
 });
+
+test("inicializa una actividad puntual de estimación", () => {
+  const app = createApp();
+  app.weekDate = "2026-08-31";
+  app.catalogos.categorias = [
+    { codigo: "REUNIONES", nombre: "Reuniones" },
+    { codigo: "ESTIMACION", nombre: "Estimación" }
+  ];
+
+  app.abrirActividad();
+
+  assert.equal(app.modalActividad, true);
+  assert.equal(app.actividad.categoria_codigo, "ESTIMACION");
+  assert.equal(app.actividad.fecha, "2026-08-31");
+  assert.equal(app.actividad.cliente_id, "");
+});
+
+test("limita los estados disponibles para actividades puntuales", () => {
+  const app = createApp();
+  app.catalogos.estados = [
+    { codigo: "PLANIFICADO" },
+    { codigo: "EN_DESARROLLO" },
+    { codigo: "CERRADO" },
+    { codigo: "CANCELADO" }
+  ];
+
+  assert.deepEqual(
+    app.estadosParaItem({ tipo_registro: "ACTIVIDAD" }).map((item) => item.codigo),
+    ["PLANIFICADO", "CERRADO", "CANCELADO"]
+  );
+});

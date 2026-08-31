@@ -5,8 +5,11 @@
             <p class="mt-1 text-sm text-slate-500">Carga semanal de consultores internos con datos de Azure DevOps y requerimientos manuales.</p>
         </div>
         <div class="flex flex-wrap gap-2" x-show="puedeGestionar">
+            <button @click="abrirActividad()" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+                Nueva actividad
+            </button>
             <button @click="abrirManual()" class="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
-                Nuevo manual
+                Nuevo requerimiento
             </button>
             <button @click="sincronizarAzure()" :disabled="cargando" class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
                 <span x-text="cargando ? 'Procesando…' : 'Sincronizar Azure'"></span>
@@ -142,8 +145,8 @@
                 <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                         <th class="px-4 py-3">ID / origen</th><th class="px-4 py-3">Cliente</th><th class="px-4 py-3">Título</th>
-                        <th class="px-4 py-3">Estado</th><th class="px-4 py-3 text-right">Effort</th><th class="px-4 py-3">Prioridad</th>
-                        <th class="px-4 py-3">Responsable</th><th class="px-4 py-3">Fin</th><th class="px-4 py-3 text-right">Acciones</th>
+                        <th class="px-4 py-3">Estado</th><th class="px-4 py-3 text-right">Horas / Effort</th><th class="px-4 py-3">Prioridad</th>
+                        <th class="px-4 py-3">Responsable</th><th class="px-4 py-3">Fecha / Fin</th><th class="px-4 py-3 text-right">Acciones</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
@@ -151,14 +154,14 @@
                         <tr class="hover:bg-slate-50">
                             <td class="px-4 py-3">
                                 <a x-show="item.azure_url" :href="item.azure_url" target="_blank" rel="noopener" class="font-semibold text-blue-600" x-text="item.external_id ? `#${item.external_id}` : 'Manual'"></a>
-                                <span x-show="!item.azure_url" class="font-semibold text-slate-700">Manual</span>
+                                <span x-show="!item.azure_url" class="font-semibold text-slate-700" x-text="item.tipo_registro === 'ACTIVIDAD' ? 'Actividad' : 'Manual'"></span>
                                 <p class="text-xs text-slate-400" x-text="item.origen === 'AZURE_DEVOPS' ? 'Azure' : 'Local'"></p>
                             </td>
                             <td class="px-4 py-3 text-slate-600" x-text="item.cliente || '—'"></td>
                             <td class="max-w-xs px-4 py-3"><p class="font-medium text-slate-900" x-text="item.titulo"></p><p class="text-xs text-slate-400" x-text="item.tipo"></p></td>
                             <td class="px-4 py-3">
                                 <select x-show="item.origen === 'MANUAL'" :value="item.estado_codigo" @change="const el = $event.target; cambiarEstado(item, el.value).finally(() => el.value = item.estado_codigo)" class="max-w-44 rounded-md border border-slate-300 px-2 py-1.5 text-xs">
-                                    <template x-for="state in catalogos.estados" :key="state.codigo"><option :value="state.codigo" x-text="state.nombre"></option></template>
+                                    <template x-for="state in estadosParaItem(item)" :key="state.codigo"><option :value="state.codigo" x-text="state.nombre"></option></template>
                                 </select>
                                 <span x-show="item.origen !== 'MANUAL'" class="rounded-full px-2.5 py-1 text-xs font-medium" :class="item.consume_capacidad ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'" x-text="item.estado"></span>
                             </td>
@@ -167,8 +170,8 @@
                             <td class="px-4 py-3 text-slate-600"><span x-text="item.responsable || 'Sin mapear'"></span><p x-show="!item.persona_id" class="text-xs text-amber-600">No relacionado con persona</p></td>
                             <td class="px-4 py-3 text-slate-600" x-text="formatDate(item.fecha_fin)"></td>
                             <td class="px-4 py-3 text-right whitespace-nowrap">
-                                <button @click="abrirDistribucion(item)" class="text-sm font-medium text-blue-600 hover:underline">Distribución</button>
-                                <button @click="verHistorial(item)" class="ml-3 text-sm font-medium text-slate-600 hover:underline">Historial</button>
+                                <button x-show="item.tipo_registro !== 'ACTIVIDAD'" @click="abrirDistribucion(item)" class="text-sm font-medium text-blue-600 hover:underline">Distribución</button>
+                                <button @click="verHistorial(item)" :class="item.tipo_registro !== 'ACTIVIDAD' ? 'ml-3' : ''" class="text-sm font-medium text-slate-600 hover:underline">Historial</button>
                             </td>
                         </tr>
                     </template>
@@ -220,6 +223,28 @@
         </div>
     </section>
 
+    <!-- Modal actividad puntual -->
+    <div x-show="modalActividad" class="fixed inset-0 z-50 !m-0 flex items-center justify-center bg-slate-900/50 p-4" @keydown.escape.window="modalActividad = false">
+        <div @click.outside="modalActividad = false" class="w-full max-w-2xl rounded-2xl bg-white px-4 pb-4 pt-3 shadow-xl sm:px-6 sm:pb-6 sm:pt-4">
+            <div class="flex items-start justify-between gap-4">
+                <div><h2 class="text-xl font-bold text-slate-900">Nueva actividad puntual</h2><p class="mt-1 text-sm text-slate-500">Reserva horas de una persona para una actividad concreta de la semana.</p></div>
+                <button @click="modalActividad = false" class="text-2xl text-slate-400">×</button>
+            </div>
+            <form @submit.prevent="guardarActividad()" class="mt-5 space-y-4">
+                <div class="grid gap-4 md:grid-cols-2">
+                    <label class="text-sm font-medium text-slate-700">Responsable<select required x-model="actividad.persona_id" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><option value="">Selecciona</option><template x-for="person in integrantesFabrica()" :key="person.id"><option :value="person.id" x-text="`${person.nombre || ''} ${person.apellidos || ''}`.trim()"></option></template></select></label>
+                    <label class="text-sm font-medium text-slate-700">Cliente <span class="font-normal text-slate-400">(opcional)</span><select x-model="actividad.cliente_id" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><option value="">Sin cliente</option><template x-for="client in catalogos.clientes" :key="client.id"><option :value="client.id" x-text="client.titulo"></option></template></select></label>
+                    <label class="text-sm font-medium text-slate-700 md:col-span-2">Actividad<input required maxlength="500" x-model="actividad.titulo" placeholder="Ej. Estimar nuevo reporte de ventas" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
+                    <label class="text-sm font-medium text-slate-700">Categoría<select required x-model="actividad.categoria_codigo" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><template x-for="category in catalogos.categorias" :key="category.codigo"><option :value="category.codigo" x-text="category.nombre"></option></template></select></label>
+                    <label class="text-sm font-medium text-slate-700">Horas<input required type="number" min="0.01" step="0.01" x-model.number="actividad.horas" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
+                    <label class="text-sm font-medium text-slate-700">Fecha<input required type="date" x-model="actividad.fecha" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
+                    <label class="text-sm font-medium text-slate-700">Prioridad<select x-model.number="actividad.prioridad" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><option :value="1">1 - Alta</option><option :value="2">2 - Media</option><option :value="3">3 - Baja</option></select></label>
+                </div>
+                <div class="flex justify-end gap-3"><button type="button" @click="modalActividad = false" class="rounded-lg border border-slate-300 px-4 py-2 text-sm">Cancelar</button><button type="submit" :disabled="guardandoActividad" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" x-text="guardandoActividad ? 'Guardando…' : 'Planificar actividad'"></button></div>
+            </form>
+        </div>
+    </div>
+
     <!-- Modal requerimiento manual -->
     <div x-show="modalManual" class="fixed inset-0 z-50 !m-0 flex items-center justify-center bg-slate-900/50 p-4" @keydown.escape.window="modalManual = false">
         <div @click.outside="modalManual = false" class="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white px-4 pb-4 pt-3 shadow-xl sm:px-6 sm:pb-6 sm:pt-4">
@@ -229,7 +254,7 @@
                     <label class="text-sm font-medium text-slate-700">Cliente<select required x-model="manual.cliente_id" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><option value="">Selecciona</option><template x-for="client in catalogos.clientes" :key="client.id"><option :value="client.id" x-text="client.titulo"></option></template></select></label>
                     <label class="text-sm font-medium text-slate-700">Responsable<select required x-model="manual.persona_id" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><option value="">Selecciona</option><template x-for="person in integrantesFabrica()" :key="person.id"><option :value="person.id" x-text="`${person.nombre || ''} ${person.apellidos || ''}`.trim()"></option></template></select></label>
                     <label class="text-sm font-medium text-slate-700">Tipo<input required x-model="manual.tipo" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
-                    <label class="text-sm font-medium text-slate-700">Estado<select required x-model="manual.estado_codigo" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><template x-for="state in catalogos.estados" :key="state.codigo"><option :value="state.codigo" x-text="state.nombre"></option></template></select></label>
+                    <label class="text-sm font-medium text-slate-700">Estado<select required x-model="manual.estado_codigo" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><template x-for="state in estadosRequerimientoManual()" :key="state.codigo"><option :value="state.codigo" x-text="state.nombre"></option></template></select></label>
                     <label class="text-sm font-medium text-slate-700 md:col-span-2">Título<input required x-model="manual.titulo" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
                     <label class="text-sm font-medium text-slate-700">Effort total<input required min="0" step="0.01" type="number" :value="manual.effort_total" @input="updateManualEffort($event.target.value)" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
                     <label class="text-sm font-medium text-slate-700">Prioridad<select x-model.number="manual.prioridad" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><option :value="1">1 - Alta</option><option :value="2">2 - Media</option><option :value="3">3 - Baja</option></select></label>

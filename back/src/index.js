@@ -1,9 +1,17 @@
 const path = require("path");
 const crypto = require("crypto");
 const fs = require("fs");
-const envFile =
-  process.env.NODE_ENV === "production" ? ".env_produccion" : ".env";
-require("dotenv").config({ path: path.resolve(process.cwd(), envFile) });
+const envFile = process.env.ENV_FILE ||
+  (process.env.NODE_ENV === "production" ? ".env_produccion" : ".env");
+const envCandidates = path.isAbsolute(envFile)
+  ? [envFile]
+  : [
+      path.resolve(process.cwd(), envFile),
+      path.resolve(__dirname, "..", envFile),
+      path.resolve(__dirname, "../..", envFile)
+    ];
+const resolvedEnvFile = envCandidates.find((candidate) => fs.existsSync(candidate));
+if (resolvedEnvFile) require("dotenv").config({ path: resolvedEnvFile });
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 const cors = require("cors");

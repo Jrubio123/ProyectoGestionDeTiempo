@@ -589,6 +589,7 @@ CREATE TABLE estados_requerimiento_capacidad
 INSERT INTO estados_requerimiento_capacidad
     (codigo, nombre, consume_capacidad, categoria_codigo, clasificacion, es_terminal, permite_reactivacion, orden)
 VALUES
+    ('PLANIFICADO', 'Planificada', FALSE, NULL, 'activo', FALSE, TRUE, 5),
     ('EN_ESTIMACION', 'En estimación', TRUE, 'ESTIMACION', 'activo', FALSE, TRUE, 10),
     ('EN_APROBACION', 'En aprobación', FALSE, NULL, 'espera', FALSE, TRUE, 20),
     ('APROBADO', 'Aprobado', FALSE, NULL, 'espera', FALSE, TRUE, 30),
@@ -641,6 +642,10 @@ CREATE TABLE requerimientos_capacidad
     azure_project_name VARCHAR(255),
     cliente_id INTEGER REFERENCES clientes(id) ON DELETE RESTRICT,
     cliente_nombre_origen VARCHAR(255),
+    tipo_registro VARCHAR(20) NOT NULL DEFAULT 'REQUERIMIENTO'
+        CHECK (tipo_registro IN ('REQUERIMIENTO', 'ACTIVIDAD')),
+    categoria_actividad_codigo VARCHAR(40)
+        REFERENCES categorias_esfuerzo_capacidad(codigo),
     tipo VARCHAR(120) NOT NULL,
     titulo TEXT NOT NULL,
     estado_id INTEGER NOT NULL REFERENCES estados_requerimiento_capacidad(id),
@@ -665,9 +670,16 @@ CREATE TABLE requerimientos_capacidad
     UNIQUE (origen, organizacion_azure, external_id),
     CONSTRAINT ck_requerimiento_manual_effort
         CHECK (origen <> 'MANUAL' OR effort_total IS NOT NULL),
-    CHECK (
-        (origen = 'AZURE_DEVOPS' AND external_id IS NOT NULL AND organizacion_azure IS NOT NULL)
-        OR (origen = 'MANUAL' AND cliente_id IS NOT NULL)
+    CONSTRAINT ck_requerimiento_capacidad_origen CHECK (
+        (origen = 'AZURE_DEVOPS' AND external_id IS NOT NULL
+            AND organizacion_azure IS NOT NULL AND tipo_registro = 'REQUERIMIENTO')
+        OR (origen = 'MANUAL' AND (tipo_registro = 'ACTIVIDAD' OR cliente_id IS NOT NULL))
+    ),
+    CONSTRAINT ck_requerimiento_actividad CHECK (
+        (tipo_registro = 'REQUERIMIENTO' AND categoria_actividad_codigo IS NULL)
+        OR (tipo_registro = 'ACTIVIDAD' AND origen = 'MANUAL'
+            AND categoria_actividad_codigo IS NOT NULL AND effort_total > 0
+            AND fecha_inicio IS NOT NULL AND fecha_fin = fecha_inicio)
     )
 );
 
@@ -675,6 +687,9 @@ CREATE INDEX idx_requerimientos_capacidad_persona ON requerimientos_capacidad(pe
 CREATE INDEX idx_requerimientos_capacidad_estado ON requerimientos_capacidad(estado_id);
 CREATE INDEX idx_requerimientos_capacidad_origen ON requerimientos_capacidad(origen);
 CREATE INDEX idx_requerimientos_capacidad_fecha_fin ON requerimientos_capacidad(fecha_fin);
+CREATE INDEX idx_requerimientos_capacidad_tipo_registro ON requerimientos_capacidad(tipo_registro);
+CREATE INDEX idx_requerimientos_capacidad_actividad_fecha
+    ON requerimientos_capacidad(fecha_inicio) WHERE tipo_registro = 'ACTIVIDAD';
 
 CREATE TABLE requerimiento_distribucion_capacidad
 (

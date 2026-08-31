@@ -16,6 +16,7 @@ router.patch("/personas/:id/fabrica", MEMBERSHIP, service.updateFactoryMembershi
 router.get("/dashboard", MANAGEMENT, service.getDashboard);
 router.get("/requerimientos", MANAGEMENT, service.listRequirements);
 router.post("/requerimientos/manual", MANAGEMENT, service.createManualRequirement);
+router.post("/actividades/manual", MANAGEMENT, service.createManualActivity);
 router.patch("/requerimientos/:id", MANAGEMENT, service.updateManualRequirement);
 router.put(
   "/requerimientos/:id/distribucion",

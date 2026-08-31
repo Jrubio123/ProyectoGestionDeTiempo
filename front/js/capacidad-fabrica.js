@@ -1,6 +1,6 @@
 window.capacidadFabricaApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
-    const CACHE_PREFIX = "capacidad-fabrica:v2";
+    const CACHE_PREFIX = "capacidad-fabrica:v3";
     const CACHE_TTL_MS = 15 * 60 * 1000;
 
     function todayInBogota() {
@@ -37,6 +37,9 @@ window.capacidadFabricaApp = function () {
         modalManual: false,
         guardandoManual: false,
         manual: {},
+        modalActividad: false,
+        guardandoActividad: false,
+        actividad: {},
         modalDistribucion: false,
         guardandoDistribucion: false,
         requerimientoDistribucion: null,
@@ -208,6 +211,42 @@ window.capacidadFabricaApp = function () {
                 this.error = this.errorText(error, "No se pudo sincronizar Azure DevOps.");
             } finally {
                 this.cargando = false;
+            }
+        },
+
+        abrirActividad() {
+            const defaultCategory = this.catalogos.categorias.find((item) => item.codigo === "ESTIMACION")
+                || this.catalogos.categorias[0];
+            this.actividad = {
+                cliente_id: "",
+                persona_id: "",
+                titulo: "",
+                categoria_codigo: defaultCategory?.codigo || "",
+                horas: "",
+                fecha: this.weekDate,
+                prioridad: 2
+            };
+            this.modalActividad = true;
+        },
+
+        async guardarActividad() {
+            this.guardandoActividad = true;
+            this.error = "";
+            try {
+                await axios.post(
+                    `${API}/capacidad-fabrica/actividades/manual`,
+                    this.actividad,
+                    this.authConfig()
+                );
+                this.modalActividad = false;
+                this.tab = "requerimientos";
+                this.clearDataCache();
+                await Promise.all([this.cargarRequerimientos(true), this.cargarDashboard(true)]);
+                this.notify("Actividad puntual planificada.");
+            } catch (error) {
+                this.error = this.errorText(error, "No se creó la actividad puntual.");
+            } finally {
+                this.guardandoActividad = false;
             }
         },
 
@@ -469,6 +508,19 @@ window.capacidadFabricaApp = function () {
 
         integrantesFabrica() {
             return this.personas.filter((person) => person.pertenece_fabrica);
+        },
+
+        estadosRequerimientoManual() {
+            return this.catalogos.estados.filter((state) => state.codigo !== "PLANIFICADO");
+        },
+
+        estadosParaItem(item) {
+            if (item?.tipo_registro === "ACTIVIDAD") {
+                return this.catalogos.estados.filter((state) =>
+                    ["PLANIFICADO", "CERRADO", "CANCELADO"].includes(state.codigo)
+                );
+            }
+            return this.estadosRequerimientoManual();
         },
 
         occupancyClass(value) {

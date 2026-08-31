@@ -1,6 +1,7 @@
 const https = require("https");
 
 const AZURE_DEVOPS_SCOPE = "499b84ac-1321-427f-aa17-267ca6975798/.default";
+const DEFAULT_AZURE_DEVOPS_ORGANIZATION = "fabricadev";
 const WORK_ITEMS_LIMIT = 200;
 const WORK_ITEMS_ORGANIZATION_LIMIT = 20000;
 const WORK_ITEM_FIELDS = [
@@ -34,21 +35,23 @@ class AzureDevOpsError extends Error {
 
 function getConfig() {
   const config = {
-    tenantId: String(
-      process.env.AZURE_DEVOPS_TENANT_ID || process.env.AZURE_TENANT_ID || ""
-    ).trim(),
-    clientId: String(
-      process.env.AZURE_DEVOPS_CLIENT_ID || process.env.AZURE_CLIENT_ID || ""
-    ).trim(),
-    clientSecret: String(
-      process.env.AZURE_DEVOPS_CLIENT_SECRET || process.env.AZURE_CLIENT_SECRET || ""
-    ).trim(),
-    organization: String(process.env.AZURE_DEVOPS_ORGANIZATION || "").trim()
+    tenantId: String(process.env.AZURE_DEVOPS_TENANT_ID || "").trim(),
+    clientId: String(process.env.AZURE_DEVOPS_CLIENT_ID || "").trim(),
+    clientSecret: String(process.env.AZURE_DEVOPS_CLIENT_SECRET || "").trim(),
+    organization: String(
+      process.env.AZURE_DEVOPS_ORGANIZATION || DEFAULT_AZURE_DEVOPS_ORGANIZATION
+    ).trim()
   };
 
+  const variableNames = {
+    tenantId: "AZURE_DEVOPS_TENANT_ID",
+    clientId: "AZURE_DEVOPS_CLIENT_ID",
+    clientSecret: "AZURE_DEVOPS_CLIENT_SECRET",
+    organization: "AZURE_DEVOPS_ORGANIZATION"
+  };
   const missing = Object.entries(config)
     .filter(([, value]) => !value)
-    .map(([key]) => key);
+    .map(([key]) => variableNames[key]);
 
   if (missing.length > 0) {
     throw new AzureDevOpsError(

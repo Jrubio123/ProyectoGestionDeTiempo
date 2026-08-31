@@ -33,6 +33,13 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_307DE4DE173B41DEA16867FD6BAE1388 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_622BA9DC3B874F1D884ECF9319877C93 }}
 
+      - name: Configure Azure DevOps organization
+        run: |
+          az webapp config appsettings set \
+            --resource-group "AppSilver" \
+            --name "BackApp" \
+            --settings AZURE_DEVOPS_ORGANIZATION=fabricadev
+
       - name: Deploy to Azure Web App
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v3

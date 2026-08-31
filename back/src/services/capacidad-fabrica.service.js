@@ -160,6 +160,8 @@ async function loadSnapshot(db, requirementId) {
     organizacion_azure: requirement.organizacion_azure,
     azure_project_name: requirement.azure_project_name,
     cliente: requirement.cliente_manual || requirement.cliente_nombre_origen,
+    tipo_registro: requirement.tipo_registro,
+    categoria_actividad_codigo: requirement.categoria_actividad_codigo,
     tipo: requirement.tipo,
     titulo: requirement.titulo,
     estado_codigo: requirement.estado_codigo,
@@ -397,7 +399,8 @@ async function listRequirements(req, res) {
       `SELECT r.public_id::text AS id, r.origen, r.external_id,
               r.organizacion_azure, r.azure_project_name,
               COALESCE(c.titulo, r.cliente_nombre_origen) AS cliente,
-              c.public_id::text AS cliente_id, r.tipo, r.titulo,
+              c.public_id::text AS cliente_id, r.tipo_registro,
+              r.categoria_actividad_codigo, r.tipo, r.titulo,
               e.codigo AS estado_codigo, e.nombre AS estado,
               e.consume_capacidad, e.categoria_codigo, e.clasificacion,
               e.es_terminal, r.estado_origen,
@@ -439,23 +442,34 @@ async function listRequirements(req, res) {
   }
 }
 
+async function resolveActiveClient(db, clientPublicId, required = true) {
+  if (!clientPublicId && !required) return null;
+  const result = await db.query(
+    `SELECT id, titulo FROM clientes
+     WHERE public_id = $1 AND activo = TRUE`,
+    [clientPublicId || null]
+  );
+  if (!result.rows[0]) throw new CapacityError("El cliente no existe o está inactivo.");
+  return result.rows[0];
+}
+
+async function resolveFactoryPerson(db, personPublicId) {
+  const result = await db.query(
+    `SELECT id, CONCAT_WS(' ', nombre, apellidos) AS nombre, correo_silver, azure_oid
+     FROM personas
+     WHERE public_id = $1 AND estado = 'activo' AND pertenece_fabrica = TRUE`,
+    [personPublicId]
+  );
+  if (!result.rows[0]) throw new CapacityError("El responsable debe pertenecer a Fábrica.");
+  return result.rows[0];
+}
+
 async function resolveManualRelations(db, clientPublicId, personPublicId) {
-  const [clientResult, personResult] = await Promise.all([
-    db.query(
-      `SELECT id, titulo FROM clientes
-       WHERE public_id = $1 AND activo = TRUE`,
-      [clientPublicId]
-    ),
-    db.query(
-      `SELECT id, CONCAT_WS(' ', nombre, apellidos) AS nombre, correo_silver, azure_oid
-       FROM personas
-       WHERE public_id = $1 AND estado = 'activo' AND pertenece_fabrica = TRUE`,
-      [personPublicId]
-    )
+  const [client, person] = await Promise.all([
+    resolveActiveClient(db, clientPublicId),
+    resolveFactoryPerson(db, personPublicId)
   ]);
-  if (!clientResult.rows[0]) throw new CapacityError("El cliente no existe o está inactivo.");
-  if (!personResult.rows[0]) throw new CapacityError("El responsable debe pertenecer a Fábrica.");
-  return { client: clientResult.rows[0], person: personResult.rows[0] };
+  return { client, person };
 }
 
 function validateEffort(value) {
@@ -523,6 +537,81 @@ async function createManualRequirement(req, res) {
   }
 }
 
+async function createManualActivity(req, res) {
+  try {
+    const payload = req.body || {};
+    const result = await withTransaction(async (client) => {
+      const title = cleanText(payload.titulo);
+      if (!title) throw new CapacityError("El nombre de la actividad es obligatorio.");
+
+      const categoryCode = cleanText(payload.categoria_codigo, 40)?.toUpperCase();
+      const categoryResult = await client.query(
+        `SELECT codigo, nombre
+         FROM categorias_esfuerzo_capacidad
+         WHERE codigo = $1 AND activo = TRUE`,
+        [categoryCode || null]
+      );
+      const category = categoryResult.rows[0];
+      if (!category) throw new CapacityError("La categoría de la actividad no es válida.");
+
+      const hours = validateEffort(payload.horas);
+      if (hours <= 0) throw new CapacityError("Las horas de la actividad deben ser mayores que cero.");
+      const activityDate = normalizeDateInput(payload.fecha, "actividad");
+      if (!activityDate) throw new CapacityError("La fecha de la actividad es obligatoria.");
+
+      const [state, person, relatedClient] = await Promise.all([
+        getStateByCode(client, "PLANIFICADO"),
+        resolveFactoryPerson(client, payload.persona_id),
+        resolveActiveClient(client, payload.cliente_id, false)
+      ]);
+      const priority = validatePriority(payload.prioridad ?? 2, true);
+      const insert = await client.query(
+        `INSERT INTO requerimientos_capacidad (
+           origen, tipo_registro, categoria_actividad_codigo,
+           cliente_id, cliente_nombre_origen, tipo, titulo, estado_id,
+           estado_origen, effort_total, prioridad, persona_id,
+           responsable_azure_id, responsable_correo, responsable_nombre,
+           fecha_inicio, fecha_fin, created_by, modified_by
+         ) VALUES (
+           'MANUAL', 'ACTIVIDAD', $1, $2, $3, $4, $5, $6,
+           $7, $8, $9, $10, $11, $12, $13, $14, $14, $15, $15
+         ) RETURNING id, public_id::text AS id_publico`,
+        [
+          category.codigo,
+          relatedClient?.id || null,
+          relatedClient?.titulo || null,
+          `Actividad puntual · ${category.nombre}`,
+          title,
+          state.id,
+          state.nombre,
+          hours,
+          priority,
+          person.id,
+          person.azure_oid,
+          person.correo_silver,
+          person.nombre,
+          activityDate,
+          req.user?.id || null
+        ]
+      );
+      await ensureDefaultDistribution(client, insert.rows[0].id);
+      await client.query(
+        `UPDATE requerimiento_distribucion_capacidad d
+         SET porcentaje = CASE WHEN c.codigo = $2 THEN 100 ELSE 0 END,
+             updated_at = CURRENT_TIMESTAMP
+         FROM categorias_esfuerzo_capacidad c
+         WHERE d.categoria_id = c.id AND d.requerimiento_id = $1`,
+        [insert.rows[0].id, category.codigo]
+      );
+      await writeHistory(client, insert.rows[0].id, "CREADO", req.user?.id);
+      return insert.rows[0];
+    });
+    return res.status(201).json({ id: result.id_publico });
+  } catch (error) {
+    return handleError(res, error, "Error creando la actividad puntual");
+  }
+}
+
 async function updateManualRequirement(req, res) {
   try {
     const payload = req.body || {};
@@ -538,6 +627,18 @@ async function updateManualRequirement(req, res) {
       if (!current) throw new CapacityError("Requerimiento no encontrado.", 404);
       if (current.origen !== "MANUAL") {
         throw new CapacityError("Los datos de Azure DevOps se actualizan desde Azure.", 409);
+      }
+
+      if (
+        current.tipo_registro === "ACTIVIDAD"
+        && payload.estado_codigo
+        && !["PLANIFICADO", "CERRADO", "CANCELADO"].includes(
+          normalizeStateCode(payload.estado_codigo) || String(payload.estado_codigo).toUpperCase()
+        )
+      ) {
+        throw new CapacityError(
+          "Una actividad puntual solo puede estar planificada, cerrada o cancelada."
+        );
       }
 
       const state = payload.estado_codigo
@@ -888,7 +989,7 @@ async function getDashboard(req, res) {
       `SELECT h.requerimiento_id, h.persona_id, h.effort_total::float8 AS effort_total,
               h.prioridad, h.fecha_inicio, h.fecha_fin, h.porcentajes_snapshot,
               h.datos_snapshot, e.codigo AS estado_codigo, e.nombre AS estado,
-              e.consume_capacidad, e.categoria_codigo
+              e.consume_capacidad, e.categoria_codigo, e.clasificacion
        FROM requerimientos_capacidad_historial h
        JOIN estados_requerimiento_capacidad e ON e.id = h.estado_id
        WHERE h.valido_desde <= $1
@@ -898,9 +999,27 @@ async function getDashboard(req, res) {
 
     const assignmentsByPerson = new Map();
     for (const version of versionsResult.rows) {
-      if (!version.persona_id || !version.consume_capacidad) continue;
+      if (!version.persona_id) continue;
+      const isActivity = version.datos_snapshot?.tipo_registro === "ACTIVIDAD";
+      if (isActivity) {
+        const startDate = dateOnly(version.fecha_inicio);
+        const endDate = dateOnly(version.fecha_fin) || startDate;
+        const overlapsWeek = startDate
+          && startDate <= week.endDate
+          && endDate >= week.startDate;
+        if (
+          !overlapsWeek
+          || !["PLANIFICADO", "CERRADO"].includes(version.estado_codigo)
+        ) continue;
+      } else if (!version.consume_capacidad) {
+        continue;
+      }
+      const activeCategory = isActivity
+        ? version.datos_snapshot?.categoria_actividad_codigo
+        : version.categoria_codigo;
+      if (!activeCategory) continue;
       const percentage = Number(
-        version.porcentajes_snapshot?.[version.categoria_codigo] || 0
+        version.porcentajes_snapshot?.[activeCategory] || 0
       );
       const hasEffort = version.effort_total !== null && version.effort_total !== undefined;
       const hours = hasEffort
@@ -913,7 +1032,8 @@ async function getDashboard(req, res) {
         origen: version.datos_snapshot?.origen || "",
         estado: version.estado,
         estado_codigo: version.estado_codigo,
-        categoria: version.categoria_codigo,
+        categoria: activeCategory,
+        tipo_registro: isActivity ? "ACTIVIDAD" : "REQUERIMIENTO",
         effort_total: hasEffort ? Number(version.effort_total) : null,
         effort_pendiente: !hasEffort,
         porcentaje_fase: percentage,
@@ -1011,6 +1131,7 @@ function handleError(res, error, fallback) {
 
 module.exports = {
   CapacityError,
+  createManualActivity,
   createManualRequirement,
   getCatalogs,
   getDashboard,

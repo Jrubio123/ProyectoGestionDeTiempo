@@ -64,7 +64,12 @@ test("el frontend exige consultor en outsourcing", () => {
   });
   assert.equal(app.formularioValido, false);
   app.form.consultores_ids = ["consultor"];
-  app.form.consultores_tarifas.consultor = { tarifa_consultoria: 100, moneda_tarifa_consultoria: "COP" };
+  app.form.consultores_tarifas.consultor = {
+    tarifa_consultoria: 100,
+    moneda_tarifa_consultoria: "COP",
+    modulos_ids: ["modulo"],
+    modulos_otros: []
+  };
   assert.equal(app.formularioValido, true);
 });
 
@@ -82,7 +87,9 @@ test("un consultor no registrado completo satisface outsourcing", () => {
     nombre: "Consultor externo",
     telefono: "3001234567",
     tarifa_consultoria: 100,
-    moneda_tarifa_consultoria: "USD"
+    moneda_tarifa_consultoria: "USD",
+    modulos_ids: ["modulo"],
+    modulos_otros: []
   };
 
   assert.equal(app.formularioValido, true);
@@ -103,7 +110,12 @@ test("exige tarifa para cada consultor agregado en cualquier tipo", () => {
   });
   app.form.consultores_ids = ["consultor"];
   assert.equal(app.formularioValido, false);
-  app.form.consultores_tarifas.consultor = { tarifa_consultoria: 250, moneda_tarifa_consultoria: "EUR" };
+  app.form.consultores_tarifas.consultor = {
+    tarifa_consultoria: 250,
+    moneda_tarifa_consultoria: "EUR",
+    modulos_ids: ["modulo"],
+    modulos_otros: []
+  };
   assert.equal(app.formularioValido, true);
 });
 
@@ -191,7 +203,8 @@ test("precarga todos los datos de una entrega devuelta para corregirla", async (
         id: "consultor",
         tipo: "USUARIO",
         tarifa_consultoria: "500000",
-        moneda_tarifa_consultoria: "COP"
+        moneda_tarifa_consultoria: "COP",
+        modulos: [{ id: "modulo", nombre: "FI" }, { id: "", nombre: "B1" }]
       },
       {
         id: "externo",
@@ -199,7 +212,8 @@ test("precarga todos los datos de una entrega devuelta para corregirla", async (
         nombre: "Consultor externo",
         telefono: "300",
         tarifa_consultoria: "50",
-        moneda_tarifa_consultoria: "USD"
+        moneda_tarifa_consultoria: "USD",
+        modulos: [{ id: "", nombre: "RE" }]
       }
     ],
     modulos: [{ id: "modulo", nombre: "FI" }, { id: "", nombre: "RE" }],
@@ -216,7 +230,10 @@ test("precarga todos los datos de una entrega devuelta para corregirla", async (
   assert.equal(app.tab, "nueva");
   assert.equal(app.form.contacto_id, "contacto");
   assert.deepEqual(app.form.consultores_ids, ["consultor"]);
+  assert.deepEqual(app.form.consultores_tarifas.consultor.modulos_ids, ["modulo"]);
+  assert.deepEqual(app.form.consultores_tarifas.consultor.modulos_otros, ["B1"]);
   assert.equal(app.form.consultores_externos[0].nombre, "Consultor externo");
+  assert.deepEqual(app.form.consultores_externos[0].modulos_otros, ["RE"]);
   assert.deepEqual(app.form.modulos_ids, ["modulo"]);
   assert.equal(app.form.modulos_otros_texto, "RE");
   assert.equal(app.form.detalle.tiene_contrato, "false");

@@ -79,6 +79,10 @@ window.entregasServicioApp = function () {
                 .map((item) => item.trim())
                 .filter(Boolean))];
         },
+        get modulosCatalogoSeleccionados() {
+            const selected = new Set(this.form.modulos_ids);
+            return this.catalogos.modulos.filter((item) => selected.has(item.id));
+        },
         get modulosFiltrados() {
             const query = this.busquedaModulo.trim().toLowerCase();
             if (!query) return this.catalogos.modulos;
@@ -133,12 +137,14 @@ window.entregasServicioApp = function () {
             return this.form.consultores_externos.every((item) =>
                 String(item.nombre || "").trim() &&
                 String(item.telefono || "").trim() &&
-                this.tarifaConsultorValida(item)
+                this.tarifaConsultorValida(item) &&
+                this.modulosConsultorValidos(item)
             );
         },
         get tarifasConsultoresValidas() {
             return this.form.consultores_ids.every((id) =>
-                this.tarifaConsultorValida(this.form.consultores_tarifas[id])
+                this.tarifaConsultorValida(this.form.consultores_tarifas[id]) &&
+                this.modulosConsultorValidos(this.form.consultores_tarifas[id])
             );
         },
         get enlacesValidos() {
@@ -193,7 +199,12 @@ window.entregasServicioApp = function () {
             this.$watch('form.consultores_ids', (newIds) => {
                 newIds.forEach(id => {
                     if (!this.form.consultores_tarifas[id]) {
-                        this.form.consultores_tarifas[id] = { tarifa_consultoria: "", moneda_tarifa_consultoria: "COP" };
+                        this.form.consultores_tarifas[id] = {
+                            tarifa_consultoria: "",
+                            moneda_tarifa_consultoria: "COP",
+                            modulos_ids: [],
+                            modulos_otros: []
+                        };
                     }
                 });
                 Object.keys(this.form.consultores_tarifas).forEach(id => {
@@ -202,6 +213,8 @@ window.entregasServicioApp = function () {
                     }
                 });
             });
+            this.$watch('form.modulos_ids', () => this.sincronizarModulosConsultores());
+            this.$watch('form.modulos_otros_texto', () => this.sincronizarModulosConsultores());
 
             await Promise.all([this.cargarCatalogos(), this.cargarEntregas()]);
         },
@@ -214,6 +227,29 @@ window.entregasServicioApp = function () {
             const currency = String(item?.moneda_tarifa_consultoria || "").toUpperCase();
             return rawValue !== "" && Number.isFinite(Number(rawValue)) && Number(rawValue) >= 0 &&
                 ["COP", "USD", "EUR"].includes(currency);
+        },
+        modulosConsultorValidos(item) {
+            const selectedIds = new Set(this.form.modulos_ids);
+            const selectedOthers = new Set(this.modulosOtros.map((name) => name.toLowerCase()));
+            const moduleIds = Array.isArray(item?.modulos_ids) ? item.modulos_ids : [];
+            const otherModules = Array.isArray(item?.modulos_otros) ? item.modulos_otros : [];
+            return Boolean(moduleIds.length || otherModules.length) &&
+                moduleIds.every((id) => selectedIds.has(id)) &&
+                otherModules.every((name) => selectedOthers.has(String(name).toLowerCase()));
+        },
+        sincronizarModulosConsultores() {
+            const selectedIds = new Set(this.form.modulos_ids);
+            const selectedOthers = new Map(this.modulosOtros.map((name) => [name.toLowerCase(), name]));
+            const clean = (item) => {
+                if (!item) return;
+                item.modulos_ids = (Array.isArray(item.modulos_ids) ? item.modulos_ids : [])
+                    .filter((id) => selectedIds.has(id));
+                item.modulos_otros = (Array.isArray(item.modulos_otros) ? item.modulos_otros : [])
+                    .map((name) => selectedOthers.get(String(name).toLowerCase()))
+                    .filter(Boolean);
+            };
+            Object.values(this.form.consultores_tarifas).forEach(clean);
+            this.form.consultores_externos.forEach(clean);
         },
         async cargarCatalogos() {
             try {
@@ -286,7 +322,9 @@ window.entregasServicioApp = function () {
                 nombre: "",
                 telefono: "",
                 tarifa_consultoria: "",
-                moneda_tarifa_consultoria: "COP"
+                moneda_tarifa_consultoria: "COP",
+                modulos_ids: [],
+                modulos_otros: []
             });
         },
         quitarConsultorExterno(index) {
@@ -346,14 +384,18 @@ window.entregasServicioApp = function () {
                     consultor.id,
                     {
                         tarifa_consultoria: consultor.tarifa_consultoria ?? "",
-                        moneda_tarifa_consultoria: consultor.moneda_tarifa_consultoria || "COP"
+                        moneda_tarifa_consultoria: consultor.moneda_tarifa_consultoria || "COP",
+                        modulos_ids: (consultor.modulos || []).filter((modulo) => modulo.id).map((modulo) => modulo.id),
+                        modulos_otros: (consultor.modulos || []).filter((modulo) => !modulo.id).map((modulo) => modulo.nombre)
                     }
                 ])),
                 consultores_externos: externos.map((consultor) => ({
                     nombre: consultor.nombre || "",
                     telefono: consultor.telefono || "",
                     tarifa_consultoria: consultor.tarifa_consultoria ?? "",
-                    moneda_tarifa_consultoria: consultor.moneda_tarifa_consultoria || "COP"
+                    moneda_tarifa_consultoria: consultor.moneda_tarifa_consultoria || "COP",
+                    modulos_ids: (consultor.modulos || []).filter((modulo) => modulo.id).map((modulo) => modulo.id),
+                    modulos_otros: (consultor.modulos || []).filter((modulo) => !modulo.id).map((modulo) => modulo.nombre)
                 })),
                 modulos_ids: modulos.filter((modulo) => modulo.id).map((modulo) => modulo.id),
                 modulos_otros_texto: modulos.filter((modulo) => !modulo.id).map((modulo) => modulo.nombre).join(", "),

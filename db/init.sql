@@ -2035,6 +2035,7 @@ CREATE INDEX idx_registro_asignaciones_compuesto ON registro_asignaciones(
 \ir migrations/2026-08-26-z-entregas-forma-pago-monetaria.sql
 \ir migrations/2026-08-26-zz-restaurar-forma-pago-texto.sql
 \ir migrations/2026-08-28-entregas-perfil-tarifas-consultor.sql
+\ir migrations/2026-09-01-entregas-consultores-modulos.sql
 
 
 

@@ -56,14 +56,24 @@ test("valida una tarifa por cada consultor seleccionado", () => {
   const payload = projectPayload();
   payload.consultores_ids = ["consultor-public-id"];
   payload.consultores_tarifas = {
-    "consultor-public-id": { tarifa_consultoria: 200000, moneda_tarifa_consultoria: "USD" }
+    "consultor-public-id": {
+      tarifa_consultoria: 200000,
+      moneda_tarifa_consultoria: "USD",
+      modulos_ids: ["modulo-public-id"],
+      modulos_otros: []
+    }
   };
   assert.deepEqual(validateEntregaPayload(payload).consultores_tarifas, payload.consultores_tarifas);
 
   payload.consultores_tarifas["consultor-public-id"].moneda_tarifa_consultoria = "GBP";
   assert.throws(() => validateEntregaPayload(payload), /moneda de la tarifa de consultoría no es válida/i);
 
-  payload.consultores_tarifas["consultor-public-id"] = { tarifa_consultoria: "", moneda_tarifa_consultoria: "COP" };
+  payload.consultores_tarifas["consultor-public-id"] = {
+    tarifa_consultoria: "",
+    moneda_tarifa_consultoria: "COP",
+    modulos_ids: ["modulo-public-id"],
+    modulos_otros: []
+  };
   assert.throws(() => validateEntregaPayload(payload), /tarifa de cada consultor seleccionado es obligatoria/i);
 });
 
@@ -89,8 +99,8 @@ test("acepta consultores informativos sin crear usuarios", () => {
   payload.tipo_servicio = "Outsourcing";
   payload.enlaces = [];
   payload.consultores_externos = [
-    { nombre: "Consultor por vincular", telefono: "3001234567", tarifa_consultoria: 5000000, moneda_tarifa_consultoria: "COP" },
-    { nombre: "Segundo consultor", telefono: "3019876543", tarifa_consultoria: 4500, moneda_tarifa_consultoria: "USD" }
+    { nombre: "Consultor por vincular", telefono: "3001234567", tarifa_consultoria: 5000000, moneda_tarifa_consultoria: "COP", modulos_ids: ["modulo-public-id"], modulos_otros: [] },
+    { nombre: "Segundo consultor", telefono: "3019876543", tarifa_consultoria: 4500, moneda_tarifa_consultoria: "USD", modulos_ids: ["modulo-public-id"], modulos_otros: [] }
   ];
   payload.detalle = {
     tiempo_descripcion: "6 meses",
@@ -102,6 +112,28 @@ test("acepta consultores informativos sin crear usuarios", () => {
   const normalized = validateEntregaPayload(payload);
   assert.equal(normalized.consultores_ids.length, 0);
   assert.deepEqual(normalized.consultores_externos, payload.consultores_externos);
+});
+
+test("asigna uno o varios módulos seleccionados a cada consultor", () => {
+  const payload = projectPayload();
+  payload.modulos_ids = ["modulo-fi", "modulo-abap"];
+  payload.modulos_otros = ["B1"];
+  payload.consultores_ids = ["consultor-public-id"];
+  payload.consultores_tarifas = {
+    "consultor-public-id": {
+      tarifa_consultoria: 200000,
+      moneda_tarifa_consultoria: "COP",
+      modulos_ids: ["modulo-fi", "modulo-abap"],
+      modulos_otros: ["b1"]
+    }
+  };
+
+  const normalized = validateEntregaPayload(payload);
+  assert.deepEqual(normalized.consultores_tarifas["consultor-public-id"].modulos_ids, ["modulo-fi", "modulo-abap"]);
+  assert.deepEqual(normalized.consultores_tarifas["consultor-public-id"].modulos_otros, ["B1"]);
+
+  payload.consultores_tarifas["consultor-public-id"].modulos_ids = ["modulo-no-seleccionado"];
+  assert.throws(() => validateEntregaPayload(payload), /no pertenecen a la entrega/i);
 });
 
 test("exige identificación y tarifa para consultores informativos", () => {
@@ -226,6 +258,17 @@ test("la ruta de creación queda reservada para Comercial", () => {
   assert.doesNotMatch(routeSource, /const CREATE[^\n]+Administrador/);
   assert.match(routeSource, /router\.patch\("\/:id\/asignacion", ADMIN, service\.reassignDelivery\)/);
   assert.match(routeSource, /router\.put\("\/:id\/rectificar", CREATE, service\.rectifyDelivery\)/);
+});
+
+test("la migración relaciona consultores con varios módulos de la entrega", () => {
+  const migration = fs.readFileSync(
+    path.resolve(__dirname, "../../db/migrations/2026-09-01-entregas-consultores-modulos.sql"),
+    "utf8"
+  );
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS entregas_servicio_consultores_modulos/);
+  assert.match(migration, /PRIMARY KEY \(entrega_consultor_id, entrega_modulo_id\)/);
+  assert.match(migration, /REFERENCES entregas_servicio_consultores\(id\) ON DELETE CASCADE/);
+  assert.match(migration, /REFERENCES entregas_servicio_modulos\(id\) ON DELETE CASCADE/);
 });
 
 test("la rectificación se limita a entregas devueltas del Comercial", () => {

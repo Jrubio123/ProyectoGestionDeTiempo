@@ -83,7 +83,17 @@ const DELIVERY_SELECT = `
         'telefono', ec.telefono_externo,
         'tarifa_consultoria', ec.tarifa_consultoria,
         'moneda_tarifa_consultoria', ec.moneda_tarifa_consultoria,
-        'es_principal', ec.es_principal
+        'es_principal', ec.es_principal,
+        'modulos', COALESCE((
+          SELECT json_agg(json_build_object(
+            'id', COALESCE(m.public_id::text, ''),
+            'nombre', COALESCE(m.titulo, em.modulo_otro)
+          ) ORDER BY COALESCE(m.titulo, em.modulo_otro))
+          FROM entregas_servicio_consultores_modulos ecm
+          JOIN entregas_servicio_modulos em ON em.id = ecm.entrega_modulo_id
+          LEFT JOIN modulo m ON m.id = em.modulo_id
+          WHERE ecm.entrega_consultor_id = ec.id
+        ), '[]'::json)
       ) ORDER BY ec.es_principal DESC, COALESCE(u.nombre_usuario, ec.nombre_externo))
       FROM entregas_servicio_consultores ec
       LEFT JOIN usuarios u ON u.id = ec.consultor_id
@@ -454,6 +464,23 @@ async function insertServiceDetail(client, entregaId, payload) {
   ]);
 }
 
+async function insertConsultantModules(client, consultantRowId, assignment, moduleIdsByPublicId, moduleIdsByName) {
+  const deliveryModuleIds = [
+    ...assignment.modulos_ids.map((id) => moduleIdsByPublicId.get(id)),
+    ...assignment.modulos_otros.map((name) => moduleIdsByName.get(name.toLowerCase()))
+  ];
+  if (deliveryModuleIds.some((id) => !id)) {
+    throw new EntregaValidationError("No se pudo relacionar un módulo con el consultor.", "consultores_modulos");
+  }
+  for (const deliveryModuleId of deliveryModuleIds) {
+    await client.query(`
+      INSERT INTO entregas_servicio_consultores_modulos
+        (entrega_consultor_id, entrega_modulo_id)
+      VALUES ($1, $2)
+    `, [consultantRowId, deliveryModuleId]);
+  }
+}
+
 async function insertDeliveryRelations(client, entregaId, payload, { contact, consultants, modules }) {
   await insertServiceDetail(client, entregaId, payload);
   await client.query(`
@@ -462,13 +489,33 @@ async function insertDeliveryRelations(client, entregaId, payload, { contact, co
     VALUES ($1, $2, 'INTERVENTOR')
   `, [entregaId, contact.id]);
 
+  const moduleIdsByPublicId = new Map();
+  const moduleIdsByName = new Map();
+  for (const module of modules) {
+    const inserted = await client.query(`
+      INSERT INTO entregas_servicio_modulos (entrega_servicio_id, modulo_id)
+      VALUES ($1, $2)
+      RETURNING id
+    `, [entregaId, module.id]);
+    moduleIdsByPublicId.set(module.public_id, inserted.rows[0].id);
+  }
+  for (const moduleName of payload.modulos_otros) {
+    const inserted = await client.query(`
+      INSERT INTO entregas_servicio_modulos (entrega_servicio_id, modulo_otro)
+      VALUES ($1, $2)
+      RETURNING id
+    `, [entregaId, moduleName]);
+    moduleIdsByName.set(moduleName.toLowerCase(), inserted.rows[0].id);
+  }
+
   for (const [index, consultant] of consultants.entries()) {
     const rate = payload.consultores_tarifas[consultant.public_id];
-    await client.query(`
+    const inserted = await client.query(`
       INSERT INTO entregas_servicio_consultores
         (entrega_servicio_id, consultor_id, tarifa_consultoria,
          moneda_tarifa_consultoria, es_principal)
       VALUES ($1, $2, $3, $4, $5)
+      RETURNING id
     `, [
       entregaId,
       consultant.id,
@@ -476,13 +523,21 @@ async function insertDeliveryRelations(client, entregaId, payload, { contact, co
       rate.moneda_tarifa_consultoria,
       index === 0
     ]);
+    await insertConsultantModules(
+      client,
+      inserted.rows[0].id,
+      rate,
+      moduleIdsByPublicId,
+      moduleIdsByName
+    );
   }
   for (const [index, consultant] of payload.consultores_externos.entries()) {
-    await client.query(`
+    const inserted = await client.query(`
       INSERT INTO entregas_servicio_consultores
         (entrega_servicio_id, consultor_id, nombre_externo, telefono_externo,
          tarifa_consultoria, moneda_tarifa_consultoria, es_principal)
       VALUES ($1, NULL, $2, $3, $4, $5, $6)
+      RETURNING id
     `, [
       entregaId,
       consultant.nombre,
@@ -491,18 +546,13 @@ async function insertDeliveryRelations(client, entregaId, payload, { contact, co
       consultant.moneda_tarifa_consultoria,
       consultants.length === 0 && index === 0
     ]);
-  }
-  for (const module of modules) {
-    await client.query(`
-      INSERT INTO entregas_servicio_modulos (entrega_servicio_id, modulo_id)
-      VALUES ($1, $2)
-    `, [entregaId, module.id]);
-  }
-  for (const moduleName of payload.modulos_otros) {
-    await client.query(`
-      INSERT INTO entregas_servicio_modulos (entrega_servicio_id, modulo_otro)
-      VALUES ($1, $2)
-    `, [entregaId, moduleName]);
+    await insertConsultantModules(
+      client,
+      inserted.rows[0].id,
+      consultant,
+      moduleIdsByPublicId,
+      moduleIdsByName
+    );
   }
 
   const linkRows = [];

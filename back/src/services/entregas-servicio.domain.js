@@ -77,7 +77,37 @@ function normalizeIdList(value) {
   return [...new Set(value.map(text).filter(Boolean))];
 }
 
-function normalizeExternalConsultants(value) {
+function normalizeModuleAssignments(item, selectedModuleIds, selectedOtherModules, fieldRoot) {
+  const moduleIds = normalizeIdList(item?.modulos_ids);
+  const selectedIds = new Set(selectedModuleIds);
+  if (moduleIds.some((id) => !selectedIds.has(id))) {
+    throw new EntregaValidationError(
+      "Uno o más módulos del consultor no pertenecen a la entrega.",
+      `${fieldRoot}.modulos_ids`
+    );
+  }
+
+  const selectedOthers = new Map(selectedOtherModules.map((name) => [name.toLowerCase(), name]));
+  const otherModules = [...new Set((Array.isArray(item?.modulos_otros) ? item.modulos_otros : [])
+    .map(text)
+    .filter(Boolean)
+    .map((name) => selectedOthers.get(name.toLowerCase()) || name))];
+  if (otherModules.some((name) => !selectedOthers.has(name.toLowerCase()))) {
+    throw new EntregaValidationError(
+      "Uno o más módulos personalizados del consultor no pertenecen a la entrega.",
+      `${fieldRoot}.modulos_otros`
+    );
+  }
+  if (moduleIds.length === 0 && otherModules.length === 0) {
+    throw new EntregaValidationError(
+      "Selecciona al menos un módulo para cada consultor.",
+      `${fieldRoot}.modulos_ids`
+    );
+  }
+  return { modulos_ids: moduleIds, modulos_otros: otherModules };
+}
+
+function normalizeExternalConsultants(value, selectedModuleIds, selectedOtherModules) {
   if (!Array.isArray(value)) return [];
   const seen = new Set();
   const result = [];
@@ -101,6 +131,12 @@ function normalizeExternalConsultants(value) {
       item?.moneda_tarifa_consultoria,
       `consultores_externos.${index}.moneda_tarifa_consultoria`
     );
+    const modules = normalizeModuleAssignments(
+      item,
+      selectedModuleIds,
+      selectedOtherModules,
+      `consultores_externos.${index}`
+    );
     const key = `${nombre.toLowerCase()}|${telefono}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -108,16 +144,23 @@ function normalizeExternalConsultants(value) {
       nombre,
       telefono,
       tarifa_consultoria: tarifaConsultoria,
-      moneda_tarifa_consultoria: monedaTarifaConsultoria
+      moneda_tarifa_consultoria: monedaTarifaConsultoria,
+      ...modules
     });
   }
   return result;
 }
 
-function normalizeRegisteredConsultantRates(publicIds, value) {
+function normalizeRegisteredConsultantRates(publicIds, value, selectedModuleIds, selectedOtherModules) {
   const rates = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return Object.fromEntries(publicIds.map((publicId) => {
     const item = rates[publicId] || {};
+    const modules = normalizeModuleAssignments(
+      item,
+      selectedModuleIds,
+      selectedOtherModules,
+      `consultores_tarifas.${publicId}`
+    );
     return [publicId, {
       tarifa_consultoria: parseMoney(
         item.tarifa_consultoria,
@@ -127,7 +170,8 @@ function normalizeRegisteredConsultantRates(publicIds, value) {
       moneda_tarifa_consultoria: normalizeCurrency(
         item.moneda_tarifa_consultoria,
         `consultores_tarifas.${publicId}.moneda_tarifa_consultoria`
-      )
+      ),
+      ...modules
     }];
   }));
 }
@@ -239,23 +283,32 @@ function validateEntregaPayload(payload = {}) {
     throw new EntregaValidationError("Selecciona el perfil del cliente.", "perfil_cliente");
   }
 
-  const consultoresIds = normalizeIdList(payload.consultores_ids);
-  const consultoresTarifas = normalizeRegisteredConsultantRates(consultoresIds, payload.consultores_tarifas);
-  const consultoresExternos = normalizeExternalConsultants(payload.consultores_externos);
-  if (
-    tipoServicio === TIPOS_SERVICIO.OUTSOURCING
-    && consultoresIds.length === 0
-    && consultoresExternos.length === 0
-  ) {
-    throw new EntregaValidationError("Outsourcing requiere al menos un consultor.", "consultores_ids");
-  }
-
   const modulosIds = normalizeIdList(payload.modulos_ids);
   const modulosOtros = [...new Set((Array.isArray(payload.modulos_otros) ? payload.modulos_otros : [])
     .map(text)
     .filter(Boolean))];
   if (modulosIds.length === 0 && modulosOtros.length === 0) {
     throw new EntregaValidationError("Selecciona o escribe al menos un módulo.", "modulos_ids");
+  }
+
+  const consultoresIds = normalizeIdList(payload.consultores_ids);
+  const consultoresTarifas = normalizeRegisteredConsultantRates(
+    consultoresIds,
+    payload.consultores_tarifas,
+    modulosIds,
+    modulosOtros
+  );
+  const consultoresExternos = normalizeExternalConsultants(
+    payload.consultores_externos,
+    modulosIds,
+    modulosOtros
+  );
+  if (
+    tipoServicio === TIPOS_SERVICIO.OUTSOURCING
+    && consultoresIds.length === 0
+    && consultoresExternos.length === 0
+  ) {
+    throw new EntregaValidationError("Outsourcing requiere al menos un consultor.", "consultores_ids");
   }
 
   const detail = validateDetail(payload, tipoServicio);

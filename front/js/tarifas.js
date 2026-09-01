@@ -14,7 +14,7 @@ window.tarifasApp = function () {
             tipos: []
         },
         tarifas: [],
-        filters: { cliente: "", consultor: "" },
+        filters: { cliente: "", consultor: "", modulo: "" },
         form: {
             id: null,
             cliente_id: "",
@@ -185,7 +185,10 @@ window.tarifasApp = function () {
                 const matchConsultor = this.filters.consultor
                     ? t.nombre_consultor === this.filters.consultor
                     : true;
-                return matchCliente && matchConsultor;
+                const matchModulo = this.filters.modulo
+                    ? t.nombre_modulo === this.filters.modulo
+                    : true;
+                return matchCliente && matchConsultor && matchModulo;
             });
         },
 

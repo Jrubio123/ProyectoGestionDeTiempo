@@ -256,7 +256,7 @@
                             <td class="px-4 py-3 text-right whitespace-nowrap">
                                 <button @click="abrirDetalle(item)" class="font-semibold text-blue-600">Ver</button>
                                 <button x-show="puedeRectificar(item)" @click="rectificar(item)" class="ml-3 rounded-md bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800">Rectificar</button>
-                                <button x-show="item.notificacion?.estado === 'ERROR'" @click="reintentarNotificacion(item)" class="ml-3 font-semibold text-amber-600">Reenviar</button>
+                                <button x-show="['ERROR', 'PENDIENTE'].includes(item.notificacion?.estado)" @click="reintentarNotificacion(item)" class="ml-3 font-semibold text-amber-600">Reenviar</button>
                                 <div x-show="puedeReasignar(item)" class="mt-2 flex justify-end gap-2">
                                     <select x-model="reasignaciones[item.id]" class="max-w-56 rounded-md border border-slate-300 px-2 py-1 text-xs">
                                         <template x-for="responsable in catalogos.coordinadores" :key="responsable.id"><option :value="responsable.id" :disabled="responsable.rol === 'Administrador' && !responsable.es_actual" x-text="`${responsable.nombre} · ${responsable.rol}`"></option></template>

@@ -601,8 +601,8 @@ function buildNotificationContent(delivery) {
 }
 
 async function sendAssignmentNotification({ delivery, notificationId, graphAccessToken }) {
-  const content = buildNotificationContent(delivery);
   try {
+    const content = buildNotificationContent(delivery);
     await sendEmail({
       to: delivery.coordinador.email,
       bcc: delivery.bcc,
@@ -786,7 +786,7 @@ async function rectifyDelivery(req, res) {
         tipo_servicio: payload.tipo_servicio,
         nombre_servicio: payload.nombre_servicio,
         cliente,
-        coordinador,
+        coordinador: coordinator,
         creador: { nombre_usuario: req.user.nombre_usuario || req.user.email || "Comercial" },
         asignador: { nombre_usuario: req.user.nombre_usuario || req.user.email || "Comercial" },
         consultores: [

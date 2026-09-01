@@ -235,6 +235,7 @@ test("la rectificación se limita a entregas devueltas del Comercial", () => {
   );
   assert.match(serviceSource, /AND creado_por = \$2 AND estado = 'CANCELADA'/);
   assert.match(serviceSource, /estado = 'REGISTRADA'/);
+  assert.match(serviceSource, /rectificada: true,[\s\S]{0,180}coordinador: coordinator/);
 });
 
 test("el detalle muestra los campos específicos de mesa y outsourcing", () => {
@@ -246,6 +247,7 @@ test("el detalle muestra los campos específicos de mesa y outsourcing", () => {
   assert.match(viewSource, /detalleSeleccionado\?\.detalle\?\.forma_pago/);
   assert.match(viewSource, /detalleSeleccionado\?\.detalle\?\.valor_cliente/);
   assert.match(viewSource, /detalleSeleccionado\?\.detalle\?\.tiene_contrato/);
+  assert.match(viewSource, /\['ERROR', 'PENDIENTE'\]\.includes\(item\.notificacion\?\.estado\)/);
 });
 
 test("el servicio no depende de cargas a OneDrive", () => {

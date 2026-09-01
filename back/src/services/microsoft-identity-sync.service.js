@@ -86,7 +86,7 @@ function assertCompatiblePersonAzureOid(person, oid) {
 async function findPersonById(db, personId) {
   if (!personId) return null;
   const result = await db.query(
-    `SELECT id, public_id, correo_silver, azure_oid
+    `SELECT id, public_id, correo_silver, azure_oid, pertenece_fabrica
      FROM personas
      WHERE id = $1
      FOR UPDATE`,
@@ -97,7 +97,7 @@ async function findPersonById(db, personId) {
 
 async function findPersonByCorporateIdentity(db, oid, email, documentNumber = null, personalEmail = null) {
   const result = await db.query(
-    `SELECT id, public_id, correo_silver, azure_oid
+    `SELECT id, public_id, correo_silver, azure_oid, pertenece_fabrica
      FROM personas
      WHERE azure_oid = $1
         OR LOWER(BTRIM(correo_silver)) = $2
@@ -138,7 +138,7 @@ async function createPerson(db, identity) {
        numero_documento, numero_contacto, correo_electronico
      )
      VALUES ($1, $2, $3, $4, 'activo', $5, $6, $7)
-     RETURNING id, public_id, correo_silver, azure_oid`,
+     RETURNING id, public_id, correo_silver, azure_oid, pertenece_fabrica`,
     [
       identity.firstName,
       identity.lastName,
@@ -170,7 +170,7 @@ async function syncPerson(db, personId, identity) {
          numero_documento = COALESCE(NULLIF(BTRIM(numero_documento), ''), $7),
          updated_at = CURRENT_TIMESTAMP
      WHERE id = $8
-     RETURNING id, public_id, correo_silver, azure_oid`,
+     RETURNING id, public_id, correo_silver, azure_oid, pertenece_fabrica`,
     [
       identity.email,
       identity.oid,
@@ -371,9 +371,18 @@ async function syncMicrosoftIdentity(db, input) {
     };
   }
 
+  let effectiveRoleId = defaultRoleId;
+  if (!user && person.pertenece_fabrica) {
+    const factoryRole = await db.query(
+      `SELECT id FROM roles
+       WHERE LOWER(BTRIM(titulo)) IN ('fábrica', 'fabrica') AND activo = TRUE
+       LIMIT 1`
+    );
+    effectiveRoleId = factoryRole.rows[0]?.id || defaultRoleId;
+  }
   const syncedUser = user
     ? await syncUser(db, user.id, person.id, identity, recordLogin)
-    : await createUser(db, person.id, identity, defaultRoleId);
+    : await createUser(db, person.id, identity, effectiveRoleId);
 
   if (!syncedUser?.id) {
     throw new MicrosoftIdentitySyncError(

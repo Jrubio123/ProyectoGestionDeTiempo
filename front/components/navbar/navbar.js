@@ -14,6 +14,7 @@ function getRoleRoutes() {
             "soportes-cuentas-cobro",
             "gestion-consultores"
         ],
+        fabrica: ["inicio"],
         consultor_principal: [
             "inicio",
             "mis-asignaciones-consultor",

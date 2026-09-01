@@ -366,6 +366,7 @@ CREATE TABLE usuarios
 
     -- Rol y estado
     rol_usuario_id INTEGER REFERENCES roles(id),
+    rol_previo_fabrica_id INTEGER REFERENCES roles(id) ON DELETE SET NULL,
     activo BOOLEAN DEFAULT true,
 
     -- Datos bancarios
@@ -551,21 +552,23 @@ CREATE TABLE categorias_esfuerzo_capacidad
         CHECK (porcentaje_predeterminado BETWEEN 0 AND 100),
     orden SMALLINT NOT NULL DEFAULT 0,
     activo BOOLEAN NOT NULL DEFAULT TRUE,
+    aplica_distribucion BOOLEAN NOT NULL DEFAULT TRUE,
+    aplica_actividad BOOLEAN NOT NULL DEFAULT FALSE,
+    usa_bolsa BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 INSERT INTO categorias_esfuerzo_capacidad
-    (codigo, nombre, porcentaje_predeterminado, orden)
+    (codigo, nombre, porcentaje_predeterminado, orden,
+     aplica_distribucion, aplica_actividad, usa_bolsa)
 VALUES
-    ('DESARROLLO', 'Desarrollo', 55, 10),
-    ('PRUEBAS', 'Pruebas', 10, 20),
-    ('DOCUMENTACION', 'Documentación', 10, 30),
-    ('SOPORTE', 'Soporte', 5, 40),
-    ('ESTIMACION', 'Estimación', 5, 50),
-    ('REUNIONES', 'Reuniones', 5, 60),
-    ('AJUSTES', 'Ajustes', 5, 70),
-    ('GARANTIA', 'Garantía', 5, 80);
+    ('DESARROLLO_PRUEBAS', 'Desarrollo y pruebas', 85, 10, TRUE, FALSE, FALSE),
+    ('DOCUMENTACION', 'Documentación', 15, 20, TRUE, FALSE, FALSE),
+    ('SOPORTE', 'Soporte', 0, 30, FALSE, TRUE, FALSE),
+    ('AJUSTES_GARANTIA', 'Ajustes y garantía', 0, 40, FALSE, TRUE, FALSE),
+    ('ESTIMACION', 'Estimación', 0, 50, FALSE, TRUE, FALSE),
+    ('REUNIONES', 'Reuniones', 0, 60, FALSE, TRUE, TRUE);
 
 CREATE TABLE estados_requerimiento_capacidad
 (
@@ -590,15 +593,15 @@ INSERT INTO estados_requerimiento_capacidad
     (codigo, nombre, consume_capacidad, categoria_codigo, clasificacion, es_terminal, permite_reactivacion, orden)
 VALUES
     ('PLANIFICADO', 'Planificada', FALSE, NULL, 'activo', FALSE, TRUE, 5),
-    ('EN_ESTIMACION', 'En estimación', TRUE, 'ESTIMACION', 'activo', FALSE, TRUE, 10),
+    ('EN_ESTIMACION', 'En estimación', FALSE, NULL, 'activo', FALSE, TRUE, 10),
     ('EN_APROBACION', 'En aprobación', FALSE, NULL, 'espera', FALSE, TRUE, 20),
     ('APROBADO', 'Aprobado', FALSE, NULL, 'espera', FALSE, TRUE, 30),
-    ('EN_DESARROLLO', 'En desarrollo', TRUE, 'DESARROLLO', 'activo', FALSE, TRUE, 40),
-    ('EN_PRUEBAS', 'En pruebas', FALSE, NULL, 'espera', FALSE, TRUE, 50),
-    ('EN_AJUSTES', 'En ajustes', TRUE, 'AJUSTES', 'activo', FALSE, TRUE, 60),
+    ('EN_DESARROLLO', 'En desarrollo', TRUE, 'DESARROLLO_PRUEBAS', 'activo', FALSE, TRUE, 40),
+    ('EN_PRUEBAS', 'En pruebas', TRUE, 'DESARROLLO_PRUEBAS', 'activo', FALSE, TRUE, 50),
+    ('EN_AJUSTES', 'En ajustes', FALSE, NULL, 'activo', FALSE, TRUE, 60),
     ('PRUEBAS_EXITOSAS', 'Pruebas exitosas', FALSE, NULL, 'espera', FALSE, TRUE, 70),
     ('CERRADO', 'Cerrado', FALSE, NULL, 'completado', TRUE, FALSE, 80),
-    ('GARANTIA', 'Garantía', TRUE, 'GARANTIA', 'activo', FALSE, TRUE, 90),
+    ('GARANTIA', 'Garantía', FALSE, NULL, 'activo', FALSE, TRUE, 90),
     ('EN_ESPERA_CLIENTE', 'En espera cliente', FALSE, NULL, 'espera', FALSE, TRUE, 100),
     ('PENDIENTE_PASO_PRD', 'Pendiente paso a PRD', FALSE, NULL, 'espera', FALSE, TRUE, 110),
     ('REMOVED', 'Removed', FALSE, NULL, 'eliminado', TRUE, FALSE, 120),
@@ -733,45 +736,78 @@ CREATE INDEX idx_requerimiento_historial_corte
 CREATE INDEX idx_requerimiento_historial_persona
     ON requerimientos_capacidad_historial(persona_id, valido_desde);
 
-CREATE TABLE actividades_calendario_capacidad
+CREATE TABLE bolsas_reuniones_capacidad
 (
     id BIGSERIAL PRIMARY KEY,
     public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
-    persona_id INTEGER NOT NULL REFERENCES personas(id) ON DELETE CASCADE,
-    coordinador_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
-    graph_event_id VARCHAR(512) NOT NULL,
-    graph_ical_uid VARCHAR(512),
-    categoria_codigo VARCHAR(40) NOT NULL DEFAULT 'REUNIONES'
-        REFERENCES categorias_esfuerzo_capacidad(codigo),
-    titulo TEXT NOT NULL,
-    organizador_nombre VARCHAR(255),
-    organizador_correo VARCHAR(255) NOT NULL,
-    inicio TIMESTAMPTZ NOT NULL,
-    fin TIMESTAMPTZ NOT NULL,
-    horas NUMERIC(10,2) NOT NULL CHECK (horas > 0),
-    estado_respuesta VARCHAR(30),
-    mostrar_como VARCHAR(30),
-    sensibilidad VARCHAR(30),
-    tipo_evento VARCHAR(30),
-    series_master_id VARCHAR(512),
-    web_url TEXT,
-    source_changed_at TIMESTAMPTZ,
-    last_synced_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    activo BOOLEAN NOT NULL DEFAULT TRUE,
-    sincronizado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    persona_id INTEGER NOT NULL REFERENCES personas(id) ON DELETE RESTRICT,
+    coordinador_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,
+    semana_inicio DATE NOT NULL,
+    semana_fin DATE NOT NULL,
+    estado VARCHAR(20) NOT NULL DEFAULT 'ABIERTA'
+        CHECK (estado IN ('ABIERTA', 'CERRADA')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_actividad_calendario_persona_evento UNIQUE (persona_id, graph_event_id),
-    CONSTRAINT ck_actividad_calendario_fechas CHECK (fin > inicio),
-    CONSTRAINT ck_actividad_calendario_categoria CHECK (categoria_codigo = 'REUNIONES')
+    CONSTRAINT uq_bolsa_reuniones_persona_semana UNIQUE (persona_id, semana_inicio),
+    CONSTRAINT ck_bolsa_reuniones_semana CHECK (semana_fin = semana_inicio + 4)
 );
 
-CREATE INDEX idx_actividad_calendario_persona_fechas
-    ON actividades_calendario_capacidad(persona_id, inicio, fin);
-CREATE INDEX idx_actividad_calendario_coordinador
-    ON actividades_calendario_capacidad(coordinador_id);
-CREATE INDEX idx_actividad_calendario_activa
-    ON actividades_calendario_capacidad(persona_id, activo) WHERE activo = TRUE;
+CREATE INDEX idx_bolsas_reuniones_semana
+    ON bolsas_reuniones_capacidad(semana_inicio, persona_id);
+
+CREATE TABLE actividades_capacidad
+(
+    id BIGSERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    titulo VARCHAR(500) NOT NULL,
+    cliente_id INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
+    categoria_codigo VARCHAR(40) NOT NULL REFERENCES categorias_esfuerzo_capacidad(codigo),
+    fecha DATE NOT NULL,
+    horas NUMERIC(8,2) NOT NULL CHECK (horas > 0 AND horas <= 168),
+    origen VARCHAR(20) NOT NULL CHECK (origen IN ('AUTORREGISTRO', 'COORDINADOR', 'MIGRACION')),
+    estado VARCHAR(20) NOT NULL DEFAULT 'ACTIVA' CHECK (estado IN ('ACTIVA', 'CANCELADA')),
+    creado_por INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,
+    cancelado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    cancelado_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_actividades_capacidad_fecha
+    ON actividades_capacidad(fecha, categoria_codigo);
+
+CREATE TABLE actividad_capacidad_responsables
+(
+    id BIGSERIAL PRIMARY KEY,
+    actividad_id BIGINT NOT NULL REFERENCES actividades_capacidad(id) ON DELETE RESTRICT,
+    persona_id INTEGER NOT NULL REFERENCES personas(id) ON DELETE RESTRICT,
+    bolsa_id BIGINT REFERENCES bolsas_reuniones_capacidad(id) ON DELETE RESTRICT,
+    horas NUMERIC(8,2) NOT NULL CHECK (horas > 0 AND horas <= 168),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_actividad_capacidad_responsable UNIQUE (actividad_id, persona_id)
+);
+
+CREATE INDEX idx_actividad_responsables_persona
+    ON actividad_capacidad_responsables(persona_id, actividad_id);
+
+CREATE TABLE bolsa_reuniones_movimientos
+(
+    id BIGSERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    bolsa_id BIGINT NOT NULL REFERENCES bolsas_reuniones_capacidad(id) ON DELETE RESTRICT,
+    actividad_responsable_id BIGINT REFERENCES actividad_capacidad_responsables(id) ON DELETE RESTRICT,
+    tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('ASIGNACION', 'AJUSTE', 'CONSUMO', 'REVERSO')),
+    horas_delta NUMERIC(8,2) NOT NULL CHECK (horas_delta <> 0),
+    motivo VARCHAR(500),
+    registrado_por INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX uq_movimiento_consumo_responsable
+    ON bolsa_reuniones_movimientos(actividad_responsable_id, tipo)
+    WHERE actividad_responsable_id IS NOT NULL;
+CREATE INDEX idx_bolsa_movimientos_bolsa_fecha
+    ON bolsa_reuniones_movimientos(bolsa_id, created_at);
 
 CREATE TABLE exportaciones_personas_auditoria
 (
@@ -1635,7 +1671,8 @@ VALUES
     ('Contabilidad', 'equipo contable', true),
     ('Reclutador', 'Usuario encargado de reclutar y gestionar candidatos y consultores', true),
     ('Talento Humano', 'Usuario de Talento Humano para onboarding y aprobacion de preregistros', true),
-    ('Comercial', 'Usuario del área comercial para solicitudes de contratación', true);
+    ('Comercial', 'Usuario del área comercial para solicitudes de contratación', true),
+    ('Fábrica', 'Integrante interno cuya capacidad semanal es medida', true);
 
 INSERT INTO documento_identidad
     (titulo, codigo, activo)

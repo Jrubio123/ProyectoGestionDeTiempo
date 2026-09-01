@@ -1,6 +1,6 @@
 window.capacidadFabricaApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
-    const CACHE_PREFIX = "capacidad-fabrica:v3";
+    const CACHE_PREFIX = "capacidad-fabrica:v4";
     const CACHE_TTL_MS = 15 * 60 * 1000;
 
     function todayInBogota() {
@@ -21,7 +21,7 @@ window.capacidadFabricaApp = function () {
         cargando: false,
         error: "",
         mensaje: "",
-        catalogos: { categorias: [], estados: [], clientes: [], configuracion: { horas_semanales: 42 } },
+        catalogos: { categorias: [], categorias_actividad: [], estados: [], clientes: [], configuracion: { horas_semanales: 42 } },
         dashboard: { semana: {}, resumen: {}, personas: [] },
         requerimientos: [],
         personas: [],
@@ -40,6 +40,12 @@ window.capacidadFabricaApp = function () {
         modalActividad: false,
         guardandoActividad: false,
         actividad: {},
+        modalBolsa: false,
+        guardandoBolsa: false,
+        bolsa: {},
+        modalMovimientosBolsa: false,
+        cargandoMovimientosBolsa: false,
+        historialBolsa: { bolsa: {}, movimientos: [] },
         modalDistribucion: false,
         guardandoDistribucion: false,
         requerimientoDistribucion: null,
@@ -207,19 +213,9 @@ window.capacidadFabricaApp = function () {
                 this.clearDataCache();
                 await Promise.all([this.cargarCatalogos(), this.cargarRequerimientos(true), this.cargarDashboard(true)]);
                 const pending = Number(data.effort_pendiente || 0);
-                const calendar = data.calendario || {};
-                if (calendar.error) {
-                    this.error = `Azure DevOps se sincronizó, pero Microsoft 365 no: ${calendar.error}`;
-                } else if (Number(calendar.personas_con_error || 0) > 0) {
-                    this.error = `Microsoft 365 no pudo consultar ${calendar.personas_con_error} calendario(s).`;
-                }
-                const calendarSummary = calendar.error
-                    ? ""
-                    : ` Microsoft 365: ${calendar.creadas || 0} reuniones nuevas, ${calendar.actualizadas || 0} actualizadas y ${calendar.desactivadas || 0} retiradas.`;
                 this.notify(
                     `Azure sincronizado: ${data.creados || 0} nuevos, ${data.actualizados || 0} actualizados` +
-                    (pending ? ` y ${pending} con Effort pendiente.` : ".") +
-                    calendarSummary
+                    (pending ? ` y ${pending} con Effort pendiente.` : ".")
                 );
             } catch (error) {
                 this.error = this.errorText(error, "No se pudo sincronizar Azure DevOps.");
@@ -229,18 +225,25 @@ window.capacidadFabricaApp = function () {
         },
 
         abrirActividad() {
-            const defaultCategory = this.catalogos.categorias.find((item) => item.codigo === "ESTIMACION")
-                || this.catalogos.categorias[0];
+            const categories = this.catalogos.categorias_actividad || [];
+            const defaultCategory = categories.find((item) => item.codigo === "ESTIMACION")
+                || categories[0];
             this.actividad = {
                 cliente_id: "",
-                persona_id: "",
+                persona_ids: [],
                 titulo: "",
                 categoria_codigo: defaultCategory?.codigo || "",
                 horas: "",
-                fecha: this.weekDate,
-                prioridad: 2
+                fecha: this.weekDate
             };
             this.modalActividad = true;
+        },
+
+        toggleActividadPersona(personId, checked) {
+            const selected = new Set(this.actividad.persona_ids || []);
+            if (checked) selected.add(personId);
+            else selected.delete(personId);
+            this.actividad.persona_ids = [...selected];
         },
 
         async guardarActividad() {
@@ -253,14 +256,88 @@ window.capacidadFabricaApp = function () {
                     this.authConfig()
                 );
                 this.modalActividad = false;
-                this.tab = "requerimientos";
+                this.tab = "dashboard";
                 this.clearDataCache();
-                await Promise.all([this.cargarRequerimientos(true), this.cargarDashboard(true)]);
-                this.notify("Actividad puntual planificada.");
+                await this.cargarDashboard(true);
+                this.notify("Actividad asignada y capacidad actualizada.");
             } catch (error) {
                 this.error = this.errorText(error, "No se creó la actividad puntual.");
             } finally {
                 this.guardandoActividad = false;
+            }
+        },
+
+        abrirBolsa(person = null) {
+            this.bolsa = {
+                persona_ids: person ? [person.persona_id] : [],
+                fecha: this.weekDate,
+                horas: "",
+                motivo: person?.bolsa_reuniones
+                    ? "Ampliación de capacidad de reuniones"
+                    : "Asignación semanal de reuniones"
+            };
+            this.modalBolsa = true;
+        },
+
+        toggleBolsaPersona(personId, checked) {
+            const selected = new Set(this.bolsa.persona_ids || []);
+            if (checked) selected.add(personId);
+            else selected.delete(personId);
+            this.bolsa.persona_ids = [...selected];
+        },
+
+        async guardarBolsa() {
+            this.guardandoBolsa = true;
+            this.error = "";
+            try {
+                await axios.post(
+                    `${API}/capacidad-fabrica/bolsas-reuniones`,
+                    this.bolsa,
+                    this.authConfig()
+                );
+                this.modalBolsa = false;
+                this.clearDataCache();
+                await this.cargarDashboard(true);
+                this.notify("Bolsa semanal actualizada.");
+            } catch (error) {
+                this.error = this.errorText(error, "No se actualizó la bolsa semanal.");
+            } finally {
+                this.guardandoBolsa = false;
+            }
+        },
+
+        async verHistorialBolsa(person) {
+            if (!person?.bolsa_reuniones?.id) return;
+            this.modalMovimientosBolsa = true;
+            this.cargandoMovimientosBolsa = true;
+            this.historialBolsa = { bolsa: { persona: person.persona }, movimientos: [] };
+            try {
+                const response = await axios.get(
+                    `${API}/capacidad-fabrica/bolsas-reuniones/${person.bolsa_reuniones.id}/movimientos`,
+                    this.authConfig()
+                );
+                this.historialBolsa = response.data;
+            } catch (error) {
+                this.error = this.errorText(error, "No se cargó el historial de la bolsa.");
+            } finally {
+                this.cargandoMovimientosBolsa = false;
+            }
+        },
+
+        async cancelarActividadCapacidad(assignment) {
+            if (!assignment?.actividad_id) return;
+            if (!window.confirm("¿Cancelar esta actividad y devolver las horas de reunión si aplica?")) return;
+            try {
+                await axios.patch(
+                    `${API}/capacidad-fabrica/actividades/${assignment.actividad_id}/cancelar`,
+                    {},
+                    this.authConfig()
+                );
+                this.clearDataCache();
+                await this.cargarDashboard(true);
+                this.notify("Actividad cancelada.");
+            } catch (error) {
+                this.error = this.errorText(error, "No se canceló la actividad.");
             }
         },
 
@@ -540,6 +617,13 @@ window.capacidadFabricaApp = function () {
         actividadFinalizada(item) {
             return item?.tipo_registro === "ACTIVIDAD"
                 && ["CERRADO", "CANCELADO"].includes(item.estado_codigo);
+        },
+
+        formatAssignmentDate(assignment) {
+            if (["ACTIVIDAD", "ACTIVIDAD_CAPACIDAD"].includes(assignment?.tipo_registro)) {
+                return this.formatDate(assignment.fecha_inicio || assignment.fecha_fin);
+            }
+            return "—";
         },
 
         occupancyClass(value) {

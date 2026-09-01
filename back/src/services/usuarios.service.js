@@ -593,40 +593,75 @@ async function patchUsuarioLicenciaEstado(req, res) {
 async function actualizarRolUsuario(req, res) {
   const { id } = req.params;
   const { rol_id } = req.body || {};
+  const client = await pool.connect();
   try {
     if (!rol_id) return res.status(400).json({ error: "Falta rol_id" });
-
-    // CTE para resolver usuario y rol en 1 query
-    const result = await pool.query(
-      `
-      WITH 
-        c_usuario AS (SELECT id, nombre_usuario, email FROM usuarios WHERE public_id = $2),
-        c_rol AS (SELECT id FROM roles WHERE public_id = $1)
-      UPDATE usuarios
-      SET rol_usuario_id = (SELECT id FROM c_rol),
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = (SELECT id FROM c_usuario)
-        AND EXISTS (SELECT 1 FROM c_rol)
-      RETURNING public_id AS id, nombre_usuario, email
-      `,
-      [rol_id, id]
-    );
-
-    if (result.rowCount === 0) {
-      // Verificar manual (sin error crash) si fue porque no existe el rol o el usuario
-      const checkRol = await pool.query("SELECT id FROM roles WHERE public_id = $1", [rol_id]);
-      if (checkRol.rowCount === 0) return res.status(404).json({ error: "Rol no encontrado" });
-
-      const checkUser = await pool.query("SELECT id FROM usuarios WHERE public_id = $1", [id]);
-      if (checkUser.rowCount === 0) return res.status(404).json({ error: "Usuario no encontrado" });
-
-      return res.status(500).json({ error: "Error desconocido al asignar rol" });
+    await client.query("BEGIN");
+    const [userResult, roleResult] = await Promise.all([
+      client.query(
+        `SELECT u.id, u.public_id, u.nombre_usuario, u.email, u.persona_id,
+                u.rol_usuario_id, r.titulo AS rol_actual
+         FROM usuarios u LEFT JOIN roles r ON r.id = u.rol_usuario_id
+         WHERE u.public_id = $1 FOR UPDATE OF u`,
+        [id]
+      ),
+      client.query(
+        `SELECT id, titulo FROM roles WHERE public_id = $1 AND activo = TRUE`,
+        [rol_id]
+      )
+    ]);
+    const user = userResult.rows[0];
+    const role = roleResult.rows[0];
+    if (!user || !role) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: !user ? "Usuario no encontrado" : "Rol no encontrado" });
     }
-
-    res.json(result.rows[0]);
+    const isFactory = ["fábrica", "fabrica"].includes(String(role.titulo).trim().toLowerCase());
+    const wasFactory = ["fábrica", "fabrica"].includes(String(user.rol_actual || "").trim().toLowerCase());
+    if (isFactory && !user.persona_id) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "El usuario debe estar vinculado a una persona para usar el rol Fábrica" });
+    }
+    const result = await client.query(
+      `UPDATE usuarios
+       SET rol_previo_fabrica_id = CASE
+             WHEN $2::boolean AND NOT $3::boolean THEN rol_usuario_id
+             WHEN NOT $2::boolean THEN NULL
+             ELSE rol_previo_fabrica_id
+           END,
+           rol_usuario_id = $1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4
+       RETURNING public_id AS id, nombre_usuario, email`,
+      [role.id, isFactory, wasFactory, user.id]
+    );
+    if (user.persona_id && isFactory !== wasFactory) {
+      await client.query(
+        `UPDATE personas SET pertenece_fabrica = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [isFactory, user.persona_id]
+      );
+      await client.query(
+        `UPDATE personas_fabrica_historial
+         SET valido_hasta = CURRENT_TIMESTAMP
+         WHERE persona_id = $1 AND valido_hasta IS NULL`,
+        [user.persona_id]
+      );
+      await client.query(
+        `INSERT INTO personas_fabrica_historial
+           (persona_id, pertenece_fabrica, registrado_por)
+         VALUES ($1, $2, $3)`,
+        [user.persona_id, isFactory, req.user?.id || null]
+      );
+    }
+    await client.query("COMMIT");
+    return res.json({ ...result.rows[0], rol: role.titulo, pertenece_fabrica: isFactory });
   } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
     console.error(err);
-    res.status(500).json({ error: "Error al actualizar rol de usuario" });
+    return res.status(500).json({ error: "Error al actualizar rol de usuario" });
+  } finally {
+    client.release();
   }
 }
 

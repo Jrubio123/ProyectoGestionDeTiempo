@@ -94,6 +94,7 @@ function initSidebar() {
             "azure-devops-prueba",
             "gestion-consultores"
         ],
+        fabrica: ["inicio"],
         consultor_principal: [
             "inicio",
             "mis-asignaciones-consultor",

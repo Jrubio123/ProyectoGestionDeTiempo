@@ -56,10 +56,10 @@ test("recalcula las horas manuales cuando cambia el Effort", () => {
   assert.equal(app.manual.distribucion[0].horas, 20);
 });
 
-test("inicializa una actividad puntual de estimación", () => {
+test("inicializa una actividad para varios responsables", () => {
   const app = createApp();
   app.weekDate = "2026-08-31";
-  app.catalogos.categorias = [
+  app.catalogos.categorias_actividad = [
     { codigo: "REUNIONES", nombre: "Reuniones" },
     { codigo: "ESTIMACION", nombre: "Estimación" }
   ];
@@ -70,6 +70,18 @@ test("inicializa una actividad puntual de estimación", () => {
   assert.equal(app.actividad.categoria_codigo, "ESTIMACION");
   assert.equal(app.actividad.fecha, "2026-08-31");
   assert.equal(app.actividad.cliente_id, "");
+  assert.deepEqual(app.actividad.persona_ids, []);
+});
+
+test("selecciona varios responsables para una actividad", () => {
+  const app = createApp();
+  app.actividad = { persona_ids: [] };
+
+  app.toggleActividadPersona("persona-1", true);
+  app.toggleActividadPersona("persona-2", true);
+  app.toggleActividadPersona("persona-1", false);
+
+  assert.deepEqual(app.actividad.persona_ids, ["persona-2"]);
 });
 
 test("limita los estados disponibles para actividades puntuales", () => {
@@ -94,4 +106,20 @@ test("bloquea actividades puntuales cerradas o canceladas", () => {
   assert.equal(app.actividadFinalizada({ tipo_registro: "ACTIVIDAD", estado_codigo: "CANCELADO" }), true);
   assert.equal(app.actividadFinalizada({ tipo_registro: "ACTIVIDAD", estado_codigo: "PLANIFICADO" }), false);
   assert.equal(app.actividadFinalizada({ tipo_registro: "REQUERIMIENTO", estado_codigo: "CERRADO" }), false);
+});
+
+test("muestra la fecha de actividades manuales y normalizadas", () => {
+  const app = createApp();
+  const manual = app.formatAssignmentDate({
+    tipo_registro: "ACTIVIDAD",
+    fecha_inicio: "2026-08-31"
+  });
+  const normalized = app.formatAssignmentDate({
+    tipo_registro: "ACTIVIDAD_CAPACIDAD",
+    fecha_inicio: "2026-08-31"
+  });
+
+  assert.match(manual, /2026/);
+  assert.match(normalized, /2026/);
+  assert.equal(app.formatAssignmentDate({ tipo_registro: "REQUERIMIENTO" }), "—");
 });

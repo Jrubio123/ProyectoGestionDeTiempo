@@ -2,11 +2,8 @@ const { pool } = require("../db");
 const { listRecentWorkItemsAllProjects } = require("./azure-devops.service");
 const { syncMicrosoftIdentity } = require("./microsoft-identity-sync.service");
 const {
-  listUserCalendarView,
-  normalizeCalendarEvent
-} = require("./microsoft-calendar.service");
-const {
   calculateActiveHours,
+  dateStringInBogota,
   getWeekRange,
   isCorporateSilverEmail,
   normalizeAzureEffort,
@@ -78,18 +75,6 @@ function dateOnly(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
 }
 
-function getCalendarWeekWindow(week) {
-  const start = new Date(`${week.startDate}T00:00:00.000-05:00`);
-  const end = new Date(`${week.endDate}T00:00:00.000-05:00`);
-  end.setUTCDate(end.getUTCDate() + 1);
-  return {
-    start,
-    end,
-    startIso: start.toISOString(),
-    endIso: end.toISOString()
-  };
-}
-
 async function withTransaction(callback) {
   const client = await pool.connect();
   try {
@@ -108,9 +93,20 @@ async function withTransaction(callback) {
 async function getCategories(db = pool) {
   const result = await db.query(
     `SELECT id, public_id::text AS id_publico, codigo, nombre,
-            porcentaje_predeterminado::float8 AS porcentaje_predeterminado, orden
+            porcentaje_predeterminado::float8 AS porcentaje_predeterminado, orden,
+            aplica_distribucion, aplica_actividad, usa_bolsa
      FROM categorias_esfuerzo_capacidad
-     WHERE activo = TRUE
+     WHERE activo = TRUE AND aplica_distribucion = TRUE
+     ORDER BY orden, id`
+  );
+  return result.rows;
+}
+
+async function getActivityCategories(db = pool) {
+  const result = await db.query(
+    `SELECT public_id::text AS id, codigo, nombre, usa_bolsa, orden
+     FROM categorias_esfuerzo_capacidad
+     WHERE activo = TRUE AND aplica_actividad = TRUE
      ORDER BY orden, id`
   );
   return result.rows;
@@ -136,7 +132,7 @@ async function ensureDefaultDistribution(db, requirementId) {
        (requerimiento_id, categoria_id, porcentaje)
      SELECT $1, c.id, c.porcentaje_predeterminado
      FROM categorias_esfuerzo_capacidad c
-     WHERE c.activo = TRUE
+     WHERE c.activo = TRUE AND c.aplica_distribucion = TRUE
      ON CONFLICT (requerimiento_id, categoria_id) DO NOTHING`,
     [requirementId]
   );
@@ -145,6 +141,7 @@ async function ensureDefaultDistribution(db, requirementId) {
 async function loadSnapshot(db, requirementId) {
   const requirementResult = await db.query(
     `SELECT r.*, e.codigo AS estado_codigo, e.nombre AS estado_nombre,
+            e.consume_capacidad, e.categoria_codigo AS estado_categoria_codigo,
             c.titulo AS cliente_manual,
             CONCAT_WS(' ', p.nombre, p.apellidos) AS persona_nombre,
             p.public_id::text AS persona_public_id
@@ -162,7 +159,7 @@ async function loadSnapshot(db, requirementId) {
     `SELECT c.codigo, d.porcentaje::float8 AS porcentaje
      FROM requerimiento_distribucion_capacidad d
      JOIN categorias_esfuerzo_capacidad c ON c.id = d.categoria_id
-     WHERE d.requerimiento_id = $1
+     WHERE d.requerimiento_id = $1 AND c.aplica_distribucion = TRUE
      ORDER BY c.orden, c.id`,
     [requirementId]
   );
@@ -182,6 +179,8 @@ async function loadSnapshot(db, requirementId) {
     titulo: requirement.titulo,
     estado_codigo: requirement.estado_codigo,
     estado_nombre: requirement.estado_nombre,
+    consume_capacidad: requirement.consume_capacidad,
+    categoria_capacidad: requirement.estado_categoria_codigo,
     responsable_nombre: requirement.persona_nombre || requirement.responsable_nombre,
     responsable_correo: requirement.responsable_correo,
     responsable_azure_id: requirement.responsable_azure_id,
@@ -263,6 +262,53 @@ async function setFactoryMembership(db, personPublicId, belongs, actorId) {
   );
   const open = openResult.rows[0] || null;
   const desired = Boolean(belongs);
+  const linkedUserResult = await db.query(
+    `SELECT u.id, u.rol_usuario_id, u.rol_previo_fabrica_id, r.titulo AS rol
+     FROM usuarios u
+     LEFT JOIN roles r ON r.id = u.rol_usuario_id
+     WHERE u.persona_id = $1
+     FOR UPDATE OF u`,
+    [person.id]
+  );
+  const linkedUser = linkedUserResult.rows[0] || null;
+  if (linkedUser) {
+    const factoryRoleResult = await db.query(
+      `SELECT id FROM roles
+       WHERE LOWER(BTRIM(titulo)) IN ('fábrica', 'fabrica') AND activo = TRUE
+       LIMIT 1`
+    );
+    const factoryRoleId = factoryRoleResult.rows[0]?.id;
+    if (!factoryRoleId) throw new CapacityError("No existe el rol Fábrica.", 500);
+    if (desired && Number(linkedUser.rol_usuario_id) !== Number(factoryRoleId)) {
+      const protectedRoles = ["administrador", "coordinador", "talento humano"];
+      if (protectedRoles.includes(String(linkedUser.rol || "").trim().toLowerCase())) {
+        throw new CapacityError(
+          `No se puede reemplazar el rol ${linkedUser.rol}. Cambia el rol del usuario desde Licencias de Acceso.`,
+          409
+        );
+      }
+      await db.query(
+        `UPDATE usuarios
+         SET rol_previo_fabrica_id = rol_usuario_id,
+             rol_usuario_id = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [factoryRoleId, linkedUser.id]
+      );
+    } else if (!desired && Number(linkedUser.rol_usuario_id) === Number(factoryRoleId)) {
+      const consultantRoleResult = await db.query(
+        `SELECT id FROM roles WHERE LOWER(BTRIM(titulo)) = 'consultor' LIMIT 1`
+      );
+      const restoredRole = linkedUser.rol_previo_fabrica_id || consultantRoleResult.rows[0]?.id;
+      if (!restoredRole) throw new CapacityError("No existe un rol para restaurar al usuario.", 500);
+      await db.query(
+        `UPDATE usuarios
+         SET rol_usuario_id = $1, rol_previo_fabrica_id = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [restoredRole, linkedUser.id]
+      );
+    }
+  }
 
   if (!open || Boolean(open.pertenece_fabrica) !== desired) {
     if (open) {
@@ -294,8 +340,9 @@ async function setFactoryMembership(db, personPublicId, belongs, actorId) {
 
 async function getCatalogs(req, res) {
   try {
-    const [categories, states, config, clients] = await Promise.all([
+    const [categories, activityCategories, states, config, clients] = await Promise.all([
       getCategories(),
+      getActivityCategories(),
       pool.query(
         `SELECT public_id::text AS id, codigo, nombre, consume_capacidad,
                 categoria_codigo, clasificacion, es_terminal,
@@ -314,6 +361,7 @@ async function getCatalogs(req, res) {
     ]);
     return res.json({
       categorias: categories,
+      categorias_actividad: activityCategories,
       estados: states.rows,
       configuracion: config.rows[0] || { horas_semanales: 42 },
       clientes: clients.rows
@@ -433,7 +481,7 @@ async function listRequirements(req, res) {
                     'porcentaje', d.porcentaje::float8,
                     'orden', cat.orden
                   ) ORDER BY cat.orden
-                ) FILTER (WHERE d.id IS NOT NULL),
+                ) FILTER (WHERE cat.id IS NOT NULL),
                 '[]'::jsonb
               ) AS distribucion
        FROM requerimientos_capacidad r
@@ -441,7 +489,8 @@ async function listRequirements(req, res) {
        LEFT JOIN clientes c ON c.id = r.cliente_id
        LEFT JOIN personas p ON p.id = r.persona_id
        LEFT JOIN requerimiento_distribucion_capacidad d ON d.requerimiento_id = r.id
-       LEFT JOIN categorias_esfuerzo_capacidad cat ON cat.id = d.categoria_id
+       LEFT JOIN categorias_esfuerzo_capacidad cat
+         ON cat.id = d.categoria_id AND cat.aplica_distribucion = TRUE
        WHERE r.activo = TRUE
          AND (
            r.origen = 'MANUAL'
@@ -494,6 +543,183 @@ function validateEffort(value) {
     throw new CapacityError("El esfuerzo total debe ser un número mayor o igual a cero.");
   }
   return effort;
+}
+
+function validatePositiveHours(value, label = "horas") {
+  const hours = Number(value);
+  if (!Number.isFinite(hours) || hours <= 0 || hours > 168) {
+    throw new CapacityError(`Las ${label} deben ser mayores que cero y menores o iguales a 168.`);
+  }
+  return Math.round(hours * 100) / 100;
+}
+
+function resolveWorkWeek(value) {
+  const date = normalizeDateInput(value, "actividad");
+  if (!date) throw new CapacityError("La fecha es obligatoria.");
+  let week;
+  try {
+    week = getWeekRange(date);
+  } catch (error) {
+    throw new CapacityError(error.message);
+  }
+  if (date < week.startDate || date > week.endDate) {
+    throw new CapacityError("La fecha debe corresponder a un día laboral de lunes a viernes.");
+  }
+  return { date, week };
+}
+
+async function resolveFactoryPeople(db, publicIds) {
+  const ids = [...new Set((publicIds || []).map((value) => String(value || "").trim()).filter(Boolean))];
+  if (!ids.length) throw new CapacityError("Debe seleccionar al menos un responsable.");
+  const result = await db.query(
+    `SELECT id, public_id::text AS public_id,
+            CONCAT_WS(' ', nombre, apellidos) AS nombre, correo_silver
+     FROM personas
+     WHERE public_id::text = ANY($1::text[])
+       AND estado = 'activo' AND pertenece_fabrica = TRUE
+     ORDER BY id
+     FOR UPDATE`,
+    [ids]
+  );
+  if (result.rows.length !== ids.length) {
+    throw new CapacityError("Todos los responsables deben pertenecer a Fábrica.");
+  }
+  return result.rows;
+}
+
+async function resolveCurrentFactoryPerson(db, userId) {
+  const result = await db.query(
+    `SELECT p.id, p.public_id::text AS public_id,
+            CONCAT_WS(' ', p.nombre, p.apellidos) AS nombre, p.correo_silver
+     FROM usuarios u
+     JOIN personas p ON p.id = u.persona_id
+     WHERE u.id = $1 AND u.activo = TRUE
+       AND p.estado = 'activo' AND p.pertenece_fabrica = TRUE
+     FOR UPDATE OF p`,
+    [userId || null]
+  );
+  if (!result.rows[0]) {
+    throw new CapacityError(
+      "Tu usuario no está vinculado a una persona activa de Fábrica.",
+      409
+    );
+  }
+  return result.rows[0];
+}
+
+async function getBagWithBalance(db, personId, weekStart, lock = false) {
+  if (lock) {
+    await db.query(
+      `SELECT id FROM bolsas_reuniones_capacidad
+       WHERE persona_id = $1 AND semana_inicio = $2
+       FOR UPDATE`,
+      [personId, weekStart]
+    );
+  }
+  const result = await db.query(
+    `SELECT b.id, b.public_id::text AS public_id, b.persona_id,
+            b.coordinador_id, b.semana_inicio, b.semana_fin, b.estado,
+            COALESCE(SUM(m.horas_delta), 0)::float8 AS saldo,
+            COALESCE(SUM(m.horas_delta) FILTER (
+              WHERE m.tipo IN ('ASIGNACION', 'AJUSTE')
+            ), 0)::float8 AS horas_asignadas,
+            ABS(COALESCE(SUM(m.horas_delta) FILTER (
+              WHERE m.tipo = 'CONSUMO'
+            ), 0))::float8
+            - COALESCE(SUM(m.horas_delta) FILTER (
+              WHERE m.tipo = 'REVERSO'
+            ), 0)::float8 AS horas_consumidas
+     FROM bolsas_reuniones_capacidad b
+     LEFT JOIN bolsa_reuniones_movimientos m ON m.bolsa_id = b.id
+     WHERE b.persona_id = $1 AND b.semana_inicio = $2
+     GROUP BY b.id`,
+    [personId, weekStart]
+  );
+  return result.rows[0] || null;
+}
+
+async function resolveActivityCategory(db, code, forceMeetings = false) {
+  const normalized = forceMeetings ? "REUNIONES" : cleanText(code, 40)?.toUpperCase();
+  const result = await db.query(
+    `SELECT codigo, nombre, usa_bolsa
+     FROM categorias_esfuerzo_capacidad
+     WHERE codigo = $1 AND activo = TRUE AND aplica_actividad = TRUE`,
+    [normalized || null]
+  );
+  if (!result.rows[0]) throw new CapacityError("La categoría de la actividad no es válida.");
+  return result.rows[0];
+}
+
+async function createCapacityActivity(db, {
+  actorId,
+  payload,
+  origin,
+  fixedPerson = null,
+  forceMeetings = false
+}) {
+  const title = cleanText(payload.titulo, 500);
+  if (!title) throw new CapacityError("El título de la actividad es obligatorio.");
+  const { date, week } = resolveWorkWeek(payload.fecha);
+  const hours = validatePositiveHours(payload.horas);
+  const category = await resolveActivityCategory(db, payload.categoria_codigo, forceMeetings);
+  const relatedClient = await resolveActiveClient(db, payload.cliente_id, false);
+  const people = fixedPerson
+    ? [fixedPerson]
+    : await resolveFactoryPeople(
+      db,
+      Array.isArray(payload.persona_ids)
+        ? payload.persona_ids
+        : [payload.persona_id]
+    );
+
+  const bagsByPerson = new Map();
+  if (category.usa_bolsa) {
+    const errors = [];
+    for (const person of people) {
+      const bag = await getBagWithBalance(db, person.id, week.startDate, true);
+      if (!bag) errors.push(`${person.nombre}: sin bolsa semanal`);
+      else if (bag.estado !== "ABIERTA") errors.push(`${person.nombre}: bolsa cerrada`);
+      else if (Number(bag.saldo) < hours) {
+        errors.push(`${person.nombre}: saldo ${Number(bag.saldo).toFixed(2)} h`);
+      } else {
+        bagsByPerson.set(person.id, bag);
+      }
+    }
+    if (errors.length) {
+      throw new CapacityError(
+        `No se puede registrar la reunión. ${errors.join("; ")}. Solicita una ampliación al coordinador.`,
+        409
+      );
+    }
+  }
+
+  const activityResult = await db.query(
+    `INSERT INTO actividades_capacidad
+       (titulo, cliente_id, categoria_codigo, fecha, horas, origen, creado_por)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id, public_id::text AS public_id`,
+    [title, relatedClient?.id || null, category.codigo, date, hours, origin, actorId]
+  );
+  const activity = activityResult.rows[0];
+  for (const person of people) {
+    const bag = bagsByPerson.get(person.id) || null;
+    const responsibleResult = await db.query(
+      `INSERT INTO actividad_capacidad_responsables
+         (actividad_id, persona_id, bolsa_id, horas)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id`,
+      [activity.id, person.id, bag?.id || null, hours]
+    );
+    if (bag) {
+      await db.query(
+        `INSERT INTO bolsa_reuniones_movimientos
+           (bolsa_id, actividad_responsable_id, tipo, horas_delta, motivo, registrado_por)
+         VALUES ($1, $2, 'CONSUMO', $3, $4, $5)`,
+        [bag.id, responsibleResult.rows[0].id, -hours, title, actorId]
+      );
+    }
+  }
+  return { id: activity.public_id, responsables: people.length };
 }
 
 async function createManualRequirement(req, res) {
@@ -553,7 +779,7 @@ async function createManualRequirement(req, res) {
   }
 }
 
-async function createManualActivity(req, res) {
+async function createLegacyManualActivity(req, res) {
   try {
     const payload = req.body || {};
     const result = await withTransaction(async (client) => {
@@ -625,6 +851,37 @@ async function createManualActivity(req, res) {
     return res.status(201).json({ id: result.id_publico });
   } catch (error) {
     return handleError(res, error, "Error creando la actividad puntual");
+  }
+}
+
+async function createManualActivity(req, res) {
+  try {
+    const result = await withTransaction((client) => createCapacityActivity(client, {
+      actorId: req.user?.id,
+      payload: req.body || {},
+      origin: "COORDINADOR"
+    }));
+    return res.status(201).json(result);
+  } catch (error) {
+    return handleError(res, error, "Error creando la actividad");
+  }
+}
+
+async function createMyMeeting(req, res) {
+  try {
+    const result = await withTransaction(async (client) => {
+      const person = await resolveCurrentFactoryPerson(client, req.user?.id);
+      return createCapacityActivity(client, {
+        actorId: req.user?.id,
+        payload: req.body || {},
+        origin: "AUTORREGISTRO",
+        fixedPerson: person,
+        forceMeetings: true
+      });
+    });
+    return res.status(201).json(result);
+  } catch (error) {
+    return handleError(res, error, "Error registrando la reunión");
   }
 }
 
@@ -808,257 +1065,194 @@ async function updateRequirementDistribution(req, res) {
   }
 }
 
-async function loadCalendarSyncContext() {
-  const [peopleResult, coordinatorsResult] = await Promise.all([
-    pool.query(
-      `SELECT p.id, p.public_id::text AS persona_id,
-              CONCAT_WS(' ', p.nombre, p.apellidos) AS nombre,
-              LOWER(BTRIM(p.correo_silver)) AS correo_silver,
-              p.azure_oid
-       FROM personas p
-       WHERE p.estado = 'activo'
-         AND p.pertenece_fabrica = TRUE
-         AND (
-           NULLIF(BTRIM(p.azure_oid), '') IS NOT NULL
-           OR NULLIF(BTRIM(p.correo_silver), '') IS NOT NULL
-         )
-       ORDER BY p.id`
-    ),
-    pool.query(
-      `SELECT u.id, LOWER(BTRIM(u.email)) AS email, u.nombre_usuario
-       FROM usuarios u
-       JOIN roles r ON r.id = u.rol_usuario_id
-       WHERE u.activo = TRUE
-         AND NULLIF(BTRIM(u.email), '') IS NOT NULL
-         AND LOWER(BTRIM(r.titulo)) = 'coordinador'`
-    )
-  ]);
-  return {
-    people: peopleResult.rows,
-    coordinatorsByEmail: new Map(
-      coordinatorsResult.rows.map((coordinator) => [coordinator.email, coordinator])
-    )
-  };
+async function assignMeetingBags(req, res) {
+  try {
+    const payload = req.body || {};
+    const { week } = resolveWorkWeek(payload.fecha);
+    const hours = validatePositiveHours(payload.horas, "horas asignadas");
+    const reason = cleanText(payload.motivo, 500) || "Asignación semanal de reuniones";
+    const result = await withTransaction(async (client) => {
+      const people = await resolveFactoryPeople(client, payload.persona_ids);
+      const rows = [];
+      for (const person of people) {
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+          `bolsa-reuniones:${person.id}:${week.startDate}`
+        ]);
+        let bag = await getBagWithBalance(client, person.id, week.startDate, true);
+        let movementType = "AJUSTE";
+        if (!bag) {
+          const inserted = await client.query(
+            `INSERT INTO bolsas_reuniones_capacidad
+               (persona_id, coordinador_id, semana_inicio, semana_fin)
+             VALUES ($1, $2, $3, $4)
+             RETURNING id, public_id::text AS public_id`,
+            [person.id, req.user?.id, week.startDate, week.endDate]
+          );
+          bag = inserted.rows[0];
+          movementType = "ASIGNACION";
+        }
+        await client.query(
+          `INSERT INTO bolsa_reuniones_movimientos
+             (bolsa_id, tipo, horas_delta, motivo, registrado_por)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [bag.id, movementType, hours, reason, req.user?.id]
+        );
+        rows.push({ persona_id: person.public_id, bolsa_id: bag.public_id, horas: hours });
+      }
+      return rows;
+    });
+    return res.status(201).json({
+      semana_inicio: week.startDate,
+      semana_fin: week.endDate,
+      personas: result.length,
+      movimientos: result
+    });
+  } catch (error) {
+    return handleError(res, error, "Error asignando las bolsas de reuniones");
+  }
 }
 
-async function persistCalendarPersonSync({
-  person,
-  meetings,
-  window,
-  actorId
-}) {
-  return withTransaction(async (client) => {
-    await client.query(
-      "SELECT pg_advisory_xact_lock(hashtext($1))",
-      [`capacidad-calendario:${person.id}:${window.startIso}`]
-    );
-    const summary = { creadas: 0, actualizadas: 0, sin_cambios: 0, desactivadas: 0 };
-    const seenIds = [];
+async function getMyCapacity(req, res) {
+  try {
+    const { week } = resolveWorkWeek(req.query?.fecha || dateStringInBogota(new Date()));
+    const result = await withTransaction(async (client) => {
+      const person = await resolveCurrentFactoryPerson(client, req.user?.id);
+      const bag = await getBagWithBalance(client, person.id, week.startDate);
+      const [activitiesResult, movementsResult] = await Promise.all([
+        client.query(
+          `SELECT a.public_id::text AS id, a.titulo, a.fecha, a.horas::float8 AS horas,
+                  a.categoria_codigo, c.titulo AS cliente, a.origen, a.estado,
+                  a.created_at, u.nombre_usuario AS creado_por
+           FROM actividades_capacidad a
+           JOIN actividad_capacidad_responsables ar ON ar.actividad_id = a.id
+           LEFT JOIN clientes c ON c.id = a.cliente_id
+           LEFT JOIN usuarios u ON u.id = a.creado_por
+           WHERE ar.persona_id = $1
+             AND a.fecha BETWEEN $2 AND $3
+           ORDER BY a.fecha DESC, a.created_at DESC`,
+          [person.id, week.startDate, week.endDate]
+        ),
+        bag
+          ? client.query(
+            `SELECT m.public_id::text AS id, m.tipo, m.horas_delta::float8 AS horas_delta,
+                    m.motivo, m.created_at, u.nombre_usuario AS registrado_por
+             FROM bolsa_reuniones_movimientos m
+             LEFT JOIN usuarios u ON u.id = m.registrado_por
+             WHERE m.bolsa_id = $1
+             ORDER BY m.created_at DESC, m.id DESC`,
+            [bag.id]
+          )
+          : Promise.resolve({ rows: [] })
+      ]);
+      let coordinator = null;
+      if (bag?.coordinador_id) {
+        const coordinatorResult = await client.query(
+          `SELECT nombre_usuario, email FROM usuarios WHERE id = $1`,
+          [bag.coordinador_id]
+        );
+        coordinator = coordinatorResult.rows[0] || null;
+      }
+      return {
+        persona: {
+          id: person.public_id,
+          nombre: person.nombre,
+          correo_silver: person.correo_silver
+        },
+        semana: { fecha_inicio: week.startDate, fecha_fin: week.endDate },
+        bolsa: bag ? {
+          id: bag.public_id,
+          estado: bag.estado,
+          horas_asignadas: Number(bag.horas_asignadas),
+          horas_consumidas: Number(bag.horas_consumidas),
+          horas_disponibles: Number(bag.saldo),
+          coordinador: coordinator
+        } : null,
+        actividades: activitiesResult.rows,
+        movimientos: movementsResult.rows
+      };
+    });
+    return res.json(result);
+  } catch (error) {
+    return handleError(res, error, "Error consultando tu capacidad semanal");
+  }
+}
 
-    for (const meeting of meetings) {
-      seenIds.push(meeting.graphEventId);
-      const changed = await client.query(
-        `INSERT INTO actividades_calendario_capacidad (
-           persona_id, coordinador_id, graph_event_id, graph_ical_uid,
-           categoria_codigo, titulo, organizador_nombre, organizador_correo,
-           inicio, fin, horas, estado_respuesta, mostrar_como, sensibilidad,
-           tipo_evento, series_master_id, web_url, source_changed_at,
-           last_synced_at, activo, sincronizado_por
-         ) VALUES (
-           $1, $2, $3, $4, 'REUNIONES', $5, $6, $7,
-           $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-           CURRENT_TIMESTAMP, TRUE, $18
-         )
-         ON CONFLICT (persona_id, graph_event_id)
-         DO UPDATE SET
-           coordinador_id = EXCLUDED.coordinador_id,
-           graph_ical_uid = EXCLUDED.graph_ical_uid,
-           titulo = EXCLUDED.titulo,
-           organizador_nombre = EXCLUDED.organizador_nombre,
-           organizador_correo = EXCLUDED.organizador_correo,
-           inicio = EXCLUDED.inicio,
-           fin = EXCLUDED.fin,
-           horas = EXCLUDED.horas,
-           estado_respuesta = EXCLUDED.estado_respuesta,
-           mostrar_como = EXCLUDED.mostrar_como,
-           sensibilidad = EXCLUDED.sensibilidad,
-           tipo_evento = EXCLUDED.tipo_evento,
-           series_master_id = EXCLUDED.series_master_id,
-           web_url = EXCLUDED.web_url,
-           source_changed_at = EXCLUDED.source_changed_at,
-           last_synced_at = CURRENT_TIMESTAMP,
-           activo = TRUE,
-           sincronizado_por = EXCLUDED.sincronizado_por,
-           updated_at = CURRENT_TIMESTAMP
-         WHERE (
-           actividades_calendario_capacidad.coordinador_id,
-           actividades_calendario_capacidad.graph_ical_uid,
-           actividades_calendario_capacidad.titulo,
-           actividades_calendario_capacidad.organizador_nombre,
-           actividades_calendario_capacidad.organizador_correo,
-           actividades_calendario_capacidad.inicio,
-           actividades_calendario_capacidad.fin,
-           actividades_calendario_capacidad.horas,
-           actividades_calendario_capacidad.estado_respuesta,
-           actividades_calendario_capacidad.mostrar_como,
-           actividades_calendario_capacidad.sensibilidad,
-           actividades_calendario_capacidad.tipo_evento,
-           actividades_calendario_capacidad.series_master_id,
-           actividades_calendario_capacidad.web_url,
-           actividades_calendario_capacidad.source_changed_at,
-           actividades_calendario_capacidad.activo
-         ) IS DISTINCT FROM (
-           EXCLUDED.coordinador_id,
-           EXCLUDED.graph_ical_uid,
-           EXCLUDED.titulo,
-           EXCLUDED.organizador_nombre,
-           EXCLUDED.organizador_correo,
-           EXCLUDED.inicio,
-           EXCLUDED.fin,
-           EXCLUDED.horas,
-           EXCLUDED.estado_respuesta,
-           EXCLUDED.mostrar_como,
-           EXCLUDED.sensibilidad,
-           EXCLUDED.tipo_evento,
-           EXCLUDED.series_master_id,
-           EXCLUDED.web_url,
-           EXCLUDED.source_changed_at,
-           TRUE
-         )
-         RETURNING (xmax = 0) AS insertada`,
-        [
-          person.id,
-          meeting.coordinatorId,
-          meeting.graphEventId,
-          meeting.graphICalUid,
-          meeting.title,
-          meeting.organizerName,
-          meeting.organizerEmail,
-          meeting.start,
-          meeting.end,
-          meeting.hours,
-          meeting.responseStatus,
-          meeting.showAs,
-          meeting.sensitivity,
-          meeting.eventType,
-          meeting.seriesMasterId,
-          meeting.webUrl,
-          meeting.sourceChangedAt,
-          actorId || null
-        ]
+async function getMeetingBagHistory(req, res) {
+  try {
+    const bagResult = await pool.query(
+      `SELECT b.public_id::text AS id, b.semana_inicio, b.semana_fin,
+              CONCAT_WS(' ', p.nombre, p.apellidos) AS persona
+       FROM bolsas_reuniones_capacidad b
+       JOIN personas p ON p.id = b.persona_id
+       WHERE b.public_id = $1`,
+      [req.params.id]
+    );
+    if (!bagResult.rows[0]) throw new CapacityError("Bolsa no encontrada.", 404);
+    const movementsResult = await pool.query(
+      `SELECT m.public_id::text AS id, m.tipo, m.horas_delta::float8 AS horas_delta,
+              m.motivo, m.created_at, u.nombre_usuario AS registrado_por,
+              a.public_id::text AS actividad_id, a.titulo AS actividad
+       FROM bolsa_reuniones_movimientos m
+       LEFT JOIN usuarios u ON u.id = m.registrado_por
+       LEFT JOIN actividad_capacidad_responsables ar ON ar.id = m.actividad_responsable_id
+       LEFT JOIN actividades_capacidad a ON a.id = ar.actividad_id
+       JOIN bolsas_reuniones_capacidad b ON b.id = m.bolsa_id
+       WHERE b.public_id = $1
+       ORDER BY m.created_at DESC, m.id DESC`,
+      [req.params.id]
+    );
+    return res.json({ bolsa: bagResult.rows[0], movimientos: movementsResult.rows });
+  } catch (error) {
+    return handleError(res, error, "Error consultando el historial de la bolsa");
+  }
+}
+
+async function cancelCapacityActivity(req, res) {
+  try {
+    await withTransaction(async (client) => {
+      const activityResult = await client.query(
+        `SELECT id, estado, origen, creado_por
+         FROM actividades_capacidad
+         WHERE public_id = $1
+         FOR UPDATE`,
+        [req.params.id]
       );
-      if (changed.rows[0]?.insertada) {
-        summary.creadas += 1;
-      } else if (changed.rows[0]) {
-        summary.actualizadas += 1;
-      } else {
-        summary.sin_cambios += 1;
+      const activity = activityResult.rows[0];
+      if (!activity) throw new CapacityError("Actividad no encontrada.", 404);
+      if (activity.estado === "CANCELADA") return;
+      const role = String(req.user?.rol || "").toLowerCase();
+      const manages = ["administrador", "coordinador"].includes(role);
+      if (!manages && !(activity.origen === "AUTORREGISTRO" && activity.creado_por === req.user?.id)) {
+        throw new CapacityError("No puedes cancelar esta actividad.", 403);
+      }
+      const responsibles = await client.query(
+        `SELECT ar.id, ar.bolsa_id, ar.horas::float8 AS horas
+         FROM actividad_capacidad_responsables ar
+         WHERE ar.actividad_id = $1
+         FOR UPDATE`,
+        [activity.id]
+      );
+      for (const responsible of responsibles.rows) {
+        if (!responsible.bolsa_id) continue;
         await client.query(
-          `UPDATE actividades_calendario_capacidad
-           SET last_synced_at = CURRENT_TIMESTAMP,
-               sincronizado_por = $3
-           WHERE persona_id = $1 AND graph_event_id = $2`,
-          [person.id, meeting.graphEventId, actorId || null]
+          `INSERT INTO bolsa_reuniones_movimientos
+             (bolsa_id, actividad_responsable_id, tipo, horas_delta, motivo, registrado_por)
+           VALUES ($1, $2, 'REVERSO', $3, 'Cancelación de actividad', $4)`,
+          [responsible.bolsa_id, responsible.id, responsible.horas, req.user?.id]
         );
       }
-    }
-
-    const deactivated = await client.query(
-      `UPDATE actividades_calendario_capacidad
-       SET activo = FALSE,
-           last_synced_at = CURRENT_TIMESTAMP,
-           sincronizado_por = $5,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE persona_id = $1
-         AND activo = TRUE
-         AND inicio < $3
-         AND fin > $2
-         AND NOT (graph_event_id = ANY($4::text[]))`,
-      [person.id, window.startIso, window.endIso, seenIds, actorId || null]
-    );
-    summary.desactivadas = deactivated.rowCount;
-    return summary;
-  });
-}
-
-async function syncCalendarMeetings(referenceDate, actorId, dependencies = {}) {
-  const week = getWeekRange(referenceDate);
-  const window = getCalendarWeekWindow(week);
-  const { people, coordinatorsByEmail } = await loadCalendarSyncContext();
-  const summary = {
-    semana_inicio: week.startDate,
-    semana_fin: week.endDate,
-    personas: people.length,
-    personas_sincronizadas: 0,
-    personas_con_error: 0,
-    recibidas: 0,
-    creadas: 0,
-    actualizadas: 0,
-    sin_cambios: 0,
-    desactivadas: 0,
-    omitidas_no_coordinador: 0,
-    omitidas_no_ocupan: 0,
-    errores: []
-  };
-
-  for (const person of people) {
-    try {
-      const identifier = person.azure_oid || person.correo_silver;
-      const graphEvents = await (dependencies.listUserCalendarView || listUserCalendarView)(
-        identifier,
-        window.startIso,
-        window.endIso
+      await client.query(
+        `UPDATE actividades_capacidad
+         SET estado = 'CANCELADA', cancelado_por = $1,
+             cancelado_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [req.user?.id, activity.id]
       );
-      summary.recibidas += graphEvents.length;
-      const meetingsById = new Map();
-      for (const graphEvent of graphEvents) {
-        const normalized = normalizeCalendarEvent(graphEvent, window.start, window.end);
-        if (!normalized.included) {
-          summary.omitidas_no_ocupan += 1;
-          continue;
-        }
-        const coordinator = coordinatorsByEmail.get(normalized.event.organizerEmail);
-        if (!coordinator) {
-          summary.omitidas_no_coordinador += 1;
-          continue;
-        }
-        meetingsById.set(normalized.event.graphEventId, {
-          ...normalized.event,
-          coordinatorId: coordinator.id
-        });
-      }
-      const persisted = await persistCalendarPersonSync({
-        person,
-        meetings: [...meetingsById.values()],
-        window,
-        actorId
-      });
-      summary.personas_sincronizadas += 1;
-      for (const key of ["creadas", "actualizadas", "sin_cambios", "desactivadas"]) {
-        summary[key] += persisted[key];
-      }
-    } catch (error) {
-      if ([401, 403].includes(Number(error.statusCode))) throw error;
-      summary.personas_con_error += 1;
-      summary.errores.push({
-        persona: person.nombre,
-        error: cleanText(error.message, 300) || "No fue posible consultar el calendario."
-      });
-    }
+    });
+    return res.json({ ok: true });
+  } catch (error) {
+    return handleError(res, error, "Error cancelando la actividad");
   }
-
-  if (
-    summary.personas > 0
-    && summary.personas_sincronizadas === 0
-    && summary.personas_con_error > 0
-  ) {
-    throw new CapacityError(
-      summary.errores[0]?.error || "No fue posible consultar los calendarios de Microsoft 365.",
-      502
-    );
-  }
-
-  return summary;
 }
 
 async function syncAzureRequirements(req, res) {
@@ -1232,22 +1426,10 @@ async function syncAzureRequirements(req, res) {
       }
       return summary;
     });
-    let calendario;
-    try {
-      calendario = await syncCalendarMeetings(req.body?.fecha, req.user?.id);
-    } catch (error) {
-      console.error("Error sincronizando calendarios de Microsoft 365", error);
-      calendario = {
-        error: error.statusCode === 403
-          ? "La aplicación de Entra ID requiere Calendars.ReadBasic o Calendars.Read como permiso de aplicación, con consentimiento de administrador."
-          : cleanText(error.message, 300) || "No fue posible sincronizar los calendarios."
-      };
-    }
     return res.json({
       organizacion: azureData.organization,
       proyectos: azureData.projectCount,
-      ...result,
-      calendario
+      ...result
     });
   } catch (error) {
     return handleError(res, error, "Error sincronizando Azure DevOps");
@@ -1262,7 +1444,6 @@ async function getDashboard(req, res) {
     } catch (error) {
       throw new CapacityError(error.message);
     }
-    const calendarWindow = getCalendarWeekWindow(week);
     const configResult = await pool.query(
       `SELECT horas_semanales::float8 AS horas_semanales
        FROM configuracion_capacidad_fabrica WHERE id = 1`
@@ -1285,28 +1466,57 @@ async function getDashboard(req, res) {
       `SELECT h.requerimiento_id, h.persona_id, h.effort_total::float8 AS effort_total,
               h.prioridad, h.fecha_inicio, h.fecha_fin, h.porcentajes_snapshot,
               h.datos_snapshot, e.codigo AS estado_codigo, e.nombre AS estado,
-              e.consume_capacidad, e.categoria_codigo, e.clasificacion
+              COALESCE(
+                (h.datos_snapshot ->> 'consume_capacidad')::boolean,
+                e.consume_capacidad
+              ) AS consume_capacidad,
+              COALESCE(
+                h.datos_snapshot ->> 'categoria_capacidad',
+                e.categoria_codigo
+              ) AS categoria_codigo,
+              e.clasificacion
        FROM requerimientos_capacidad_historial h
        JOIN estados_requerimiento_capacidad e ON e.id = h.estado_id
        WHERE h.valido_desde <= $1
          AND (h.valido_hasta IS NULL OR h.valido_hasta > $1)`,
       [week.cutoff]
     );
-    const calendarResult = await pool.query(
-      `SELECT a.public_id::text AS actividad_id, a.persona_id, a.titulo,
-              a.categoria_codigo, a.organizador_nombre, a.organizador_correo,
-              a.inicio, a.fin, a.web_url,
-              ROUND((EXTRACT(EPOCH FROM (
-                LEAST(a.fin, $2::timestamptz) - GREATEST(a.inicio, $1::timestamptz)
-              )) / 3600)::numeric, 2)::float8 AS horas_activas
-       FROM actividades_calendario_capacidad a
-       WHERE a.activo = TRUE
-         AND a.inicio < $2::timestamptz
-         AND a.fin > $1::timestamptz
-       ORDER BY a.inicio, a.id`,
-      [calendarWindow.startIso, calendarWindow.endIso]
-    );
-
+    const [activitiesResult, bagsResult] = await Promise.all([
+      pool.query(
+        `SELECT a.public_id::text AS actividad_id, ar.persona_id, a.titulo,
+                c.titulo AS cliente, a.categoria_codigo, a.fecha,
+                ar.horas::float8 AS horas, a.origen, a.estado,
+                u.nombre_usuario AS creado_por
+         FROM actividades_capacidad a
+         JOIN actividad_capacidad_responsables ar ON ar.actividad_id = a.id
+         LEFT JOIN clientes c ON c.id = a.cliente_id
+         LEFT JOIN usuarios u ON u.id = a.creado_por
+         WHERE a.estado = 'ACTIVA' AND a.fecha BETWEEN $1 AND $2
+         ORDER BY a.fecha, a.id`,
+        [week.startDate, week.endDate]
+      ),
+      pool.query(
+        `SELECT b.persona_id, b.public_id::text AS bolsa_id, b.estado,
+                b.semana_inicio, b.semana_fin,
+                u.nombre_usuario AS coordinador, u.email AS coordinador_correo,
+                COALESCE(SUM(m.horas_delta), 0)::float8 AS horas_disponibles,
+                COALESCE(SUM(m.horas_delta) FILTER (
+                  WHERE m.tipo IN ('ASIGNACION', 'AJUSTE')
+                ), 0)::float8 AS horas_asignadas,
+                ABS(COALESCE(SUM(m.horas_delta) FILTER (
+                  WHERE m.tipo = 'CONSUMO'
+                ), 0))::float8
+                - COALESCE(SUM(m.horas_delta) FILTER (
+                  WHERE m.tipo = 'REVERSO'
+                ), 0)::float8 AS horas_consumidas
+         FROM bolsas_reuniones_capacidad b
+         LEFT JOIN bolsa_reuniones_movimientos m ON m.bolsa_id = b.id
+         LEFT JOIN usuarios u ON u.id = b.coordinador_id
+         WHERE b.semana_inicio = $1
+         GROUP BY b.id, u.id`,
+        [week.startDate]
+      )
+    ]);
     const assignmentsByPerson = new Map();
     for (const version of versionsResult.rows) {
       if (!version.persona_id) continue;
@@ -1328,9 +1538,15 @@ async function getDashboard(req, res) {
         ? version.datos_snapshot?.categoria_actividad_codigo
         : version.categoria_codigo;
       if (!activeCategory) continue;
-      const percentage = Number(
-        version.porcentajes_snapshot?.[activeCategory] || 0
-      );
+      const percentage = activeCategory === "DESARROLLO_PRUEBAS"
+        ? Number(
+          version.porcentajes_snapshot?.DESARROLLO_PRUEBAS
+          ?? (
+            Number(version.porcentajes_snapshot?.DESARROLLO || 0)
+            + Number(version.porcentajes_snapshot?.PRUEBAS || 0)
+          )
+        ) + Number(version.porcentajes_snapshot?.DOCUMENTACION || 0)
+        : Number(version.porcentajes_snapshot?.[activeCategory] || 0);
       const hasEffort = version.effort_total !== null && version.effort_total !== undefined;
       const hours = hasEffort
         ? calculateActiveHours(version.effort_total, percentage)
@@ -1349,6 +1565,7 @@ async function getDashboard(req, res) {
         porcentaje_fase: percentage,
         horas_activas: hours,
         prioridad: version.prioridad,
+        fecha_inicio: version.fecha_inicio,
         fecha_fin: version.fecha_fin
       };
       if (!assignmentsByPerson.has(version.persona_id)) {
@@ -1357,33 +1574,35 @@ async function getDashboard(req, res) {
       assignmentsByPerson.get(version.persona_id).push(detail);
     }
 
-    for (const meeting of calendarResult.rows) {
-      if (!assignmentsByPerson.has(meeting.persona_id)) {
-        assignmentsByPerson.set(meeting.persona_id, []);
+    for (const activity of activitiesResult.rows) {
+      if (!assignmentsByPerson.has(activity.persona_id)) {
+        assignmentsByPerson.set(activity.persona_id, []);
       }
-      assignmentsByPerson.get(meeting.persona_id).push({
-        requerimiento_id: `calendario:${meeting.actividad_id}`,
-        titulo: meeting.titulo,
-        cliente: "",
-        origen: "MICROSOFT_365",
-        estado: "Programada",
-        estado_codigo: "PLANIFICADO",
-        categoria: "REUNIONES",
-        tipo_registro: "ACTIVIDAD_CALENDARIO",
-        effort_total: Number(meeting.horas_activas),
+      assignmentsByPerson.get(activity.persona_id).push({
+        requerimiento_id: `actividad:${activity.actividad_id}`,
+        actividad_id: activity.actividad_id,
+        titulo: activity.titulo,
+        cliente: activity.cliente || "",
+        origen: activity.origen,
+        estado: "Activa",
+        estado_codigo: "ACTIVA",
+        categoria: activity.categoria_codigo,
+        tipo_registro: "ACTIVIDAD_CAPACIDAD",
+        effort_total: Number(activity.horas),
         effort_pendiente: false,
         porcentaje_fase: 100,
-        horas_activas: Number(meeting.horas_activas),
+        horas_activas: Number(activity.horas),
         prioridad: 2,
-        fecha_inicio: meeting.inicio,
-        fecha_fin: meeting.fin,
-        organizador: meeting.organizador_nombre || meeting.organizador_correo,
-        web_url: meeting.web_url
+        fecha_inicio: activity.fecha,
+        fecha_fin: activity.fecha,
+        creado_por: activity.creado_por
       });
     }
 
+    const bagsByPerson = new Map(bagsResult.rows.map((bag) => [bag.persona_id, bag]));
     const people = membersResult.rows.map((person) => {
       const assignments = assignmentsByPerson.get(person.id) || [];
+      const bag = bagsByPerson.get(person.id) || null;
       const used = Math.round(
         assignments.reduce((sum, item) => sum + item.horas_activas, 0) * 100
       ) / 100;
@@ -1398,6 +1617,15 @@ async function getDashboard(req, res) {
         porcentaje_ocupacion: Math.round((used / weeklyHours) * 10000) / 100,
         requerimientos_activos: assignments.length,
         requerimientos_sin_effort: pendingEffort,
+        bolsa_reuniones: bag ? {
+          id: bag.bolsa_id,
+          estado: bag.estado,
+          horas_asignadas: Number(bag.horas_asignadas),
+          horas_consumidas: Number(bag.horas_consumidas),
+          horas_disponibles: Number(bag.horas_disponibles),
+          coordinador: bag.coordinador,
+          coordinador_correo: bag.coordinador_correo
+        } : null,
         asignaciones: assignments.sort((left, right) =>
           (left.prioridad || 99) - (right.prioridad || 99)
         )
@@ -1466,16 +1694,20 @@ function handleError(res, error, fallback) {
 
 module.exports = {
   CapacityError,
+  assignMeetingBags,
+  cancelCapacityActivity,
   createManualActivity,
+  createMyMeeting,
   createManualRequirement,
   getCatalogs,
   getDashboard,
+  getMeetingBagHistory,
+  getMyCapacity,
   getRequirementHistory,
   listPeople,
   listRequirements,
   materializeMicrosoftPerson,
   syncAzureRequirements,
-  syncCalendarMeetings,
   updateFactoryMembership,
   updateManualRequirement,
   updateRequirementDistribution

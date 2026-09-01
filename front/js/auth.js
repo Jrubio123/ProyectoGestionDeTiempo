@@ -89,6 +89,7 @@ window.auth = (function () {
         
         if (rol === "administrador") return "admin";
         if (rol === "coordinador") return "coordinador";
+        if (rol === "fábrica" || rol === "fabrica") return "fabrica";
         if (rol === "reclutador") return "reclutador";
         if (rol === "contabilidad") return "contabilidad";
         if (rol === "comercial") return "comercial";
@@ -110,6 +111,10 @@ window.auth = (function () {
         try {
             const res = await window.axios.get(`${API_BASE}/auth/me`);
             if (res?.data?.user) {
+                if (res.data.token) safeSet(TOKEN_KEY, res.data.token);
+                if (window.axios && res.data.token) {
+                    window.axios.defaults.headers.common.Authorization = `Bearer ${res.data.token}`;
+                }
                 safeSet(USER_KEY, JSON.stringify(res.data.user));
                 return res.data.user;
             }

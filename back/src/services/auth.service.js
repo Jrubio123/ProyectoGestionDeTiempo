@@ -300,7 +300,17 @@ async function getCurrentUser(req, res) {
     if (result.rows.length === 0) {
       return res.status(401).json({ error: "Usuario no válido" });
     }
-    res.json({ user: buildUserResponse(result.rows[0]) });
+    const user = result.rows[0];
+    const refreshedToken = jwt.sign({
+      id: user.id,
+      public_id: user.public_id || null,
+      nombre_usuario: user.nombre_usuario,
+      email: user.email,
+      rol: user.rol || "",
+      rol_usuario_id: user.rol_usuario_id,
+      tipo_consultor: user.tipo_consultor || null
+    }, JWT_SECRET, { expiresIn: "12h" });
+    res.json({ user: buildUserResponse(user), token: refreshedToken });
   } catch (err) {
     res.status(401).json({ error: "Token inválido" });
   }

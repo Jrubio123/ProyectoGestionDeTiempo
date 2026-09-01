@@ -2,9 +2,12 @@
     <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
             <h1 class="text-2xl font-bold text-slate-900">Capacidad de Fábrica</h1>
-            <p class="mt-1 text-sm text-slate-500">Carga semanal con Azure DevOps, reuniones de Microsoft 365 y actividades manuales.</p>
+            <p class="mt-1 text-sm text-slate-500">Carga semanal con Azure DevOps, bolsas de reuniones y actividades del equipo.</p>
         </div>
         <div class="flex flex-wrap gap-2" x-show="puedeGestionar">
+            <button @click="abrirBolsa()" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700">
+                Asignar bolsa de reuniones
+            </button>
             <button @click="abrirActividad()" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
                 Nueva actividad
             </button>
@@ -88,13 +91,25 @@
                     <div class="mt-4 h-2.5 overflow-hidden rounded-full bg-slate-100">
                         <div class="h-full rounded-full" :class="occupancyClass(person.porcentaje_ocupacion)" :style="`width:${Math.min(Number(person.porcentaje_ocupacion), 100)}%`"></div>
                     </div>
+                    <div class="mt-4 flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between" :class="person.bolsa_reuniones ? 'border-violet-200 bg-violet-50' : 'border-amber-200 bg-amber-50'">
+                        <div>
+                            <p class="text-xs font-semibold uppercase tracking-wide" :class="person.bolsa_reuniones ? 'text-violet-700' : 'text-amber-700'">Bolsa de reuniones</p>
+                            <p x-show="person.bolsa_reuniones" class="mt-1 text-sm text-slate-700">
+                                <strong><span x-text="formatNumber(person.bolsa_reuniones?.horas_consumidas)"></span> h</strong> consumidas de
+                                <strong><span x-text="formatNumber(person.bolsa_reuniones?.horas_asignadas)"></span> h</strong> ·
+                                saldo <strong><span x-text="formatNumber(person.bolsa_reuniones?.horas_disponibles)"></span> h</strong>
+                            </p>
+                            <p x-show="!person.bolsa_reuniones" class="mt-1 text-sm text-amber-700">Sin bolsa asignada para esta semana.</p>
+                        </div>
+                        <div class="flex shrink-0 gap-2"><button x-show="person.bolsa_reuniones" @click="verHistorialBolsa(person)" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">Historial</button><button @click="abrirBolsa(person)" class="rounded-lg border border-violet-200 bg-white px-3 py-2 text-xs font-semibold text-violet-700" x-text="person.bolsa_reuniones ? 'Ampliar bolsa' : 'Asignar bolsa'"></button></div>
+                    </div>
                     <p x-show="person.requerimientos_sin_effort" class="mt-3 text-xs font-medium text-amber-700">
                         <span x-text="person.requerimientos_sin_effort"></span> requerimiento(s) pendiente(s) de Effort.
                     </p>
                     <div class="mt-4 overflow-x-auto" x-show="person.asignaciones?.length">
                         <table class="min-w-full text-sm">
                             <thead class="text-left text-xs uppercase text-slate-400">
-                                <tr><th class="pb-2 pr-4">Cliente</th><th class="pb-2 pr-4">Requerimiento</th><th class="pb-2 pr-4">Estado</th><th class="pb-2 text-right">Horas activas</th></tr>
+                                <tr><th class="pb-2 pr-4">Cliente</th><th class="pb-2 pr-4">Requerimiento</th><th class="pb-2 pr-4">Estado</th><th class="pb-2 pr-4">Fecha</th><th class="pb-2 text-right">Horas activas</th></tr>
                             </thead>
                             <tbody class="divide-y divide-slate-100">
                                 <template x-for="assignment in person.asignaciones" :key="assignment.requerimiento_id">
@@ -103,9 +118,11 @@
                                         <td class="py-2 pr-4 font-medium text-slate-800">
                                             <a x-show="assignment.web_url" :href="assignment.web_url" target="_blank" rel="noopener" class="text-blue-700 hover:underline" x-text="assignment.titulo"></a>
                                             <span x-show="!assignment.web_url" x-text="assignment.titulo"></span>
-                                            <p x-show="assignment.origen === 'MICROSOFT_365'" class="text-xs font-normal text-slate-400">Microsoft 365 · Reuniones</p>
+                                            <p x-show="assignment.tipo_registro === 'ACTIVIDAD_CAPACIDAD'" class="text-xs font-normal text-slate-400"><span x-text="assignment.categoria?.replaceAll('_', ' ')"></span> · <span x-text="assignment.origen === 'AUTORREGISTRO' ? 'Autorregistro' : 'Coordinador'"></span></p>
+                                            <button x-show="assignment.tipo_registro === 'ACTIVIDAD_CAPACIDAD'" @click="cancelarActividadCapacidad(assignment)" class="mt-1 text-xs font-semibold text-red-600">Cancelar actividad</button>
                                         </td>
                                         <td class="py-2 pr-4 text-slate-600" x-text="assignment.estado"></td>
+                                        <td class="whitespace-nowrap py-2 pr-4 text-slate-600" x-text="formatAssignmentDate(assignment)"></td>
                                         <td class="py-2 text-right font-semibold">
                                             <span x-show="!assignment.effort_pendiente"><span x-text="formatNumber(assignment.horas_activas)"></span> h</span>
                                             <span x-show="assignment.effort_pendiente" class="text-amber-600">Effort pendiente</span>
@@ -228,24 +245,46 @@
         </div>
     </section>
 
+    <!-- Modal bolsa semanal de reuniones -->
+    <div x-show="modalBolsa" class="fixed inset-0 z-50 !m-0 flex items-center justify-center bg-slate-900/50 p-4" @keydown.escape.window="modalBolsa = false">
+        <div @click.outside="modalBolsa = false" class="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl sm:p-6">
+            <div class="flex items-start justify-between gap-4"><div><h2 class="text-xl font-bold text-slate-900">Bolsa semanal de reuniones</h2><p class="mt-1 text-sm text-slate-500">Crea la bolsa o suma horas conservando el historial del cambio.</p></div><button @click="modalBolsa = false" class="text-2xl text-slate-400">×</button></div>
+            <form @submit.prevent="guardarBolsa()" class="mt-5 space-y-4">
+                <div><span class="text-sm font-medium text-slate-700">Integrantes</span><div class="mt-1 grid max-h-48 gap-2 overflow-y-auto rounded-lg border border-slate-300 p-3 sm:grid-cols-2"><template x-for="person in integrantesFabrica()" :key="person.id"><label class="flex items-center gap-2 rounded-md p-2 hover:bg-slate-50"><input type="checkbox" :checked="bolsa.persona_ids?.includes(person.id)" @change="toggleBolsaPersona(person.id, $event.target.checked)" class="rounded border-slate-300"><span x-text="`${person.nombre || ''} ${person.apellidos || ''}`.trim()"></span></label></template></div></div>
+                <div class="grid gap-4 sm:grid-cols-2"><label class="text-sm font-medium text-slate-700">Semana<input required type="date" x-model="bolsa.fecha" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label><label class="text-sm font-medium text-slate-700">Horas a sumar<input required type="number" min="0.01" max="168" step="0.01" x-model.number="bolsa.horas" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label></div>
+                <label class="block text-sm font-medium text-slate-700">Motivo<input required maxlength="500" x-model.trim="bolsa.motivo" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
+                <div class="flex justify-end gap-3"><button type="button" @click="modalBolsa = false" class="rounded-lg border border-slate-300 px-4 py-2 text-sm">Cancelar</button><button type="submit" :disabled="guardandoBolsa || !bolsa.persona_ids?.length" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" x-text="guardandoBolsa ? 'Guardando…' : 'Guardar bolsa'"></button></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal historial de bolsa -->
+    <div x-show="modalMovimientosBolsa" class="fixed inset-0 z-50 !m-0 flex items-center justify-center bg-slate-900/50 p-4" @keydown.escape.window="modalMovimientosBolsa = false">
+        <div @click.outside="modalMovimientosBolsa = false" class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl sm:p-6">
+            <div class="flex items-start justify-between"><div><h2 class="text-xl font-bold text-slate-900">Historial de bolsa</h2><p class="mt-1 text-sm text-slate-500" x-text="historialBolsa.bolsa?.persona"></p></div><button @click="modalMovimientosBolsa = false" class="text-2xl text-slate-400">×</button></div>
+            <p x-show="cargandoMovimientosBolsa" class="py-10 text-center text-slate-500">Cargando…</p>
+            <div x-show="!cargandoMovimientosBolsa" class="mt-5 space-y-3"><template x-for="movement in historialBolsa.movimientos || []" :key="movement.id"><article class="flex items-start justify-between gap-4 rounded-lg border border-slate-200 p-4"><div><div class="flex items-center gap-2"><span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600" x-text="movement.tipo"></span><strong class="text-sm" x-text="movement.motivo || movement.actividad || 'Movimiento de bolsa'"></strong></div><p class="mt-2 text-xs text-slate-500"><span x-text="movement.registrado_por || 'Sistema'"></span> · <span x-text="formatDate(movement.created_at, true)"></span></p></div><span class="whitespace-nowrap font-bold" :class="Number(movement.horas_delta) >= 0 ? 'text-emerald-600' : 'text-red-600'" x-text="`${Number(movement.horas_delta) >= 0 ? '+' : ''}${formatNumber(movement.horas_delta)} h`"></span></article></template><p x-show="!historialBolsa.movimientos?.length" class="py-8 text-center text-slate-500">Sin movimientos.</p></div>
+        </div>
+    </div>
+
     <!-- Modal actividad puntual -->
     <div x-show="modalActividad" class="fixed inset-0 z-50 !m-0 flex items-center justify-center bg-slate-900/50 p-4" @keydown.escape.window="modalActividad = false">
         <div @click.outside="modalActividad = false" class="w-full max-w-2xl rounded-2xl bg-white px-4 pb-4 pt-3 shadow-xl sm:px-6 sm:pb-6 sm:pt-4">
             <div class="flex items-start justify-between gap-4">
-                <div><h2 class="text-xl font-bold text-slate-900">Nueva actividad puntual</h2><p class="mt-1 text-sm text-slate-500">Reserva horas de una persona para una actividad concreta de la semana.</p></div>
+                <div><h2 class="text-xl font-bold text-slate-900">Nueva actividad</h2><p class="mt-1 text-sm text-slate-500">Asigna la misma actividad a uno o varios integrantes. Las reuniones descuentan su bolsa semanal.</p></div>
                 <button @click="modalActividad = false" class="text-2xl text-slate-400">×</button>
             </div>
             <form @submit.prevent="guardarActividad()" class="mt-5 space-y-4">
                 <div class="grid gap-4 md:grid-cols-2">
-                    <label class="text-sm font-medium text-slate-700">Responsable<select required x-model="actividad.persona_id" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><option value="">Selecciona</option><template x-for="person in integrantesFabrica()" :key="person.id"><option :value="person.id" x-text="`${person.nombre || ''} ${person.apellidos || ''}`.trim()"></option></template></select></label>
+                    <div class="text-sm font-medium text-slate-700 md:col-span-2"><span>Responsables</span><div class="mt-1 grid max-h-44 gap-2 overflow-y-auto rounded-lg border border-slate-300 p-3 sm:grid-cols-2"><template x-for="person in integrantesFabrica()" :key="person.id"><label class="flex items-center gap-2 rounded-md p-2 hover:bg-slate-50"><input type="checkbox" :checked="actividad.persona_ids?.includes(person.id)" @change="toggleActividadPersona(person.id, $event.target.checked)" class="rounded border-slate-300"><span x-text="`${person.nombre || ''} ${person.apellidos || ''}`.trim()"></span></label></template></div></div>
                     <label class="text-sm font-medium text-slate-700">Cliente <span class="font-normal text-slate-400">(opcional)</span><select x-model="actividad.cliente_id" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><option value="">Sin cliente</option><template x-for="client in catalogos.clientes" :key="client.id"><option :value="client.id" x-text="client.titulo"></option></template></select></label>
                     <label class="text-sm font-medium text-slate-700 md:col-span-2">Actividad<input required maxlength="500" x-model="actividad.titulo" placeholder="Ej. Estimar nuevo reporte de ventas" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
-                    <label class="text-sm font-medium text-slate-700">Categoría<select required x-model="actividad.categoria_codigo" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><template x-for="category in catalogos.categorias" :key="category.codigo"><option :value="category.codigo" x-text="category.nombre"></option></template></select></label>
+                    <label class="text-sm font-medium text-slate-700">Categoría<select required x-model="actividad.categoria_codigo" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><template x-for="category in catalogos.categorias_actividad || []" :key="category.codigo"><option :value="category.codigo" x-text="category.nombre"></option></template></select></label>
                     <label class="text-sm font-medium text-slate-700">Horas<input required type="number" min="0.01" step="0.01" x-model.number="actividad.horas" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
                     <label class="text-sm font-medium text-slate-700">Fecha<input required type="date" x-model="actividad.fecha" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
-                    <label class="text-sm font-medium text-slate-700">Prioridad<select x-model.number="actividad.prioridad" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><option :value="1">1 - Alta</option><option :value="2">2 - Media</option><option :value="3">3 - Baja</option></select></label>
                 </div>
-                <div class="flex justify-end gap-3"><button type="button" @click="modalActividad = false" class="rounded-lg border border-slate-300 px-4 py-2 text-sm">Cancelar</button><button type="submit" :disabled="guardandoActividad" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" x-text="guardandoActividad ? 'Guardando…' : 'Planificar actividad'"></button></div>
+                <p x-show="actividad.categoria_codigo === 'REUNIONES'" class="rounded-lg bg-violet-50 px-3 py-2 text-sm text-violet-700">Se validará y descontará la bolsa de reuniones de cada responsable.</p>
+                <div class="flex justify-end gap-3"><button type="button" @click="modalActividad = false" class="rounded-lg border border-slate-300 px-4 py-2 text-sm">Cancelar</button><button type="submit" :disabled="guardandoActividad || !actividad.persona_ids?.length" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" x-text="guardandoActividad ? 'Guardando…' : 'Planificar actividad'"></button></div>
             </form>
         </div>
     </div>

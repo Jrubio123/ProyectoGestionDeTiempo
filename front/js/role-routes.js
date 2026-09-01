@@ -36,6 +36,7 @@ window.roleAccess = (function () {
             "capacidad-fabrica",
             "azure-devops-prueba"
         ],
+        fabrica: ["inicio"],
         comercial: [
             "inicio",
             "asignacion-consultor",

@@ -354,6 +354,7 @@ Tablas principales:
 - `reporte_horas`, `cuenta_cobro`
 - `solicitudes_rrhh`, `solicitudes_contratacion`, `preregistro_personas`
 - `personas`, `anexo_tecnico_items`
+- `vacaciones_solicitudes`, `vacaciones_destinatarios`, `vacaciones_auditoria`
 - `tokens_firma_contrato`, `tokens_firma_anexo_individual`
 - `permisos_administrador`, `usuario_licencias_backup`
 
@@ -371,6 +372,7 @@ Migraciones recientes relevantes:
 - `2026-04-16-personas-nucleo.sql`
 - `2026-04-21-campos-persona-juridica.sql`
 - `2026-04-22-formulario-personas-contratacion.sql`
+- `2026-09-01-vacaciones.sql`
 
 Scripts utiles:
 
@@ -394,6 +396,7 @@ Variables clave:
 - CORS/front: `CORS_ORIGINS`, `FRONT_PORTAL_BASE`
 - Microsoft: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_ALLOWED_GROUPS`
 - Email: `EMAIL_PROVIDER`, `EMAIL_FALLBACK_SMTP`, `GRAPH_SENDER_USER`, `EMAIL_TO_CONTABILIDAD`
+- Vacaciones: `VACACIONES_PUBLIC_API_URL`, `VACACIONES_JEFES_FIJOS`, `VACACIONES_TOKEN_DIAS`
 - OneDrive: `ONEDRIVE_ENABLED`, `ONEDRIVE_TARGET_USER`, `ONEDRIVE_ROOT_FOLDER`
 - Contratos: `CONTRATOS_BASE_URL`, `CONTRATOS_TOKEN_EXPIRY_HOURS`, `CONTRATOS_ONEDRIVE_FOLDER`
 - Click&Sign: `CLICKSIGN_API_BASE`, `CLICKSIGN_API_KEY`, `CLICKSIGN_USER`, `CLICKSIGN_CONFIG_ID`

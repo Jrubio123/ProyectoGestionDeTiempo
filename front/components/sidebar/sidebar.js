@@ -126,8 +126,12 @@ function initSidebar() {
         ],
         talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "gestion-personas", "gestion-consultores", "capacidad-fabrica"]
     };
+    Object.values(roleRoutes).forEach((roleViews) => {
+        if (!roleViews.includes("vacaciones")) roleViews.push("vacaciones");
+    });
+    roleRoutes.administrativo = ["inicio", "vacaciones"];
 
-    const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
+    const allowed = new Set(roleRoutes[roleKey] || ["inicio", "vacaciones"]);
     menuItems.forEach((item) => {
         const link = item.querySelector(".menu-link");
         if (!link) return;

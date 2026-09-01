@@ -20,6 +20,7 @@ const viewScripts = {
     "gestion-licencias-admin":        "/js/gestion-licencias-admin.js",
     "azure-devops-prueba":            "/js/azure-devops-prueba.js",
     "capacidad-fabrica":              "/js/capacidad-fabrica.js",
+    vacaciones:                       "/js/vacaciones.js",
     "gestion-personas":               "/js/gestion-personas.js",
     "gestion-consultores":            "/js/gestion-consultores.js",
     "firma-contratos-admin":          "/js/firma-contratos-admin.js",
@@ -34,7 +35,7 @@ const viewScripts = {
 // Guardar la promesa (no solo el resultado) evita inyectar el mismo
 // archivo dos veces si llegan dos navegaciones rápidas antes del onload.
 const _scriptPromises = new Map();
-const APP_ASSET_VERSION = "20260831-capacidad-fabrica-v2-20260812-anexo-estado-firma";
+const APP_ASSET_VERSION = "20260901-vacaciones-20260812-anexo-estado-firma";
 
 function loadScript(src) {
     if (_scriptPromises.has(src)) return _scriptPromises.get(src);
@@ -110,6 +111,7 @@ const routes = {
     "gestion-licencias-admin": "gestion-licencias-admin",
     "azure-devops-prueba": "azure-devops-prueba",
     "capacidad-fabrica": "capacidad-fabrica",
+    vacaciones: "vacaciones",
     "gestion-personas": "gestion-personas",
     "gestion-consultores": "gestion-consultores",
     "firma-contratos-admin": "firma-contratos-admin",
@@ -179,7 +181,11 @@ function router() {
         ],
         talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "gestion-personas", "gestion-consultores", "capacidad-fabrica"]
     };
-    const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
+    Object.values(roleRoutes).forEach((roleViews) => {
+        if (!roleViews.includes("vacaciones")) roleViews.push("vacaciones");
+    });
+    roleRoutes.administrativo = ["inicio", "vacaciones"];
+    const allowed = new Set(roleRoutes[roleKey] || ["inicio", "vacaciones"]);
     if (view && !allowed.has(view)) {
         loadView("inicio");
         return;

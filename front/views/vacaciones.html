@@ -1,0 +1,98 @@
+<div x-data="vacacionesApp()" x-init="init()" class="mx-auto max-w-7xl space-y-5 p-4 md:p-6">
+    <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-900">Vacaciones</h1>
+            <p class="text-sm text-slate-500">Solicitudes, aprobaciones y calendario de ausencias.</p>
+        </div>
+        <p class="text-sm text-slate-600" x-show="contexto.solicitante?.nombre">
+            Solicitante: <strong x-text="contexto.solicitante?.nombre"></strong>
+        </p>
+    </div>
+
+    <div x-show="error" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" x-text="error"></div>
+    <div x-show="exito" class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" x-text="exito"></div>
+
+    <div x-show="cargando" class="rounded-xl border border-slate-200 bg-white p-10 text-center text-slate-500">Cargando vacaciones...</div>
+
+    <template x-if="!cargando">
+        <div class="space-y-5">
+            <nav class="flex gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+                <button @click="tab='solicitar'" class="whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold" :class="tab==='solicitar' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'">Solicitar / Mis vacaciones</button>
+                <button @click="tab='aprobar'" class="whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold" :class="tab==='aprobar' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'">Por aprobar <span class="ml-1 rounded-full bg-white/20 px-2" x-text="porAprobar.filter(i => i.estado === 'pendiente').length"></span></button>
+                <button x-show="permisos.puede_ver_panorama" @click="tab='vigentes'" class="whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold" :class="tab==='vigentes' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'">Vigentes y próximas</button>
+                <button x-show="permisos.puede_ver_panorama" @click="tab='historial'" class="whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold" :class="tab==='historial' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'">Historial</button>
+            </nav>
+
+            <section x-show="tab==='solicitar'" class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
+                <form @submit.prevent="solicitar()" class="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <h2 class="text-lg font-semibold text-slate-900">Nueva solicitud</h2>
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Fecha inicial</span><input type="date" x-model="form.fecha_inicio" :min="hoy()" @change="calcular()" required class="w-full rounded-lg border border-slate-300 px-3 py-2"></label>
+                        <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Fecha final</span><input type="date" x-model="form.fecha_fin" :min="form.fecha_inicio || hoy()" @change="calcular()" required class="w-full rounded-lg border border-slate-300 px-3 py-2"></label>
+                    </div>
+
+                    <div x-show="calculo" class="grid grid-cols-2 gap-3 rounded-lg border border-blue-100 bg-blue-50 p-4">
+                        <div><p class="text-xs font-semibold uppercase text-blue-600">Días hábiles</p><p class="text-2xl font-bold text-blue-900" x-text="calculo?.dias_habiles || 0"></p></div>
+                        <div><p class="text-xs font-semibold uppercase text-blue-600">Regreso</p><p class="font-bold text-blue-900" x-text="formatDate(calculo?.fecha_regreso)"></p></div>
+                        <div class="col-span-2 flex flex-wrap gap-1" x-show="calculo?.calendario?.some(d => !d.habil)">
+                            <template x-for="dia in calculo?.calendario?.filter(d => !d.habil) || []" :key="dia.fecha"><span class="rounded bg-white px-2 py-1 text-xs text-slate-600"><span x-text="formatDate(dia.fecha)"></span>: <span x-text="dia.festivo || dia.tipo"></span></span></template>
+                        </div>
+                    </div>
+
+                    <div class="relative">
+                        <label class="mb-1 block text-sm font-medium text-slate-700">Jefe inmediato</label>
+                        <input type="search" x-model="busquedaJefe" @input="form.jefe=null; buscarJefes()" placeholder="Buscar por nombre o correo" autocomplete="off" class="w-full rounded-lg border border-slate-300 px-3 py-2">
+                        <div x-show="jefes.length" class="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-xl">
+                            <template x-for="persona in jefes" :key="persona.email"><button type="button" @click="seleccionarJefe(persona)" class="block w-full border-b border-slate-100 px-4 py-3 text-left hover:bg-blue-50"><strong class="block text-sm text-slate-900" x-text="persona.nombre"></strong><span class="text-xs text-slate-500" x-text="`${persona.email} · ${persona.origen === 'personas' ? 'Personas' : 'Microsoft 365'}`"></span></button></template>
+                        </div>
+                        <p x-show="buscandoJefe" class="mt-1 text-xs text-slate-500">Buscando en Personas y Microsoft 365...</p>
+                    </div>
+
+                    <label class="block"><span class="mb-1 block text-sm font-medium text-slate-700">Observaciones</span><textarea x-model="form.observaciones" maxlength="2000" rows="3" class="w-full rounded-lg border border-slate-300 px-3 py-2" placeholder="Opcional"></textarea></label>
+                    <button type="submit" :disabled="guardando || !calculo?.dias_habiles || !form.jefe" class="w-full rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"><span x-text="guardando ? 'Enviando...' : 'Enviar solicitud'"></span></button>
+                </form>
+
+                <div class="space-y-3">
+                    <h2 class="text-lg font-semibold text-slate-900">Mis solicitudes</h2>
+                    <p x-show="!mias.length" class="rounded-xl border border-slate-200 bg-white p-6 text-center text-slate-500">No tienes solicitudes.</p>
+                    <template x-for="item in mias" :key="item.id">
+                        <article class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                            <div class="flex items-start justify-between gap-3"><div><p class="font-semibold text-slate-900"><span x-text="formatDate(item.fecha_inicio)"></span> — <span x-text="formatDate(item.fecha_fin)"></span></p><p class="mt-1 text-sm text-slate-500"><span x-text="item.dias_habiles"></span> días hábiles · regreso <span x-text="formatDate(item.fecha_regreso)"></span></p></div><span class="rounded-full px-2.5 py-1 text-xs font-semibold capitalize" :class="estadoClase(item.estado)" x-text="item.estado"></span></div>
+                            <p class="mt-3 text-sm text-slate-600">Jefe: <strong x-text="item.jefe.nombre"></strong></p>
+                            <p x-show="item.comentario_decision" class="mt-2 rounded bg-slate-50 p-2 text-sm text-slate-600" x-text="item.comentario_decision"></p>
+                        </article>
+                    </template>
+                </div>
+            </section>
+
+            <section x-show="tab==='aprobar'" class="space-y-3">
+                <p x-show="!porAprobar.length" class="rounded-xl border border-slate-200 bg-white p-8 text-center text-slate-500">No tienes solicitudes asignadas.</p>
+                <template x-for="item in porAprobar" :key="item.id">
+                    <article class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                            <div><div class="flex items-center gap-2"><h3 class="font-semibold text-slate-900" x-text="item.solicitante.nombre"></h3><span class="rounded-full px-2.5 py-1 text-xs font-semibold capitalize" :class="estadoClase(item.estado)" x-text="item.estado"></span></div><p class="mt-2 text-sm text-slate-600"><span x-text="formatDate(item.fecha_inicio)"></span> al <span x-text="formatDate(item.fecha_fin)"></span> · <strong><span x-text="item.dias_habiles"></span> días hábiles</strong> · regreso <span x-text="formatDate(item.fecha_regreso)"></span></p><p x-show="item.observaciones" class="mt-2 text-sm text-slate-500" x-text="item.observaciones"></p></div>
+                            <div x-show="item.puede_decidir" class="flex gap-2"><button @click="decidir(item,'rechazar')" class="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50">Rechazar</button><button @click="decidir(item,'aprobar')" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">Aprobar</button></div>
+                        </div>
+                    </article>
+                </template>
+            </section>
+
+            <section x-show="tab==='vigentes' && permisos.puede_ver_panorama" class="space-y-4">
+                <div class="grid gap-3 md:grid-cols-3"><div class="rounded-xl border border-slate-200 bg-white p-4"><p class="text-xs font-semibold uppercase text-slate-500">Vigentes y próximas</p><p class="mt-1 text-3xl font-bold text-slate-900" x-text="vigentes.length"></p></div></div>
+                <p x-show="!vigentes.length" class="rounded-xl border border-slate-200 bg-white p-8 text-center text-slate-500">No hay vacaciones vigentes o próximas.</p>
+                <div class="grid gap-3 lg:grid-cols-2"><template x-for="item in vigentes" :key="item.id"><article class="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm"><h3 class="font-semibold text-slate-900" x-text="item.solicitante.nombre"></h3><p class="mt-1 text-sm text-slate-600"><span x-text="formatDate(item.fecha_inicio)"></span> al <span x-text="formatDate(item.fecha_fin)"></span></p><p class="mt-1 text-sm text-slate-500">Regresa <strong x-text="formatDate(item.fecha_regreso)"></strong> · <span x-text="item.dias_habiles"></span> días hábiles</p></article></template></div>
+
+                <div x-show="permisos.puede_configurar" class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"><div><h2 class="font-semibold text-slate-900">Notificaciones de vacaciones aprobadas</h2><p class="text-sm text-slate-500">Estas personas reciben correo y, si tienen acceso, ven vigentes e historial.</p></div><button @click="guardarConfiguracion()" :disabled="guardando" class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Guardar configuración</button></div>
+                    <div class="relative mt-4 max-w-xl"><input type="search" x-model="busquedaConfig" @input="buscarParaConfig()" placeholder="Agregar desde Personas o Microsoft 365" class="w-full rounded-lg border border-slate-300 px-3 py-2"><div x-show="resultadosConfig.length" class="absolute z-20 mt-1 w-full rounded-lg border bg-white shadow-xl"><template x-for="persona in resultadosConfig" :key="persona.email"><button @click="agregarDestinatario(persona)" class="block w-full border-b px-3 py-2 text-left hover:bg-blue-50"><strong class="block text-sm" x-text="persona.nombre"></strong><span class="text-xs text-slate-500" x-text="persona.email"></span></button></template></div></div>
+                    <div class="mt-4 flex flex-wrap gap-2"><template x-for="(persona,index) in configuracion" :key="persona.correo || persona.email"><span class="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1.5 text-sm text-blue-800"><span x-text="persona.nombre"></span><button @click="configuracion.splice(index,1)" class="font-bold text-blue-500" title="Quitar">×</button></span></template><span x-show="!configuracion.length" class="text-sm text-slate-500">Sin destinatarios configurados.</span></div>
+                </div>
+            </section>
+
+            <section x-show="tab==='historial' && permisos.puede_ver_panorama" class="space-y-3">
+                <p x-show="!historial.length" class="rounded-xl border border-slate-200 bg-white p-8 text-center text-slate-500">No hay historial.</p>
+                <template x-for="item in historial" :key="item.id"><article class="rounded-xl border border-slate-200 bg-white p-4"><div class="flex flex-wrap items-center justify-between gap-2"><div><strong x-text="item.solicitante.nombre"></strong><p class="text-sm text-slate-500"><span x-text="formatDate(item.fecha_inicio)"></span> al <span x-text="formatDate(item.fecha_fin)"></span></p></div><span class="rounded-full px-2.5 py-1 text-xs font-semibold capitalize" :class="estadoClase(item.estado)" x-text="item.estado"></span></div></article></template>
+            </section>
+        </div>
+    </template>
+</div>

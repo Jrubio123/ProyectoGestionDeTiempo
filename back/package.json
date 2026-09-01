@@ -1,12 +1,16 @@
 {
   "name": "gestion-tiempo-back",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node src/index.js",
     "dev": "node src/index.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
+    "@juandbc/festivos-colombia": "npm:@jsr/juandbc__festivos-colombia@^1.4.1",
     "bcrypt": "^5.1.0",
     "cors": "^2.8.5",
     "docxtemplater": "^3.67.3",

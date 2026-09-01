@@ -1,6 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { calcularPeriodoVacaciones } = require("../src/services/vacaciones-calendario.service");
+const {
+  calcularPeriodoVacaciones,
+  formatDateEs,
+  normalizeDateToIso
+} = require("../src/services/vacaciones-calendario.service");
 
 test("excluye sábados, domingos y festivos colombianos", () => {
   const result = calcularPeriodoVacaciones("2026-07-17", "2026-07-21");
@@ -24,4 +28,10 @@ test("valida el orden y el límite del periodo", () => {
     () => calcularPeriodoVacaciones("2026-01-01", "2027-01-03"),
     /366 días/
   );
+});
+
+test("formatea fechas DATE devueltas por PostgreSQL", () => {
+  const postgresDate = new Date(Date.UTC(2026, 8, 10));
+  assert.equal(normalizeDateToIso(postgresDate), "2026-09-10");
+  assert.match(formatDateEs(postgresDate), /10 de septiembre de 2026/);
 });

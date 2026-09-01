@@ -21,6 +21,23 @@ function toIsoDate(date) {
   return date.toISOString().slice(0, 10);
 }
 
+function normalizeDateToIso(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return toIsoDate(value);
+  const raw = String(value || "").trim();
+  if (ISO_DATE_RE.test(raw.slice(0, 10))) return raw.slice(0, 10);
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return toIsoDate(parsed);
+}
+
+function formatDateEs(value) {
+  const iso = normalizeDateToIso(value);
+  if (!iso) return "";
+  return new Intl.DateTimeFormat("es-CO", {
+    year: "numeric", month: "long", day: "numeric", timeZone: "UTC"
+  }).format(new Date(`${iso}T00:00:00Z`));
+}
+
 function addDays(date, days) {
   const result = new Date(date.getTime());
   result.setUTCDate(result.getUTCDate() + days);
@@ -84,7 +101,9 @@ function calcularPeriodoVacaciones(fechaInicio, fechaFin) {
 
 module.exports = {
   calcularPeriodoVacaciones,
+  formatDateEs,
   getDayInfo,
+  normalizeDateToIso,
   parseIsoDate,
   toIsoDate
 };

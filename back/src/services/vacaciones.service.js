@@ -1,7 +1,10 @@
 const crypto = require("crypto");
 const { pool } = require("../db");
 const { sendEmail } = require("../email");
-const { calcularPeriodoVacaciones } = require("./vacaciones-calendario.service");
+const {
+  calcularPeriodoVacaciones,
+  formatDateEs: formatDate
+} = require("./vacaciones-calendario.service");
 const {
   getMicrosoftManager,
   getMicrosoftPerson,
@@ -41,13 +44,6 @@ function fixedBossEmails() {
     .split(/[;,]/)
     .map(normalizeEmail)
     .filter(Boolean);
-}
-
-function formatDate(value) {
-  if (!value) return "";
-  return new Intl.DateTimeFormat("es-CO", {
-    year: "numeric", month: "long", day: "numeric", timeZone: "UTC"
-  }).format(new Date(`${String(value).slice(0, 10)}T00:00:00Z`));
 }
 
 function emailContext(req = {}) {
@@ -532,7 +528,7 @@ async function decideFromApp(req, res) {
 function approvalPage({ token, action, request, message, done = false }) {
   const validAction = ['aprobar', 'rechazar'].includes(action) ? action : 'aprobar';
   const title = done ? message : `${validAction === 'aprobar' ? 'Aprobar' : 'Rechazar'} solicitud`;
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>${escapeHtml(title)}</title></head>
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><link rel="icon" href="data:,"><title>${escapeHtml(title)}</title></head>
   <body style="font-family:Arial,sans-serif;background:#f1f5f9;color:#1e293b;padding:24px"><main style="max-width:560px;margin:40px auto;background:#fff;border-radius:14px;padding:30px;border:1px solid #e2e8f0">
     <h1 style="font-size:24px">${escapeHtml(title)}</h1>
     ${done ? `<p>${escapeHtml(message)}</p>` : `<p><strong>${escapeHtml(request.solicitante_nombre)}</strong><br>${escapeHtml(formatDate(request.fecha_inicio))} al ${escapeHtml(formatDate(request.fecha_fin))}<br>${request.dias_habiles} día(s) hábil(es) · regreso ${escapeHtml(formatDate(request.fecha_regreso))}</p>

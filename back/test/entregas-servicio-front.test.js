@@ -157,3 +157,69 @@ test("coordinador solo acepta y administrador asignado puede aceptar o devolver"
   assert.equal(app.puedeAceptar(item), false);
   assert.equal(app.puedeDevolver(item), false);
 });
+
+test("solo Comercial puede rectificar una entrega devuelta", () => {
+  const app = createApp();
+  assert.equal(app.puedeRectificar({ estado: "CANCELADA" }), true);
+  assert.equal(app.puedeRectificar({ estado: "REGISTRADA" }), false);
+
+  global.window.auth.getRoleKey = () => "admin";
+  assert.equal(app.puedeRectificar({ estado: "CANCELADA" }), false);
+});
+
+test("precarga todos los datos de una entrega devuelta para corregirla", async () => {
+  const app = createApp();
+  global.axios = {
+    get: async () => ({
+      data: [{ id: "contacto", nombre: "Interventor", es_contacto_principal: true }]
+    })
+  };
+  global.window.scrollTo = () => {};
+
+  await app.rectificar({
+    id: "entrega",
+    estado: "CANCELADA",
+    tipo_servicio: "OUTSOURCING",
+    cliente_id: "cliente",
+    coordinador_id: "coordinador",
+    nombre_servicio: "Outsourcing FI",
+    perfil_cliente: "CLAVE",
+    acuerdos_comerciales: "Pago mensual",
+    interventor: { id: "contacto" },
+    consultores: [
+      {
+        id: "consultor",
+        tipo: "USUARIO",
+        tarifa_consultoria: "500000",
+        moneda_tarifa_consultoria: "COP"
+      },
+      {
+        id: "externo",
+        tipo: "EXTERNO",
+        nombre: "Consultor externo",
+        telefono: "300",
+        tarifa_consultoria: "50",
+        moneda_tarifa_consultoria: "USD"
+      }
+    ],
+    modulos: [{ id: "modulo", nombre: "FI" }, { id: "", nombre: "RE" }],
+    enlaces: [{ titulo: "Propuesta", url: "https://empresa.com/propuesta" }],
+    detalle: {
+      tiempo_descripcion: "6 meses",
+      valor_cliente: "8000000",
+      moneda: "COP",
+      tiene_contrato: false
+    }
+  });
+
+  assert.equal(app.entregaEditandoId, "entrega");
+  assert.equal(app.tab, "nueva");
+  assert.equal(app.form.contacto_id, "contacto");
+  assert.deepEqual(app.form.consultores_ids, ["consultor"]);
+  assert.equal(app.form.consultores_externos[0].nombre, "Consultor externo");
+  assert.deepEqual(app.form.modulos_ids, ["modulo"]);
+  assert.equal(app.form.modulos_otros_texto, "RE");
+  assert.equal(app.form.detalle.tiene_contrato, "false");
+
+  delete global.axios;
+});

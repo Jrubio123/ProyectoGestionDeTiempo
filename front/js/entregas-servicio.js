@@ -42,6 +42,7 @@ window.entregasServicioApp = function () {
         contactos: [],
         entregas: [],
         reasignaciones: {},
+        entregaEditandoId: null,
         detalleSeleccionado: null,
         filtro: { q: "", tipo: "", estado: "" },
         busquedaModulo: "",
@@ -236,22 +237,26 @@ window.entregasServicioApp = function () {
                 this.cargando = false;
             }
         },
+        async cargarContactosCliente(clienteId, contactoPreferido = "") {
+            this.contactos = [];
+            if (!clienteId) return;
+            try {
+                const response = await axios.get(`${API}/entregas-servicio/clientes/${clienteId}/contactos`);
+                this.contactos = response.data;
+                const preferido = this.contactos.find((item) => item.id === contactoPreferido);
+                const principal = this.contactos.find((item) => item.es_contacto_principal);
+                this.form.contacto_id = preferido?.id || principal?.id || this.contactos[0]?.id || "";
+            } catch (error) {
+                this.error = error?.response?.data?.error || "No se pudieron cargar los contactos.";
+            }
+        },
         async cambiarCliente() {
             this.clienteNuevoPreparado = null;
             this.form.contacto_id = "";
             this.form.contacto_nuevo = emptyContact();
-            this.contactos = [];
             const cliente = this.catalogos.clientes.find((item) => item.id === this.form.cliente_id);
             this.form.perfil_cliente = cliente?.perfil_cliente || "";
-            if (!this.form.cliente_id) return;
-            try {
-                const response = await axios.get(`${API}/entregas-servicio/clientes/${this.form.cliente_id}/contactos`);
-                this.contactos = response.data;
-                const principal = this.contactos.find((item) => item.es_contacto_principal);
-                this.form.contacto_id = principal?.id || this.contactos[0]?.id || "";
-            } catch (error) {
-                this.error = error?.response?.data?.error || "No se pudieron cargar los contactos.";
-            }
+            await this.cargarContactosCliente(this.form.cliente_id);
         },
         abrirClienteNuevo() {
             this.clienteNuevo = {
@@ -294,6 +299,75 @@ window.entregasServicioApp = function () {
         quitarEnlace(index) {
             this.form.enlaces.splice(index, 1);
         },
+        nuevaEntrega() {
+            this.entregaEditandoId = null;
+            this.form = emptyForm();
+            this.clienteNuevoPreparado = null;
+            this.contactos = [];
+            this.busquedaModulo = "";
+            this.busquedaConsultor = "";
+            this.tab = "nueva";
+            this.limpiarAlertas();
+        },
+        cancelarRectificacion() {
+            this.nuevaEntrega();
+            this.tab = "historial";
+        },
+        puedeRectificar(item) {
+            return this.roleKey === "comercial" && item?.estado === "CANCELADA";
+        },
+        async rectificar(item) {
+            if (!this.puedeRectificar(item)) return;
+            this.limpiarAlertas();
+            this.entregaEditandoId = item.id;
+            this.clienteNuevoPreparado = null;
+
+            const consultores = item.consultores || [];
+            const registrados = consultores.filter((consultor) => consultor.tipo === "USUARIO");
+            const externos = consultores.filter((consultor) => consultor.tipo === "EXTERNO");
+            const modulos = item.modulos || [];
+            const detalle = { ...emptyDetail(), ...(item.detalle || {}) };
+            detalle.nombre_proyecto = item.tipo_servicio === "PROYECTO" ? item.nombre_servicio : "";
+            detalle.tiene_contrato = detalle.tiene_contrato === true
+                ? "true"
+                : detalle.tiene_contrato === false ? "false" : "";
+
+            this.form = {
+                ...emptyForm(),
+                tipo_servicio: item.tipo_servicio,
+                cliente_id: item.cliente_id,
+                coordinador_id: item.coordinador_id,
+                nombre_servicio: item.nombre_servicio,
+                perfil_cliente: item.perfil_cliente || "",
+                acuerdos_comerciales: item.acuerdos_comerciales || "",
+                contacto_id: item.interventor?.id || "",
+                consultores_ids: registrados.map((consultor) => consultor.id),
+                consultores_tarifas: Object.fromEntries(registrados.map((consultor) => [
+                    consultor.id,
+                    {
+                        tarifa_consultoria: consultor.tarifa_consultoria ?? "",
+                        moneda_tarifa_consultoria: consultor.moneda_tarifa_consultoria || "COP"
+                    }
+                ])),
+                consultores_externos: externos.map((consultor) => ({
+                    nombre: consultor.nombre || "",
+                    telefono: consultor.telefono || "",
+                    tarifa_consultoria: consultor.tarifa_consultoria ?? "",
+                    moneda_tarifa_consultoria: consultor.moneda_tarifa_consultoria || "COP"
+                })),
+                modulos_ids: modulos.filter((modulo) => modulo.id).map((modulo) => modulo.id),
+                modulos_otros_texto: modulos.filter((modulo) => !modulo.id).map((modulo) => modulo.nombre).join(", "),
+                enlaces: (item.enlaces || []).length
+                    ? item.enlaces.map((enlace) => ({ titulo: enlace.titulo || "", url: enlace.url || "" }))
+                    : [{ titulo: "", url: "" }],
+                detalle
+            };
+
+            await this.cargarContactosCliente(item.cliente_id, item.interventor?.id || "");
+            this.tab = "nueva";
+            this.detalleSeleccionado = null;
+            if (typeof window.scrollTo === "function") window.scrollTo({ top: 0, behavior: "smooth" });
+        },
         async guardarEntrega() {
             if (!this.formularioValido || this.guardando) {
                 this.error = "Completa todos los campos obligatorios.";
@@ -328,11 +402,19 @@ window.entregasServicioApp = function () {
                 }
                 
                 delete payload.modulos_otros_texto;
-                const response = await axios.post(`${API}/entregas-servicio`, payload);
+                const rectificando = Boolean(this.entregaEditandoId);
+                const response = rectificando
+                    ? await axios.put(`${API}/entregas-servicio/${this.entregaEditandoId}/rectificar`, payload)
+                    : await axios.post(`${API}/entregas-servicio`, payload);
                 const notification = response.data?.notificacion;
                 this.mensaje = notification?.estado === "ERROR"
-                    ? "Entrega registrada. El correo quedó pendiente de reintento."
-                    : "Entrega registrada y responsable notificado.";
+                    ? rectificando
+                        ? "Entrega corregida. El correo quedó pendiente de reintento."
+                        : "Entrega registrada. El correo quedó pendiente de reintento."
+                    : rectificando
+                        ? "Entrega corregida y reenviada al responsable."
+                        : "Entrega registrada y responsable notificado.";
+                this.entregaEditandoId = null;
                 this.form = emptyForm();
                 this.clienteNuevoPreparado = null;
                 this.contactos = [];

@@ -225,6 +225,27 @@ test("la ruta de creación queda reservada para Comercial", () => {
   assert.match(routeSource, /const CREATE = requireAccess\(\{ roles: \["Comercial"\] \}\)/);
   assert.doesNotMatch(routeSource, /const CREATE[^\n]+Administrador/);
   assert.match(routeSource, /router\.patch\("\/:id\/asignacion", ADMIN, service\.reassignDelivery\)/);
+  assert.match(routeSource, /router\.put\("\/:id\/rectificar", CREATE, service\.rectifyDelivery\)/);
+});
+
+test("la rectificación se limita a entregas devueltas del Comercial", () => {
+  const serviceSource = fs.readFileSync(
+    path.resolve(__dirname, "../src/services/entregas-servicio.service.js"),
+    "utf8"
+  );
+  assert.match(serviceSource, /AND creado_por = \$2 AND estado = 'CANCELADA'/);
+  assert.match(serviceSource, /estado = 'REGISTRADA'/);
+});
+
+test("el detalle muestra los campos específicos de mesa y outsourcing", () => {
+  const viewSource = fs.readFileSync(
+    path.resolve(__dirname, "../../front/views/entregas-servicio.html"),
+    "utf8"
+  );
+  assert.match(viewSource, /detalle\.detalle_tarifas/);
+  assert.match(viewSource, /detalleSeleccionado\?\.detalle\?\.forma_pago/);
+  assert.match(viewSource, /detalleSeleccionado\?\.detalle\?\.valor_cliente/);
+  assert.match(viewSource, /detalleSeleccionado\?\.detalle\?\.tiene_contrato/);
 });
 
 test("el servicio no depende de cargas a OneDrive", () => {

@@ -454,6 +454,80 @@ async function insertServiceDetail(client, entregaId, payload) {
   ]);
 }
 
+async function insertDeliveryRelations(client, entregaId, payload, { contact, consultants, modules }) {
+  await insertServiceDetail(client, entregaId, payload);
+  await client.query(`
+    INSERT INTO entregas_servicio_contactos
+      (entrega_servicio_id, contacto_cliente_id, tipo_contacto)
+    VALUES ($1, $2, 'INTERVENTOR')
+  `, [entregaId, contact.id]);
+
+  for (const [index, consultant] of consultants.entries()) {
+    const rate = payload.consultores_tarifas[consultant.public_id];
+    await client.query(`
+      INSERT INTO entregas_servicio_consultores
+        (entrega_servicio_id, consultor_id, tarifa_consultoria,
+         moneda_tarifa_consultoria, es_principal)
+      VALUES ($1, $2, $3, $4, $5)
+    `, [
+      entregaId,
+      consultant.id,
+      rate.tarifa_consultoria,
+      rate.moneda_tarifa_consultoria,
+      index === 0
+    ]);
+  }
+  for (const [index, consultant] of payload.consultores_externos.entries()) {
+    await client.query(`
+      INSERT INTO entregas_servicio_consultores
+        (entrega_servicio_id, consultor_id, nombre_externo, telefono_externo,
+         tarifa_consultoria, moneda_tarifa_consultoria, es_principal)
+      VALUES ($1, NULL, $2, $3, $4, $5, $6)
+    `, [
+      entregaId,
+      consultant.nombre,
+      consultant.telefono,
+      consultant.tarifa_consultoria,
+      consultant.moneda_tarifa_consultoria,
+      consultants.length === 0 && index === 0
+    ]);
+  }
+  for (const module of modules) {
+    await client.query(`
+      INSERT INTO entregas_servicio_modulos (entrega_servicio_id, modulo_id)
+      VALUES ($1, $2)
+    `, [entregaId, module.id]);
+  }
+  for (const moduleName of payload.modulos_otros) {
+    await client.query(`
+      INSERT INTO entregas_servicio_modulos (entrega_servicio_id, modulo_otro)
+      VALUES ($1, $2)
+    `, [entregaId, moduleName]);
+  }
+
+  const linkRows = [];
+  for (const link of payload.enlaces) {
+    const result = await client.query(`
+      INSERT INTO entregas_servicio_enlaces
+        (entrega_servicio_id, titulo, url)
+      VALUES ($1, $2, $3)
+      RETURNING public_id::text AS id, titulo, url
+    `, [entregaId, link.titulo, link.url]);
+    linkRows.push(result.rows[0]);
+  }
+  return linkRows;
+}
+
+async function deleteDeliveryRelations(client, entregaId) {
+  await client.query("DELETE FROM entregas_servicio_contactos WHERE entrega_servicio_id = $1", [entregaId]);
+  await client.query("DELETE FROM entregas_servicio_consultores WHERE entrega_servicio_id = $1", [entregaId]);
+  await client.query("DELETE FROM entregas_servicio_modulos WHERE entrega_servicio_id = $1", [entregaId]);
+  await client.query("DELETE FROM entregas_servicio_enlaces WHERE entrega_servicio_id = $1", [entregaId]);
+  await client.query("DELETE FROM entregas_servicio_proyecto WHERE entrega_servicio_id = $1", [entregaId]);
+  await client.query("DELETE FROM entregas_servicio_mesa WHERE entrega_servicio_id = $1", [entregaId]);
+  await client.query("DELETE FROM entregas_servicio_outsourcing WHERE entrega_servicio_id = $1", [entregaId]);
+}
+
 async function getAdminBcc(client, coordinator) {
   if (normalizeRole(coordinator.rol) === "administrador") return [];
   const result = await client.query(`
@@ -493,10 +567,13 @@ function buildNotificationContent(delivery) {
     `<li><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">${escapeHtml(item.titulo || "Abrir enlace")}</a></li>`
   )).join("");
   const url = portalUrl();
+  const title = delivery.rectificada ? "Entrega de servicio corregida" : "Nueva entrega de servicio";
+  const textAction = delivery.rectificada ? "corrigió y reenvió esta entrega" : "asignó una nueva entrega";
+  const htmlAction = delivery.rectificada ? "corrigió y reenvió esta entrega" : "te asignó una nueva entrega";
   return {
-    subject: `Nueva entrega de servicio: ${delivery.cliente.titulo} - ${delivery.nombre_servicio}`,
+    subject: `${title}: ${delivery.cliente.titulo} - ${delivery.nombre_servicio}`,
     text: [
-      `${assignerName} asignó un nuevo servicio a ${delivery.coordinador.nombre_usuario}.`,
+      `${assignerName} ${textAction} a ${delivery.coordinador.nombre_usuario}.`,
       `Cliente: ${delivery.cliente.titulo}`,
       `Servicio: ${typeLabel(delivery.tipo_servicio)} - ${delivery.nombre_servicio}`,
       `Módulos: ${modules}`,
@@ -507,8 +584,8 @@ function buildNotificationContent(delivery) {
     ].filter(Boolean).join("\n"),
     html: `
       <div style="font-family:Arial,sans-serif;color:#1e293b;line-height:1.5">
-        <h2 style="margin:0 0 16px">Nueva entrega de servicio</h2>
-        <p>Hola <strong>${escapeHtml(delivery.coordinador.nombre_usuario)}</strong>, <strong>${escapeHtml(assignerName)}</strong> te asignó una nueva entrega.</p>
+        <h2 style="margin:0 0 16px">${title}</h2>
+        <p>Hola <strong>${escapeHtml(delivery.coordinador.nombre_usuario)}</strong>, <strong>${escapeHtml(assignerName)}</strong> ${htmlAction}.</p>
         <table style="border-collapse:collapse;width:100%;max-width:680px">
           <tr><td style="padding:7px;border-bottom:1px solid #e2e8f0"><strong>Cliente</strong></td><td style="padding:7px;border-bottom:1px solid #e2e8f0">${escapeHtml(delivery.cliente.titulo)}</td></tr>
           <tr><td style="padding:7px;border-bottom:1px solid #e2e8f0"><strong>Servicio</strong></td><td style="padding:7px;border-bottom:1px solid #e2e8f0">${escapeHtml(typeLabel(delivery.tipo_servicio))} - ${escapeHtml(delivery.nombre_servicio)}</td></tr>
@@ -583,66 +660,11 @@ async function createDelivery(req, res) {
     ]);
     const delivery = inserted.rows[0];
 
-    await insertServiceDetail(client, delivery.id, payload);
-    await client.query(`
-      INSERT INTO entregas_servicio_contactos
-        (entrega_servicio_id, contacto_cliente_id, tipo_contacto)
-      VALUES ($1, $2, 'INTERVENTOR')
-    `, [delivery.id, contact.id]);
-
-    for (const [index, consultant] of consultants.entries()) {
-      const rate = payload.consultores_tarifas[consultant.public_id];
-      await client.query(`
-        INSERT INTO entregas_servicio_consultores
-          (entrega_servicio_id, consultor_id, tarifa_consultoria,
-           moneda_tarifa_consultoria, es_principal)
-        VALUES ($1, $2, $3, $4, $5)
-      `, [
-        delivery.id,
-        consultant.id,
-        rate.tarifa_consultoria,
-        rate.moneda_tarifa_consultoria,
-        index === 0
-      ]);
-    }
-    for (const [index, consultant] of payload.consultores_externos.entries()) {
-      await client.query(`
-        INSERT INTO entregas_servicio_consultores
-          (entrega_servicio_id, consultor_id, nombre_externo, telefono_externo,
-           tarifa_consultoria, moneda_tarifa_consultoria, es_principal)
-        VALUES ($1, NULL, $2, $3, $4, $5, $6)
-      `, [
-        delivery.id,
-        consultant.nombre,
-        consultant.telefono,
-        consultant.tarifa_consultoria,
-        consultant.moneda_tarifa_consultoria,
-        consultants.length === 0 && index === 0
-      ]);
-    }
-    for (const module of modules) {
-      await client.query(`
-        INSERT INTO entregas_servicio_modulos (entrega_servicio_id, modulo_id)
-        VALUES ($1, $2)
-      `, [delivery.id, module.id]);
-    }
-    for (const moduleName of payload.modulos_otros) {
-      await client.query(`
-        INSERT INTO entregas_servicio_modulos (entrega_servicio_id, modulo_otro)
-        VALUES ($1, $2)
-      `, [delivery.id, moduleName]);
-    }
-
-    const linkRows = [];
-    for (const link of payload.enlaces) {
-      const result = await client.query(`
-        INSERT INTO entregas_servicio_enlaces
-          (entrega_servicio_id, titulo, url)
-        VALUES ($1, $2, $3)
-        RETURNING public_id::text AS id, titulo, url
-      `, [delivery.id, link.titulo, link.url]);
-      linkRows.push(result.rows[0]);
-    }
+    const linkRows = await insertDeliveryRelations(client, delivery.id, payload, {
+      contact,
+      consultants,
+      modules
+    });
 
     const bcc = await getAdminBcc(client, coordinator);
     const notification = await client.query(`
@@ -687,6 +709,112 @@ async function createDelivery(req, res) {
   } catch (error) {
     if (client) await client.query("ROLLBACK").catch(() => {});
     return handleError(res, error, "registrar la entrega de servicio");
+  } finally {
+    if (client) client.release();
+  }
+}
+
+async function rectifyDelivery(req, res) {
+  let client;
+  let transactionOpen = false;
+  try {
+    const payload = validateEntregaPayload(req.body || {});
+    client = await pool.connect();
+    await client.query("BEGIN");
+    transactionOpen = true;
+
+    const current = await client.query(`
+      SELECT id
+      FROM entregas_servicio
+      WHERE public_id::text = $1 AND creado_por = $2 AND estado = 'CANCELADA'
+      FOR UPDATE
+    `, [String(req.params.id || ""), req.user.id]);
+    if (!current.rows[0]) {
+      await client.query("ROLLBACK");
+      transactionOpen = false;
+      return res.status(404).json({
+        error: "La entrega no existe, no te pertenece o ya no está disponible para rectificar."
+      });
+    }
+
+    const deliveryId = current.rows[0].id;
+    const { cliente, principalContact } = await resolveOrCreateClient(client, payload, req.user.id);
+    const coordinator = await resolveCoordinator(client, payload.coordinador_id);
+    const consultants = await resolveConsultants(client, payload.consultores_ids);
+    const modules = await resolveModules(client, payload.modulos_ids);
+    const contact = await resolveDeliveryContact(client, payload, cliente, principalContact, req.user.id);
+
+    await client.query(`
+      UPDATE entregas_servicio
+      SET cliente_id = $2,
+          coordinador_asignado_id = $3,
+          tipo_servicio = $4,
+          nombre_servicio = $5,
+          estado = 'REGISTRADA',
+          acuerdos_comerciales = $6,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+    `, [
+      deliveryId,
+      cliente.id,
+      coordinator.id,
+      payload.tipo_servicio,
+      payload.nombre_servicio,
+      payload.acuerdos_comerciales
+    ]);
+
+    await deleteDeliveryRelations(client, deliveryId);
+    const linkRows = await insertDeliveryRelations(client, deliveryId, payload, {
+      contact,
+      consultants,
+      modules
+    });
+
+    const bcc = await getAdminBcc(client, coordinator);
+    const notification = await client.query(`
+      INSERT INTO entregas_servicio_notificaciones
+        (entrega_servicio_id, destinatarios, estado)
+      VALUES ($1, $2::jsonb, 'PENDIENTE')
+      RETURNING id
+    `, [deliveryId, JSON.stringify({ to: [coordinator.email], bcc })]);
+    await client.query("COMMIT");
+    transactionOpen = false;
+
+    const notificationResult = await sendAssignmentNotification({
+      delivery: {
+        rectificada: true,
+        tipo_servicio: payload.tipo_servicio,
+        nombre_servicio: payload.nombre_servicio,
+        cliente,
+        coordinador,
+        creador: { nombre_usuario: req.user.nombre_usuario || req.user.email || "Comercial" },
+        asignador: { nombre_usuario: req.user.nombre_usuario || req.user.email || "Comercial" },
+        consultores: [
+          ...consultants,
+          ...payload.consultores_externos.map((item) => ({
+            nombre_usuario: item.nombre,
+            telefono: item.telefono,
+            tipo: "EXTERNO"
+          }))
+        ],
+        modulos: modules,
+        modulos_otros: payload.modulos_otros,
+        enlaces: linkRows,
+        bcc
+      },
+      notificationId: notification.rows[0].id,
+      graphAccessToken: String(req.headers["x-graph-access-token"] || "").trim() || null
+    });
+
+    return res.json({
+      id: String(req.params.id || ""),
+      estado: "REGISTRADA",
+      cliente: { id: cliente.public_id, nombre: cliente.titulo },
+      notificacion: notificationResult
+    });
+  } catch (error) {
+    if (client && transactionOpen) await client.query("ROLLBACK").catch(() => {});
+    return handleError(res, error, "rectificar la entrega de servicio");
   } finally {
     if (client) client.release();
   }
@@ -910,6 +1038,7 @@ module.exports = {
   getDelivery,
   listClientContacts,
   listDeliveries,
+  rectifyDelivery,
   reassignDelivery,
   retryNotification,
   updateDeliveryStatus,

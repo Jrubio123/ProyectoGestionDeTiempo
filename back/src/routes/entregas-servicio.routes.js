@@ -11,6 +11,7 @@ router.get("/catalogos", ACCESS, service.getCatalogs);
 router.get("/clientes/:clienteId/contactos", ACCESS, service.listClientContacts);
 router.get("/", ACCESS, service.listDeliveries);
 router.post("/", CREATE, service.createDelivery);
+router.put("/:id/rectificar", CREATE, service.rectifyDelivery);
 router.get("/:id", ACCESS, service.getDelivery);
 router.patch("/:id/asignacion", ADMIN, service.reassignDelivery);
 router.patch("/:id/estado", ACCESS, service.updateDeliveryStatus);

@@ -5,7 +5,7 @@
             <p class="mt-1 text-sm text-slate-500">Registra la venta, sus enlaces comerciales y el responsable inicial.</p>
         </div>
         <div class="flex gap-2">
-            <button x-show="puedeCrear" @click="tab = 'nueva'; limpiarAlertas()" class="rounded-lg px-4 py-2 text-sm font-semibold" :class="tab === 'nueva' ? 'bg-blue-600 text-white' : 'border border-slate-300 bg-white text-slate-700'">
+            <button x-show="puedeCrear" @click="nuevaEntrega()" class="rounded-lg px-4 py-2 text-sm font-semibold" :class="tab === 'nueva' ? 'bg-blue-600 text-white' : 'border border-slate-300 bg-white text-slate-700'">
                 Nueva entrega
             </button>
             <button @click="tab = 'historial'; limpiarAlertas()" class="rounded-lg px-4 py-2 text-sm font-semibold" :class="tab === 'historial' ? 'bg-blue-600 text-white' : 'border border-slate-300 bg-white text-slate-700'">
@@ -24,6 +24,10 @@
     </div>
 
     <form x-show="tab === 'nueva' && puedeCrear" @submit.prevent="guardarEntrega()" class="space-y-5">
+        <div x-show="entregaEditandoId" class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <span><strong>Rectificando entrega devuelta.</strong> Corrige la información y reenvíala al responsable.</span>
+            <button type="button" @click="cancelarRectificacion()" class="font-semibold text-amber-800 underline">Cancelar rectificación</button>
+        </div>
         <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 class="text-lg font-semibold text-slate-900">1. Cliente y responsable</h2>
             <div class="mt-4 grid gap-4 lg:grid-cols-2">
@@ -220,7 +224,8 @@
 
         <div class="flex items-center justify-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <span x-show="!formularioValido" class="mr-auto text-sm text-amber-600">Completa los campos marcados con *.</span>
-            <button type="submit" :disabled="!formularioValido || guardando" class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50" x-text="guardando ? 'Guardando y notificando…' : 'Registrar entrega'"></button>
+            <button x-show="entregaEditandoId" type="button" @click="cancelarRectificacion()" class="rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700">Cancelar</button>
+            <button type="submit" :disabled="!formularioValido || guardando" class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50" x-text="guardando ? 'Guardando y notificando…' : (entregaEditandoId ? 'Guardar correcciones y reenviar' : 'Registrar entrega')"></button>
         </div>
     </form>
 
@@ -250,6 +255,7 @@
                             <td class="px-4 py-3 text-slate-500" x-text="formatDate(item.created_at)"></td>
                             <td class="px-4 py-3 text-right whitespace-nowrap">
                                 <button @click="abrirDetalle(item)" class="font-semibold text-blue-600">Ver</button>
+                                <button x-show="puedeRectificar(item)" @click="rectificar(item)" class="ml-3 rounded-md bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800">Rectificar</button>
                                 <button x-show="item.notificacion?.estado === 'ERROR'" @click="reintentarNotificacion(item)" class="ml-3 font-semibold text-amber-600">Reenviar</button>
                                 <div x-show="puedeReasignar(item)" class="mt-2 flex justify-end gap-2">
                                     <select x-model="reasignaciones[item.id]" class="max-w-56 rounded-md border border-slate-300 px-2 py-1 text-xs">
@@ -294,6 +300,8 @@
             <div class="flex items-start justify-between"><div><p class="text-sm font-semibold text-blue-600" x-text="typeLabel(detalleSeleccionado?.tipo_servicio)"></p><h2 class="text-xl font-bold text-slate-900" x-text="detalleSeleccionado?.nombre_servicio"></h2><p class="text-sm text-slate-500" x-text="detalleSeleccionado?.cliente"></p></div><button @click="detalleSeleccionado = null" class="text-2xl text-slate-400">×</button></div>
             <dl class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-4 md:grid-cols-2"><div><dt class="text-xs font-semibold uppercase text-slate-400">Entregado por</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.creado_por"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Asignado a</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.coordinador"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Estado</dt><dd class="mt-1 text-sm text-slate-800" x-text="statusLabel(detalleSeleccionado?.estado)"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Perfil</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.perfil_cliente"></dd></div><div class="md:col-span-2"><dt class="text-xs font-semibold uppercase text-slate-400">Interventor</dt><dd class="mt-1 text-sm text-slate-800" x-text="`${detalleSeleccionado?.interventor?.nombre || '—'} · ${detalleSeleccionado?.interventor?.cargo || '—'} · ${detalleSeleccionado?.interventor?.telefono || '—'}`"></dd></div></dl>
             <dl x-show="detalleSeleccionado?.tipo_servicio === 'PROYECTO'" class="mt-4 grid gap-4 rounded-xl border border-slate-200 p-4 md:grid-cols-2"><div><dt class="text-xs font-semibold uppercase text-slate-400">Valor total</dt><dd class="mt-1 text-sm font-semibold text-slate-800" x-text="formatMoney(detalleSeleccionado?.detalle?.valor_total, detalleSeleccionado?.detalle?.moneda)"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Forma de pago</dt><dd class="mt-1 whitespace-pre-line text-sm text-slate-800" x-text="detalleSeleccionado?.detalle?.forma_pago || '—'"></dd></div></dl>
+            <dl x-show="detalleSeleccionado?.tipo_servicio === 'MESA_SERVICIO'" class="mt-4 grid gap-4 rounded-xl border border-slate-200 p-4 md:grid-cols-2"><div><dt class="text-xs font-semibold uppercase text-slate-400">Tarifas ofrecidas</dt><dd class="mt-1 whitespace-pre-line text-sm text-slate-800" x-text="detalleSeleccionado?.detalle?.detalle_tarifas || '—'"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Forma de pago</dt><dd class="mt-1 whitespace-pre-line text-sm text-slate-800" x-text="detalleSeleccionado?.detalle?.forma_pago || '—'"></dd></div></dl>
+            <dl x-show="detalleSeleccionado?.tipo_servicio === 'OUTSOURCING'" class="mt-4 grid gap-4 rounded-xl border border-slate-200 p-4 md:grid-cols-3"><div><dt class="text-xs font-semibold uppercase text-slate-400">Tiempo</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.detalle?.tiempo_descripcion || '—'"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Valor cliente</dt><dd class="mt-1 text-sm font-semibold text-slate-800" x-text="formatMoney(detalleSeleccionado?.detalle?.valor_cliente, detalleSeleccionado?.detalle?.moneda)"></dd></div><div><dt class="text-xs font-semibold uppercase text-slate-400">Tiene contrato</dt><dd class="mt-1 text-sm text-slate-800" x-text="detalleSeleccionado?.detalle?.tiene_contrato === true ? 'Sí' : detalleSeleccionado?.detalle?.tiene_contrato === false ? 'No' : '—'"></dd></div></dl>
             <div class="mt-5"><h3 class="font-semibold text-slate-900">Módulos</h3><p class="mt-1 text-sm text-slate-600" x-text="(detalleSeleccionado?.modulos || []).map(item => item.nombre).join(', ') || '—'"></p></div>
             <div class="mt-4"><h3 class="font-semibold text-slate-900">Consultores y tarifas</h3><div class="mt-2 space-y-2"><template x-for="item in detalleSeleccionado?.consultores || []" :key="item.id"><div class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm"><p class="text-slate-600"><span x-text="item.nombre"></span><span x-show="item.tipo === 'EXTERNO'" class="ml-1 text-slate-400" x-text="`(no registrado · ${item.telefono})`"></span></p><strong class="text-slate-800" x-text="formatMoney(item.tarifa_consultoria, item.moneda_tarifa_consultoria || 'COP')"></strong></div></template><p x-show="!(detalleSeleccionado?.consultores || []).length" class="text-sm text-slate-500">Sin asignar</p></div></div>
             <div x-show="detalleSeleccionado?.acuerdos_comerciales" class="mt-4"><h3 class="font-semibold text-slate-900">Acuerdos comerciales</h3><p class="mt-1 whitespace-pre-line text-sm text-slate-600" x-text="detalleSeleccionado?.acuerdos_comerciales"></p></div>

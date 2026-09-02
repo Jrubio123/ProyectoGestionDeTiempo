@@ -10,6 +10,7 @@ const CONTABILIDAD_ACCESS = requireAccess({
 router.use(CONTABILIDAD_ACCESS);
 
 router.post("/retenciones/simular", service.simularRetenciones);
+router.post("/proyeccion/previsualizar", service.previsualizarProyeccion);
 router.post("/proyeccion/generar", service.generarProyeccion);
 router.get("/proyeccion/:id/detalles", service.getDetallesProyeccion);
 router.put("/proyeccion/detalle/:id_detalle/retenciones", service.actualizarRetencionesDetalle);

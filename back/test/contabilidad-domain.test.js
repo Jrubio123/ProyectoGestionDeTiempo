@@ -69,3 +69,46 @@ test("normaliza las acciones del flujo y no expone IDs internos", () => {
   assert.equal(mapped.id === 99, false);
   assert.equal("public_id" in mapped, false);
 });
+
+test("previsualiza pagos antes de crear el lote y explica los excluidos", () => {
+  const base = {
+    persona_id: 5,
+    persona_public_id: "a2a3bb18-6eb0-4fc4-b5cb-33fd24459787",
+    tercero: "Consultor de prueba",
+    numero_documento: "10001",
+    factura_en_colombia: true,
+    moneda_origen: "COP"
+  };
+  const input = {
+    anio: 2026,
+    mes: 9,
+    quincena: 1,
+    trm_oficial: null,
+    fecha_pago_programada: "2026-09-15"
+  };
+  const cuentas = [
+    {
+      ...base,
+      id: 1,
+      public_id: "d0e0dabc-34d9-41ae-b49b-56e028809d2f",
+      total_cuenta_cobro: 2000000,
+      datos_adjuntos: { soportes: [{ url: "https://example.test/q1.pdf", created_at: "2026-09-03T15:00:00Z" }] }
+    },
+    {
+      ...base,
+      id: 2,
+      public_id: "41fa3627-8c96-4633-bd55-45aa42733093",
+      total_cuenta_cobro: 1000000,
+      datos_adjuntos: {}
+    }
+  ];
+
+  const preview = _private.construirVistaPrevia({ input, cuentas });
+
+  assert.equal(preview.resumen.total_pagos, 1);
+  assert.equal(preview.resumen.cuentas_cobro, 1);
+  assert.equal(preview.resumen.cuentas_en_limbo, 1);
+  assert.equal(preview.resumen.puede_generar, true);
+  assert.equal(preview.pagos[0].tercero, "Consultor de prueba");
+  assert.equal(preview.excluidos.cuentas_en_limbo[0].motivo, "sin_fecha_de_archivo");
+});

@@ -57,6 +57,11 @@ También se puede enviar `persona` como objeto para una simulación sin consulta
 }
 ```
 
+Antes de generar, el frontend consulta `POST /api/contabilidad/proyeccion/previsualizar`
+con el mismo periodo. Este endpoint no modifica datos: devuelve los pagos candidatos,
+las cuentas asignadas a otra quincena, las cuentas en limbo, si hace falta TRM y si ya
+existe un lote para ese periodo.
+
 `trm_oficial` es opcional si no hay pagos Capitalink y obligatorio cuando el lote contiene pagos internacionales. La respuesta incluye un resumen y las cuentas que quedaron en limbo por no tener una fecha de archivo válida o haber superado el segundo corte.
 
 Solo puede existir una proyección activa por año, mes y quincena. Las facturas futuras respecto a `fecha_pago_programada` no se recolectan.

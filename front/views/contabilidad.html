@@ -31,80 +31,166 @@
     </div>
 
     <div x-show="tab === 'proyecciones'" class="space-y-6">
+        <section class="grid gap-3 md:grid-cols-3">
+            <div class="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                <p class="text-xs font-bold uppercase tracking-wide text-blue-700">1. Buscar</p>
+                <p class="mt-1 text-sm text-blue-900">El sistema revisa qué pagos están listos para el periodo.</p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white p-4">
+                <p class="text-xs font-bold uppercase tracking-wide text-slate-500">2. Confirmar</p>
+                <p class="mt-1 text-sm text-slate-700">Ves las cuentas, facturas y nómina antes de crear algo.</p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white p-4">
+                <p class="text-xs font-bold uppercase tracking-wide text-slate-500">3. Revisar y aprobar</p>
+                <p class="mt-1 text-sm text-slate-700">Validas impuestos y avanzas el lote hasta Pagado.</p>
+            </div>
+        </section>
+
         <div class="grid gap-5 xl:grid-cols-2">
-            <form @submit.prevent="generarProyeccion()" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <form @submit.prevent="previsualizarProyeccion()" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div class="flex items-start justify-between gap-3">
                     <div>
-                        <h2 class="text-lg font-semibold text-slate-900">Generar lote</h2>
-                        <p class="mt-1 text-sm text-slate-500">Recolecta automáticamente las cuentas, facturas y nómina elegibles.</p>
+                        <h2 class="text-lg font-semibold text-slate-900">¿Qué quieres pagar?</h2>
+                        <p class="mt-1 text-sm text-slate-500">Selecciona el mes y la quincena que deseas preparar.</p>
                     </div>
-                    <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">Crea un borrador</span>
+                    <span class="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800">No guarda todavía</span>
                 </div>
 
                 <div class="mt-5 grid gap-4 sm:grid-cols-2">
                     <label class="block">
                         <span class="mb-1 block text-sm font-medium text-slate-700">Año</span>
-                        <input x-model.number="generacion.anio" type="number" min="2020" max="2100" required
+                        <input x-model.number="generacion.anio" @change="limpiarVistaPrevia()" type="number" min="2020" max="2100" required
                             class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
                     </label>
                     <label class="block">
                         <span class="mb-1 block text-sm font-medium text-slate-700">Mes</span>
-                        <select x-model.number="generacion.mes" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
-                            <template x-for="mes in meses" :key="mes.valor">
-                                <option :value="mes.valor" x-text="mes.nombre"></option>
-                            </template>
+                        <select x-model.number="generacion.mes" @change="limpiarVistaPrevia()" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                            <option value="1">Enero</option>
+                            <option value="2">Febrero</option>
+                            <option value="3">Marzo</option>
+                            <option value="4">Abril</option>
+                            <option value="5">Mayo</option>
+                            <option value="6">Junio</option>
+                            <option value="7">Julio</option>
+                            <option value="8">Agosto</option>
+                            <option value="9">Septiembre</option>
+                            <option value="10">Octubre</option>
+                            <option value="11">Noviembre</option>
+                            <option value="12">Diciembre</option>
                         </select>
                     </label>
                     <label class="block">
                         <span class="mb-1 block text-sm font-medium text-slate-700">Quincena</span>
-                        <select x-model.number="generacion.quincena" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
-                            <option :value="1">Primera quincena</option>
-                            <option :value="2">Segunda quincena</option>
+                        <select x-model.number="generacion.quincena" @change="limpiarVistaPrevia()" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                            <option value="1">Pago de mitad de mes</option>
+                            <option value="2">Pago de fin de mes</option>
                         </select>
                     </label>
                     <label class="block">
-                        <span class="mb-1 block text-sm font-medium text-slate-700">TRM del día</span>
-                        <input x-model="generacion.trm_oficial" type="number" min="0.01" step="0.01" placeholder="Solo pagos en USD"
+                        <span class="mb-1 block text-sm font-medium text-slate-700">TRM del día <span class="font-normal text-slate-400">(opcional)</span></span>
+                        <input x-model="generacion.trm_oficial" @change="limpiarVistaPrevia()" type="number" min="0.01" step="0.01" placeholder="Solo si hay pagos en USD"
                             class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
                     </label>
                 </div>
 
-                <button type="submit" :disabled="generando"
+                <button type="submit" :disabled="previsualizando"
                     class="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">
-                    <span x-text="generando ? 'Generando lote…' : 'Generar proyección'"></span>
+                    <span x-text="previsualizando ? 'Buscando pagos…' : 'Buscar pagos disponibles'"></span>
                 </button>
             </form>
 
-            <form @submit.prevent="consultarProyeccion()" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h2 class="text-lg font-semibold text-slate-900">Consultar lote existente</h2>
-                <p class="mt-1 text-sm text-slate-500">Ingresa el UUID entregado al generar la proyección.</p>
-                <label class="mt-5 block">
-                    <span class="mb-1 block text-sm font-medium text-slate-700">ID de la proyección</span>
-                    <input x-model.trim="loteId" type="text" required placeholder="00000000-0000-0000-0000-000000000000"
-                        class="w-full rounded-lg border border-slate-300 px-3 py-2.5 font-mono text-sm">
-                </label>
-                <button type="submit" :disabled="consultando"
-                    class="mt-5 inline-flex w-full items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-wait disabled:opacity-60">
-                    <span x-text="consultando ? 'Consultando…' : 'Abrir detalle del lote'"></span>
-                </button>
-            </form>
+            <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-lg font-semibold text-slate-900">¿Qué busca el sistema?</h2>
+                <div class="mt-4 space-y-3 text-sm">
+                    <div class="flex gap-3 rounded-xl bg-slate-50 p-3">
+                        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700">1</span>
+                        <p><strong class="block text-slate-800">Cuentas de cobro aprobadas</strong><span class="text-slate-500">Las ubica en mitad o fin de mes según la fecha del último soporte.</span></p>
+                    </div>
+                    <div class="flex gap-3 rounded-xl bg-slate-50 p-3">
+                        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700">2</span>
+                        <p><strong class="block text-slate-800">Facturas de proveedores pendientes</strong><span class="text-slate-500">Incluye las emitidas antes de la fecha programada de pago.</span></p>
+                    </div>
+                    <div class="flex gap-3 rounded-xl bg-slate-50 p-3">
+                        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700">3</span>
+                        <p><strong class="block text-slate-800">Nómina cargada para el periodo</strong><span class="text-slate-500">Toma exactamente el valor neto registrado por Talento Humano.</span></p>
+                    </div>
+                </div>
+            </section>
         </div>
 
-        <section x-show="resultadoGeneracion" class="rounded-xl border border-blue-200 bg-blue-50 p-4">
-            <div class="flex flex-wrap items-center justify-between gap-3">
+        <section x-show="vistaPrevia" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                    <p class="text-sm font-semibold text-blue-900">Resultado de la recolección</p>
-                    <p class="mt-1 text-sm text-blue-700">
-                        <span x-text="resultadoGeneracion?.cuentas_cobro || 0"></span> cuentas ·
-                        <span x-text="resultadoGeneracion?.facturas_proveedores || 0"></span> facturas ·
-                        <span x-text="resultadoGeneracion?.nomina || 0"></span> pagos de nómina
-                    </p>
+                    <p class="text-xs font-bold uppercase tracking-wide text-blue-600">Resultado de la búsqueda</p>
+                    <h2 class="mt-1 text-xl font-bold text-slate-900">
+                        <span x-text="nombreMes(vistaPrevia?.periodo?.mes)"></span>
+                        <span x-text="vistaPrevia?.periodo?.anio"></span> ·
+                        <span x-text="vistaPrevia?.periodo?.quincena === 1 ? 'Mitad de mes' : 'Fin de mes'"></span>
+                    </h2>
+                    <p class="mt-1 text-sm text-slate-500">Fecha programada de pago: <strong x-text="formatearFecha(vistaPrevia?.periodo?.fecha_pago_programada)"></strong></p>
                 </div>
-                <span class="rounded-full bg-white px-3 py-1 text-xs font-semibold text-blue-800">
-                    <span x-text="limbo.length"></span> en limbo
-                </span>
+                <div class="grid grid-cols-3 gap-2 text-center">
+                    <div class="rounded-lg bg-blue-50 px-3 py-2"><strong class="block text-blue-800" x-text="vistaPrevia?.resumen?.cuentas_cobro || 0"></strong><span class="text-xs text-blue-600">Cuentas</span></div>
+                    <div class="rounded-lg bg-violet-50 px-3 py-2"><strong class="block text-violet-800" x-text="vistaPrevia?.resumen?.facturas_proveedores || 0"></strong><span class="text-xs text-violet-600">Facturas</span></div>
+                    <div class="rounded-lg bg-emerald-50 px-3 py-2"><strong class="block text-emerald-800" x-text="vistaPrevia?.resumen?.nomina || 0"></strong><span class="text-xs text-emerald-600">Nómina</span></div>
+                </div>
             </div>
+
+            <div x-show="vistaPrevia?.proyeccion_existente" class="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <strong>Este periodo ya tiene un lote <span x-text="vistaPrevia?.proyeccion_existente?.estado"></span>.</strong>
+                <button type="button" @click="abrirProyeccionExistente()" class="ml-2 font-semibold text-blue-700 underline">Abrirlo</button>
+            </div>
+
+            <div x-show="vistaPrevia && !vistaPrevia.resumen?.total_pagos && !vistaPrevia.proyeccion_existente"
+                class="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-5">
+                <p class="font-semibold text-slate-800">No hay pagos listos para este periodo.</p>
+                <p class="mt-1 text-sm text-slate-600">No se creó ningún lote. El sistema encontró:</p>
+                <ul class="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
+                    <li><span x-text="vistaPrevia?.resumen?.cuentas_aprobadas_pendientes || 0"></span> cuentas aprobadas pendientes de proyectar.</li>
+                    <li><span x-text="vistaPrevia?.resumen?.cuentas_otra_quincena || 0"></span> cuentas que pertenecen a la otra quincena.</li>
+                    <li><span x-text="vistaPrevia?.resumen?.cuentas_en_limbo || 0"></span> cuentas sin fecha válida de soportes o entregadas fuera de corte.</li>
+                    <li><span x-text="vistaPrevia?.resumen?.facturas_proveedores || 0"></span> facturas pendientes y <span x-text="vistaPrevia?.resumen?.nomina || 0"></span> pagos de nómina cargados.</li>
+                </ul>
+            </div>
+
+            <div x-show="vistaPrevia?.resumen?.trm_faltante" class="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                Hay pagos en moneda extranjera. Ingresa la TRM arriba y vuelve a buscar antes de crear el lote.
+            </div>
+
+            <div x-show="vistaPrevia?.pagos?.length" class="mt-5 overflow-x-auto rounded-xl border border-slate-200">
+                <table class="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead class="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                        <tr><th class="px-4 py-3">Tercero</th><th class="px-4 py-3">Fuente</th><th class="px-4 py-3">Referencia</th><th class="px-4 py-3 text-right">Valor recibido</th></tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        <template x-for="pago in (vistaPrevia?.pagos || [])" :key="`${pago.origen_tipo}-${pago.id}`">
+                            <tr>
+                                <td class="px-4 py-3"><strong class="text-slate-800" x-text="pago.tercero"></strong><p class="text-xs text-slate-500" x-text="pago.numero_documento || 'Sin documento'"></p></td>
+                                <td class="px-4 py-3" x-text="tipoOrigen(pago.origen_tipo)"></td>
+                                <td class="px-4 py-3 text-slate-600" x-text="pago.referencia || 'Sin referencia'"></td>
+                                <td class="whitespace-nowrap px-4 py-3 text-right font-semibold" x-text="formatearValorOrigen(pago.valor_origen, pago.moneda_origen)"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <button x-show="vistaPrevia?.resumen?.puede_generar" type="button" @click="generarProyeccion()" :disabled="generando"
+                class="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60">
+                <span x-text="generando ? 'Creando borrador…' : `Crear borrador con ${vistaPrevia?.resumen?.total_pagos || 0} pagos`"></span>
+            </button>
         </section>
+
+        <details class="rounded-xl border border-slate-200 bg-white p-4 text-sm">
+            <summary class="cursor-pointer font-semibold text-slate-700">Abrir un lote usando su ID</summary>
+            <form @submit.prevent="consultarProyeccion()" class="mt-4 flex flex-col gap-2 sm:flex-row">
+                <input x-model.trim="loteId" type="text" required placeholder="UUID de la proyección"
+                    class="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm">
+                <button type="submit" :disabled="consultando" class="rounded-lg bg-slate-800 px-4 py-2 font-semibold text-white disabled:opacity-60">
+                    <span x-text="consultando ? 'Consultando…' : 'Abrir lote'"></span>
+                </button>
+            </form>
+        </details>
 
         <section x-show="proyeccion" class="space-y-5">
             <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

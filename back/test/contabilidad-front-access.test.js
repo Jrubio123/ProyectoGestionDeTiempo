@@ -32,6 +32,7 @@ test("la vista usa los endpoints del módulo de contabilidad", () => {
   const viewScript = read("front/js/contabilidad.js");
 
   assert.match(viewScript, /\/api\/contabilidad\/proyeccion\/generar/);
+  assert.match(viewScript, /\/api\/contabilidad\/proyeccion\/previsualizar/);
   assert.match(viewScript, /\/api\/contabilidad\/proyeccion\/\$\{encodeURIComponent\(id\)\}\/detalles/);
   assert.match(viewScript, /\/api\/contabilidad\/retenciones\/simular/);
   assert.match(viewScript, /\/api\/contabilidad\/proyeccion\/\$\{encodeURIComponent\(this\.proyeccion\.id\)\}\/transicion/);

@@ -40,7 +40,9 @@ window.contabilidadApp = function () {
         detalles: [],
         resultadoGeneracion: null,
         limbo: [],
+        vistaPrevia: null,
         resultadoSimulador: null,
+        previsualizando: false,
         generando: false,
         consultando: false,
         transicionando: false,
@@ -57,34 +59,81 @@ window.contabilidadApp = function () {
             this.mensaje = "";
         },
 
+        limpiarVistaPrevia() {
+            this.vistaPrevia = null;
+            this.resultadoGeneracion = null;
+            this.limpiarAlertas();
+        },
+
         mensajeError(error, respaldo) {
             return error?.response?.data?.error || error?.message || respaldo;
         },
 
+        payloadPeriodo() {
+            const payload = {
+                anio: Number(this.generacion.anio),
+                mes: Number(this.generacion.mes),
+                quincena: Number(this.generacion.quincena)
+            };
+            if (this.generacion.trm_oficial !== "" && this.generacion.trm_oficial !== null) {
+                payload.trm_oficial = Number(this.generacion.trm_oficial);
+            }
+            return payload;
+        },
+
+        async previsualizarProyeccion() {
+            this.limpiarAlertas();
+            this.previsualizando = true;
+            try {
+                const response = await window.axios.post(
+                    `${API}/api/contabilidad/proyeccion/previsualizar`,
+                    this.payloadPeriodo()
+                );
+                this.vistaPrevia = response.data;
+                this.proyeccion = null;
+                this.resumen = null;
+                this.detalles = [];
+            } catch (error) {
+                this.vistaPrevia = null;
+                this.error = this.mensajeError(error, "No fue posible buscar los pagos disponibles.");
+            } finally {
+                this.previsualizando = false;
+            }
+        },
+
         async generarProyeccion() {
+            if (!this.vistaPrevia?.resumen?.puede_generar) {
+                this.error = "Primero busca y confirma los pagos disponibles.";
+                return;
+            }
             this.limpiarAlertas();
             this.generando = true;
             try {
-                const payload = {
-                    anio: Number(this.generacion.anio),
-                    mes: Number(this.generacion.mes),
-                    quincena: Number(this.generacion.quincena)
-                };
-                if (this.generacion.trm_oficial !== "" && this.generacion.trm_oficial !== null) {
-                    payload.trm_oficial = Number(this.generacion.trm_oficial);
-                }
-                const response = await window.axios.post(`${API}/api/contabilidad/proyeccion/generar`, payload);
+                const response = await window.axios.post(
+                    `${API}/api/contabilidad/proyeccion/generar`,
+                    this.payloadPeriodo()
+                );
                 this.loteId = response.data?.proyeccion?.id || "";
                 this.resultadoGeneracion = response.data?.resumen || null;
                 this.limbo = response.data?.limbo || [];
                 this.mensaje = "La proyección se generó en estado Borrador.";
                 if (this.loteId) await this.consultarProyeccion(false);
             } catch (error) {
-                this.error = this.mensajeError(error, "No fue posible generar la proyección.");
+                const codigo = error?.response?.data?.codigo;
+                this.error = codigo === "PROYECCION_SIN_DETALLES"
+                    ? "Los pagos disponibles cambiaron mientras confirmabas. Vuelve a buscarlos antes de crear el lote."
+                    : this.mensajeError(error, "No fue posible generar la proyección.");
                 this.limbo = error?.response?.data?.datos?.limbo || [];
             } finally {
                 this.generando = false;
             }
+        },
+
+        async abrirProyeccionExistente() {
+            const id = this.vistaPrevia?.proyeccion_existente?.id;
+            if (!id) return;
+            this.loteId = id;
+            await this.consultarProyeccion();
         },
 
         async consultarProyeccion(limpiar = true) {
@@ -196,6 +245,20 @@ window.contabilidadApp = function () {
                 currency: "COP",
                 maximumFractionDigits: 0
             }).format(Number.isFinite(numero) ? numero : 0);
+        },
+
+        formatearValorOrigen(value, moneda = "COP") {
+            const numero = Number(value || 0);
+            const codigo = String(moneda || "COP").toUpperCase();
+            try {
+                return new Intl.NumberFormat("es-CO", {
+                    style: "currency",
+                    currency: codigo,
+                    maximumFractionDigits: 2
+                }).format(Number.isFinite(numero) ? numero : 0);
+            } catch (_) {
+                return `${codigo} ${Number.isFinite(numero) ? numero.toLocaleString("es-CO") : "0"}`;
+            }
         },
 
         formatearFecha(value) {

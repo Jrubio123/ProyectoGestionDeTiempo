@@ -121,10 +121,6 @@ function initNavbar() {
 
             const data = await response.json();
             if (!data?.hasPhoto || !data?.data) {
-                if (!window.__avatarNoPhotoLogged) {
-                    console.info(data?.message || "No tiene foto de perfil");
-                    window.__avatarNoPhotoLogged = true;
-                }
                 return false;
             }
 

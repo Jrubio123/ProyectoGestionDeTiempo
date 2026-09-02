@@ -234,12 +234,15 @@ async function insertarDetalle(client, proyeccionId, detalle, userId) {
   return result.rows[0];
 }
 
-async function consultarCuentasPendientes(client) {
+async function consultarCuentasPendientes(client, { bloquear = true } = {}) {
   const result = await client.query(`
     SELECT
-      cc.id, cc.public_id::text, cc.total_cuenta_cobro, cc.datos_adjuntos,
+      cc.id, cc.public_id::text, cc.descripcion AS referencia,
+      cc.total_cuenta_cobro, cc.datos_adjuntos,
       cc.ciclo_proyeccion_asignado,
       p.id AS persona_id, p.public_id::text AS persona_public_id,
+      BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) AS tercero,
+      p.numero_documento,
       p.factura_en_colombia, p.es_gran_contribuyente, p.es_autorretenedor,
       p.es_regimen_simple, p.es_entidad_sin_animo_lucro, p.facturador_electronico,
       p.acumulado_facturacion_anual, p.declarante_renta, p.ciudad_residencia,
@@ -250,16 +253,19 @@ async function consultarCuentasPendientes(client) {
     WHERE cc.estado::text = 'Aprobado'
       AND cc.proyeccion_pago_id IS NULL
     ORDER BY cc.id
-    FOR UPDATE OF cc
+    ${bloquear ? "FOR UPDATE OF cc" : ""}
   `);
   return result.rows;
 }
 
-async function consultarFacturasPendientes(client, fechaLimite) {
+async function consultarFacturasPendientes(client, fechaLimite, { bloquear = true } = {}) {
   const result = await client.query(`
     SELECT
-      fp.id, fp.public_id::text, fp.subtotal, fp.iva, fp.tipo_gasto,
+      fp.id, fp.public_id::text, fp.numero_factura AS referencia,
+      fp.fecha_emision, fp.concepto, fp.subtotal, fp.iva, fp.tipo_gasto,
       p.id AS persona_id, p.public_id::text AS persona_public_id,
+      BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) AS tercero,
+      p.numero_documento,
       p.factura_en_colombia, p.es_gran_contribuyente, p.es_autorretenedor,
       p.es_regimen_simple, p.es_entidad_sin_animo_lucro, p.facturador_electronico,
       p.acumulado_facturacion_anual, p.declarante_renta, p.ciudad_residencia,
@@ -270,17 +276,19 @@ async function consultarFacturasPendientes(client, fechaLimite) {
       AND fp.proyeccion_pago_id IS NULL
       AND fp.fecha_emision <= $1::date
     ORDER BY fp.fecha_emision, fp.id
-    FOR UPDATE OF fp
+    ${bloquear ? "FOR UPDATE OF fp" : ""}
   `, [fechaLimite]);
   return result.rows;
 }
 
-async function consultarNominaPendiente(client, periodo) {
+async function consultarNominaPendiente(client, periodo, { bloquear = true } = {}) {
   const result = await client.query(
     `
     SELECT
       np.id, np.public_id::text, np.valor_neto,
       p.id AS persona_id, p.public_id::text AS persona_public_id,
+      BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) AS tercero,
+      p.numero_documento,
       p.factura_en_colombia, p.es_gran_contribuyente, p.es_autorretenedor,
       p.es_regimen_simple, p.es_entidad_sin_animo_lucro, p.facturador_electronico,
       p.acumulado_facturacion_anual, p.declarante_renta, p.ciudad_residencia,
@@ -291,11 +299,131 @@ async function consultarNominaPendiente(client, periodo) {
       AND np.estado = 'Pendiente'
       AND np.proyeccion_pago_id IS NULL
     ORDER BY np.id
-    FOR UPDATE OF np
+    ${bloquear ? "FOR UPDATE OF np" : ""}
     `,
     [periodo.anio, periodo.mes, periodo.quincena]
   );
   return result.rows;
+}
+
+function construirVistaPrevia({ input, cuentas = [], facturas = [], nominas = [], existente = null }) {
+  const pagos = [];
+  const cuentasOtraQuincena = [];
+  const cuentasLimbo = [];
+
+  for (const cuenta of cuentas) {
+    const clasificacion = determinarQuincenaCuenta({
+      anio: input.anio,
+      mes: input.mes,
+      datos_adjuntos: parseJsonObject(cuenta.datos_adjuntos),
+      ciclo_proyeccion_asignado: cuenta.ciclo_proyeccion_asignado
+    });
+    const resumenCuenta = {
+      id: cuenta.public_id,
+      origen_tipo: "cuenta_cobro",
+      tercero: cuenta.tercero || "Persona sin nombre",
+      numero_documento: cuenta.numero_documento || null,
+      referencia: cuenta.referencia || null,
+      valor_origen: Number(cuenta.total_cuenta_cobro || 0),
+      moneda_origen: monedaOrigen(cuenta, personaFromRow(cuenta)),
+      fecha_ultimo_archivo: clasificacion.fecha_ultimo_archivo,
+      ciclo: clasificacion.ciclo,
+      motivo: clasificacion.motivo || null,
+      cortes: clasificacion.cortes
+    };
+    if (!clasificacion.quincena) {
+      cuentasLimbo.push(resumenCuenta);
+    } else if (clasificacion.quincena !== input.quincena) {
+      cuentasOtraQuincena.push(resumenCuenta);
+    } else {
+      pagos.push(resumenCuenta);
+    }
+  }
+
+  for (const factura of facturas) {
+    pagos.push({
+      id: factura.public_id,
+      origen_tipo: "factura_proveedor",
+      tercero: factura.tercero || "Persona sin nombre",
+      numero_documento: factura.numero_documento || null,
+      referencia: factura.referencia || factura.concepto || null,
+      valor_origen: roundMoney(Number(factura.subtotal || 0) + Number(factura.iva || 0)),
+      moneda_origen: monedaOrigen(factura, personaFromRow(factura)),
+      fecha_emision: factura.fecha_emision || null,
+      tipo_pago: factura.tipo_gasto
+    });
+  }
+
+  for (const nomina of nominas) {
+    pagos.push({
+      id: nomina.public_id,
+      origen_tipo: "nomina",
+      tercero: nomina.tercero || "Persona sin nombre",
+      numero_documento: nomina.numero_documento || null,
+      referencia: `Nómina ${input.anio}-${String(input.mes).padStart(2, "0")} Q${input.quincena}`,
+      valor_origen: Number(nomina.valor_neto || 0),
+      moneda_origen: "COP"
+    });
+  }
+
+  const requiereTrm = pagos.some((pago) => pago.moneda_origen !== "COP");
+  const trmFaltante = requiereTrm && !input.trm_oficial;
+  return {
+    periodo: {
+      anio: input.anio,
+      mes: input.mes,
+      quincena: input.quincena,
+      fecha_pago_programada: input.fecha_pago_programada,
+      trm_oficial: input.trm_oficial
+    },
+    proyeccion_existente: existente ? mapProyeccion(existente) : null,
+    resumen: {
+      total_pagos: pagos.length,
+      cuentas_cobro: pagos.filter((pago) => pago.origen_tipo === "cuenta_cobro").length,
+      facturas_proveedores: facturas.length,
+      nomina: nominas.length,
+      cuentas_otra_quincena: cuentasOtraQuincena.length,
+      cuentas_en_limbo: cuentasLimbo.length,
+      cuentas_aprobadas_pendientes: cuentas.length,
+      requiere_trm: requiereTrm,
+      trm_faltante: trmFaltante,
+      puede_generar: pagos.length > 0 && !trmFaltante && !existente
+    },
+    pagos,
+    excluidos: {
+      cuentas_otra_quincena: cuentasOtraQuincena,
+      cuentas_en_limbo: cuentasLimbo
+    }
+  };
+}
+
+async function previsualizarProyeccion(req, res, deps = {}) {
+  const dbPool = deps.pool || pool;
+  try {
+    const input = validarGeneracion(req.body || {});
+    const [existenteResult, cuentas, facturas, nominas] = await Promise.all([
+      dbPool.query(
+        `SELECT public_id::text, mes, anio, quincena, trm_oficial, estado,
+                fecha_pago_programada, created_at, updated_at
+         FROM proyeccion_pagos
+         WHERE anio = $1 AND mes = $2 AND quincena = $3 AND estado <> 'Cancelado'
+         LIMIT 1`,
+        [input.anio, input.mes, input.quincena]
+      ),
+      consultarCuentasPendientes(dbPool, { bloquear: false }),
+      consultarFacturasPendientes(dbPool, input.fecha_pago_programada, { bloquear: false }),
+      consultarNominaPendiente(dbPool, input, { bloquear: false })
+    ]);
+    return res.json(construirVistaPrevia({
+      input,
+      cuentas,
+      facturas,
+      nominas,
+      existente: existenteResult.rows[0] || null
+    }));
+  } catch (error) {
+    return handleError(res, error, "previsualizando la proyección");
+  }
 }
 
 async function registrarAuditoria(client, {
@@ -1140,6 +1268,7 @@ module.exports = {
   actualizarRetencionesDetalle,
   generarProyeccion,
   getDetallesProyeccion,
+  previsualizarProyeccion,
   simularRetenciones,
   transicionarProyeccion,
   _private: {
@@ -1147,6 +1276,7 @@ module.exports = {
     ESTADOS,
     TRANSICIONES,
     canonicalRetentionType,
+    construirVistaPrevia,
     esExterior,
     mapDetalle,
     mapProyeccion,

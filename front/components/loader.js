@@ -18,7 +18,7 @@ async function loadComponent(containerId, url, initFnName) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-    const version = "20260825-entregas-servicio";
+    const version = "20260902-contabilidad-ui";
     loadComponent("navbar-container", `/components/navbar/navbar.html?v=${version}`, "initNavbar");
     loadComponent("sidebar-container", `/components/sidebar/sidebar.html?v=${version}`, "initSidebar");
 });

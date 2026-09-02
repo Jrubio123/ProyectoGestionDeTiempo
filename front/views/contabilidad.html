@@ -1,0 +1,303 @@
+<div x-data="contabilidadApp()" x-init="init()" class="space-y-6 p-4 md:p-6" x-cloak>
+    <header class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">Contabilidad y Tesorería</p>
+            <h1 class="mt-1 text-2xl font-bold text-slate-900">Proyección de pagos</h1>
+            <p class="mt-1 max-w-3xl text-sm text-slate-500">
+                Genera los lotes quincenales, revisa cada tercero y valida el motor de retenciones antes de aprobar el pago.
+            </p>
+        </div>
+        <div class="flex w-full gap-2 rounded-xl bg-slate-100 p-1 sm:w-auto">
+            <button type="button" @click="tab = 'proyecciones'; limpiarAlertas()"
+                class="flex-1 rounded-lg px-4 py-2 text-sm font-semibold sm:flex-none"
+                :class="tab === 'proyecciones' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'">
+                Lotes de pago
+            </button>
+            <button type="button" @click="tab = 'simulador'; limpiarAlertas()"
+                class="flex-1 rounded-lg px-4 py-2 text-sm font-semibold sm:flex-none"
+                :class="tab === 'simulador' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'">
+                Simular retenciones
+            </button>
+        </div>
+    </header>
+
+    <div x-show="error" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <span x-text="error"></span>
+        <button type="button" @click="error = ''" class="float-right font-bold" aria-label="Cerrar">&times;</button>
+    </div>
+    <div x-show="mensaje" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+        <span x-text="mensaje"></span>
+        <button type="button" @click="mensaje = ''" class="float-right font-bold" aria-label="Cerrar">&times;</button>
+    </div>
+
+    <div x-show="tab === 'proyecciones'" class="space-y-6">
+        <div class="grid gap-5 xl:grid-cols-2">
+            <form @submit.prevent="generarProyeccion()" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <h2 class="text-lg font-semibold text-slate-900">Generar lote</h2>
+                        <p class="mt-1 text-sm text-slate-500">Recolecta automáticamente las cuentas, facturas y nómina elegibles.</p>
+                    </div>
+                    <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">Crea un borrador</span>
+                </div>
+
+                <div class="mt-5 grid gap-4 sm:grid-cols-2">
+                    <label class="block">
+                        <span class="mb-1 block text-sm font-medium text-slate-700">Año</span>
+                        <input x-model.number="generacion.anio" type="number" min="2020" max="2100" required
+                            class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                    </label>
+                    <label class="block">
+                        <span class="mb-1 block text-sm font-medium text-slate-700">Mes</span>
+                        <select x-model.number="generacion.mes" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                            <template x-for="mes in meses" :key="mes.valor">
+                                <option :value="mes.valor" x-text="mes.nombre"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <label class="block">
+                        <span class="mb-1 block text-sm font-medium text-slate-700">Quincena</span>
+                        <select x-model.number="generacion.quincena" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                            <option :value="1">Primera quincena</option>
+                            <option :value="2">Segunda quincena</option>
+                        </select>
+                    </label>
+                    <label class="block">
+                        <span class="mb-1 block text-sm font-medium text-slate-700">TRM del día</span>
+                        <input x-model="generacion.trm_oficial" type="number" min="0.01" step="0.01" placeholder="Solo pagos en USD"
+                            class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                    </label>
+                </div>
+
+                <button type="submit" :disabled="generando"
+                    class="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">
+                    <span x-text="generando ? 'Generando lote…' : 'Generar proyección'"></span>
+                </button>
+            </form>
+
+            <form @submit.prevent="consultarProyeccion()" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-lg font-semibold text-slate-900">Consultar lote existente</h2>
+                <p class="mt-1 text-sm text-slate-500">Ingresa el UUID entregado al generar la proyección.</p>
+                <label class="mt-5 block">
+                    <span class="mb-1 block text-sm font-medium text-slate-700">ID de la proyección</span>
+                    <input x-model.trim="loteId" type="text" required placeholder="00000000-0000-0000-0000-000000000000"
+                        class="w-full rounded-lg border border-slate-300 px-3 py-2.5 font-mono text-sm">
+                </label>
+                <button type="submit" :disabled="consultando"
+                    class="mt-5 inline-flex w-full items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-wait disabled:opacity-60">
+                    <span x-text="consultando ? 'Consultando…' : 'Abrir detalle del lote'"></span>
+                </button>
+            </form>
+        </div>
+
+        <section x-show="resultadoGeneracion" class="rounded-xl border border-blue-200 bg-blue-50 p-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <p class="text-sm font-semibold text-blue-900">Resultado de la recolección</p>
+                    <p class="mt-1 text-sm text-blue-700">
+                        <span x-text="resultadoGeneracion?.cuentas_cobro || 0"></span> cuentas ·
+                        <span x-text="resultadoGeneracion?.facturas_proveedores || 0"></span> facturas ·
+                        <span x-text="resultadoGeneracion?.nomina || 0"></span> pagos de nómina
+                    </p>
+                </div>
+                <span class="rounded-full bg-white px-3 py-1 text-xs font-semibold text-blue-800">
+                    <span x-text="limbo.length"></span> en limbo
+                </span>
+            </div>
+        </section>
+
+        <section x-show="proyeccion" class="space-y-5">
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <h2 class="text-xl font-bold text-slate-900">
+                                <span x-text="nombreMes(proyeccion?.mes)"></span>
+                                <span x-text="proyeccion?.anio"></span> · Q<span x-text="proyeccion?.quincena"></span>
+                            </h2>
+                            <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="estadoClase(proyeccion?.estado)" x-text="proyeccion?.estado"></span>
+                        </div>
+                        <p class="mt-2 text-sm text-slate-500">
+                            Pago programado: <strong class="text-slate-700" x-text="formatearFecha(proyeccion?.fecha_pago_programada)"></strong>
+                            <span x-show="proyeccion?.trm_oficial"> · TRM: <strong x-text="formatearMoneda(proyeccion?.trm_oficial)"></strong></span>
+                        </p>
+                        <p class="mt-1 break-all font-mono text-xs text-slate-400" x-text="proyeccion?.id"></p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <template x-for="accion in accionesDisponibles" :key="accion.estado">
+                            <button type="button" @click="transicionar(accion)" :disabled="transicionando"
+                                class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+                                x-text="accion.label"></button>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Pagos</p>
+                        <p class="mt-1 text-xl font-bold text-slate-900" x-text="resumen?.total_detalles || 0"></p>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Total bruto</p>
+                        <p class="mt-1 text-xl font-bold text-slate-900" x-text="formatearMoneda(resumen?.total_bruto)"></p>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Retenciones</p>
+                        <p class="mt-1 text-xl font-bold text-rose-700" x-text="formatearMoneda(resumen?.total_retenciones)"></p>
+                    </div>
+                    <div class="rounded-xl bg-emerald-50 p-4">
+                        <p class="text-xs font-medium uppercase tracking-wide text-emerald-700">Total neto</p>
+                        <p class="mt-1 text-xl font-bold text-emerald-800" x-text="formatearMoneda(resumen?.total_neto)"></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div class="border-b border-slate-200 px-5 py-4">
+                    <h3 class="font-semibold text-slate-900">Detalle de pagos</h3>
+                    <p class="mt-1 text-sm text-slate-500">Valores calculados por tercero y fuente del pago.</p>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-slate-200 text-sm">
+                        <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                            <tr>
+                                <th class="px-4 py-3 font-semibold">Tercero</th>
+                                <th class="px-4 py-3 font-semibold">Origen</th>
+                                <th class="px-4 py-3 text-right font-semibold">Bruto</th>
+                                <th class="px-4 py-3 font-semibold">Retenciones</th>
+                                <th class="px-4 py-3 text-right font-semibold">Neto</th>
+                                <th class="px-4 py-3 font-semibold">Banco</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            <template x-for="detalle in detalles" :key="detalle.id">
+                                <tr class="align-top hover:bg-slate-50">
+                                    <td class="px-4 py-3">
+                                        <p class="font-semibold text-slate-900" x-text="detalle.tercero || 'Sin nombre'"></p>
+                                        <p class="mt-1 text-xs text-slate-500" x-text="detalle.numero_documento || 'Sin documento'"></p>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <p class="text-slate-700" x-text="tipoOrigen(detalle.origen_tipo)"></p>
+                                        <p class="mt-1 text-xs text-slate-500" x-text="detalle.referencia || detalle.tipo_pago"></p>
+                                    </td>
+                                    <td class="whitespace-nowrap px-4 py-3 text-right font-medium" x-text="formatearMoneda(detalle.bruto)"></td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex min-w-44 flex-wrap gap-1">
+                                            <template x-for="retencion in detalle.retenciones_aplicadas" :key="retencion.tipo">
+                                                <span class="rounded-full bg-rose-50 px-2 py-1 text-xs text-rose-700"
+                                                    x-text="`${retencion.tipo} ${retencion.porcentaje}%: ${formatearMoneda(retencion.valor)}`"></span>
+                                            </template>
+                                            <span x-show="!detalle.retenciones_aplicadas?.length" class="text-xs text-slate-400">Sin retenciones</span>
+                                        </div>
+                                    </td>
+                                    <td class="whitespace-nowrap px-4 py-3 text-right font-bold text-emerald-700" x-text="formatearMoneda(detalle.valor_neto)"></td>
+                                    <td class="px-4 py-3 text-slate-600">
+                                        <p x-text="detalle.banco || 'Sin banco'"></p>
+                                        <p class="mt-1 text-xs" x-text="detalle.numero_cuenta || 'Sin cuenta'"></p>
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr x-show="!detalles.length">
+                                <td colspan="6" class="px-4 py-10 text-center text-slate-500">El lote no tiene detalles.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div x-show="tab === 'simulador'" class="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+        <form @submit.prevent="simularRetenciones()" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="text-lg font-semibold text-slate-900">Probar reglas tributarias</h2>
+            <p class="mt-1 text-sm text-slate-500">Esta simulación no crea ni modifica pagos.</p>
+
+            <div class="mt-5 grid gap-4 sm:grid-cols-3">
+                <label class="block">
+                    <span class="mb-1 block text-sm font-medium text-slate-700">Tipo de pago</span>
+                    <select x-model="simulador.tipo_pago" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                        <option value="consultor">Consultor (3,5%)</option>
+                        <option value="honorarios">Honorarios (10% / 11%)</option>
+                    </select>
+                </label>
+                <label class="block">
+                    <span class="mb-1 block text-sm font-medium text-slate-700">Subtotal</span>
+                    <input x-model.number="simulador.subtotal" type="number" min="0" step="0.01" required
+                        class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                </label>
+                <label class="block">
+                    <span class="mb-1 block text-sm font-medium text-slate-700">IVA</span>
+                    <input x-model.number="simulador.iva" type="number" min="0" step="0.01" required
+                        class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                </label>
+            </div>
+
+            <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <h3 class="text-sm font-semibold text-slate-800">Perfil tributario</h3>
+                <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                    <template x-for="opcion in opcionesTributarias" :key="opcion.campo">
+                        <label class="flex cursor-pointer items-start gap-3 rounded-lg bg-white p-3 text-sm text-slate-700">
+                            <input x-model="simulador.persona[opcion.campo]" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600">
+                            <span>
+                                <strong class="block font-medium" x-text="opcion.nombre"></strong>
+                                <span class="text-xs text-slate-500" x-text="opcion.efecto"></span>
+                            </span>
+                        </label>
+                    </template>
+                </div>
+                <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label class="flex items-center gap-3 rounded-lg bg-white p-3 text-sm text-slate-700">
+                        <input x-model="simulador.persona.declarante_renta" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-blue-600">
+                        Declarante de renta
+                    </label>
+                    <label class="block rounded-lg bg-white p-3">
+                        <span class="mb-1 block text-sm text-slate-700">Ciudad de residencia</span>
+                        <input x-model.trim="simulador.persona.ciudad_residencia" type="text" placeholder="Ej. Medellín"
+                            class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                    </label>
+                </div>
+            </div>
+
+            <button type="submit" :disabled="simulando"
+                class="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">
+                <span x-text="simulando ? 'Calculando…' : 'Calcular retenciones'"></span>
+            </button>
+        </form>
+
+        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="text-lg font-semibold text-slate-900">Resultado</h2>
+            <div x-show="!resultadoSimulador" class="mt-8 rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
+                Completa el formulario para ver el cálculo.
+            </div>
+            <div x-show="resultadoSimulador" class="mt-5 space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <p class="text-xs uppercase text-slate-500">Base mínima</p>
+                        <p class="mt-1 font-bold text-slate-900" x-text="formatearMoneda(resultadoSimulador?.base_minima)"></p>
+                    </div>
+                    <div class="rounded-xl bg-emerald-50 p-4">
+                        <p class="text-xs uppercase text-emerald-700">Neto</p>
+                        <p class="mt-1 font-bold text-emerald-800" x-text="formatearMoneda(resultadoSimulador?.valor_neto)"></p>
+                    </div>
+                </div>
+                <div class="space-y-2">
+                    <template x-for="retencion in (resultadoSimulador?.retenciones_aplicadas || [])" :key="retencion.tipo">
+                        <div class="flex items-center justify-between rounded-xl border border-slate-200 p-3 text-sm">
+                            <div>
+                                <p class="font-semibold text-slate-800" x-text="retencion.tipo"></p>
+                                <p class="text-xs text-slate-500"><span x-text="retencion.porcentaje"></span>% sobre <span x-text="formatearMoneda(retencion.base)"></span></p>
+                            </div>
+                            <strong class="text-rose-700" x-text="formatearMoneda(retencion.valor)"></strong>
+                        </div>
+                    </template>
+                    <p x-show="resultadoSimulador && !resultadoSimulador.retenciones_aplicadas?.length"
+                        class="rounded-xl bg-slate-50 p-4 text-center text-sm text-slate-500">No se aplican retenciones.</p>
+                </div>
+                <div class="flex justify-between border-t border-slate-200 pt-4 text-sm">
+                    <span class="text-slate-600">Total retenciones</span>
+                    <strong class="text-slate-900" x-text="formatearMoneda(resultadoSimulador?.total_retenciones)"></strong>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>

@@ -20,7 +20,8 @@ window.roleAccess = (function () {
             "firma-contratos-admin",
             "temp-crear-usuarios",
             "aprobar-rechazar-coordinador",
-            "asignacion-consultor"
+            "asignacion-consultor",
+            "contabilidad"
         ],
         coordinador: [
             "inicio",
@@ -64,7 +65,8 @@ window.roleAccess = (function () {
             "asignacion-fabrica-mesa-servicio"
         ],
         reclutador: ["inicio", "solicitudesRecl"],
-        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "temp-crear-usuarios", "capacidad-fabrica"]
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "temp-crear-usuarios", "capacidad-fabrica", "contabilidad"],
+        contabilidad: ["inicio", "contabilidad", "vacaciones"]
     };
 
     const searchViews = [
@@ -93,7 +95,8 @@ window.roleAccess = (function () {
         { label: "Contrataciones TH", hash: "#onboardingTH" },
         { label: "Anexo tecnico individual", hash: "#anexoTecnicoIndividual" },
         { label: "Firma de Contratos", hash: "#firma-contratos-admin" },
-        { label: "Crear Usuarios Temp.", hash: "#temp-crear-usuarios" }
+        { label: "Crear Usuarios Temp.", hash: "#temp-crear-usuarios" },
+        { label: "Proyección de pagos", hash: "#contabilidad" }
     ];
 
     function getRoleRoutes() {

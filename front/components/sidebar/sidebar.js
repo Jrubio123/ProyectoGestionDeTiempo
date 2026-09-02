@@ -77,7 +77,7 @@ function initSidebar() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "entregas-servicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "azure-devops-prueba", "capacidad-fabrica", "firma-contratos-admin", "gestion-personas", "gestion-consultores"],
+        admin: ["inicio", "entregas-servicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "azure-devops-prueba", "capacidad-fabrica", "firma-contratos-admin", "gestion-personas", "gestion-consultores", "contabilidad"],
         coordinador: [
             "inicio",
             "entregas-servicio",
@@ -124,7 +124,7 @@ function initSidebar() {
             "soportes-cuentas-cobro",
             "gestion-consultores"
         ],
-        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "gestion-personas", "gestion-consultores", "capacidad-fabrica"]
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "gestion-personas", "gestion-consultores", "capacidad-fabrica", "contabilidad"]
     };
     Object.entries(roleRoutes).forEach(([role, roleViews]) => {
         if (!["consultor_principal", "consultor_asociado"].includes(role) && !roleViews.includes("vacaciones")) {
@@ -132,7 +132,7 @@ function initSidebar() {
         }
     });
     roleRoutes.administrativo = ["inicio", "vacaciones"];
-    roleRoutes.contabilidad = ["inicio", "vacaciones"];
+    roleRoutes.contabilidad = ["inicio", "contabilidad", "vacaciones"];
 
     const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
     menuItems.forEach((item) => {

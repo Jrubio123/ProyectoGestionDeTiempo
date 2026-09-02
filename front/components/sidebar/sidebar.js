@@ -138,12 +138,14 @@ function initSidebar() {
     menuItems.forEach((item) => {
         const link = item.querySelector(".menu-link");
         if (!link) return;
-        const hash = (link.getAttribute("href") || "").replace("#", "");
+        const href = link.getAttribute("href") || "";
+        const isExternalLink = /^https?:\/\//i.test(href);
+        const hash = href.replace("#", "");
         const roleList = String(item.dataset.roles || "")
             .split(/\s+/)
             .filter(Boolean);
         const roleAllowed = roleList.length === 0 || roleList.includes(roleKey);
-        item.style.display = allowed.has(hash) && roleAllowed ? "" : "none";
+        item.style.display = (isExternalLink ? roleAllowed : allowed.has(hash) && roleAllowed) ? "" : "none";
     });
 
     const sections = sidebar.querySelectorAll(".menu-section");
@@ -172,7 +174,12 @@ function initSidebar() {
         menuItems.forEach((item) => {
             const link = item.querySelector(".menu-link");
             if (!link) return;
-            const target = (link.getAttribute("href") || "").replace("#", "");
+            const href = link.getAttribute("href") || "";
+            if (/^https?:\/\//i.test(href)) {
+                item.classList.remove("active");
+                return;
+            }
+            const target = href.replace("#", "");
             const isActive = target === currentHash;
             item.classList.toggle("active", isActive);
             if (isActive) matched = true;
@@ -182,7 +189,9 @@ function initSidebar() {
             menuItems.forEach((item) => {
                 const link = item.querySelector(".menu-link");
                 if (!link) return;
-                const target = (link.getAttribute("href") || "").replace("#", "");
+                const href = link.getAttribute("href") || "";
+                if (/^https?:\/\//i.test(href)) return;
+                const target = href.replace("#", "");
                 item.classList.toggle("active", target === "inicio");
             });
         }

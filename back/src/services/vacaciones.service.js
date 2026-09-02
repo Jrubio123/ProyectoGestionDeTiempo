@@ -10,6 +10,7 @@ const {
   getMicrosoftPerson,
   searchMicrosoftPeople
 } = require("./microsoft-people.service");
+const { getAvailableVacationDays } = require("./loggro-vacaciones.service");
 
 const MANAGEMENT_ROLES = new Set(["administrador", "talento humano", "administrativo"]);
 const TOKEN_DAYS = Math.max(1, Number(process.env.VACACIONES_TOKEN_DIAS || 30));
@@ -71,6 +72,7 @@ async function currentUser(userId) {
            LOWER(u.email) AS email, u.azure_oid,
            p.id AS persona_internal_id, p.public_id::text AS persona_id,
            p.jefe_inmediato, p.correo_silver, p.correo_electronico,
+           COALESCE(NULLIF(BTRIM(p.numero_documento), ''), NULLIF(BTRIM(u.cedula), '')) AS numero_documento,
            r.titulo AS rol
     FROM usuarios u
     LEFT JOIN personas p ON p.id = u.persona_id
@@ -240,6 +242,23 @@ function calculate(req, res) {
     return res.json(calcularPeriodoVacaciones(req.body.fecha_inicio, req.body.fecha_fin));
   } catch (error) {
     return res.status(400).json({ error: error.message });
+  }
+}
+
+async function getAvailableDays(req, res) {
+  try {
+    const user = await currentUser(req.user.id);
+    if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
+    const result = await getAvailableVacationDays({
+      documentNumber: user.numero_documento,
+      date: req.query.fecha
+    });
+    return res.json(result);
+  } catch (error) {
+    console.error(`[vacaciones] saldo Loggro (${error.code || "ERROR"}):`, error.message);
+    return res.status(error.statusCode || 500).json({
+      error: error.statusCode ? error.message : "No fue posible consultar los días disponibles en Loggro"
+    });
   }
 }
 
@@ -655,6 +674,7 @@ module.exports = {
   createRequest,
   decideFromApp,
   decideFromEmail,
+  getAvailableDays,
   getContext,
   getNotificationConfig,
   listRequests,

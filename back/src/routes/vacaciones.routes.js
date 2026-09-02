@@ -30,6 +30,7 @@ router.get("/aprobacion/:token", APPROVAL_LIMIT, service.showApproval);
 router.post("/aprobacion/:token", APPROVAL_LIMIT, service.decideFromEmail);
 
 router.get("/contexto", VACATION_ACCESS, service.getContext);
+router.get("/dias-disponibles", VACATION_ACCESS, service.getAvailableDays);
 router.get("/personas", VACATION_ACCESS, service.searchPeople);
 router.post("/calcular", VACATION_ACCESS, service.calculate);
 router.get("/solicitudes", VACATION_ACCESS, service.listRequests);

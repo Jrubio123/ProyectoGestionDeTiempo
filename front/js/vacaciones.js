@@ -9,6 +9,7 @@ function vacacionesApp() {
         contexto: { solicitante: {}, jefe_sugerido: null, jefes_fijos: [], puede_configurar: false },
         permisos: { puede_configurar: false, puede_ver_panorama: false },
         solicitudes: [],
+        saldoLoggro: { cargando: true, dias_disponibles: null, fecha_corte: null, error: "" },
         form: { fecha_inicio: "", fecha_fin: "", observaciones: "", jefe: null },
         calculo: null,
         busquedaJefe: "",
@@ -21,7 +22,7 @@ function vacacionesApp() {
         _configTimer: null,
 
         async init() {
-            await Promise.all([this.cargarContexto(), this.cargarSolicitudes()]);
+            await Promise.all([this.cargarContexto(), this.cargarSolicitudes(), this.cargarDiasDisponibles()]);
             if (this.permisos.puede_configurar) await this.cargarConfiguracion();
             this.cargando = false;
         },
@@ -70,6 +71,22 @@ function vacacionesApp() {
                 this.permisos = data.permisos || this.permisos;
             } catch (error) {
                 this.mostrarError(error, "No fue posible cargar las solicitudes");
+            }
+        },
+
+        async cargarDiasDisponibles() {
+            this.saldoLoggro.cargando = true;
+            this.saldoLoggro.error = "";
+            try {
+                const { data } = await axios.get(`${this.api}/dias-disponibles`);
+                this.saldoLoggro.dias_disponibles = data.dias_disponibles;
+                this.saldoLoggro.fecha_corte = data.fecha_corte;
+            } catch (error) {
+                this.saldoLoggro.dias_disponibles = null;
+                this.saldoLoggro.fecha_corte = null;
+                this.saldoLoggro.error = error?.response?.data?.error || "No fue posible consultar el saldo en Loggro";
+            } finally {
+                this.saldoLoggro.cargando = false;
             }
         },
 

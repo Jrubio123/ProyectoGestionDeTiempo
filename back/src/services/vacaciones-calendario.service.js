@@ -99,8 +99,57 @@ function calcularPeriodoVacaciones(fechaInicio, fechaFin) {
   };
 }
 
+function calcularSolicitudVacaciones(fechaInicio, fechaFin, diasCompensados = 0) {
+  const periodo = calcularPeriodoVacaciones(fechaInicio, fechaFin);
+  const totalSolicitado = periodo.dias_habiles;
+  if (totalSolicitado < 1) {
+    throw new Error("El periodo debe contener al menos un día hábil");
+  }
+
+  const rawCompensados = diasCompensados === "" || diasCompensados === null || diasCompensados === undefined
+    ? 0
+    : Number(diasCompensados);
+  if (!Number.isInteger(rawCompensados) || rawCompensados < 0) {
+    throw new Error("Los días reconocidos en dinero deben ser un número entero mayor o igual a cero");
+  }
+
+  const maxDiasCompensados = Math.floor(totalSolicitado / 2);
+  if (rawCompensados > maxDiasCompensados) {
+    throw new Error(`Solo se pueden reconocer en dinero hasta ${maxDiasCompensados} día(s)`);
+  }
+
+  const diasDisfrutados = totalSolicitado - rawCompensados;
+  let disfrutadosPendientes = diasDisfrutados;
+  let fechaFinDisfrute = null;
+  const calendario = periodo.calendario.map((dia) => {
+    if (!dia.habil) return { ...dia, modalidad: null };
+    if (disfrutadosPendientes > 0) {
+      disfrutadosPendientes -= 1;
+      fechaFinDisfrute = dia.fecha;
+      return { ...dia, modalidad: "disfrutado" };
+    }
+    return { ...dia, modalidad: "compensado" };
+  });
+
+  let fechaRegreso = addDays(parseIsoDate(fechaFinDisfrute), 1);
+  while (!getDayInfo(fechaRegreso).habil) fechaRegreso = addDays(fechaRegreso, 1);
+
+  return {
+    fecha_inicio: periodo.fecha_inicio,
+    fecha_fin_solicitada: periodo.fecha_fin,
+    fecha_fin: fechaFinDisfrute,
+    fecha_regreso: toIsoDate(fechaRegreso),
+    dias_habiles: totalSolicitado,
+    dias_disfrutados: diasDisfrutados,
+    dias_compensados: rawCompensados,
+    max_dias_compensados: maxDiasCompensados,
+    calendario
+  };
+}
+
 module.exports = {
   calcularPeriodoVacaciones,
+  calcularSolicitudVacaciones,
   formatDateEs,
   getDayInfo,
   normalizeDateToIso,

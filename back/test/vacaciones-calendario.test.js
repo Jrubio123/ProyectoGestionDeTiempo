@@ -2,9 +2,37 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   calcularPeriodoVacaciones,
+  calcularSolicitudVacaciones,
   formatDateEs,
   normalizeDateToIso
 } = require("../src/services/vacaciones-calendario.service");
+
+test("divide cuatro días entre disfrute y reconocimiento en dinero", () => {
+  const result = calcularSolicitudVacaciones("2026-09-07", "2026-09-10", 2);
+  assert.equal(result.dias_habiles, 4);
+  assert.equal(result.dias_disfrutados, 2);
+  assert.equal(result.dias_compensados, 2);
+  assert.equal(result.fecha_fin, "2026-09-08");
+  assert.equal(result.fecha_regreso, "2026-09-09");
+});
+
+test("redondea hacia abajo el máximo compensable para periodos impares", () => {
+  const result = calcularSolicitudVacaciones("2026-09-07", "2026-09-09", 1);
+  assert.equal(result.dias_habiles, 3);
+  assert.equal(result.max_dias_compensados, 1);
+  assert.equal(result.dias_disfrutados, 2);
+  assert.throws(
+    () => calcularSolicitudVacaciones("2026-09-07", "2026-09-09", 2),
+    /hasta 1 día/
+  );
+});
+
+test("rechaza fracciones de días reconocidos en dinero", () => {
+  assert.throws(
+    () => calcularSolicitudVacaciones("2026-09-07", "2026-09-10", 1.5),
+    /número entero/
+  );
+});
 
 test("excluye sábados, domingos y festivos colombianos", () => {
   const result = calcularPeriodoVacaciones("2026-07-17", "2026-07-21");

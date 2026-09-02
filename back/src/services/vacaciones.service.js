@@ -2,7 +2,7 @@ const crypto = require("crypto");
 const { pool } = require("../db");
 const { sendEmail } = require("../email");
 const {
-  calcularPeriodoVacaciones,
+  calcularSolicitudVacaciones,
   formatDateEs: formatDate
 } = require("./vacaciones-calendario.service");
 const {
@@ -10,7 +10,6 @@ const {
   getMicrosoftPerson,
   searchMicrosoftPeople
 } = require("./microsoft-people.service");
-const { getAvailableVacationDays } = require("./loggro-vacaciones.service");
 
 const MANAGEMENT_ROLES = new Set(["administrador", "talento humano", "administrativo"]);
 const TOKEN_DAYS = Math.max(1, Number(process.env.VACACIONES_TOKEN_DIAS || 30));
@@ -72,7 +71,6 @@ async function currentUser(userId) {
            LOWER(u.email) AS email, u.azure_oid,
            p.id AS persona_internal_id, p.public_id::text AS persona_id,
            p.jefe_inmediato, p.correo_silver, p.correo_electronico,
-           COALESCE(NULLIF(BTRIM(p.numero_documento), ''), NULLIF(BTRIM(u.cedula), '')) AS numero_documento,
            r.titulo AS rol
     FROM usuarios u
     LEFT JOIN personas p ON p.id = u.persona_id
@@ -239,26 +237,13 @@ async function getContext(req, res) {
 
 function calculate(req, res) {
   try {
-    return res.json(calcularPeriodoVacaciones(req.body.fecha_inicio, req.body.fecha_fin));
+    return res.json(calcularSolicitudVacaciones(
+      req.body.fecha_inicio,
+      req.body.fecha_fin,
+      req.body.dias_compensados
+    ));
   } catch (error) {
     return res.status(400).json({ error: error.message });
-  }
-}
-
-async function getAvailableDays(req, res) {
-  try {
-    const user = await currentUser(req.user.id);
-    if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
-    const result = await getAvailableVacationDays({
-      documentNumber: user.numero_documento,
-      date: req.query.fecha
-    });
-    return res.json(result);
-  } catch (error) {
-    console.error(`[vacaciones] saldo Loggro (${error.code || "ERROR"}):`, error.message);
-    return res.status(error.statusCode || 500).json({
-      error: error.statusCode ? error.message : "No fue posible consultar los días disponibles en Loggro"
-    });
   }
 }
 
@@ -269,7 +254,8 @@ function requestEmailHtml(request, token, baseUrl) {
     <div style="max-width:620px;margin:auto;background:white;border:1px solid #e2e8f0;border-radius:12px;padding:28px">
       <h2 style="margin-top:0">Solicitud de vacaciones</h2>
       <p><strong>${escapeHtml(request.solicitante_nombre)}</strong> solicita ${request.dias_habiles} día(s) hábil(es) de vacaciones.</p>
-      <p>Desde <strong>${escapeHtml(formatDate(request.fecha_inicio))}</strong> hasta <strong>${escapeHtml(formatDate(request.fecha_fin))}</strong>.<br>Regreso: <strong>${escapeHtml(formatDate(request.fecha_regreso))}</strong>.</p>
+      <p><strong>${request.dias_disfrutados} día(s) disfrutados</strong> y <strong>${request.dias_compensados} día(s) reconocidos en dinero</strong>.</p>
+      <p>Disfrute desde <strong>${escapeHtml(formatDate(request.fecha_inicio))}</strong> hasta <strong>${escapeHtml(formatDate(request.fecha_fin))}</strong>.<br>Regreso: <strong>${escapeHtml(formatDate(request.fecha_regreso))}</strong>.</p>
       ${request.observaciones ? `<p>Observaciones: ${escapeHtml(request.observaciones)}</p>` : ""}
       <p style="margin-top:28px">
         <a href="${escapeHtml(approve)}" style="display:inline-block;background:#15803d;color:white;text-decoration:none;padding:12px 20px;border-radius:8px;margin-right:8px">Aceptar solicitud</a>
@@ -300,15 +286,16 @@ async function trackEmail(requestId, type, recipients, sender) {
 async function createRequest(req, res) {
   let calculated;
   try {
-    calculated = calcularPeriodoVacaciones(req.body.fecha_inicio, req.body.fecha_fin);
+    calculated = calcularSolicitudVacaciones(
+      req.body.fecha_inicio,
+      req.body.fecha_fin,
+      req.body.dias_compensados
+    );
     const today = new Intl.DateTimeFormat("en-CA", {
       year: "numeric", month: "2-digit", day: "2-digit", timeZone: "America/Bogota"
     }).format(new Date());
     if (calculated.fecha_inicio < today) {
       return res.status(400).json({ error: "La fecha inicial no puede estar en el pasado" });
-    }
-    if (calculated.dias_habiles < 1) {
-      return res.status(400).json({ error: "El periodo debe contener al menos un día hábil" });
     }
   } catch (error) {
     return res.status(400).json({ error: error.message });
@@ -330,8 +317,9 @@ async function createRequest(req, res) {
       INSERT INTO vacaciones_solicitudes (
         solicitante_usuario_id, solicitante_persona_id, solicitante_nombre, solicitante_correo,
         jefe_usuario_id, jefe_persona_id, jefe_azure_oid, jefe_nombre, jefe_correo,
-        fecha_inicio, fecha_fin, dias_habiles, fecha_regreso, observaciones, created_by
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$1)
+        fecha_inicio, fecha_fin, dias_habiles, dias_disfrutados, dias_compensados,
+        fecha_regreso, observaciones, created_by
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$1)
       RETURNING *, public_id::text AS solicitud_id,
                 TO_CHAR(fecha_inicio,'YYYY-MM-DD') AS fecha_inicio_text,
                 TO_CHAR(fecha_fin,'YYYY-MM-DD') AS fecha_fin_text,
@@ -340,7 +328,8 @@ async function createRequest(req, res) {
       applicant.id, applicant.persona_internal_id, applicant.nombre, applicant.email,
       boss._usuario_internal_id || null, boss._persona_internal_id || null, boss.azure_oid || null,
       boss.nombre, boss.email, calculated.fecha_inicio, calculated.fecha_fin,
-      calculated.dias_habiles, calculated.fecha_regreso,
+      calculated.dias_habiles, calculated.dias_disfrutados, calculated.dias_compensados,
+      calculated.fecha_regreso,
       String(req.body.observaciones || "").trim().slice(0, 2000) || null
     ]);
     const request = inserted.rows[0];
@@ -361,7 +350,7 @@ async function createRequest(req, res) {
       to: boss.email,
       subject: `Solicitud de vacaciones - ${applicant.nombre}`,
       html: requestEmailHtml(request, rawToken, publicApiBase(req)),
-      text: `${applicant.nombre} solicita vacaciones del ${request.fecha_inicio} al ${request.fecha_fin}.`,
+      text: `${applicant.nombre} solicita ${request.dias_habiles} días: ${request.dias_disfrutados} disfrutados y ${request.dias_compensados} reconocidos en dinero.`,
       ...emailContext(req)
     }));
     return res.status(201).json({
@@ -390,6 +379,8 @@ function mapRequest(row, user) {
     fecha_fin: row.fecha_fin_text || String(row.fecha_fin).slice(0, 10),
     fecha_regreso: row.fecha_regreso_text || String(row.fecha_regreso).slice(0, 10),
     dias_habiles: Number(row.dias_habiles),
+    dias_disfrutados: Number(row.dias_disfrutados ?? row.dias_habiles),
+    dias_compensados: Number(row.dias_compensados ?? 0),
     estado: row.estado,
     observaciones: row.observaciones,
     comentario_decision: row.comentario_decision,
@@ -447,7 +438,8 @@ function decisionEmailHtml(request, recipientsCopy = false) {
     <div style="max-width:620px;margin:auto;border:1px solid #e2e8f0;border-radius:12px;padding:28px">
       <h2 style="margin-top:0;color:${approved ? "#15803d" : "#b91c1c"}">Vacaciones ${approved ? "aprobadas" : "rechazadas"}</h2>
       <p>La solicitud de <strong>${escapeHtml(request.solicitante_nombre)}</strong> fue ${approved ? "aprobada" : "rechazada"}.</p>
-      <p>${escapeHtml(formatDate(request.fecha_inicio))} al ${escapeHtml(formatDate(request.fecha_fin))} · ${request.dias_habiles} día(s) hábil(es).</p>
+      <p>${request.dias_habiles} día(s) solicitados: ${request.dias_disfrutados} disfrutados y ${request.dias_compensados} reconocidos en dinero.</p>
+      <p>Disfrute: ${escapeHtml(formatDate(request.fecha_inicio))} al ${escapeHtml(formatDate(request.fecha_fin))}.</p>
       ${approved ? `<p>Fecha de regreso: <strong>${escapeHtml(formatDate(request.fecha_regreso))}</strong>.</p>` : ""}
       ${request.comentario_decision ? `<p>Comentario: ${escapeHtml(request.comentario_decision)}</p>` : ""}
       ${appUrl() && !recipientsCopy ? `<p><a href="${escapeHtml(appUrl())}">Ver en la aplicación</a></p>` : ""}
@@ -550,7 +542,7 @@ function approvalPage({ token, action, request, message, done = false }) {
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><link rel="icon" href="data:,"><title>${escapeHtml(title)}</title></head>
   <body style="font-family:Arial,sans-serif;background:#f1f5f9;color:#1e293b;padding:24px"><main style="max-width:560px;margin:40px auto;background:#fff;border-radius:14px;padding:30px;border:1px solid #e2e8f0">
     <h1 style="font-size:24px">${escapeHtml(title)}</h1>
-    ${done ? `<p>${escapeHtml(message)}</p>` : `<p><strong>${escapeHtml(request.solicitante_nombre)}</strong><br>${escapeHtml(formatDate(request.fecha_inicio))} al ${escapeHtml(formatDate(request.fecha_fin))}<br>${request.dias_habiles} día(s) hábil(es) · regreso ${escapeHtml(formatDate(request.fecha_regreso))}</p>
+    ${done ? `<p>${escapeHtml(message)}</p>` : `<p><strong>${escapeHtml(request.solicitante_nombre)}</strong><br>${request.dias_habiles} día(s) solicitados: ${request.dias_disfrutados} disfrutados y ${request.dias_compensados} reconocidos en dinero.<br>Disfrute: ${escapeHtml(formatDate(request.fecha_inicio))} al ${escapeHtml(formatDate(request.fecha_fin))} · regreso ${escapeHtml(formatDate(request.fecha_regreso))}</p>
       <form method="post" action="/vacaciones/aprobacion/${encodeURIComponent(token)}">
         <input type="hidden" name="accion" value="${validAction}">
         <label style="display:block;margin:18px 0 6px">Comentario (opcional)</label>
@@ -674,7 +666,6 @@ module.exports = {
   createRequest,
   decideFromApp,
   decideFromEmail,
-  getAvailableDays,
   getContext,
   getNotificationConfig,
   listRequests,

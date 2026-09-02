@@ -2121,6 +2121,10 @@ CREATE TABLE IF NOT EXISTS vacaciones_solicitudes (
   fecha_inicio DATE NOT NULL,
   fecha_fin DATE NOT NULL,
   dias_habiles SMALLINT NOT NULL CHECK (dias_habiles > 0),
+  dias_disfrutados SMALLINT NOT NULL
+    CONSTRAINT vacaciones_dias_disfrutados_check CHECK (dias_disfrutados > 0),
+  dias_compensados SMALLINT NOT NULL DEFAULT 0
+    CONSTRAINT vacaciones_dias_compensados_check CHECK (dias_compensados >= 0),
   fecha_regreso DATE NOT NULL,
   observaciones TEXT,
   estado VARCHAR(20) NOT NULL DEFAULT 'pendiente'
@@ -2133,7 +2137,11 @@ CREATE TABLE IF NOT EXISTS vacaciones_solicitudes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CHECK (fecha_fin >= fecha_inicio),
-  CHECK (fecha_regreso > fecha_fin)
+  CHECK (fecha_regreso > fecha_fin),
+  CONSTRAINT vacaciones_dias_suma_check
+    CHECK (dias_habiles = dias_disfrutados + dias_compensados),
+  CONSTRAINT vacaciones_dias_compensados_max_check
+    CHECK (dias_compensados * 2 <= dias_habiles)
 );
 
 CREATE INDEX IF NOT EXISTS idx_vacaciones_solicitante

@@ -8,6 +8,10 @@ const migration = fs.readFileSync(
   path.join(root, "db/migrations/2026-08-31-capacidad-fabrica-v2.sql"),
   "utf8"
 );
+const multipleBagsMigration = fs.readFileSync(
+  path.join(root, "db/migrations/2026-09-03-multiples-bolsas-reuniones.sql"),
+  "utf8"
+);
 const routes = fs.readFileSync(
   path.join(root, "back/src/routes/capacidad-fabrica.routes.js"),
   "utf8"
@@ -28,12 +32,17 @@ test("modela bolsa, movimientos y responsables múltiples", () => {
   assert.match(migration, /CREATE TABLE IF NOT EXISTS bolsa_reuniones_movimientos/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS actividad_capacidad_responsables/);
   assert.match(migration, /UNIQUE \(persona_id, semana_inicio\)/);
+  assert.match(multipleBagsMigration, /ADD COLUMN IF NOT EXISTS nombre/);
+  assert.match(multipleBagsMigration, /DROP CONSTRAINT IF EXISTS uq_bolsa_reuniones_persona_semana/);
 });
 
 test("expone endpoints separados para coordinador y usuario Fábrica", () => {
   assert.match(routes, /post\("\/bolsas-reuniones", MANAGEMENT/);
   assert.match(routes, /get\("\/mi-capacidad", SELF_FACTORY/);
   assert.match(routes, /post\("\/mi-reuniones", SELF_FACTORY/);
+  assert.match(routes, /patch\("\/actividades\/:id\/cancelar", MANAGEMENT/);
+  assert.doesNotMatch(homeScript, /cancelarActividad/);
+  assert.match(homeScript, /bolsa_id/);
 });
 
 test("retira el calendario como fuente de capacidad", () => {

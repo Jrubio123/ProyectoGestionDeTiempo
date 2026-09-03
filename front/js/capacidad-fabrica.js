@@ -260,12 +260,14 @@ window.capacidadFabricaApp = function () {
             }
         },
 
-        abrirBolsa(person = null) {
+        abrirBolsa(person = null, bag = null) {
             this.bolsa = {
                 persona_ids: person ? [person.persona_id] : [],
+                bolsa_id: bag?.id || null,
+                nombre: bag?.nombre || "Reuniones",
                 fecha: this.weekDate,
-                horas_total: person?.bolsa_reuniones?.horas_asignadas ?? "",
-                motivo: person?.bolsa_reuniones
+                horas_total: bag?.horas_asignadas ?? "",
+                motivo: bag
                     ? "Modificación de capacidad de reuniones"
                     : "Asignación semanal de reuniones"
             };
@@ -299,14 +301,14 @@ window.capacidadFabricaApp = function () {
             }
         },
 
-        async verHistorialBolsa(person) {
-            if (!person?.bolsa_reuniones?.id) return;
+        async verHistorialBolsa(person, bag) {
+            if (!bag?.id) return;
             this.modalMovimientosBolsa = true;
             this.cargandoMovimientosBolsa = true;
-            this.historialBolsa = { bolsa: { persona: person.persona }, movimientos: [] };
+            this.historialBolsa = { bolsa: { persona: person.persona, nombre: bag.nombre }, movimientos: [] };
             try {
                 const response = await axios.get(
-                    `${API}/capacidad-fabrica/bolsas-reuniones/${person.bolsa_reuniones.id}/movimientos`,
+                    `${API}/capacidad-fabrica/bolsas-reuniones/${bag.id}/movimientos`,
                     this.authConfig()
                 );
                 this.historialBolsa = response.data;

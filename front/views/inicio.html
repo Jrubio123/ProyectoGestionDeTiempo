@@ -19,54 +19,55 @@
 
         <div x-show="cargando" class="rounded-xl border border-slate-200 bg-white p-8 text-center text-slate-500">Cargando capacidad…</div>
 
-        <template x-if="!cargando && capacidad.bolsa">
+        <template x-if="!cargando && capacidad.bolsas?.length">
             <div class="space-y-6">
                 <div class="grid gap-4 md:grid-cols-3">
                     <article class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                         <p class="text-xs font-semibold uppercase text-slate-500">Asignadas</p>
-                        <p class="mt-2 text-3xl font-bold text-slate-900"><span x-text="formatNumber(capacidad.bolsa.horas_asignadas)"></span> h</p>
+                        <p class="mt-2 text-3xl font-bold text-slate-900"><span x-text="formatNumber(totalAsignado)"></span> h</p>
                     </article>
                     <article class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                         <p class="text-xs font-semibold uppercase text-slate-500">Consumidas</p>
-                        <p class="mt-2 text-3xl font-bold text-blue-700"><span x-text="formatNumber(capacidad.bolsa.horas_consumidas)"></span> h</p>
+                        <p class="mt-2 text-3xl font-bold text-blue-700"><span x-text="formatNumber(totalConsumido)"></span> h</p>
                     </article>
-                    <article class="rounded-xl border p-5 shadow-sm" :class="Number(capacidad.bolsa.horas_disponibles) > 0 ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50'">
+                    <article class="rounded-xl border p-5 shadow-sm" :class="totalDisponible > 0 ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50'">
                         <p class="text-xs font-semibold uppercase text-slate-500">Disponibles</p>
-                        <p class="mt-2 text-3xl font-bold" :class="Number(capacidad.bolsa.horas_disponibles) > 0 ? 'text-emerald-700' : 'text-red-700'"><span x-text="formatNumber(capacidad.bolsa.horas_disponibles)"></span> h</p>
+                        <p class="mt-2 text-3xl font-bold" :class="totalDisponible > 0 ? 'text-emerald-700' : 'text-red-700'"><span x-text="formatNumber(totalDisponible)"></span> h</p>
                     </article>
                 </div>
 
                 <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                     <div class="flex justify-between text-sm"><span>Consumo semanal</span><strong><span x-text="formatNumber(porcentajeConsumido)"></span>%</strong></div>
                     <div class="mt-2 h-3 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-blue-600" :style="`width:${porcentajeConsumido}%`"></div></div>
-                    <p class="mt-2 text-xs text-slate-500">Coordinador: <strong x-text="capacidad.bolsa.coordinador?.nombre_usuario || 'Sin responsable'"></strong></p>
+                    <div class="mt-4 grid gap-2 md:grid-cols-2"><template x-for="bag in capacidad.bolsas" :key="bag.id"><div class="rounded-lg border border-slate-200 p-3 text-sm"><strong x-text="bag.nombre"></strong><p class="mt-1 text-xs text-slate-500"><span x-text="formatNumber(bag.horas_consumidas)"></span> de <span x-text="formatNumber(bag.horas_asignadas)"></span> h · saldo <span x-text="formatNumber(bag.horas_disponibles)"></span> h</p><p class="mt-1 text-xs text-slate-400" x-text="bag.coordinador?.nombre_usuario || 'Sin coordinador'"></p></div></template></div>
                 </div>
 
                 <form @submit.prevent="guardarReunion()" class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                     <h2 class="text-lg font-semibold text-slate-900">Registrar reunión</h2>
                     <div class="mt-4 grid gap-4 md:grid-cols-2">
+                        <label class="text-sm font-medium text-slate-700 md:col-span-2">Descontar de la bolsa<select required x-model="reunion.bolsa_id" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><option value="">Selecciona una bolsa</option><template x-for="bag in capacidad.bolsas" :key="bag.id"><option :value="bag.id" :disabled="Number(bag.horas_disponibles) <= 0" x-text="`${bag.nombre} · saldo ${formatNumber(bag.horas_disponibles)} h`"></option></template></select></label>
                         <label class="text-sm font-medium text-slate-700 md:col-span-2">Título<input required maxlength="500" x-model.trim="reunion.titulo" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
                         <label class="text-sm font-medium text-slate-700">Cliente opcional<select x-model="reunion.cliente_id" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><option value="">Sin cliente</option><template x-for="client in clientes" :key="client.id"><option :value="client.id" x-text="client.titulo"></option></template></select></label>
                         <label class="text-sm font-medium text-slate-700">Fecha<input required type="date" x-model="reunion.fecha" :min="capacidad.semana.fecha_inicio" :max="capacidad.semana.fecha_fin" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
-                        <label class="text-sm font-medium text-slate-700">Horas<input required type="number" min="0.01" step="0.01" :max="capacidad.bolsa.horas_disponibles" x-model="reunion.horas" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
+                        <label class="text-sm font-medium text-slate-700">Horas<input required type="number" min="0.01" step="0.01" :max="bolsaSeleccionada?.horas_disponibles || 0" x-model="reunion.horas" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
                     </div>
-                    <div class="mt-5 flex justify-end"><button :disabled="guardando || Number(capacidad.bolsa.horas_disponibles) <= 0" class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" x-text="guardando ? 'Guardando…' : 'Registrar y descontar'"></button></div>
+                    <div class="mt-5 flex justify-end"><button :disabled="guardando || !bolsaSeleccionada || Number(bolsaSeleccionada.horas_disponibles) <= 0" class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" x-text="guardando ? 'Guardando…' : 'Registrar y descontar'"></button></div>
                 </form>
 
                 <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
                     <div class="border-b border-slate-200 px-5 py-4"><h2 class="font-semibold text-slate-900">Historial de la semana</h2></div>
-                    <table class="min-w-full text-sm"><thead class="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Fecha</th><th class="px-4 py-3">Título</th><th class="px-4 py-3">Cliente</th><th class="px-4 py-3">Origen</th><th class="px-4 py-3 text-right">Horas</th><th class="px-4 py-3"></th></tr></thead><tbody class="divide-y divide-slate-100"><template x-for="activity in capacidad.actividades" :key="activity.id"><tr><td class="px-4 py-3" x-text="formatDate(activity.fecha)"></td><td class="px-4 py-3 font-medium" x-text="activity.titulo"></td><td class="px-4 py-3 text-slate-600" x-text="activity.cliente || '—'"></td><td class="px-4 py-3 text-slate-600" x-text="activity.origen === 'AUTORREGISTRO' ? 'Propia' : 'Coordinador'"></td><td class="px-4 py-3 text-right font-semibold"><span x-text="formatNumber(activity.horas)"></span> h</td><td class="px-4 py-3 text-right"><button x-show="activity.origen === 'AUTORREGISTRO' && activity.estado !== 'CANCELADA'" @click="cancelarActividad(activity)" class="text-xs font-semibold text-red-600">Cancelar</button><span x-show="activity.estado === 'CANCELADA'" class="text-xs text-slate-400">Cancelada</span></td></tr></template></tbody></table>
+                    <table class="min-w-full text-sm"><thead class="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Fecha</th><th class="px-4 py-3">Título</th><th class="px-4 py-3">Bolsa</th><th class="px-4 py-3">Cliente</th><th class="px-4 py-3">Origen</th><th class="px-4 py-3 text-right">Horas</th></tr></thead><tbody class="divide-y divide-slate-100"><template x-for="activity in capacidad.actividades" :key="activity.id"><tr><td class="px-4 py-3" x-text="formatDate(activity.fecha)"></td><td class="px-4 py-3 font-medium" x-text="activity.titulo"></td><td class="px-4 py-3 text-slate-600" x-text="activity.bolsa_nombre || '—'"></td><td class="px-4 py-3 text-slate-600" x-text="activity.cliente || '—'"></td><td class="px-4 py-3 text-slate-600" x-text="activity.origen === 'AUTORREGISTRO' ? 'Propia' : 'Coordinador'"></td><td class="px-4 py-3 text-right font-semibold"><span x-text="formatNumber(activity.horas)"></span> h</td></tr></template></tbody></table>
                     <p x-show="!capacidad.actividades?.length" class="p-8 text-center text-slate-500">Todavía no hay reuniones registradas en esta semana.</p>
                 </div>
 
                 <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                     <h2 class="font-semibold text-slate-900">Movimientos de la bolsa</h2>
-                    <div class="mt-3 divide-y divide-slate-100"><template x-for="movement in capacidad.movimientos || []" :key="movement.id"><div class="flex items-center justify-between gap-4 py-3 text-sm"><div><strong x-text="movement.motivo || movement.tipo"></strong><p class="text-xs text-slate-500"><span x-text="movement.registrado_por || 'Sistema'"></span> · <span x-text="formatDate(movement.created_at, true)"></span></p></div><span class="font-bold" :class="Number(movement.horas_delta) >= 0 ? 'text-emerald-600' : 'text-red-600'" x-text="`${Number(movement.horas_delta) >= 0 ? '+' : ''}${formatNumber(movement.horas_delta)} h`"></span></div></template></div>
+                    <div class="mt-3 divide-y divide-slate-100"><template x-for="movement in capacidad.movimientos || []" :key="movement.id"><div class="flex items-center justify-between gap-4 py-3 text-sm"><div><strong x-text="movement.motivo || movement.tipo"></strong><p class="text-xs font-medium text-violet-600" x-text="movement.bolsa_nombre"></p><p class="text-xs text-slate-500"><span x-text="movement.registrado_por || 'Sistema'"></span> · <span x-text="formatDate(movement.created_at, true)"></span></p></div><span class="font-bold" :class="Number(movement.horas_delta) >= 0 ? 'text-emerald-600' : 'text-red-600'" x-text="`${Number(movement.horas_delta) >= 0 ? '+' : ''}${formatNumber(movement.horas_delta)} h`"></span></div></template></div>
                 </div>
             </div>
         </template>
 
-        <div x-show="!cargando && !capacidad.bolsa" class="rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-800">
+        <div x-show="!cargando && !capacidad.bolsas?.length" class="rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-800">
             <h2 class="font-semibold">No tienes bolsa de reuniones para esta semana</h2>
             <p class="mt-1 text-sm">Solicita a tu coordinador responsable que asigne las horas antes de registrar reuniones.</p>
         </div>

@@ -740,6 +740,7 @@ CREATE TABLE bolsas_reuniones_capacidad
 (
     id BIGSERIAL PRIMARY KEY,
     public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    nombre VARCHAR(200) NOT NULL,
     persona_id INTEGER NOT NULL REFERENCES personas(id) ON DELETE RESTRICT,
     coordinador_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,
     semana_inicio DATE NOT NULL,
@@ -748,12 +749,14 @@ CREATE TABLE bolsas_reuniones_capacidad
         CHECK (estado IN ('ABIERTA', 'CERRADA')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_bolsa_reuniones_persona_semana UNIQUE (persona_id, semana_inicio),
     CONSTRAINT ck_bolsa_reuniones_semana CHECK (semana_fin = semana_inicio + 4)
 );
 
 CREATE INDEX idx_bolsas_reuniones_semana
     ON bolsas_reuniones_capacidad(semana_inicio, persona_id);
+
+CREATE INDEX idx_bolsas_reuniones_persona_semana
+    ON bolsas_reuniones_capacidad(persona_id, semana_inicio, created_at);
 
 CREATE TABLE actividades_capacidad
 (

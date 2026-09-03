@@ -3,12 +3,20 @@ const test = require("node:test");
 const path = require("node:path");
 
 const scriptPath = path.resolve(__dirname, "../../front/js/capacidad-fabrica.js");
+const homeScriptPath = path.resolve(__dirname, "../../front/js/inicio.js");
 
 function createApp() {
   global.window = {};
   delete require.cache[scriptPath];
   require(scriptPath);
   return global.window.capacidadFabricaApp();
+}
+
+function createHomeApp() {
+  global.window = {};
+  delete require.cache[homeScriptPath];
+  require(homeScriptPath);
+  return global.window.inicioApp();
 }
 
 test("calcula las horas cuando cambia el porcentaje", () => {
@@ -88,14 +96,30 @@ test("edita la bolsa usando el total actual, no horas adicionales", () => {
   const app = createApp();
   app.weekDate = "2026-08-31";
 
-  app.abrirBolsa({
-    persona_id: "persona-1",
-    bolsa_reuniones: { horas_asignadas: 20, horas_consumidas: 3 }
-  });
+  app.abrirBolsa(
+    { persona_id: "persona-1" },
+    { id: "bolsa-1", nombre: "Reuniones cliente", horas_asignadas: 20, horas_consumidas: 3 }
+  );
 
   assert.equal(app.bolsa.horas_total, 20);
+  assert.equal(app.bolsa.bolsa_id, "bolsa-1");
+  assert.equal(app.bolsa.nombre, "Reuniones cliente");
   assert.deepEqual(app.bolsa.persona_ids, ["persona-1"]);
   assert.match(app.bolsa.motivo, /Modificación/);
+});
+
+test("suma varias bolsas y conserva el total reservado al consumir", () => {
+  const app = createHomeApp();
+  app.capacidad.bolsas = [
+    { id: "bolsa-1", horas_asignadas: 50, horas_consumidas: 3, horas_disponibles: 47 },
+    { id: "bolsa-2", horas_asignadas: 10, horas_consumidas: 2, horas_disponibles: 8 }
+  ];
+  app.reunion.bolsa_id = "bolsa-2";
+
+  assert.equal(app.totalAsignado, 60);
+  assert.equal(app.totalConsumido, 5);
+  assert.equal(app.totalDisponible, 55);
+  assert.equal(app.bolsaSeleccionada.id, "bolsa-2");
 });
 
 test("limita los estados disponibles para actividades puntuales", () => {

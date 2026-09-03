@@ -20,8 +20,8 @@ window.inicioApp = function () {
         mensaje: "",
         fechaConsulta: todayInBogota(),
         clientes: [],
-        capacidad: { semana: {}, bolsa: null, actividades: [], movimientos: [] },
-        reunion: { titulo: "", cliente_id: "", fecha: todayInBogota(), horas: "" },
+        capacidad: { semana: {}, bolsas: [], actividades: [], movimientos: [] },
+        reunion: { titulo: "", cliente_id: "", bolsa_id: "", fecha: todayInBogota(), horas: "" },
 
         async init() {
             this.roleKey = window.auth?.getRoleKey?.() || "other";
@@ -64,7 +64,11 @@ window.inicioApp = function () {
                 const response = await axios.get(`${API}/capacidad-fabrica/mi-capacidad`, this.authConfig({
                     params: { fecha: this.fechaConsulta }
                 }));
-                this.capacidad = response.data || { semana: {}, bolsa: null, actividades: [], movimientos: [] };
+                this.capacidad = response.data || { semana: {}, bolsas: [], actividades: [], movimientos: [] };
+                const availableBags = this.capacidad.bolsas || [];
+                if (!availableBags.some((bag) => bag.id === this.reunion.bolsa_id)) {
+                    this.reunion.bolsa_id = availableBags.find((bag) => Number(bag.horas_disponibles) > 0)?.id || "";
+                }
                 if (this.capacidad.semana?.fecha_inicio) {
                     this.reunion.fecha = this.fechaConsulta;
                 }
@@ -86,6 +90,7 @@ window.inicioApp = function () {
                 this.reunion = {
                     titulo: "",
                     cliente_id: "",
+                    bolsa_id: this.reunion.bolsa_id,
                     fecha: this.reunion.fecha,
                     horas: ""
                 };
@@ -98,27 +103,26 @@ window.inicioApp = function () {
             }
         },
 
-        async cancelarActividad(activity) {
-            if (!activity?.id || activity.estado === "CANCELADA") return;
-            if (!window.confirm("¿Cancelar esta reunión y devolver sus horas a la bolsa?")) return;
-            this.error = "";
-            try {
-                await axios.patch(
-                    `${API}/capacidad-fabrica/actividades/${activity.id}/cancelar`,
-                    {},
-                    this.authConfig()
-                );
-                this.mensaje = "Reunión cancelada; las horas regresaron a la bolsa.";
-                await this.cargarCapacidad();
-            } catch (error) {
-                this.error = this.errorText(error, "No se canceló la reunión.");
-            }
+        get bolsaSeleccionada() {
+            return (this.capacidad.bolsas || []).find((bag) => bag.id === this.reunion.bolsa_id) || null;
+        },
+
+        get totalAsignado() {
+            return (this.capacidad.bolsas || []).reduce((sum, bag) => sum + Number(bag.horas_asignadas || 0), 0);
+        },
+
+        get totalConsumido() {
+            return (this.capacidad.bolsas || []).reduce((sum, bag) => sum + Number(bag.horas_consumidas || 0), 0);
+        },
+
+        get totalDisponible() {
+            return (this.capacidad.bolsas || []).reduce((sum, bag) => sum + Number(bag.horas_disponibles || 0), 0);
         },
 
         get porcentajeConsumido() {
-            const assigned = Number(this.capacidad.bolsa?.horas_asignadas || 0);
-            const consumed = Number(this.capacidad.bolsa?.horas_consumidas || 0);
-            return assigned > 0 ? Math.min(100, Math.round(consumed * 10000 / assigned) / 100) : 0;
+            return this.totalAsignado > 0
+                ? Math.min(100, Math.round(this.totalConsumido * 10000 / this.totalAsignado) / 100)
+                : 0;
         },
 
         formatNumber(value) {

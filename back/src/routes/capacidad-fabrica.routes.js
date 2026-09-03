@@ -5,7 +5,6 @@ const service = require("../services/capacidad-fabrica.service");
 const router = express.Router();
 const MANAGEMENT = requireAccess({ roles: ["Administrador", "Coordinador"] });
 const SELF_FACTORY = requireAccess({ roles: ["Fábrica"] });
-const ACTIVITY_ACCESS = requireAccess({ roles: ["Administrador", "Coordinador", "Fábrica"] });
 const CATALOGS = requireAccess({
   roles: ["Administrador", "Coordinador", "Talento Humano", "Fábrica"]
 });
@@ -23,7 +22,7 @@ router.post("/bolsas-reuniones", MANAGEMENT, service.assignMeetingBags);
 router.get("/bolsas-reuniones/:id/movimientos", MANAGEMENT, service.getMeetingBagHistory);
 router.get("/mi-capacidad", SELF_FACTORY, service.getMyCapacity);
 router.post("/mi-reuniones", SELF_FACTORY, service.createMyMeeting);
-router.patch("/actividades/:id/cancelar", ACTIVITY_ACCESS, service.cancelCapacityActivity);
+router.patch("/actividades/:id/cancelar", MANAGEMENT, service.cancelCapacityActivity);
 router.get("/requerimientos", MANAGEMENT, service.listRequirements);
 router.post("/requerimientos/manual", MANAGEMENT, service.createManualRequirement);
 router.post("/actividades/manual", MANAGEMENT, service.createManualActivity);

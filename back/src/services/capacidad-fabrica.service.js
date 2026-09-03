@@ -608,7 +608,7 @@ async function resolveCurrentFactoryPerson(db, userId) {
   return result.rows[0];
 }
 
-async function getBagWithBalance(db, personId, weekStart, lock = false) {
+async function getBagsWithBalances(db, personId, weekStart, lock = false) {
   if (lock) {
     await db.query(
       `SELECT id FROM bolsas_reuniones_capacidad
@@ -618,8 +618,9 @@ async function getBagWithBalance(db, personId, weekStart, lock = false) {
     );
   }
   const result = await db.query(
-    `SELECT b.id, b.public_id::text AS public_id, b.persona_id,
+    `SELECT b.id, b.public_id::text AS public_id, b.nombre, b.persona_id,
             b.coordinador_id, b.semana_inicio, b.semana_fin, b.estado,
+            u.nombre_usuario AS coordinador_nombre, u.email AS coordinador_correo,
             COALESCE(SUM(m.horas_delta), 0)::float8 AS saldo,
             COALESCE(SUM(m.horas_delta) FILTER (
               WHERE m.tipo IN ('ASIGNACION', 'AJUSTE')
@@ -632,11 +633,13 @@ async function getBagWithBalance(db, personId, weekStart, lock = false) {
             ), 0)::float8 AS horas_consumidas
      FROM bolsas_reuniones_capacidad b
      LEFT JOIN bolsa_reuniones_movimientos m ON m.bolsa_id = b.id
+     LEFT JOIN usuarios u ON u.id = b.coordinador_id
      WHERE b.persona_id = $1 AND b.semana_inicio = $2
-     GROUP BY b.id`,
+     GROUP BY b.id, u.id
+     ORDER BY b.created_at, b.id`,
     [personId, weekStart]
   );
-  return result.rows[0] || null;
+  return result.rows;
 }
 
 async function resolveActivityCategory(db, code, forceMeetings = false) {
@@ -677,11 +680,21 @@ async function createCapacityActivity(db, {
   if (category.usa_bolsa) {
     const errors = [];
     for (const person of people) {
-      const bag = await getBagWithBalance(db, person.id, week.startDate, true);
-      if (!bag) errors.push(`${person.nombre}: sin bolsa semanal`);
+      const bags = await getBagsWithBalances(db, person.id, week.startDate, true);
+      const selectedPublicId = fixedPerson
+        ? cleanText(payload.bolsa_id, 80)
+        : cleanText(payload.bolsa_ids?.[person.public_id], 80)
+          || (people.length === 1 ? cleanText(payload.bolsa_id, 80) : null);
+      const bag = selectedPublicId
+        ? bags.find((item) => item.public_id === selectedPublicId)
+        : fixedPerson
+          ? null
+          : bags.find((item) => item.estado === "ABIERTA" && Number(item.saldo) >= hours);
+      if (!bags.length) errors.push(`${person.nombre}: sin bolsa semanal`);
+      else if (!bag) errors.push(`${person.nombre}: selecciona una bolsa con saldo suficiente`);
       else if (bag.estado !== "ABIERTA") errors.push(`${person.nombre}: bolsa cerrada`);
       else if (Number(bag.saldo) < hours) {
-        errors.push(`${person.nombre}: saldo ${Number(bag.saldo).toFixed(2)} h`);
+        errors.push(`${person.nombre}: ${bag.nombre} tiene ${Number(bag.saldo).toFixed(2)} h`);
       } else {
         bagsByPerson.set(person.id, bag);
       }
@@ -1075,15 +1088,27 @@ async function assignMeetingBags(req, res) {
       throw new CapacityError("La capacidad total de reuniones debe estar entre 0 y 168 horas.");
     }
     const roundedTargetHours = Math.round(targetHours * 100) / 100;
+    const bagName = cleanText(payload.nombre, 200);
+    if (!bagName) throw new CapacityError("El nombre de la bolsa es obligatorio.");
+    const requestedBagId = cleanText(payload.bolsa_id, 80);
     const reason = cleanText(payload.motivo, 500) || "Modificación de capacidad de reuniones";
     const result = await withTransaction(async (client) => {
       const people = await resolveFactoryPeople(client, payload.persona_ids);
+      if (requestedBagId && people.length !== 1) {
+        throw new CapacityError("Solo se puede editar una bolsa a la vez.");
+      }
       const rows = [];
       for (const person of people) {
         await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
           `bolsa-reuniones:${person.id}:${week.startDate}`
         ]);
-        let bag = await getBagWithBalance(client, person.id, week.startDate, true);
+        const bags = await getBagsWithBalances(client, person.id, week.startDate, true);
+        let bag = requestedBagId
+          ? bags.find((item) => item.public_id === requestedBagId)
+          : null;
+        if (requestedBagId && !bag) {
+          throw new CapacityError("La bolsa que intentas editar no existe para este integrante y semana.", 404);
+        }
         const consumedHours = Number(bag?.horas_consumidas || 0);
         const currentAssignedHours = Number(bag?.horas_asignadas || 0);
         if (roundedTargetHours < consumedHours) {
@@ -1100,13 +1125,20 @@ async function assignMeetingBags(req, res) {
           }
           const inserted = await client.query(
             `INSERT INTO bolsas_reuniones_capacidad
-               (persona_id, coordinador_id, semana_inicio, semana_fin)
-             VALUES ($1, $2, $3, $4)
+               (nombre, persona_id, coordinador_id, semana_inicio, semana_fin)
+             VALUES ($1, $2, $3, $4, $5)
              RETURNING id, public_id::text AS public_id`,
-            [person.id, req.user?.id, week.startDate, week.endDate]
+            [bagName, person.id, req.user?.id, week.startDate, week.endDate]
           );
           bag = inserted.rows[0];
           movementType = "ASIGNACION";
+        } else {
+          await client.query(
+            `UPDATE bolsas_reuniones_capacidad
+             SET nombre = $1, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2`,
+            [bagName, bag.id]
+          );
         }
         if (adjustment !== 0) {
           await client.query(
@@ -1119,6 +1151,7 @@ async function assignMeetingBags(req, res) {
         rows.push({
           persona_id: person.public_id,
           bolsa_id: bag.public_id,
+          nombre: bagName,
           horas_total: roundedTargetHours,
           horas_ajuste: adjustment
         });
@@ -1141,14 +1174,16 @@ async function getMyCapacity(req, res) {
     const { week } = resolveWorkWeek(req.query?.fecha || dateStringInBogota(new Date()));
     const result = await withTransaction(async (client) => {
       const person = await resolveCurrentFactoryPerson(client, req.user?.id);
-      const bag = await getBagWithBalance(client, person.id, week.startDate);
+      const bags = await getBagsWithBalances(client, person.id, week.startDate);
       const [activitiesResult, movementsResult] = await Promise.all([
         client.query(
           `SELECT a.public_id::text AS id, a.titulo, a.fecha, a.horas::float8 AS horas,
                   a.categoria_codigo, c.titulo AS cliente, a.origen, a.estado,
-                  a.created_at, u.nombre_usuario AS creado_por
+                  a.created_at, u.nombre_usuario AS creado_por,
+                  b.public_id::text AS bolsa_id, b.nombre AS bolsa_nombre
            FROM actividades_capacidad a
            JOIN actividad_capacidad_responsables ar ON ar.actividad_id = a.id
+           LEFT JOIN bolsas_reuniones_capacidad b ON b.id = ar.bolsa_id
            LEFT JOIN clientes c ON c.id = a.cliente_id
            LEFT JOIN usuarios u ON u.id = a.creado_por
            WHERE ar.persona_id = $1
@@ -1156,26 +1191,18 @@ async function getMyCapacity(req, res) {
            ORDER BY a.fecha DESC, a.created_at DESC`,
           [person.id, week.startDate, week.endDate]
         ),
-        bag
-          ? client.query(
-            `SELECT m.public_id::text AS id, m.tipo, m.horas_delta::float8 AS horas_delta,
-                    m.motivo, m.created_at, u.nombre_usuario AS registrado_por
-             FROM bolsa_reuniones_movimientos m
-             LEFT JOIN usuarios u ON u.id = m.registrado_por
-             WHERE m.bolsa_id = $1
-             ORDER BY m.created_at DESC, m.id DESC`,
-            [bag.id]
-          )
-          : Promise.resolve({ rows: [] })
+        client.query(
+          `SELECT m.public_id::text AS id, m.tipo, m.horas_delta::float8 AS horas_delta,
+                  m.motivo, m.created_at, u.nombre_usuario AS registrado_por,
+                  b.public_id::text AS bolsa_id, b.nombre AS bolsa_nombre
+           FROM bolsa_reuniones_movimientos m
+           JOIN bolsas_reuniones_capacidad b ON b.id = m.bolsa_id
+           LEFT JOIN usuarios u ON u.id = m.registrado_por
+           WHERE b.persona_id = $1 AND b.semana_inicio = $2
+           ORDER BY m.created_at DESC, m.id DESC`,
+          [person.id, week.startDate]
+        )
       ]);
-      let coordinator = null;
-      if (bag?.coordinador_id) {
-        const coordinatorResult = await client.query(
-          `SELECT nombre_usuario, email FROM usuarios WHERE id = $1`,
-          [bag.coordinador_id]
-        );
-        coordinator = coordinatorResult.rows[0] || null;
-      }
       return {
         persona: {
           id: person.public_id,
@@ -1183,14 +1210,18 @@ async function getMyCapacity(req, res) {
           correo_silver: person.correo_silver
         },
         semana: { fecha_inicio: week.startDate, fecha_fin: week.endDate },
-        bolsa: bag ? {
+        bolsas: bags.map((bag) => ({
           id: bag.public_id,
+          nombre: bag.nombre,
           estado: bag.estado,
           horas_asignadas: Number(bag.horas_asignadas),
           horas_consumidas: Number(bag.horas_consumidas),
           horas_disponibles: Number(bag.saldo),
-          coordinador: coordinator
-        } : null,
+          coordinador: {
+            nombre_usuario: bag.coordinador_nombre,
+            email: bag.coordinador_correo
+          }
+        })),
         actividades: activitiesResult.rows,
         movimientos: movementsResult.rows
       };
@@ -1204,7 +1235,7 @@ async function getMyCapacity(req, res) {
 async function getMeetingBagHistory(req, res) {
   try {
     const bagResult = await pool.query(
-      `SELECT b.public_id::text AS id, b.semana_inicio, b.semana_fin,
+      `SELECT b.public_id::text AS id, b.nombre, b.semana_inicio, b.semana_fin,
               CONCAT_WS(' ', p.nombre, p.apellidos) AS persona
        FROM bolsas_reuniones_capacidad b
        JOIN personas p ON p.id = b.persona_id
@@ -1244,11 +1275,6 @@ async function cancelCapacityActivity(req, res) {
       const activity = activityResult.rows[0];
       if (!activity) throw new CapacityError("Actividad no encontrada.", 404);
       if (activity.estado === "CANCELADA") return;
-      const role = String(req.user?.rol || "").toLowerCase();
-      const manages = ["administrador", "coordinador"].includes(role);
-      if (!manages && !(activity.origen === "AUTORREGISTRO" && activity.creado_por === req.user?.id)) {
-        throw new CapacityError("No puedes cancelar esta actividad.", 403);
-      }
       const responsibles = await client.query(
         `SELECT ar.id, ar.bolsa_id, ar.horas::float8 AS horas
          FROM actividad_capacidad_responsables ar
@@ -1520,7 +1546,7 @@ async function getDashboard(req, res) {
         [week.startDate, week.endDate]
       ),
       pool.query(
-        `SELECT b.persona_id, b.public_id::text AS bolsa_id, b.estado,
+        `SELECT b.persona_id, b.public_id::text AS bolsa_id, b.nombre, b.estado,
                 b.semana_inicio, b.semana_fin,
                 u.nombre_usuario AS coordinador, u.email AS coordinador_correo,
                 COALESCE(SUM(m.horas_delta), 0)::float8 AS horas_disponibles,
@@ -1624,13 +1650,21 @@ async function getDashboard(req, res) {
       });
     }
 
-    const bagsByPerson = new Map(bagsResult.rows.map((bag) => [bag.persona_id, bag]));
+    const bagsByPerson = new Map();
+    for (const bag of bagsResult.rows) {
+      if (!bagsByPerson.has(bag.persona_id)) bagsByPerson.set(bag.persona_id, []);
+      bagsByPerson.get(bag.persona_id).push(bag);
+    }
     const people = membersResult.rows.map((person) => {
       const assignments = assignmentsByPerson.get(person.id) || [];
-      const bag = bagsByPerson.get(person.id) || null;
+      const bags = bagsByPerson.get(person.id) || [];
+      const reservedMeetingHours = bags.reduce(
+        (sum, bag) => sum + Number(bag.horas_asignadas || 0),
+        0
+      );
       const used = calculateWeeklyOccupiedHours(
         assignments,
-        bag?.horas_asignadas
+        reservedMeetingHours
       );
       const pendingEffort = assignments.filter((item) => item.effort_pendiente).length;
       return {
@@ -1643,15 +1677,16 @@ async function getDashboard(req, res) {
         porcentaje_ocupacion: Math.round((used / weeklyHours) * 10000) / 100,
         requerimientos_activos: assignments.length,
         requerimientos_sin_effort: pendingEffort,
-        bolsa_reuniones: bag ? {
+        bolsas_reuniones: bags.map((bag) => ({
           id: bag.bolsa_id,
+          nombre: bag.nombre,
           estado: bag.estado,
           horas_asignadas: Number(bag.horas_asignadas),
           horas_consumidas: Number(bag.horas_consumidas),
           horas_disponibles: Number(bag.horas_disponibles),
           coordinador: bag.coordinador,
           coordinador_correo: bag.coordinador_correo
-        } : null,
+        })),
         asignaciones: assignments.sort((left, right) =>
           (left.prioridad || 99) - (right.prioridad || 99)
         )

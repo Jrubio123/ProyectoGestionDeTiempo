@@ -186,6 +186,7 @@ app.use("/entregas-servicio", require("./routes/entregas-servicio.routes"));
 app.use(require("./routes/anexo-individual.routes"));
 app.use("/admin/firma-contratos", require("./routes/firma-contratos.routes"));
 app.use("/cuentas-cobro", require("./routes/cuentas-cobro.routes"));
+app.use("/api/contabilidad", require("./routes/contabilidad.routes"));
 app.options('*', cors(corsOptions));
 
 /* ===============================

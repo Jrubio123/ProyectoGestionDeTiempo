@@ -9,7 +9,7 @@ function vacacionesApp() {
         contexto: { solicitante: {}, jefe_sugerido: null, jefes_fijos: [], puede_configurar: false },
         permisos: { puede_configurar: false, puede_ver_panorama: false },
         solicitudes: [],
-        form: { fecha_inicio: "", fecha_fin: "", observaciones: "", jefe: null },
+        form: { fecha_inicio: "", fecha_fin: "", dias_compensados: 0, observaciones: "", jefe: null },
         calculo: null,
         busquedaJefe: "",
         jefes: [],
@@ -73,6 +73,11 @@ function vacacionesApp() {
             }
         },
 
+        get opcionesDiasCompensados() {
+            const maximo = Number(this.calculo?.max_dias_compensados || 0);
+            return Array.from({ length: maximo + 1 }, (_, index) => index);
+        },
+
         buscarJefes() {
             clearTimeout(this._jefeTimer);
             const query = this.busquedaJefe.trim();
@@ -105,13 +110,19 @@ function vacacionesApp() {
             try {
                 const { data } = await axios.post(`${this.api}/calcular`, {
                     fecha_inicio: this.form.fecha_inicio,
-                    fecha_fin: this.form.fecha_fin
+                    fecha_fin: this.form.fecha_fin,
+                    dias_compensados: Number(this.form.dias_compensados || 0)
                 });
                 this.calculo = data;
                 this.error = "";
             } catch (error) {
                 this.mostrarError(error, "Fechas inválidas");
             }
+        },
+
+        cambiarFechas() {
+            this.form.dias_compensados = 0;
+            this.calcular();
         },
 
         async solicitar() {
@@ -125,7 +136,7 @@ function vacacionesApp() {
                 this.exito = data.advertencia_correo
                     ? `Solicitud creada, pero el correo no pudo enviarse: ${data.advertencia_correo}`
                     : "Solicitud enviada al jefe inmediato";
-                this.form = { fecha_inicio: "", fecha_fin: "", observaciones: "", jefe: null };
+                this.form = { fecha_inicio: "", fecha_fin: "", dias_compensados: 0, observaciones: "", jefe: null };
                 this.busquedaJefe = "";
                 this.calculo = null;
                 await this.cargarSolicitudes();
@@ -142,7 +153,7 @@ function vacacionesApp() {
                 const ingresado = window.prompt("Motivo del rechazo (opcional):");
                 if (ingresado === null) return;
                 comentario = ingresado;
-            } else if (!window.confirm(`¿Aprobar las vacaciones de ${item.solicitante.nombre}?`)) {
+            } else if (!window.confirm(`¿Aprobar las vacaciones de ${item.solicitante.nombre}? ${item.dias_disfrutados} día(s) disfrutados y ${item.dias_compensados} en dinero.`)) {
                 return;
             }
             try {

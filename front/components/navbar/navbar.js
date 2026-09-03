@@ -1,6 +1,6 @@
 function getRoleRoutes() {
     return {
-        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin", "gestion-personas", "gestion-consultores"],
+        admin: ["inicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "firma-contratos-admin", "gestion-personas", "gestion-consultores", "contabilidad"],
         coordinador: [
             "inicio",
             "asignacion-consultor",
@@ -43,7 +43,8 @@ function getRoleRoutes() {
             "gestion-consultores"
         ],
         reclutador: ["inicio", "solicitudesRecl"],
-        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "gestion-personas", "gestion-consultores"]
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "gestion-personas", "gestion-consultores", "contabilidad"],
+        contabilidad: ["inicio", "contabilidad", "vacaciones"]
     };
 }
 
@@ -73,7 +74,8 @@ function getAllSearchViews() {
         { label: "Pool de Solicitudes", hash: "#solicitudesRecl" },
         { label: "Contrataciones TH", hash: "#onboardingTH" },
         { label: "Anexo tecnico individual", hash: "#anexoTecnicoIndividual" },
-        { label: "Firma de Contratos", hash: "#firma-contratos-admin" }
+        { label: "Firma de Contratos", hash: "#firma-contratos-admin" },
+        { label: "Proyección de pagos", hash: "#contabilidad" }
     ];
 }
 
@@ -119,10 +121,6 @@ function initNavbar() {
 
             const data = await response.json();
             if (!data?.hasPhoto || !data?.data) {
-                if (!window.__avatarNoPhotoLogged) {
-                    console.info(data?.message || "No tiene foto de perfil");
-                    window.__avatarNoPhotoLogged = true;
-                }
                 return false;
             }
 

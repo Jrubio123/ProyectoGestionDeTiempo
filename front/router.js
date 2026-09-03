@@ -24,6 +24,7 @@ const viewScripts = {
     "gestion-personas":               "/js/gestion-personas.js",
     "gestion-consultores":            "/js/gestion-consultores.js",
     "firma-contratos-admin":          "/js/firma-contratos-admin.js",
+    contabilidad:                      "/js/contabilidad.js",
     solicitudesCoord:                 "/js/solicitudes-coord.js",
     preregistrosCoord:                "/js/preregistros-coord.js",
     solicitudesRecl:                  "/js/solicitudes-recl.js",
@@ -35,7 +36,7 @@ const viewScripts = {
 // Guardar la promesa (no solo el resultado) evita inyectar el mismo
 // archivo dos veces si llegan dos navegaciones rápidas antes del onload.
 const _scriptPromises = new Map();
-const APP_ASSET_VERSION = "20260901-tarifas-modulo-vacaciones-20260812-anexo-estado-firma";
+const APP_ASSET_VERSION = "20260902-contabilidad-preview";
 
 function loadScript(src) {
     if (_scriptPromises.has(src)) return _scriptPromises.get(src);
@@ -115,6 +116,7 @@ const routes = {
     "gestion-personas": "gestion-personas",
     "gestion-consultores": "gestion-consultores",
     "firma-contratos-admin": "firma-contratos-admin",
+    contabilidad: "contabilidad",
     solicitudesCoord: "solicitudesCoord",
     preregistrosCoord: "preregistrosCoord",
     solicitudesRecl: "solicitudesRecl",
@@ -132,7 +134,7 @@ function router() {
 
     const roleKey = window.auth?.getRoleKey?.() || "other";
     const roleRoutes = {
-        admin: ["inicio", "entregas-servicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "azure-devops-prueba", "capacidad-fabrica", "firma-contratos-admin", "gestion-personas", "gestion-consultores"],
+        admin: ["inicio", "entregas-servicio", "cliente", "permisos-coordinador", "asignacion-coordinador", "asignacion-consultor", "aprobar-rechazar-coordinador", "asociar-subconsultores", "tarifas", "solicitudesCoord", "preregistrosCoord", "solicitudesRecl", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "catalogos-admin", "gestion-licencias-admin", "azure-devops-prueba", "capacidad-fabrica", "firma-contratos-admin", "gestion-personas", "gestion-consultores", "contabilidad"],
         coordinador: [
             "inicio",
             "entregas-servicio",
@@ -179,7 +181,7 @@ function router() {
             "soportes-cuentas-cobro",
             "gestion-consultores"
         ],
-        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "gestion-personas", "gestion-consultores", "capacidad-fabrica"]
+        talento_humano: ["inicio", "onboardingTH", "anexoTecnicoIndividual", "soportes-cuentas-cobro", "firma-contratos-admin", "gestion-personas", "gestion-consultores", "capacidad-fabrica", "contabilidad"]
     };
     Object.entries(roleRoutes).forEach(([role, roleViews]) => {
         if (!["consultor_principal", "consultor_asociado"].includes(role) && !roleViews.includes("vacaciones")) {
@@ -187,7 +189,7 @@ function router() {
         }
     });
     roleRoutes.administrativo = ["inicio", "vacaciones"];
-    roleRoutes.contabilidad = ["inicio", "vacaciones"];
+    roleRoutes.contabilidad = ["inicio", "contabilidad", "vacaciones"];
     const allowed = new Set(roleRoutes[roleKey] || ["inicio"]);
     if (view && !allowed.has(view)) {
         loadView("inicio");

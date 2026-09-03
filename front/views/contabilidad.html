@@ -1,0 +1,389 @@
+<div x-data="contabilidadApp()" x-init="init()" class="space-y-6 p-4 md:p-6" x-cloak>
+    <header class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">Contabilidad y Tesorería</p>
+            <h1 class="mt-1 text-2xl font-bold text-slate-900">Proyección de pagos</h1>
+            <p class="mt-1 max-w-3xl text-sm text-slate-500">
+                Genera los lotes quincenales, revisa cada tercero y valida el motor de retenciones antes de aprobar el pago.
+            </p>
+        </div>
+        <div class="flex w-full gap-2 rounded-xl bg-slate-100 p-1 sm:w-auto">
+            <button type="button" @click="tab = 'proyecciones'; limpiarAlertas()"
+                class="flex-1 rounded-lg px-4 py-2 text-sm font-semibold sm:flex-none"
+                :class="tab === 'proyecciones' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'">
+                Lotes de pago
+            </button>
+            <button type="button" @click="tab = 'simulador'; limpiarAlertas()"
+                class="flex-1 rounded-lg px-4 py-2 text-sm font-semibold sm:flex-none"
+                :class="tab === 'simulador' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'">
+                Simular retenciones
+            </button>
+        </div>
+    </header>
+
+    <div x-show="error" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <span x-text="error"></span>
+        <button type="button" @click="error = ''" class="float-right font-bold" aria-label="Cerrar">&times;</button>
+    </div>
+    <div x-show="mensaje" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+        <span x-text="mensaje"></span>
+        <button type="button" @click="mensaje = ''" class="float-right font-bold" aria-label="Cerrar">&times;</button>
+    </div>
+
+    <div x-show="tab === 'proyecciones'" class="space-y-6">
+        <section class="grid gap-3 md:grid-cols-3">
+            <div class="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                <p class="text-xs font-bold uppercase tracking-wide text-blue-700">1. Buscar</p>
+                <p class="mt-1 text-sm text-blue-900">El sistema revisa qué pagos están listos para el periodo.</p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white p-4">
+                <p class="text-xs font-bold uppercase tracking-wide text-slate-500">2. Confirmar</p>
+                <p class="mt-1 text-sm text-slate-700">Ves las cuentas, facturas y nómina antes de crear algo.</p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white p-4">
+                <p class="text-xs font-bold uppercase tracking-wide text-slate-500">3. Revisar y aprobar</p>
+                <p class="mt-1 text-sm text-slate-700">Validas impuestos y avanzas el lote hasta Pagado.</p>
+            </div>
+        </section>
+
+        <div class="grid gap-5 xl:grid-cols-2">
+            <form @submit.prevent="previsualizarProyeccion()" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <h2 class="text-lg font-semibold text-slate-900">¿Qué quieres pagar?</h2>
+                        <p class="mt-1 text-sm text-slate-500">Selecciona el mes y la quincena que deseas preparar.</p>
+                    </div>
+                    <span class="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800">No guarda todavía</span>
+                </div>
+
+                <div class="mt-5 grid gap-4 sm:grid-cols-2">
+                    <label class="block">
+                        <span class="mb-1 block text-sm font-medium text-slate-700">Año</span>
+                        <input x-model.number="generacion.anio" @change="limpiarVistaPrevia()" type="number" min="2020" max="2100" required
+                            class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                    </label>
+                    <label class="block">
+                        <span class="mb-1 block text-sm font-medium text-slate-700">Mes</span>
+                        <select x-model.number="generacion.mes" @change="limpiarVistaPrevia()" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                            <option value="1">Enero</option>
+                            <option value="2">Febrero</option>
+                            <option value="3">Marzo</option>
+                            <option value="4">Abril</option>
+                            <option value="5">Mayo</option>
+                            <option value="6">Junio</option>
+                            <option value="7">Julio</option>
+                            <option value="8">Agosto</option>
+                            <option value="9">Septiembre</option>
+                            <option value="10">Octubre</option>
+                            <option value="11">Noviembre</option>
+                            <option value="12">Diciembre</option>
+                        </select>
+                    </label>
+                    <label class="block">
+                        <span class="mb-1 block text-sm font-medium text-slate-700">Quincena</span>
+                        <select x-model.number="generacion.quincena" @change="limpiarVistaPrevia()" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                            <option value="1">Pago de mitad de mes</option>
+                            <option value="2">Pago de fin de mes</option>
+                        </select>
+                    </label>
+                    <label class="block">
+                        <span class="mb-1 block text-sm font-medium text-slate-700">TRM del día <span class="font-normal text-slate-400">(opcional)</span></span>
+                        <input x-model="generacion.trm_oficial" @change="limpiarVistaPrevia()" type="number" min="0.01" step="0.01" placeholder="Solo si hay pagos en USD"
+                            class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                    </label>
+                </div>
+
+                <button type="submit" :disabled="previsualizando"
+                    class="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">
+                    <span x-text="previsualizando ? 'Buscando pagos…' : 'Buscar pagos disponibles'"></span>
+                </button>
+            </form>
+
+            <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-lg font-semibold text-slate-900">¿Qué busca el sistema?</h2>
+                <div class="mt-4 space-y-3 text-sm">
+                    <div class="flex gap-3 rounded-xl bg-slate-50 p-3">
+                        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700">1</span>
+                        <p><strong class="block text-slate-800">Cuentas de cobro aprobadas</strong><span class="text-slate-500">Las ubica en mitad o fin de mes según la fecha del último soporte.</span></p>
+                    </div>
+                    <div class="flex gap-3 rounded-xl bg-slate-50 p-3">
+                        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700">2</span>
+                        <p><strong class="block text-slate-800">Facturas de proveedores pendientes</strong><span class="text-slate-500">Incluye las emitidas antes de la fecha programada de pago.</span></p>
+                    </div>
+                    <div class="flex gap-3 rounded-xl bg-slate-50 p-3">
+                        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700">3</span>
+                        <p><strong class="block text-slate-800">Nómina cargada para el periodo</strong><span class="text-slate-500">Toma exactamente el valor neto registrado por Talento Humano.</span></p>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <section x-show="vistaPrevia" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                    <p class="text-xs font-bold uppercase tracking-wide text-blue-600">Resultado de la búsqueda</p>
+                    <h2 class="mt-1 text-xl font-bold text-slate-900">
+                        <span x-text="nombreMes(vistaPrevia?.periodo?.mes)"></span>
+                        <span x-text="vistaPrevia?.periodo?.anio"></span> ·
+                        <span x-text="vistaPrevia?.periodo?.quincena === 1 ? 'Mitad de mes' : 'Fin de mes'"></span>
+                    </h2>
+                    <p class="mt-1 text-sm text-slate-500">Fecha programada de pago: <strong x-text="formatearFecha(vistaPrevia?.periodo?.fecha_pago_programada)"></strong></p>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-center">
+                    <div class="rounded-lg bg-blue-50 px-3 py-2"><strong class="block text-blue-800" x-text="vistaPrevia?.resumen?.cuentas_cobro || 0"></strong><span class="text-xs text-blue-600">Cuentas</span></div>
+                    <div class="rounded-lg bg-violet-50 px-3 py-2"><strong class="block text-violet-800" x-text="vistaPrevia?.resumen?.facturas_proveedores || 0"></strong><span class="text-xs text-violet-600">Facturas</span></div>
+                    <div class="rounded-lg bg-emerald-50 px-3 py-2"><strong class="block text-emerald-800" x-text="vistaPrevia?.resumen?.nomina || 0"></strong><span class="text-xs text-emerald-600">Nómina</span></div>
+                </div>
+            </div>
+
+            <div x-show="vistaPrevia?.proyeccion_existente" class="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <strong>Este periodo ya tiene un lote <span x-text="vistaPrevia?.proyeccion_existente?.estado"></span>.</strong>
+                <button type="button" @click="abrirProyeccionExistente()" class="ml-2 font-semibold text-blue-700 underline">Abrirlo</button>
+            </div>
+
+            <div x-show="vistaPrevia && !vistaPrevia.resumen?.total_pagos && !vistaPrevia.proyeccion_existente"
+                class="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-5">
+                <p class="font-semibold text-slate-800">No hay pagos listos para este periodo.</p>
+                <p class="mt-1 text-sm text-slate-600">No se creó ningún lote. El sistema encontró:</p>
+                <ul class="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
+                    <li><span x-text="vistaPrevia?.resumen?.cuentas_aprobadas_pendientes || 0"></span> cuentas aprobadas pendientes de proyectar.</li>
+                    <li><span x-text="vistaPrevia?.resumen?.cuentas_otra_quincena || 0"></span> cuentas que pertenecen a la otra quincena.</li>
+                    <li><span x-text="vistaPrevia?.resumen?.cuentas_en_limbo || 0"></span> cuentas sin fecha válida de soportes o entregadas fuera de corte.</li>
+                    <li><span x-text="vistaPrevia?.resumen?.facturas_proveedores || 0"></span> facturas pendientes y <span x-text="vistaPrevia?.resumen?.nomina || 0"></span> pagos de nómina cargados.</li>
+                </ul>
+            </div>
+
+            <div x-show="vistaPrevia?.resumen?.trm_faltante" class="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                Hay pagos en moneda extranjera. Ingresa la TRM arriba y vuelve a buscar antes de crear el lote.
+            </div>
+
+            <div x-show="vistaPrevia?.pagos?.length" class="mt-5 overflow-x-auto rounded-xl border border-slate-200">
+                <table class="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead class="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                        <tr><th class="px-4 py-3">Tercero</th><th class="px-4 py-3">Fuente</th><th class="px-4 py-3">Referencia</th><th class="px-4 py-3 text-right">Valor recibido</th></tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        <template x-for="pago in (vistaPrevia?.pagos || [])" :key="`${pago.origen_tipo}-${pago.id}`">
+                            <tr>
+                                <td class="px-4 py-3"><strong class="text-slate-800" x-text="pago.tercero"></strong><p class="text-xs text-slate-500" x-text="pago.numero_documento || 'Sin documento'"></p></td>
+                                <td class="px-4 py-3" x-text="tipoOrigen(pago.origen_tipo)"></td>
+                                <td class="px-4 py-3 text-slate-600" x-text="pago.referencia || 'Sin referencia'"></td>
+                                <td class="whitespace-nowrap px-4 py-3 text-right font-semibold" x-text="formatearValorOrigen(pago.valor_origen, pago.moneda_origen)"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <button x-show="vistaPrevia?.resumen?.puede_generar" type="button" @click="generarProyeccion()" :disabled="generando"
+                class="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60">
+                <span x-text="generando ? 'Creando borrador…' : `Crear borrador con ${vistaPrevia?.resumen?.total_pagos || 0} pagos`"></span>
+            </button>
+        </section>
+
+        <details class="rounded-xl border border-slate-200 bg-white p-4 text-sm">
+            <summary class="cursor-pointer font-semibold text-slate-700">Abrir un lote usando su ID</summary>
+            <form @submit.prevent="consultarProyeccion()" class="mt-4 flex flex-col gap-2 sm:flex-row">
+                <input x-model.trim="loteId" type="text" required placeholder="UUID de la proyección"
+                    class="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm">
+                <button type="submit" :disabled="consultando" class="rounded-lg bg-slate-800 px-4 py-2 font-semibold text-white disabled:opacity-60">
+                    <span x-text="consultando ? 'Consultando…' : 'Abrir lote'"></span>
+                </button>
+            </form>
+        </details>
+
+        <section x-show="proyeccion" class="space-y-5">
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <h2 class="text-xl font-bold text-slate-900">
+                                <span x-text="nombreMes(proyeccion?.mes)"></span>
+                                <span x-text="proyeccion?.anio"></span> · Q<span x-text="proyeccion?.quincena"></span>
+                            </h2>
+                            <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="estadoClase(proyeccion?.estado)" x-text="proyeccion?.estado"></span>
+                        </div>
+                        <p class="mt-2 text-sm text-slate-500">
+                            Pago programado: <strong class="text-slate-700" x-text="formatearFecha(proyeccion?.fecha_pago_programada)"></strong>
+                            <span x-show="proyeccion?.trm_oficial"> · TRM: <strong x-text="formatearMoneda(proyeccion?.trm_oficial)"></strong></span>
+                        </p>
+                        <p class="mt-1 break-all font-mono text-xs text-slate-400" x-text="proyeccion?.id"></p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <template x-for="accion in accionesDisponibles" :key="accion.estado">
+                            <button type="button" @click="transicionar(accion)" :disabled="transicionando"
+                                class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+                                x-text="accion.label"></button>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Pagos</p>
+                        <p class="mt-1 text-xl font-bold text-slate-900" x-text="resumen?.total_detalles || 0"></p>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Total bruto</p>
+                        <p class="mt-1 text-xl font-bold text-slate-900" x-text="formatearMoneda(resumen?.total_bruto)"></p>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Retenciones</p>
+                        <p class="mt-1 text-xl font-bold text-rose-700" x-text="formatearMoneda(resumen?.total_retenciones)"></p>
+                    </div>
+                    <div class="rounded-xl bg-emerald-50 p-4">
+                        <p class="text-xs font-medium uppercase tracking-wide text-emerald-700">Total neto</p>
+                        <p class="mt-1 text-xl font-bold text-emerald-800" x-text="formatearMoneda(resumen?.total_neto)"></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div class="border-b border-slate-200 px-5 py-4">
+                    <h3 class="font-semibold text-slate-900">Detalle de pagos</h3>
+                    <p class="mt-1 text-sm text-slate-500">Valores calculados por tercero y fuente del pago.</p>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-slate-200 text-sm">
+                        <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                            <tr>
+                                <th class="px-4 py-3 font-semibold">Tercero</th>
+                                <th class="px-4 py-3 font-semibold">Origen</th>
+                                <th class="px-4 py-3 text-right font-semibold">Bruto</th>
+                                <th class="px-4 py-3 font-semibold">Retenciones</th>
+                                <th class="px-4 py-3 text-right font-semibold">Neto</th>
+                                <th class="px-4 py-3 font-semibold">Banco</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            <template x-for="detalle in detalles" :key="detalle.id">
+                                <tr class="align-top hover:bg-slate-50">
+                                    <td class="px-4 py-3">
+                                        <p class="font-semibold text-slate-900" x-text="detalle.tercero || 'Sin nombre'"></p>
+                                        <p class="mt-1 text-xs text-slate-500" x-text="detalle.numero_documento || 'Sin documento'"></p>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <p class="text-slate-700" x-text="tipoOrigen(detalle.origen_tipo)"></p>
+                                        <p class="mt-1 text-xs text-slate-500" x-text="detalle.referencia || detalle.tipo_pago"></p>
+                                    </td>
+                                    <td class="whitespace-nowrap px-4 py-3 text-right font-medium" x-text="formatearMoneda(detalle.bruto)"></td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex min-w-44 flex-wrap gap-1">
+                                            <template x-for="retencion in detalle.retenciones_aplicadas" :key="retencion.tipo">
+                                                <span class="rounded-full bg-rose-50 px-2 py-1 text-xs text-rose-700"
+                                                    x-text="`${retencion.tipo} ${retencion.porcentaje}%: ${formatearMoneda(retencion.valor)}`"></span>
+                                            </template>
+                                            <span x-show="!detalle.retenciones_aplicadas?.length" class="text-xs text-slate-400">Sin retenciones</span>
+                                        </div>
+                                    </td>
+                                    <td class="whitespace-nowrap px-4 py-3 text-right font-bold text-emerald-700" x-text="formatearMoneda(detalle.valor_neto)"></td>
+                                    <td class="px-4 py-3 text-slate-600">
+                                        <p x-text="detalle.banco || 'Sin banco'"></p>
+                                        <p class="mt-1 text-xs" x-text="detalle.numero_cuenta || 'Sin cuenta'"></p>
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr x-show="!detalles.length">
+                                <td colspan="6" class="px-4 py-10 text-center text-slate-500">El lote no tiene detalles.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div x-show="tab === 'simulador'" class="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+        <form @submit.prevent="simularRetenciones()" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="text-lg font-semibold text-slate-900">Probar reglas tributarias</h2>
+            <p class="mt-1 text-sm text-slate-500">Esta simulación no crea ni modifica pagos.</p>
+
+            <div class="mt-5 grid gap-4 sm:grid-cols-3">
+                <label class="block">
+                    <span class="mb-1 block text-sm font-medium text-slate-700">Tipo de pago</span>
+                    <select x-model="simulador.tipo_pago" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                        <option value="consultor">Consultor (3,5%)</option>
+                        <option value="honorarios">Honorarios (10% / 11%)</option>
+                    </select>
+                </label>
+                <label class="block">
+                    <span class="mb-1 block text-sm font-medium text-slate-700">Subtotal</span>
+                    <input x-model.number="simulador.subtotal" type="number" min="0" step="0.01" required
+                        class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                </label>
+                <label class="block">
+                    <span class="mb-1 block text-sm font-medium text-slate-700">IVA</span>
+                    <input x-model.number="simulador.iva" type="number" min="0" step="0.01" required
+                        class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+                </label>
+            </div>
+
+            <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <h3 class="text-sm font-semibold text-slate-800">Perfil tributario</h3>
+                <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                    <template x-for="opcion in opcionesTributarias" :key="opcion.campo">
+                        <label class="flex cursor-pointer items-start gap-3 rounded-lg bg-white p-3 text-sm text-slate-700">
+                            <input x-model="simulador.persona[opcion.campo]" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600">
+                            <span>
+                                <strong class="block font-medium" x-text="opcion.nombre"></strong>
+                                <span class="text-xs text-slate-500" x-text="opcion.efecto"></span>
+                            </span>
+                        </label>
+                    </template>
+                </div>
+                <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label class="flex items-center gap-3 rounded-lg bg-white p-3 text-sm text-slate-700">
+                        <input x-model="simulador.persona.declarante_renta" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-blue-600">
+                        Declarante de renta
+                    </label>
+                    <label class="block rounded-lg bg-white p-3">
+                        <span class="mb-1 block text-sm text-slate-700">Ciudad de residencia</span>
+                        <input x-model.trim="simulador.persona.ciudad_residencia" type="text" placeholder="Ej. Medellín"
+                            class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                    </label>
+                </div>
+            </div>
+
+            <button type="submit" :disabled="simulando"
+                class="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">
+                <span x-text="simulando ? 'Calculando…' : 'Calcular retenciones'"></span>
+            </button>
+        </form>
+
+        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="text-lg font-semibold text-slate-900">Resultado</h2>
+            <div x-show="!resultadoSimulador" class="mt-8 rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
+                Completa el formulario para ver el cálculo.
+            </div>
+            <div x-show="resultadoSimulador" class="mt-5 space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <p class="text-xs uppercase text-slate-500">Base mínima</p>
+                        <p class="mt-1 font-bold text-slate-900" x-text="formatearMoneda(resultadoSimulador?.base_minima)"></p>
+                    </div>
+                    <div class="rounded-xl bg-emerald-50 p-4">
+                        <p class="text-xs uppercase text-emerald-700">Neto</p>
+                        <p class="mt-1 font-bold text-emerald-800" x-text="formatearMoneda(resultadoSimulador?.valor_neto)"></p>
+                    </div>
+                </div>
+                <div class="space-y-2">
+                    <template x-for="retencion in (resultadoSimulador?.retenciones_aplicadas || [])" :key="retencion.tipo">
+                        <div class="flex items-center justify-between rounded-xl border border-slate-200 p-3 text-sm">
+                            <div>
+                                <p class="font-semibold text-slate-800" x-text="retencion.tipo"></p>
+                                <p class="text-xs text-slate-500"><span x-text="retencion.porcentaje"></span>% sobre <span x-text="formatearMoneda(retencion.base)"></span></p>
+                            </div>
+                            <strong class="text-rose-700" x-text="formatearMoneda(retencion.valor)"></strong>
+                        </div>
+                    </template>
+                    <p x-show="resultadoSimulador && !resultadoSimulador.retenciones_aplicadas?.length"
+                        class="rounded-xl bg-slate-50 p-4 text-center text-sm text-slate-500">No se aplican retenciones.</p>
+                </div>
+                <div class="flex justify-between border-t border-slate-200 pt-4 text-sm">
+                    <span class="text-slate-600">Total retenciones</span>
+                    <strong class="text-slate-900" x-text="formatearMoneda(resultadoSimulador?.total_retenciones)"></strong>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>

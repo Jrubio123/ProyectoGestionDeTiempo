@@ -130,6 +130,18 @@ function calculateActiveHours(effortTotal, percentage) {
   return Math.round(effort * (percent / 100) * 100) / 100;
 }
 
+function calculateWeeklyOccupiedHours(assignments, meetingBagHours = 0) {
+  const assignmentHours = (assignments || []).reduce((sum, item) => {
+    if (item?.incluida_en_bolsa) return sum;
+    const hours = Number(item?.horas_activas || 0);
+    return Number.isFinite(hours) ? sum + hours : sum;
+  }, 0);
+  const reservedMeetingHours = Number(meetingBagHours || 0);
+  const total = assignmentHours
+    + (Number.isFinite(reservedMeetingHours) ? Math.max(0, reservedMeetingHours) : 0);
+  return Math.round(total * 100) / 100;
+}
+
 function normalizeAzureEffort(value) {
   if (value === null || value === undefined || value === "") {
     return { effort: null, pending: true, valid: true };
@@ -143,6 +155,7 @@ function normalizeAzureEffort(value) {
 
 module.exports = {
   calculateActiveHours,
+  calculateWeeklyOccupiedHours,
   dateStringInBogota,
   getWeekRange,
   isCorporateSilverEmail,

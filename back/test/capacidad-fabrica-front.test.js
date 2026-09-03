@@ -84,6 +84,20 @@ test("selecciona varios responsables para una actividad", () => {
   assert.deepEqual(app.actividad.persona_ids, ["persona-2"]);
 });
 
+test("edita la bolsa usando el total actual, no horas adicionales", () => {
+  const app = createApp();
+  app.weekDate = "2026-08-31";
+
+  app.abrirBolsa({
+    persona_id: "persona-1",
+    bolsa_reuniones: { horas_asignadas: 20, horas_consumidas: 3 }
+  });
+
+  assert.equal(app.bolsa.horas_total, 20);
+  assert.deepEqual(app.bolsa.persona_ids, ["persona-1"]);
+  assert.match(app.bolsa.motivo, /Modificación/);
+});
+
 test("limita los estados disponibles para actividades puntuales", () => {
   const app = createApp();
   app.catalogos.estados = [

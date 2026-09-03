@@ -3,6 +3,7 @@ const { listRecentWorkItemsAllProjects } = require("./azure-devops.service");
 const { syncMicrosoftIdentity } = require("./microsoft-identity-sync.service");
 const {
   calculateActiveHours,
+  calculateWeeklyOccupiedHours,
   dateStringInBogota,
   getWeekRange,
   isCorporateSilverEmail,
@@ -1069,8 +1070,12 @@ async function assignMeetingBags(req, res) {
   try {
     const payload = req.body || {};
     const { week } = resolveWorkWeek(payload.fecha);
-    const hours = validatePositiveHours(payload.horas, "horas asignadas");
-    const reason = cleanText(payload.motivo, 500) || "Asignación semanal de reuniones";
+    const targetHours = numberOrNull(payload.horas_total ?? payload.horas);
+    if (targetHours === null || targetHours < 0 || targetHours > 168) {
+      throw new CapacityError("La capacidad total de reuniones debe estar entre 0 y 168 horas.");
+    }
+    const roundedTargetHours = Math.round(targetHours * 100) / 100;
+    const reason = cleanText(payload.motivo, 500) || "Modificación de capacidad de reuniones";
     const result = await withTransaction(async (client) => {
       const people = await resolveFactoryPeople(client, payload.persona_ids);
       const rows = [];
@@ -1079,8 +1084,20 @@ async function assignMeetingBags(req, res) {
           `bolsa-reuniones:${person.id}:${week.startDate}`
         ]);
         let bag = await getBagWithBalance(client, person.id, week.startDate, true);
+        const consumedHours = Number(bag?.horas_consumidas || 0);
+        const currentAssignedHours = Number(bag?.horas_asignadas || 0);
+        if (roundedTargetHours < consumedHours) {
+          throw new CapacityError(
+            `No puedes asignar ${roundedTargetHours} h a ${person.nombre}: ya consumió ${consumedHours} h.`,
+            409
+          );
+        }
+        const adjustment = Math.round((roundedTargetHours - currentAssignedHours) * 100) / 100;
         let movementType = "AJUSTE";
         if (!bag) {
+          if (roundedTargetHours === 0) {
+            throw new CapacityError("La capacidad inicial de reuniones debe ser mayor que cero.");
+          }
           const inserted = await client.query(
             `INSERT INTO bolsas_reuniones_capacidad
                (persona_id, coordinador_id, semana_inicio, semana_fin)
@@ -1091,13 +1108,20 @@ async function assignMeetingBags(req, res) {
           bag = inserted.rows[0];
           movementType = "ASIGNACION";
         }
-        await client.query(
-          `INSERT INTO bolsa_reuniones_movimientos
-             (bolsa_id, tipo, horas_delta, motivo, registrado_por)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [bag.id, movementType, hours, reason, req.user?.id]
-        );
-        rows.push({ persona_id: person.public_id, bolsa_id: bag.public_id, horas: hours });
+        if (adjustment !== 0) {
+          await client.query(
+            `INSERT INTO bolsa_reuniones_movimientos
+               (bolsa_id, tipo, horas_delta, motivo, registrado_por)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [bag.id, movementType, adjustment, reason, req.user?.id]
+          );
+        }
+        rows.push({
+          persona_id: person.public_id,
+          bolsa_id: bag.public_id,
+          horas_total: roundedTargetHours,
+          horas_ajuste: adjustment
+        });
       }
       return rows;
     });
@@ -1588,6 +1612,7 @@ async function getDashboard(req, res) {
         estado_codigo: "ACTIVA",
         categoria: activity.categoria_codigo,
         tipo_registro: "ACTIVIDAD_CAPACIDAD",
+        incluida_en_bolsa: activity.categoria_codigo === "REUNIONES",
         effort_total: Number(activity.horas),
         effort_pendiente: false,
         porcentaje_fase: 100,
@@ -1603,9 +1628,10 @@ async function getDashboard(req, res) {
     const people = membersResult.rows.map((person) => {
       const assignments = assignmentsByPerson.get(person.id) || [];
       const bag = bagsByPerson.get(person.id) || null;
-      const used = Math.round(
-        assignments.reduce((sum, item) => sum + item.horas_activas, 0) * 100
-      ) / 100;
+      const used = calculateWeeklyOccupiedHours(
+        assignments,
+        bag?.horas_asignadas
+      );
       const pendingEffort = assignments.filter((item) => item.effort_pendiente).length;
       return {
         persona_id: person.persona_id,

@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   calculateActiveHours,
+  calculateWeeklyOccupiedHours,
   getWeekRange,
   isCorporateSilverEmail,
   normalizeAzureEffort,
@@ -68,6 +69,17 @@ test("calcula las horas activas de la fase actual", () => {
   assert.equal(calculateActiveHours(100, 55), 55);
   assert.equal(calculateActiveHours(42, 5), 2.1);
   assert.equal(calculateActiveHours(null, 55), 0);
+});
+
+test("reserva la bolsa completa sin duplicar las reuniones consumidas", () => {
+  const assignments = [
+    { horas_activas: 3, incluida_en_bolsa: true },
+    { horas_activas: 5, incluida_en_bolsa: false }
+  ];
+
+  assert.equal(calculateWeeklyOccupiedHours(assignments.slice(0, 1), 50), 50);
+  assert.equal(calculateWeeklyOccupiedHours(assignments, 20), 25);
+  assert.equal(calculateWeeklyOccupiedHours(assignments, 10), 15);
 });
 
 test("acepta elementos Azure con Effort pendiente", () => {

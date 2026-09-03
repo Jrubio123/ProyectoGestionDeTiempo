@@ -142,14 +142,8 @@ window.capacidadFabricaApp = function () {
             }
         },
 
-        async cargarDashboard(force = false) {
+        async cargarDashboard() {
             if (!this.puedeGestionar) return;
-            const cacheName = `dashboard:${this.weekDate}`;
-            const cached = force ? null : this.readCache(cacheName);
-            if (cached) {
-                this.dashboard = cached;
-                return;
-            }
             this.cargando = true;
             this.error = "";
             try {
@@ -157,7 +151,6 @@ window.capacidadFabricaApp = function () {
                     params: { fecha: this.weekDate }
                 }));
                 this.dashboard = response.data;
-                this.writeCache(cacheName, response.data);
             } catch (error) {
                 this.error = this.errorText(error, "No se calculó la capacidad semanal.");
             } finally {
@@ -271,9 +264,9 @@ window.capacidadFabricaApp = function () {
             this.bolsa = {
                 persona_ids: person ? [person.persona_id] : [],
                 fecha: this.weekDate,
-                horas: "",
+                horas_total: person?.bolsa_reuniones?.horas_asignadas ?? "",
                 motivo: person?.bolsa_reuniones
-                    ? "Ampliación de capacidad de reuniones"
+                    ? "Modificación de capacidad de reuniones"
                     : "Asignación semanal de reuniones"
             };
             this.modalBolsa = true;

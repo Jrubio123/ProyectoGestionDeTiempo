@@ -79,17 +79,39 @@ test("inicializa una actividad para varios responsables", () => {
   assert.equal(app.actividad.fecha, "2026-08-31");
   assert.equal(app.actividad.cliente_id, "");
   assert.deepEqual(app.actividad.persona_ids, []);
+  assert.deepEqual(app.actividad.bolsa_ids, {});
 });
 
 test("selecciona varios responsables para una actividad", () => {
   const app = createApp();
-  app.actividad = { persona_ids: [] };
+  app.actividad = { persona_ids: [], bolsa_ids: {} };
 
   app.toggleActividadPersona("persona-1", true);
   app.toggleActividadPersona("persona-2", true);
   app.toggleActividadPersona("persona-1", false);
 
   assert.deepEqual(app.actividad.persona_ids, ["persona-2"]);
+  assert.deepEqual(app.actividad.bolsa_ids, { "persona-2": "" });
+});
+
+test("exige una bolsa con saldo para cada reunión programada", () => {
+  const app = createApp();
+  app.actividad = {
+    categoria_codigo: "REUNIONES",
+    persona_ids: ["persona-1"],
+    bolsa_ids: { "persona-1": "bolsa-1" },
+    horas: 3
+  };
+  app.dashboard.personas = [{
+    persona_id: "persona-1",
+    bolsas_reuniones: [{ id: "bolsa-1", estado: "ABIERTA", horas_disponibles: 5 }]
+  }];
+
+  assert.equal(app.actividadBolsasValidas(), true);
+  app.actividad.horas = 6;
+  assert.equal(app.actividadBolsasValidas(), false);
+  app.actividad.bolsa_ids["persona-1"] = "";
+  assert.equal(app.actividadBolsasValidas(), false);
 });
 
 test("edita la bolsa usando el total actual, no horas adicionales", () => {

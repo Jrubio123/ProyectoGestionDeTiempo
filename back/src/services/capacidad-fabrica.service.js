@@ -687,9 +687,7 @@ async function createCapacityActivity(db, {
           || (people.length === 1 ? cleanText(payload.bolsa_id, 80) : null);
       const bag = selectedPublicId
         ? bags.find((item) => item.public_id === selectedPublicId)
-        : fixedPerson
-          ? null
-          : bags.find((item) => item.estado === "ABIERTA" && Number(item.saldo) >= hours);
+        : null;
       if (!bags.length) errors.push(`${person.nombre}: sin bolsa semanal`);
       else if (!bag) errors.push(`${person.nombre}: selecciona una bolsa con saldo suficiente`);
       else if (bag.estado !== "ABIERTA") errors.push(`${person.nombre}: bolsa cerrada`);

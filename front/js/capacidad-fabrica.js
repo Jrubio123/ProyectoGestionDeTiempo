@@ -224,6 +224,7 @@ window.capacidadFabricaApp = function () {
             this.actividad = {
                 cliente_id: "",
                 persona_ids: [],
+                bolsa_ids: {},
                 titulo: "",
                 categoria_codigo: defaultCategory?.codigo || "",
                 horas: "",
@@ -234,8 +235,14 @@ window.capacidadFabricaApp = function () {
 
         toggleActividadPersona(personId, checked) {
             const selected = new Set(this.actividad.persona_ids || []);
-            if (checked) selected.add(personId);
-            else selected.delete(personId);
+            if (checked) {
+                selected.add(personId);
+                if (!this.actividad.bolsa_ids) this.actividad.bolsa_ids = {};
+                if (!(personId in this.actividad.bolsa_ids)) this.actividad.bolsa_ids[personId] = "";
+            } else {
+                selected.delete(personId);
+                if (this.actividad.bolsa_ids) delete this.actividad.bolsa_ids[personId];
+            }
             this.actividad.persona_ids = [...selected];
         },
 
@@ -594,6 +601,26 @@ window.capacidadFabricaApp = function () {
 
         integrantesFabrica() {
             return this.personas.filter((person) => person.pertenece_fabrica);
+        },
+
+        nombreIntegrante(personId) {
+            const person = this.integrantesFabrica().find((item) => item.id === personId);
+            return person ? `${person.nombre || ""} ${person.apellidos || ""}`.trim() : "Integrante";
+        },
+
+        bolsasActividadPersona(personId) {
+            return this.dashboard.personas?.find((person) => person.persona_id === personId)?.bolsas_reuniones || [];
+        },
+
+        actividadBolsasValidas() {
+            if (this.actividad.categoria_codigo !== "REUNIONES") return true;
+            const hours = Number(this.actividad.horas || 0);
+            if (!(hours > 0)) return false;
+            return (this.actividad.persona_ids || []).every((personId) => {
+                const selectedId = this.actividad.bolsa_ids?.[personId];
+                const bag = this.bolsasActividadPersona(personId).find((item) => item.id === selectedId);
+                return bag && bag.estado === "ABIERTA" && Number(bag.horas_disponibles) >= hours;
+            });
         },
 
         estadosRequerimientoManual() {

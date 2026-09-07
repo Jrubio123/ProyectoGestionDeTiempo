@@ -2,22 +2,32 @@ const TIPOS_PAGO = Object.freeze({
   CONSULTOR: "consultor",
   COMPRA: "compra",
   SERVICIO: "servicio",
-  ARRIENDO: "arriendo",
+  ARRENDAMIENTO_INMUEBLE: "arrendamiento_inmueble",
+  ARRENDAMIENTO_MUEBLE: "arrendamiento_mueble",
   HONORARIOS: "honorarios",
   NOMINA: "nomina"
 });
 
-const BASES_MINIMAS = Object.freeze({
-  [TIPOS_PAGO.CONSULTOR]: 1_750_905,
-  [TIPOS_PAGO.COMPRA]: 524_000,
-  [TIPOS_PAGO.SERVICIO]: 105_000,
-  // El documento no define una tarifa independiente para arriendos; se tratan
-  // como servicios hasta que Contabilidad configure una regla específica.
-  [TIPOS_PAGO.ARRIENDO]: 105_000,
-  [TIPOS_PAGO.HONORARIOS]: 1
+const BASE_RETEICA_MEDELLIN = 785_610;
+const REGLAS_PREDETERMINADAS = Object.freeze({
+  [`${TIPOS_PAGO.CONSULTOR}:cuenta_cobro`]: Object.freeze({ base_minima: 1_750_905, fuente_declarante: 3.5, fuente_no_declarante: 3.5 }),
+  [`${TIPOS_PAGO.CONSULTOR}:factura_electronica`]: Object.freeze({ base_minima: 1, fuente_declarante: 3.5, fuente_no_declarante: 3.5 }),
+  [TIPOS_PAGO.CONSULTOR]: Object.freeze({ base_minima: 1_750_905, fuente_declarante: 3.5, fuente_no_declarante: 3.5 }),
+  [TIPOS_PAGO.COMPRA]: Object.freeze({ base_minima: 524_000, fuente_declarante: 2.5, fuente_no_declarante: 3.5 }),
+  [TIPOS_PAGO.SERVICIO]: Object.freeze({ base_minima: 105_000, fuente_declarante: 4, fuente_no_declarante: 6 }),
+  [TIPOS_PAGO.ARRENDAMIENTO_INMUEBLE]: Object.freeze({ base_minima: 1, fuente_declarante: 3.5, fuente_no_declarante: 3.5 }),
+  [TIPOS_PAGO.ARRENDAMIENTO_MUEBLE]: Object.freeze({ base_minima: 524_000, fuente_declarante: 4, fuente_no_declarante: 4 }),
+  [TIPOS_PAGO.HONORARIOS]: Object.freeze({ base_minima: 1, fuente_declarante: 11, fuente_no_declarante: 10 })
 });
 
-const BASE_RETEICA_MEDELLIN = 785_610;
+const BASES_MINIMAS = Object.freeze({
+  [TIPOS_PAGO.CONSULTOR]: REGLAS_PREDETERMINADAS[TIPOS_PAGO.CONSULTOR].base_minima,
+  [TIPOS_PAGO.COMPRA]: REGLAS_PREDETERMINADAS[TIPOS_PAGO.COMPRA].base_minima,
+  [TIPOS_PAGO.SERVICIO]: REGLAS_PREDETERMINADAS[TIPOS_PAGO.SERVICIO].base_minima,
+  [TIPOS_PAGO.ARRENDAMIENTO_INMUEBLE]: REGLAS_PREDETERMINADAS[TIPOS_PAGO.ARRENDAMIENTO_INMUEBLE].base_minima,
+  [TIPOS_PAGO.ARRENDAMIENTO_MUEBLE]: REGLAS_PREDETERMINADAS[TIPOS_PAGO.ARRENDAMIENTO_MUEBLE].base_minima,
+  [TIPOS_PAGO.HONORARIOS]: REGLAS_PREDETERMINADAS[TIPOS_PAGO.HONORARIOS].base_minima
+});
 
 class RetencionValidationError extends Error {
   constructor(message) {
@@ -43,7 +53,12 @@ function normalizeTipoPago(value) {
     ["cuenta_cobro", TIPOS_PAGO.CONSULTOR],
     ["compra", TIPOS_PAGO.COMPRA],
     ["servicio", TIPOS_PAGO.SERVICIO],
-    ["arriendo", TIPOS_PAGO.ARRIENDO],
+    ["arriendo", TIPOS_PAGO.ARRENDAMIENTO_INMUEBLE],
+    ["arrendamiento", TIPOS_PAGO.ARRENDAMIENTO_INMUEBLE],
+    ["arrendamiento_inmueble", TIPOS_PAGO.ARRENDAMIENTO_INMUEBLE],
+    ["arrendamiento_inmuebles", TIPOS_PAGO.ARRENDAMIENTO_INMUEBLE],
+    ["arrendamiento_mueble", TIPOS_PAGO.ARRENDAMIENTO_MUEBLE],
+    ["arrendamiento_muebles", TIPOS_PAGO.ARRENDAMIENTO_MUEBLE],
     ["honorario", TIPOS_PAGO.HONORARIOS],
     ["honorarios", TIPOS_PAGO.HONORARIOS],
     ["nomina", TIPOS_PAGO.NOMINA]
@@ -51,10 +66,14 @@ function normalizeTipoPago(value) {
   const tipo = aliases.get(normalized);
   if (!tipo) {
     throw new RetencionValidationError(
-      "tipo_pago debe ser consultor, compra, servicio, arriendo, honorarios o nomina"
+      "tipo_pago debe ser consultor, compra, servicio, arrendamiento_inmueble, arrendamiento_mueble, honorarios o nomina"
     );
   }
   return tipo;
+}
+
+function roundMoney(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }
 
 function toNonNegativeMoney(value, fieldName) {
@@ -63,10 +82,6 @@ function toNonNegativeMoney(value, fieldName) {
     throw new RetencionValidationError(`${fieldName} debe ser un valor numérico mayor o igual a cero`);
   }
   return roundMoney(number);
-}
-
-function roundMoney(value) {
-  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }
 
 function asBoolean(value, defaultValue = false) {
@@ -91,6 +106,7 @@ function resolvePersona(persona = {}) {
     es_autorretenedor: asBoolean(persona.es_autorretenedor, false),
     es_regimen_simple: asBoolean(persona.es_regimen_simple, false),
     es_entidad_sin_animo_lucro: asBoolean(persona.es_entidad_sin_animo_lucro, false),
+    es_economia_naranja: asBoolean(persona.es_economia_naranja, false),
     declarante_renta: asBoolean(
       persona.declarante_renta ?? persona.declarante ?? persona.es_declarante,
       false
@@ -103,19 +119,31 @@ function resolveRegimenFlags(persona = {}) {
     aplicaReteFuente: !(
       persona.es_autorretenedor ||
       persona.es_regimen_simple ||
-      persona.es_entidad_sin_animo_lucro
+      persona.es_entidad_sin_animo_lucro ||
+      persona.es_economia_naranja
     ),
     aplicaReteIva: !persona.es_gran_contribuyente
   };
 }
 
-function resolveTarifaReteFuente(tipoPago, declarante) {
-  if (tipoPago === TIPOS_PAGO.HONORARIOS) return declarante ? 11 : 10;
-  if (tipoPago === TIPOS_PAGO.COMPRA) return declarante ? 2.5 : 3.5;
-  if (tipoPago === TIPOS_PAGO.SERVICIO || tipoPago === TIPOS_PAGO.ARRIENDO) {
-    return declarante ? 4 : 6;
-  }
-  return 3.5;
+function resolveRegla(tipoPago, tipoDocumentoPago, regla = {}) {
+  const documento = normalizeText(tipoDocumentoPago).replace(/[\s-]+/g, "_") || "cualquiera";
+  const predeterminada = REGLAS_PREDETERMINADAS[`${tipoPago}:${documento}`] || REGLAS_PREDETERMINADAS[tipoPago] || {};
+  const numberOr = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+  return {
+    base_minima: numberOr(regla.base_minima, predeterminada.base_minima || 0),
+    fuente_declarante: numberOr(regla.porcentaje_fuente_declarante ?? regla.fuente_declarante, predeterminada.fuente_declarante || 0),
+    fuente_no_declarante: numberOr(regla.porcentaje_fuente_no_declarante ?? regla.fuente_no_declarante, predeterminada.fuente_no_declarante || 0),
+    porcentaje_iva: numberOr(regla.porcentaje_iva, 19),
+    porcentaje_reteiva: numberOr(regla.porcentaje_reteiva, 15),
+    base_reteica: numberOr(regla.base_reteica, BASE_RETEICA_MEDELLIN),
+    porcentaje_reteica: numberOr(regla.porcentaje_reteica, 0.18)
+  };
+}
+
+function resolveTarifaReteFuente(tipoPago, declarante, regla = null, tipoDocumentoPago = null) {
+  const resolved = resolveRegla(tipoPago, tipoDocumentoPago, regla || {});
+  return declarante ? resolved.fuente_declarante : resolved.fuente_no_declarante;
 }
 
 function buildRetencion(tipo, porcentaje, base, editable = true) {
@@ -136,42 +164,45 @@ function calcularRetenciones(input = {}, ivaArg = 0, personaArg = {}, tipoPagoAr
     subtotal,
     iva = 0,
     persona = {},
-    tipo_pago
+    tipo_pago,
+    tipo_documento_pago,
+    tiene_iva,
+    anticipo = 0,
+    ciudad_servicio,
+    regla = {}
   } = payload;
   const tipoPago = normalizeTipoPago(tipo_pago);
   const subtotalNormalizado = toNonNegativeMoney(subtotal, "subtotal");
-  const ivaNormalizado = toNonNegativeMoney(iva, "iva");
+  const anticipoNormalizado = toNonNegativeMoney(anticipo, "anticipo");
   const perfil = resolvePersona(persona);
+  const reglaAplicada = resolveRegla(tipoPago, tipo_documento_pago, regla);
+  const ivaNormalizado = tiene_iva === undefined || tiene_iva === null
+    ? toNonNegativeMoney(iva, "iva")
+    : (asBoolean(tiene_iva, false)
+      ? roundMoney(subtotalNormalizado * (reglaAplicada.porcentaje_iva / 100))
+      : 0);
+  if (anticipoNormalizado > subtotalNormalizado + ivaNormalizado) {
+    throw new RetencionValidationError("anticipo no puede superar el valor del pago");
+  }
 
-  if (tipoPago === TIPOS_PAGO.NOMINA) {
+  if (tipoPago === TIPOS_PAGO.NOMINA || !perfil.factura_en_colombia) {
+    const netoDirecto = roundMoney(subtotalNormalizado - anticipoNormalizado);
     return {
       tipo_pago: tipoPago,
       subtotal: subtotalNormalizado,
+      anticipo: anticipoNormalizado,
       iva: 0,
       base_minima: null,
+      regla_aplicada: reglaAplicada,
       retenciones_aplicadas: [],
       retenciones: [],
       total_retenciones: 0,
-      valor_neto: subtotalNormalizado,
-      neto: subtotalNormalizado
+      valor_neto: netoDirecto,
+      neto: netoDirecto
     };
   }
 
-  if (!perfil.factura_en_colombia) {
-    return {
-      tipo_pago: tipoPago,
-      subtotal: subtotalNormalizado,
-      iva: 0,
-      base_minima: null,
-      retenciones_aplicadas: [],
-      retenciones: [],
-      total_retenciones: 0,
-      valor_neto: subtotalNormalizado,
-      neto: subtotalNormalizado
-    };
-  }
-
-  const baseMinima = BASES_MINIMAS[tipoPago];
+  const baseMinima = reglaAplicada.base_minima;
   const superaBaseNacional = subtotalNormalizado >= baseMinima;
   const regimen = resolveRegimenFlags(perfil);
   const retenciones = [];
@@ -179,32 +210,34 @@ function calcularRetenciones(input = {}, ivaArg = 0, personaArg = {}, tipoPagoAr
   if (superaBaseNacional && regimen.aplicaReteFuente) {
     retenciones.push(buildRetencion(
       "ReteFuente",
-      resolveTarifaReteFuente(tipoPago, perfil.declarante_renta),
+      perfil.declarante_renta ? reglaAplicada.fuente_declarante : reglaAplicada.fuente_no_declarante,
       subtotalNormalizado
     ));
   }
-
   if (superaBaseNacional && regimen.aplicaReteIva && ivaNormalizado > 0) {
-    retenciones.push(buildRetencion("ReteIVA", 15, ivaNormalizado));
+    retenciones.push(buildRetencion("ReteIVA", reglaAplicada.porcentaje_reteiva, ivaNormalizado));
   }
-
   if (
-    normalizeText(perfil.ciudad_residencia).includes("medellin") &&
-    subtotalNormalizado >= BASE_RETEICA_MEDELLIN
+    normalizeText(ciudad_servicio || perfil.ciudad_residencia).includes("medellin") &&
+    subtotalNormalizado >= reglaAplicada.base_reteica
   ) {
-    retenciones.push(buildRetencion("ReteICA", 0.18, subtotalNormalizado));
+    retenciones.push(buildRetencion("ReteICA", reglaAplicada.porcentaje_reteica, subtotalNormalizado));
   }
 
   const totalRetenciones = roundMoney(
     retenciones.reduce((total, retencion) => total + Number(retencion.valor || 0), 0)
   );
-  const valorNeto = roundMoney(subtotalNormalizado + ivaNormalizado - totalRetenciones);
+  const valorNeto = roundMoney(
+    subtotalNormalizado - anticipoNormalizado + ivaNormalizado - totalRetenciones
+  );
 
   return {
     tipo_pago: tipoPago,
     subtotal: subtotalNormalizado,
+    anticipo: anticipoNormalizado,
     iva: ivaNormalizado,
     base_minima: baseMinima,
+    regla_aplicada: reglaAplicada,
     retenciones_aplicadas: retenciones,
     retenciones,
     total_retenciones: totalRetenciones,
@@ -216,12 +249,14 @@ function calcularRetenciones(input = {}, ivaArg = 0, personaArg = {}, tipoPagoAr
 module.exports = {
   BASES_MINIMAS,
   BASE_RETEICA_MEDELLIN,
+  REGLAS_PREDETERMINADAS,
   RetencionValidationError,
   TIPOS_PAGO,
   calcularRetenciones,
   normalizeTipoPago,
   normalizeText,
   resolveRegimenFlags,
+  resolveRegla,
   resolveTarifaReteFuente,
   roundMoney
 };

@@ -1,389 +1,297 @@
-<div x-data="contabilidadApp()" x-init="init()" class="space-y-6 p-4 md:p-6" x-cloak>
-    <header class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">Contabilidad y Tesorería</p>
-            <h1 class="mt-1 text-2xl font-bold text-slate-900">Proyección de pagos</h1>
-            <p class="mt-1 max-w-3xl text-sm text-slate-500">
-                Genera los lotes quincenales, revisa cada tercero y valida el motor de retenciones antes de aprobar el pago.
-            </p>
-        </div>
-        <div class="flex w-full gap-2 rounded-xl bg-slate-100 p-1 sm:w-auto">
-            <button type="button" @click="tab = 'proyecciones'; limpiarAlertas()"
-                class="flex-1 rounded-lg px-4 py-2 text-sm font-semibold sm:flex-none"
-                :class="tab === 'proyecciones' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'">
-                Lotes de pago
-            </button>
-            <button type="button" @click="tab = 'simulador'; limpiarAlertas()"
-                class="flex-1 rounded-lg px-4 py-2 text-sm font-semibold sm:flex-none"
-                :class="tab === 'simulador' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'">
-                Simular retenciones
-            </button>
+<div x-data="contabilidadApp()" x-init="init()" class="mx-auto max-w-[1600px] space-y-5 p-4 md:p-6" x-cloak>
+    <header class="overflow-hidden rounded-2xl bg-slate-950 text-white shadow-sm">
+        <div class="flex flex-col gap-5 px-5 py-6 lg:flex-row lg:items-end lg:justify-between lg:px-7">
+            <div>
+                <p class="text-xs font-bold uppercase tracking-[0.2em] text-cyan-300">Contabilidad y tesorería</p>
+                <h1 class="mt-2 text-2xl font-bold md:text-3xl">Pagos</h1>
+                <p class="mt-2 max-w-2xl text-sm text-slate-300">Programa, revisa y confirma pagos sin buscar códigos internos.</p>
+            </div>
+            <nav class="grid grid-cols-2 gap-1 rounded-xl bg-white/10 p-1 sm:flex" aria-label="Secciones de contabilidad">
+                <template x-for="item in [
+                    ['programaciones','Programaciones'],
+                    ['facturas','Proveedores'],
+                    ['configuracion','Configuración'],
+                    ['historial','Historial']
+                ]" :key="item[0]">
+                    <button type="button" @click="cambiarTab(item[0])"
+                        class="rounded-lg px-3 py-2 text-sm font-semibold transition"
+                        :class="tab === item[0] ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white'"
+                        x-text="item[1]"></button>
+                </template>
+            </nav>
         </div>
     </header>
 
-    <div x-show="error" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <div x-show="error" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+        <button type="button" @click="error = ''" class="float-right ml-3 font-bold" aria-label="Cerrar">×</button>
         <span x-text="error"></span>
-        <button type="button" @click="error = ''" class="float-right font-bold" aria-label="Cerrar">&times;</button>
     </div>
-    <div x-show="mensaje" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+    <div x-show="mensaje" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+        <button type="button" @click="mensaje = ''" class="float-right ml-3 font-bold" aria-label="Cerrar">×</button>
         <span x-text="mensaje"></span>
-        <button type="button" @click="mensaje = ''" class="float-right font-bold" aria-label="Cerrar">&times;</button>
     </div>
 
-    <div x-show="tab === 'proyecciones'" class="space-y-6">
-        <section class="grid gap-3 md:grid-cols-3">
-            <div class="rounded-xl border border-blue-100 bg-blue-50 p-4">
-                <p class="text-xs font-bold uppercase tracking-wide text-blue-700">1. Buscar</p>
-                <p class="mt-1 text-sm text-blue-900">El sistema revisa qué pagos están listos para el periodo.</p>
+    <!-- PROGRAMACIONES -->
+    <div x-show="tab === 'programaciones'" class="space-y-5">
+        <section class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <h2 class="text-lg font-bold text-slate-900">Preparar una fecha de pago</h2>
+                        <p class="mt-1 text-sm text-slate-500">El sistema trae cuentas aprobadas, facturas pendientes y nómina.</p>
+                    </div>
+                    <span class="w-fit rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-800">Fechas hábiles automáticas</span>
+                </div>
+                <form @submit.prevent="cargarDisponibles" class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                    <label class="block">
+                        <span class="mb-1 block text-xs font-bold uppercase text-slate-500">Año</span>
+                        <input x-model.number="generacion.anio" @change="vistaPrevia = null" type="number" min="2020" max="2200" required class="w-full rounded-lg border-slate-300 text-sm">
+                    </label>
+                    <label class="block lg:col-span-2">
+                        <span class="mb-1 block text-xs font-bold uppercase text-slate-500">Mes</span>
+                        <select x-model.number="generacion.mes" @change="vistaPrevia = null" class="w-full rounded-lg border-slate-300 text-sm">
+                            <template x-for="mes in meses" :key="mes.valor"><option :value="mes.valor" x-text="mes.nombre"></option></template>
+                        </select>
+                    </label>
+                    <label class="block">
+                        <span class="mb-1 block text-xs font-bold uppercase text-slate-500">Corte</span>
+                        <select x-model.number="generacion.quincena" @change="vistaPrevia = null" class="w-full rounded-lg border-slate-300 text-sm">
+                            <option :value="1">Día 15</option>
+                            <option :value="2">Día 30</option>
+                        </select>
+                    </label>
+                    <button type="submit" :disabled="cargando" class="self-end rounded-lg bg-cyan-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-cyan-700 disabled:opacity-50">
+                        <span x-text="cargando ? 'Cargando…' : 'Cargar pagos'"></span>
+                    </button>
+                </form>
+                <label class="mt-3 block max-w-xs">
+                    <span class="mb-1 block text-xs font-bold uppercase text-slate-500">TRM oficial (solo si hay Capitalink)</span>
+                    <input x-model="generacion.trm_oficial" @change="vistaPrevia = null" type="number" min="0" step="0.01" placeholder="Se solicitará cuando aplique" class="w-full rounded-lg border-slate-300 text-sm">
+                </label>
             </div>
-            <div class="rounded-xl border border-slate-200 bg-white p-4">
-                <p class="text-xs font-bold uppercase tracking-wide text-slate-500">2. Confirmar</p>
-                <p class="mt-1 text-sm text-slate-700">Ves las cuentas, facturas y nómina antes de crear algo.</p>
-            </div>
-            <div class="rounded-xl border border-slate-200 bg-white p-4">
-                <p class="text-xs font-bold uppercase tracking-wide text-slate-500">3. Revisar y aprobar</p>
-                <p class="mt-1 text-sm text-slate-700">Validas impuestos y avanzas el lote hasta Pagado.</p>
-            </div>
+
+            <aside class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div class="flex items-center justify-between">
+                    <h2 class="font-bold text-slate-900">Programaciones recientes</h2>
+                    <button type="button" @click="listarProgramaciones(false)" class="text-xs font-bold text-cyan-700">Actualizar</button>
+                </div>
+                <div class="mt-3 space-y-2">
+                    <template x-for="item in programaciones.slice(0, 5)" :key="item.id">
+                        <button type="button" @click="abrirProgramacion(item.id)" class="w-full rounded-xl border border-slate-200 p-3 text-left hover:border-cyan-300 hover:bg-cyan-50/40">
+                            <div class="flex items-start justify-between gap-2">
+                                <div>
+                                    <p class="text-sm font-bold text-slate-800" x-text="formatearFecha(item.fecha_pago_programada)"></p>
+                                    <p class="mt-0.5 text-xs text-slate-500"><span x-text="etiquetaCorte(item)"></span> · <span x-text="item.total_pagos"></span> pagos</p>
+                                </div>
+                                <span class="rounded-full px-2 py-1 text-[11px] font-bold" :class="estadoClase(item.estado)" x-text="item.estado"></span>
+                            </div>
+                            <p class="mt-2 text-sm font-bold text-slate-900" x-text="formatearMoneda(item.total_neto)"></p>
+                        </button>
+                    </template>
+                    <p x-show="!programaciones.length" class="py-6 text-center text-sm text-slate-400">Aún no hay programaciones.</p>
+                </div>
+            </aside>
         </section>
 
-        <div class="grid gap-5 xl:grid-cols-2">
-            <form @submit.prevent="previsualizarProyeccion()" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <div class="flex items-start justify-between gap-3">
-                    <div>
-                        <h2 class="text-lg font-semibold text-slate-900">¿Qué quieres pagar?</h2>
-                        <p class="mt-1 text-sm text-slate-500">Selecciona el mes y la quincena que deseas preparar.</p>
-                    </div>
-                    <span class="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800">No guarda todavía</span>
-                </div>
-
-                <div class="mt-5 grid gap-4 sm:grid-cols-2">
-                    <label class="block">
-                        <span class="mb-1 block text-sm font-medium text-slate-700">Año</span>
-                        <input x-model.number="generacion.anio" @change="limpiarVistaPrevia()" type="number" min="2020" max="2100" required
-                            class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
-                    </label>
-                    <label class="block">
-                        <span class="mb-1 block text-sm font-medium text-slate-700">Mes</span>
-                        <select x-model.number="generacion.mes" @change="limpiarVistaPrevia()" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
-                            <option value="1">Enero</option>
-                            <option value="2">Febrero</option>
-                            <option value="3">Marzo</option>
-                            <option value="4">Abril</option>
-                            <option value="5">Mayo</option>
-                            <option value="6">Junio</option>
-                            <option value="7">Julio</option>
-                            <option value="8">Agosto</option>
-                            <option value="9">Septiembre</option>
-                            <option value="10">Octubre</option>
-                            <option value="11">Noviembre</option>
-                            <option value="12">Diciembre</option>
-                        </select>
-                    </label>
-                    <label class="block">
-                        <span class="mb-1 block text-sm font-medium text-slate-700">Quincena</span>
-                        <select x-model.number="generacion.quincena" @change="limpiarVistaPrevia()" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
-                            <option value="1">Pago de mitad de mes</option>
-                            <option value="2">Pago de fin de mes</option>
-                        </select>
-                    </label>
-                    <label class="block">
-                        <span class="mb-1 block text-sm font-medium text-slate-700">TRM del día <span class="font-normal text-slate-400">(opcional)</span></span>
-                        <input x-model="generacion.trm_oficial" @change="limpiarVistaPrevia()" type="number" min="0.01" step="0.01" placeholder="Solo si hay pagos en USD"
-                            class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
-                    </label>
-                </div>
-
-                <button type="submit" :disabled="previsualizando"
-                    class="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">
-                    <span x-text="previsualizando ? 'Buscando pagos…' : 'Buscar pagos disponibles'"></span>
-                </button>
-            </form>
-
-            <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h2 class="text-lg font-semibold text-slate-900">¿Qué busca el sistema?</h2>
-                <div class="mt-4 space-y-3 text-sm">
-                    <div class="flex gap-3 rounded-xl bg-slate-50 p-3">
-                        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700">1</span>
-                        <p><strong class="block text-slate-800">Cuentas de cobro aprobadas</strong><span class="text-slate-500">Las ubica en mitad o fin de mes según la fecha del último soporte.</span></p>
-                    </div>
-                    <div class="flex gap-3 rounded-xl bg-slate-50 p-3">
-                        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700">2</span>
-                        <p><strong class="block text-slate-800">Facturas de proveedores pendientes</strong><span class="text-slate-500">Incluye las emitidas antes de la fecha programada de pago.</span></p>
-                    </div>
-                    <div class="flex gap-3 rounded-xl bg-slate-50 p-3">
-                        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700">3</span>
-                        <p><strong class="block text-slate-800">Nómina cargada para el periodo</strong><span class="text-slate-500">Toma exactamente el valor neto registrado por Talento Humano.</span></p>
-                    </div>
-                </div>
-            </section>
-        </div>
-
-        <section x-show="vistaPrevia" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <section x-show="vistaPrevia && !vistaPrevia.proyeccion_existente" class="rounded-2xl border border-cyan-200 bg-white shadow-sm">
+            <div class="flex flex-col gap-4 border-b border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <p class="text-xs font-bold uppercase tracking-wide text-blue-600">Resultado de la búsqueda</p>
-                    <h2 class="mt-1 text-xl font-bold text-slate-900">
-                        <span x-text="nombreMes(vistaPrevia?.periodo?.mes)"></span>
-                        <span x-text="vistaPrevia?.periodo?.anio"></span> ·
-                        <span x-text="vistaPrevia?.periodo?.quincena === 1 ? 'Mitad de mes' : 'Fin de mes'"></span>
-                    </h2>
-                    <p class="mt-1 text-sm text-slate-500">Fecha programada de pago: <strong x-text="formatearFecha(vistaPrevia?.periodo?.fecha_pago_programada)"></strong></p>
+                    <p class="text-xs font-bold uppercase tracking-wide text-cyan-700">Vista previa</p>
+                    <h2 class="mt-1 text-xl font-bold text-slate-900" x-text="`Programación de pagos — ${formatearFecha(vistaPrevia?.periodo?.fecha_pago_programada)}`"></h2>
+                    <p class="mt-1 text-sm text-slate-500">Nada se guarda hasta que confirmes la programación.</p>
                 </div>
-                <div class="grid grid-cols-3 gap-2 text-center">
-                    <div class="rounded-lg bg-blue-50 px-3 py-2"><strong class="block text-blue-800" x-text="vistaPrevia?.resumen?.cuentas_cobro || 0"></strong><span class="text-xs text-blue-600">Cuentas</span></div>
-                    <div class="rounded-lg bg-violet-50 px-3 py-2"><strong class="block text-violet-800" x-text="vistaPrevia?.resumen?.facturas_proveedores || 0"></strong><span class="text-xs text-violet-600">Facturas</span></div>
-                    <div class="rounded-lg bg-emerald-50 px-3 py-2"><strong class="block text-emerald-800" x-text="vistaPrevia?.resumen?.nomina || 0"></strong><span class="text-xs text-emerald-600">Nómina</span></div>
-                </div>
+                <button type="button" @click="crearProgramacion" :disabled="guardando || !vistaPrevia?.resumen?.puede_generar" class="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-40">
+                    <span x-text="guardando ? 'Creando…' : 'Crear programación'"></span>
+                </button>
             </div>
-
-            <div x-show="vistaPrevia?.proyeccion_existente" class="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                <strong>Este periodo ya tiene un lote <span x-text="vistaPrevia?.proyeccion_existente?.estado"></span>.</strong>
-                <button type="button" @click="abrirProyeccionExistente()" class="ml-2 font-semibold text-blue-700 underline">Abrirlo</button>
+            <div class="grid gap-px bg-slate-200 sm:grid-cols-3 lg:grid-cols-6">
+                <template x-for="dato in [
+                    ['Pagos', vistaPrevia?.resumen?.total_pagos],
+                    ['Cuentas', vistaPrevia?.resumen?.cuentas_cobro],
+                    ['Facturas', vistaPrevia?.resumen?.facturas_proveedores],
+                    ['Nómina', vistaPrevia?.resumen?.nomina],
+                    ['Otro corte', vistaPrevia?.resumen?.cuentas_otra_quincena],
+                    ['Por revisar', vistaPrevia?.resumen?.cuentas_en_limbo]
+                ]" :key="dato[0]">
+                    <div class="bg-white p-4"><p class="text-xs text-slate-500" x-text="dato[0]"></p><p class="mt-1 text-xl font-bold text-slate-900" x-text="dato[1] || 0"></p></div>
+                </template>
             </div>
-
-            <div x-show="vistaPrevia && !vistaPrevia.resumen?.total_pagos && !vistaPrevia.proyeccion_existente"
-                class="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-5">
-                <p class="font-semibold text-slate-800">No hay pagos listos para este periodo.</p>
-                <p class="mt-1 text-sm text-slate-600">No se creó ningún lote. El sistema encontró:</p>
-                <ul class="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
-                    <li><span x-text="vistaPrevia?.resumen?.cuentas_aprobadas_pendientes || 0"></span> cuentas aprobadas pendientes de proyectar.</li>
-                    <li><span x-text="vistaPrevia?.resumen?.cuentas_otra_quincena || 0"></span> cuentas que pertenecen a la otra quincena.</li>
-                    <li><span x-text="vistaPrevia?.resumen?.cuentas_en_limbo || 0"></span> cuentas sin fecha válida de soportes o entregadas fuera de corte.</li>
-                    <li><span x-text="vistaPrevia?.resumen?.facturas_proveedores || 0"></span> facturas pendientes y <span x-text="vistaPrevia?.resumen?.nomina || 0"></span> pagos de nómina cargados.</li>
-                </ul>
+            <div class="grid gap-3 border-t border-slate-200 bg-slate-50 p-5 sm:grid-cols-2 lg:grid-cols-5">
+                <template x-for="dato in [
+                    ['Subtotal', vistaPrevia?.resumen?.subtotal],
+                    ['IVA', vistaPrevia?.resumen?.iva],
+                    ['Anticipos', vistaPrevia?.resumen?.anticipos],
+                    ['Retenciones', vistaPrevia?.resumen?.retenciones],
+                    ['Neto proyectado', vistaPrevia?.resumen?.total_neto]
+                ]" :key="dato[0]">
+                    <div><p class="text-xs text-slate-500" x-text="dato[0]"></p><p class="mt-1 font-bold" :class="dato[0] === 'Neto proyectado' ? 'text-emerald-700' : 'text-slate-900'" x-text="formatearMoneda(dato[1])"></p></div>
+                </template>
             </div>
-
-            <div x-show="vistaPrevia?.resumen?.trm_faltante" class="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                Hay pagos en moneda extranjera. Ingresa la TRM arriba y vuelve a buscar antes de crear el lote.
-            </div>
-
-            <div x-show="vistaPrevia?.pagos?.length" class="mt-5 overflow-x-auto rounded-xl border border-slate-200">
-                <table class="min-w-full divide-y divide-slate-200 text-sm">
-                    <thead class="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                        <tr><th class="px-4 py-3">Tercero</th><th class="px-4 py-3">Fuente</th><th class="px-4 py-3">Referencia</th><th class="px-4 py-3 text-right">Valor recibido</th></tr>
-                    </thead>
+            <div x-show="vistaPrevia?.resumen?.trm_faltante" class="m-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Hay pagos de Capitalink. Ingresa la TRM oficial y vuelve a cargar.</div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-left text-sm">
+                    <thead class="bg-slate-50 text-xs uppercase text-slate-500"><tr><th class="px-5 py-3">Beneficiario</th><th class="px-5 py-3">Origen</th><th class="px-5 py-3">Referencia</th><th class="px-5 py-3 text-right">Valor recibido</th><th class="px-5 py-3 text-right">Retenciones</th><th class="px-5 py-3 text-right">Neto</th></tr></thead>
                     <tbody class="divide-y divide-slate-100">
-                        <template x-for="pago in (vistaPrevia?.pagos || [])" :key="`${pago.origen_tipo}-${pago.id}`">
-                            <tr>
-                                <td class="px-4 py-3"><strong class="text-slate-800" x-text="pago.tercero"></strong><p class="text-xs text-slate-500" x-text="pago.numero_documento || 'Sin documento'"></p></td>
-                                <td class="px-4 py-3" x-text="tipoOrigen(pago.origen_tipo)"></td>
-                                <td class="px-4 py-3 text-slate-600" x-text="pago.referencia || 'Sin referencia'"></td>
-                                <td class="whitespace-nowrap px-4 py-3 text-right font-semibold" x-text="formatearValorOrigen(pago.valor_origen, pago.moneda_origen)"></td>
-                            </tr>
+                        <template x-for="item in (vistaPrevia?.pagos || [])" :key="`${item.origen_tipo}-${item.id}`">
+                            <tr><td class="px-5 py-3"><p class="font-semibold text-slate-800" x-text="item.tercero"></p><p class="text-xs text-slate-500" x-text="item.numero_documento"></p></td><td class="px-5 py-3 text-slate-600" x-text="tipoOrigen(item.origen_tipo)"></td><td class="px-5 py-3 text-slate-600" x-text="item.referencia || 'Sin referencia'"></td><td class="px-5 py-3 text-right font-semibold" x-text="formatearValorOrigen(item.valor_origen, item.moneda_origen)"></td><td class="px-5 py-3 text-right text-rose-700" x-text="item.calculo ? formatearMoneda(item.calculo.retefuente + item.calculo.reteiva + item.calculo.reteica) : 'Pendiente de TRM'"></td><td class="px-5 py-3 text-right font-bold text-emerald-700" x-text="item.calculo ? formatearMoneda(item.calculo.valor_neto) : '—'"></td></tr>
                         </template>
                     </tbody>
                 </table>
             </div>
-
-            <button x-show="vistaPrevia?.resumen?.puede_generar" type="button" @click="generarProyeccion()" :disabled="generando"
-                class="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60">
-                <span x-text="generando ? 'Creando borrador…' : `Crear borrador con ${vistaPrevia?.resumen?.total_pagos || 0} pagos`"></span>
-            </button>
         </section>
 
-        <details class="rounded-xl border border-slate-200 bg-white p-4 text-sm">
-            <summary class="cursor-pointer font-semibold text-slate-700">Abrir un lote usando su ID</summary>
-            <form @submit.prevent="consultarProyeccion()" class="mt-4 flex flex-col gap-2 sm:flex-row">
-                <input x-model.trim="loteId" type="text" required placeholder="UUID de la proyección"
-                    class="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm">
-                <button type="submit" :disabled="consultando" class="rounded-lg bg-slate-800 px-4 py-2 font-semibold text-white disabled:opacity-60">
-                    <span x-text="consultando ? 'Consultando…' : 'Abrir lote'"></span>
-                </button>
-            </form>
-        </details>
-
-        <section x-show="proyeccion" class="space-y-5">
-            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                        <div class="flex flex-wrap items-center gap-2">
-                            <h2 class="text-xl font-bold text-slate-900">
-                                <span x-text="nombreMes(proyeccion?.mes)"></span>
-                                <span x-text="proyeccion?.anio"></span> · Q<span x-text="proyeccion?.quincena"></span>
-                            </h2>
-                            <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="estadoClase(proyeccion?.estado)" x-text="proyeccion?.estado"></span>
-                        </div>
-                        <p class="mt-2 text-sm text-slate-500">
-                            Pago programado: <strong class="text-slate-700" x-text="formatearFecha(proyeccion?.fecha_pago_programada)"></strong>
-                            <span x-show="proyeccion?.trm_oficial"> · TRM: <strong x-text="formatearMoneda(proyeccion?.trm_oficial)"></strong></span>
-                        </p>
-                        <p class="mt-1 break-all font-mono text-xs text-slate-400" x-text="proyeccion?.id"></p>
+        <section x-show="proyeccion" class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div class="flex flex-col gap-4 border-b border-slate-200 p-5 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h2 class="text-xl font-bold text-slate-900" x-text="tituloProgramacion(proyeccion)"></h2>
+                        <span class="rounded-full px-2.5 py-1 text-xs font-bold" :class="estadoClase(proyeccion?.estado)" x-text="proyeccion?.estado"></span>
                     </div>
-                    <div class="flex flex-wrap gap-2">
-                        <template x-for="accion in accionesDisponibles" :key="accion.estado">
-                            <button type="button" @click="transicionar(accion)" :disabled="transicionando"
-                                class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
-                                x-text="accion.label"></button>
-                        </template>
-                    </div>
+                    <p class="mt-1 text-sm text-slate-500"><span x-text="etiquetaCorte(proyeccion)"></span> · <span x-text="nombreMes(proyeccion?.mes)"></span> de <span x-text="proyeccion?.anio"></span></p>
                 </div>
-
-                <div class="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <div class="rounded-xl bg-slate-50 p-4">
-                        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Pagos</p>
-                        <p class="mt-1 text-xl font-bold text-slate-900" x-text="resumen?.total_detalles || 0"></p>
-                    </div>
-                    <div class="rounded-xl bg-slate-50 p-4">
-                        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Total bruto</p>
-                        <p class="mt-1 text-xl font-bold text-slate-900" x-text="formatearMoneda(resumen?.total_bruto)"></p>
-                    </div>
-                    <div class="rounded-xl bg-slate-50 p-4">
-                        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Retenciones</p>
-                        <p class="mt-1 text-xl font-bold text-rose-700" x-text="formatearMoneda(resumen?.total_retenciones)"></p>
-                    </div>
-                    <div class="rounded-xl bg-emerald-50 p-4">
-                        <p class="text-xs font-medium uppercase tracking-wide text-emerald-700">Total neto</p>
-                        <p class="mt-1 text-xl font-bold text-emerald-800" x-text="formatearMoneda(resumen?.total_neto)"></p>
-                    </div>
+                <div class="flex flex-wrap gap-2">
+                    <button type="button" @click="verAuditoria" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700">Auditoría</button>
+                    <button x-show="['aprobado','pagado'].includes(normalizar(proyeccion?.estado))" type="button" @click="exportarBanco" class="rounded-lg border border-cyan-300 bg-cyan-50 px-3 py-2 text-sm font-bold text-cyan-800">Descargar archivo bancario</button>
+                    <template x-for="accion in accionesDisponibles" :key="accion.estado">
+                        <button type="button" @click="cambiarEstado(accion)" :disabled="guardando" class="rounded-lg bg-slate-950 px-4 py-2 text-sm font-bold text-white disabled:opacity-50" x-text="accion.label"></button>
+                    </template>
                 </div>
             </div>
 
-            <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div class="border-b border-slate-200 px-5 py-4">
-                    <h3 class="font-semibold text-slate-900">Detalle de pagos</h3>
-                    <p class="mt-1 text-sm text-slate-500">Valores calculados por tercero y fuente del pago.</p>
+            <div class="grid gap-px bg-slate-200 sm:grid-cols-2 lg:grid-cols-5">
+                <template x-for="dato in [
+                    ['Subtotal', resumen?.total_subtotal],
+                    ['IVA', resumen?.total_iva],
+                    ['Anticipos', resumen?.total_anticipos],
+                    ['Retenciones', resumen?.total_retenciones],
+                    ['Neto a pagar', resumen?.total_neto]
+                ]" :key="dato[0]">
+                    <div class="bg-white p-4"><p class="text-xs font-medium text-slate-500" x-text="dato[0]"></p><p class="mt-1 text-lg font-bold" :class="dato[0] === 'Neto a pagar' ? 'text-emerald-700' : 'text-slate-900'" x-text="formatearMoneda(dato[1])"></p></div>
+                </template>
+            </div>
+
+            <div x-show="mostrarAuditoria" class="border-y border-slate-200 bg-slate-50 p-5">
+                <h3 class="text-sm font-bold text-slate-800">Movimientos de la programación</h3>
+                <div class="mt-3 grid gap-2 lg:grid-cols-2">
+                    <template x-for="item in auditoria" :key="item.id"><div class="rounded-lg bg-white p-3 text-sm"><div class="flex justify-between gap-3"><strong class="text-slate-800" x-text="item.evento.replaceAll('_',' ')"></strong><span class="text-xs text-slate-500" x-text="formatearFechaHora(item.created_at)"></span></div><p class="mt-1 text-xs text-slate-500"><span x-text="item.usuario || 'Sistema'"></span><span x-show="item.estado_nuevo"> · <span x-text="item.estado_anterior || 'Inicio'"></span> → <span x-text="item.estado_nuevo"></span></span></p></div></template>
+                    <p x-show="!auditoria.length" class="text-sm text-slate-500">No hay movimientos registrados.</p>
                 </div>
-                <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-slate-200 text-sm">
-                        <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                            <tr>
-                                <th class="px-4 py-3 font-semibold">Tercero</th>
-                                <th class="px-4 py-3 font-semibold">Origen</th>
-                                <th class="px-4 py-3 text-right font-semibold">Bruto</th>
-                                <th class="px-4 py-3 font-semibold">Retenciones</th>
-                                <th class="px-4 py-3 text-right font-semibold">Neto</th>
-                                <th class="px-4 py-3 font-semibold">Banco</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-100">
-                            <template x-for="detalle in detalles" :key="detalle.id">
-                                <tr class="align-top hover:bg-slate-50">
-                                    <td class="px-4 py-3">
-                                        <p class="font-semibold text-slate-900" x-text="detalle.tercero || 'Sin nombre'"></p>
-                                        <p class="mt-1 text-xs text-slate-500" x-text="detalle.numero_documento || 'Sin documento'"></p>
-                                    </td>
-                                    <td class="px-4 py-3">
-                                        <p class="text-slate-700" x-text="tipoOrigen(detalle.origen_tipo)"></p>
-                                        <p class="mt-1 text-xs text-slate-500" x-text="detalle.referencia || detalle.tipo_pago"></p>
-                                    </td>
-                                    <td class="whitespace-nowrap px-4 py-3 text-right font-medium" x-text="formatearMoneda(detalle.bruto)"></td>
-                                    <td class="px-4 py-3">
-                                        <div class="flex min-w-44 flex-wrap gap-1">
-                                            <template x-for="retencion in detalle.retenciones_aplicadas" :key="retencion.tipo">
-                                                <span class="rounded-full bg-rose-50 px-2 py-1 text-xs text-rose-700"
-                                                    x-text="`${retencion.tipo} ${retencion.porcentaje}%: ${formatearMoneda(retencion.valor)}`"></span>
-                                            </template>
-                                            <span x-show="!detalle.retenciones_aplicadas?.length" class="text-xs text-slate-400">Sin retenciones</span>
-                                        </div>
-                                    </td>
-                                    <td class="whitespace-nowrap px-4 py-3 text-right font-bold text-emerald-700" x-text="formatearMoneda(detalle.valor_neto)"></td>
-                                    <td class="px-4 py-3 text-slate-600">
-                                        <p x-text="detalle.banco || 'Sin banco'"></p>
-                                        <p class="mt-1 text-xs" x-text="detalle.numero_cuenta || 'Sin cuenta'"></p>
-                                    </td>
-                                </tr>
-                            </template>
-                            <tr x-show="!detalles.length">
-                                <td colspan="6" class="px-4 py-10 text-center text-slate-500">El lote no tiene detalles.</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+            </div>
+
+            <div class="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row">
+                <input x-model="filtroDetalle" type="search" placeholder="Buscar documento, beneficiario o referencia" class="min-w-0 flex-1 rounded-lg border-slate-300 text-sm">
+                <select x-model="tipoDetalle" class="rounded-lg border-slate-300 text-sm"><option value="">Todos los pagos</option><option value="cuenta_cobro">Cuentas de cobro</option><option value="factura_proveedor">Facturas</option><option value="nomina">Nómina</option></select>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-[1180px] w-full text-left text-sm">
+                    <thead class="bg-slate-50 text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Beneficiario</th><th class="px-4 py-3">Pago</th><th class="px-4 py-3 text-right">Subtotal</th><th class="px-4 py-3 text-right">IVA</th><th class="px-4 py-3 text-right">Anticipo</th><th class="px-4 py-3 text-right">ReteFuente</th><th class="px-4 py-3 text-right">ReteIVA</th><th class="px-4 py-3 text-right">ReteICA</th><th class="px-4 py-3 text-right">Neto</th><th class="px-4 py-3">Cálculo</th><th class="px-4 py-3"></th></tr></thead>
+                    <tbody class="divide-y divide-slate-100">
+                        <template x-for="item in detallesFiltrados" :key="item.id">
+                            <tr class="hover:bg-slate-50"><td class="px-4 py-3"><p class="font-semibold text-slate-800" x-text="item.tercero"></p><p class="text-xs text-slate-500" x-text="item.numero_documento"></p></td><td class="px-4 py-3"><p class="text-slate-700" x-text="tipoOrigen(item.origen_tipo)"></p><p class="max-w-[180px] truncate text-xs text-slate-500" x-text="item.referencia"></p></td><td class="px-4 py-3 text-right" x-text="formatearMoneda(item.subtotal)"></td><td class="px-4 py-3 text-right" x-text="formatearMoneda(item.iva)"></td><td class="px-4 py-3 text-right" x-text="formatearMoneda(item.anticipo)"></td><td class="px-4 py-3 text-right text-rose-700" x-text="formatearMoneda(item.retefuente)"></td><td class="px-4 py-3 text-right text-rose-700" x-text="formatearMoneda(item.reteiva)"></td><td class="px-4 py-3 text-right text-rose-700" x-text="formatearMoneda(item.reteica)"></td><td class="px-4 py-3 text-right font-bold text-emerald-700" x-text="formatearMoneda(item.valor_neto)"></td><td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-bold" :class="item.calculo_origen === 'Manual' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'" x-text="item.calculo_origen"></span></td><td class="px-4 py-3 text-right"><button x-show="['borrador','revision'].includes(normalizar(proyeccion?.estado))" type="button" @click="abrirAjuste(item)" class="text-xs font-bold text-cyan-700">Ajustar</button></td></tr>
+                        </template>
+                    </tbody>
+                </table>
             </div>
         </section>
     </div>
 
-    <div x-show="tab === 'simulador'" class="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-        <form @submit.prevent="simularRetenciones()" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 class="text-lg font-semibold text-slate-900">Probar reglas tributarias</h2>
-            <p class="mt-1 text-sm text-slate-500">Esta simulación no crea ni modifica pagos.</p>
-
-            <div class="mt-5 grid gap-4 sm:grid-cols-3">
-                <label class="block">
-                    <span class="mb-1 block text-sm font-medium text-slate-700">Tipo de pago</span>
-                    <select x-model="simulador.tipo_pago" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
-                        <option value="consultor">Consultor (3,5%)</option>
-                        <option value="honorarios">Honorarios (10% / 11%)</option>
-                    </select>
-                </label>
-                <label class="block">
-                    <span class="mb-1 block text-sm font-medium text-slate-700">Subtotal</span>
-                    <input x-model.number="simulador.subtotal" type="number" min="0" step="0.01" required
-                        class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
-                </label>
-                <label class="block">
-                    <span class="mb-1 block text-sm font-medium text-slate-700">IVA</span>
-                    <input x-model.number="simulador.iva" type="number" min="0" step="0.01" required
-                        class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
-                </label>
+    <!-- FACTURAS DE PROVEEDORES -->
+    <div x-show="tab === 'facturas'" class="grid gap-5 xl:grid-cols-[430px_minmax(0,1fr)]">
+        <form @submit.prevent="guardarFactura" class="h-fit rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="flex items-center justify-between"><div><p class="text-xs font-bold uppercase tracking-wide text-cyan-700">Proveedor</p><h2 class="mt-1 text-lg font-bold text-slate-900" x-text="factura.id ? 'Editar factura' : 'Registrar factura'"></h2></div><button x-show="factura.id" type="button" @click="limpiarFactura()" class="text-xs font-bold text-slate-500">Cancelar edición</button></div>
+            <div class="relative mt-5">
+                <label class="mb-1 block text-sm font-semibold text-slate-700">NIT, documento o nombre</label>
+                <div class="flex gap-2"><input x-model="busquedaBeneficiario" @keyup.enter.prevent="buscarBeneficiarios('factura')" type="search" class="min-w-0 flex-1 rounded-lg border-slate-300 text-sm" placeholder="Ej. 901299175"><button type="button" @click="buscarBeneficiarios('factura')" class="rounded-lg border border-slate-300 px-3 text-sm font-bold">Buscar</button></div>
+                <div x-show="beneficiarios.length" class="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl"><template x-for="item in beneficiarios" :key="item.id"><button type="button" @click="seleccionarBeneficiario(item)" class="block w-full rounded-md px-3 py-2 text-left hover:bg-cyan-50"><strong class="block text-sm text-slate-800" x-text="item.nombre"></strong><span class="text-xs text-slate-500"><span x-text="item.numero_documento"></span> · <span x-text="item.banco || 'Sin banco'"></span></span></button></template></div>
             </div>
-
-            <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <h3 class="text-sm font-semibold text-slate-800">Perfil tributario</h3>
-                <div class="mt-3 grid gap-3 sm:grid-cols-2">
-                    <template x-for="opcion in opcionesTributarias" :key="opcion.campo">
-                        <label class="flex cursor-pointer items-start gap-3 rounded-lg bg-white p-3 text-sm text-slate-700">
-                            <input x-model="simulador.persona[opcion.campo]" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600">
-                            <span>
-                                <strong class="block font-medium" x-text="opcion.nombre"></strong>
-                                <span class="text-xs text-slate-500" x-text="opcion.efecto"></span>
-                            </span>
-                        </label>
-                    </template>
-                </div>
-                <div class="mt-3 grid gap-3 sm:grid-cols-2">
-                    <label class="flex items-center gap-3 rounded-lg bg-white p-3 text-sm text-slate-700">
-                        <input x-model="simulador.persona.declarante_renta" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-blue-600">
-                        Declarante de renta
-                    </label>
-                    <label class="block rounded-lg bg-white p-3">
-                        <span class="mb-1 block text-sm text-slate-700">Ciudad de residencia</span>
-                        <input x-model.trim="simulador.persona.ciudad_residencia" type="text" placeholder="Ej. Medellín"
-                            class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                    </label>
-                </div>
+            <div x-show="beneficiarioSeleccionado" class="mt-3 rounded-xl border p-3 text-sm" :class="beneficiarioSeleccionado?.datos_bancarios_completos === false ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'"><strong x-text="beneficiarioSeleccionado?.nombre"></strong><p class="mt-1 text-xs" x-text="beneficiarioSeleccionado?.datos_bancarios_completos === false ? 'Faltan datos bancarios; podrás registrar la factura, pero no exportar el pago.' : `${beneficiarioSeleccionado?.banco || ''} · ${beneficiarioSeleccionado?.numero_cuenta || ''}`"></p></div>
+            <div class="mt-4 grid gap-3 sm:grid-cols-2">
+                <label><span class="mb-1 block text-sm font-semibold text-slate-700">Número de factura</span><input x-model.trim="factura.numero_factura" required class="w-full rounded-lg border-slate-300 text-sm"></label>
+                <label><span class="mb-1 block text-sm font-semibold text-slate-700">Concepto contable</span><select x-model="factura.tipo_gasto" @change="simulacionFactura = null" class="w-full rounded-lg border-slate-300 text-sm"><template x-for="item in conceptos" :key="item[0]"><option :value="item[0]" x-text="item[1]"></option></template></select></label>
+                <label><span class="mb-1 block text-sm font-semibold text-slate-700">Emisión</span><input x-model="factura.fecha_emision" type="date" required class="w-full rounded-lg border-slate-300 text-sm"></label>
+                <label><span class="mb-1 block text-sm font-semibold text-slate-700">Vencimiento</span><input x-model="factura.fecha_vencimiento" type="date" class="w-full rounded-lg border-slate-300 text-sm"></label>
+                <label class="sm:col-span-2"><span class="mb-1 block text-sm font-semibold text-slate-700">Fecha de pago preferida</span><input x-model="factura.fecha_pago_preferida" type="date" class="w-full rounded-lg border-slate-300 text-sm"><span class="mt-1 block text-xs text-slate-500">La factura entrará en la primera programación posterior a esta fecha.</span></label>
+                <label class="sm:col-span-2"><span class="mb-1 block text-sm font-semibold text-slate-700">Detalle</span><textarea x-model.trim="factura.concepto" rows="2" required class="w-full rounded-lg border-slate-300 text-sm"></textarea></label>
+                <label><span class="mb-1 block text-sm font-semibold text-slate-700">Ciudad del servicio</span><input x-model.trim="factura.ciudad_servicio" placeholder="Para ReteICA" class="w-full rounded-lg border-slate-300 text-sm"></label>
+                <label><span class="mb-1 block text-sm font-semibold text-slate-700">Moneda</span><select x-model="factura.moneda" class="w-full rounded-lg border-slate-300 text-sm"><option>COP</option><option>USD</option><option>EUR</option></select></label>
+                <label><span class="mb-1 block text-sm font-semibold text-slate-700">Subtotal</span><input x-model.number="factura.subtotal" @input="simulacionFactura = null" type="number" min="0" step="0.01" required class="w-full rounded-lg border-slate-300 text-sm"></label>
+                <label><span class="mb-1 block text-sm font-semibold text-slate-700">Anticipo</span><input x-model.number="factura.anticipo" @input="simulacionFactura = null" type="number" min="0" step="0.01" class="w-full rounded-lg border-slate-300 text-sm"></label>
+                <label class="flex items-center gap-3 rounded-lg bg-slate-50 p-3 sm:col-span-2"><input x-model="factura.tiene_iva" @change="simulacionFactura = null" type="checkbox" class="rounded border-slate-300 text-cyan-600"><span class="text-sm font-semibold text-slate-700">La factura cobra IVA</span></label>
+                <label class="sm:col-span-2"><span class="mb-1 block text-sm font-semibold text-slate-700">Enlace del soporte</span><input x-model.trim="factura.soporte_url" type="url" placeholder="https://…" class="w-full rounded-lg border-slate-300 text-sm"></label>
             </div>
-
-            <button type="submit" :disabled="simulando"
-                class="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">
-                <span x-text="simulando ? 'Calculando…' : 'Calcular retenciones'"></span>
-            </button>
+            <button type="button" @click="simularFactura" class="mt-4 w-full rounded-lg border border-cyan-300 bg-cyan-50 px-4 py-2.5 text-sm font-bold text-cyan-800">Calcular antes de guardar</button>
+            <div x-show="simulacionFactura" class="mt-3 rounded-xl bg-slate-950 p-4 text-white"><div class="flex justify-between text-sm"><span class="text-slate-300">IVA</span><strong x-text="formatearMoneda(simulacionFactura?.iva)"></strong></div><div class="mt-2 flex justify-between text-sm"><span class="text-slate-300">Retenciones</span><strong x-text="formatearMoneda(simulacionFactura?.total_retenciones)"></strong></div><div class="mt-3 flex justify-between border-t border-white/20 pt-3"><span class="font-semibold">Neto a pagar</span><strong class="text-lg text-emerald-300" x-text="formatearMoneda(simulacionFactura?.valor_neto)"></strong></div></div>
+            <button type="submit" :disabled="guardando" class="mt-3 w-full rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50" x-text="guardando ? 'Guardando…' : 'Guardar factura'"></button>
         </form>
 
-        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 class="text-lg font-semibold text-slate-900">Resultado</h2>
-            <div x-show="!resultadoSimulador" class="mt-8 rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-                Completa el formulario para ver el cálculo.
-            </div>
-            <div x-show="resultadoSimulador" class="mt-5 space-y-4">
-                <div class="grid grid-cols-2 gap-3">
-                    <div class="rounded-xl bg-slate-50 p-4">
-                        <p class="text-xs uppercase text-slate-500">Base mínima</p>
-                        <p class="mt-1 font-bold text-slate-900" x-text="formatearMoneda(resultadoSimulador?.base_minima)"></p>
-                    </div>
-                    <div class="rounded-xl bg-emerald-50 p-4">
-                        <p class="text-xs uppercase text-emerald-700">Neto</p>
-                        <p class="mt-1 font-bold text-emerald-800" x-text="formatearMoneda(resultadoSimulador?.valor_neto)"></p>
-                    </div>
-                </div>
-                <div class="space-y-2">
-                    <template x-for="retencion in (resultadoSimulador?.retenciones_aplicadas || [])" :key="retencion.tipo">
-                        <div class="flex items-center justify-between rounded-xl border border-slate-200 p-3 text-sm">
-                            <div>
-                                <p class="font-semibold text-slate-800" x-text="retencion.tipo"></p>
-                                <p class="text-xs text-slate-500"><span x-text="retencion.porcentaje"></span>% sobre <span x-text="formatearMoneda(retencion.base)"></span></p>
-                            </div>
-                            <strong class="text-rose-700" x-text="formatearMoneda(retencion.valor)"></strong>
-                        </div>
-                    </template>
-                    <p x-show="resultadoSimulador && !resultadoSimulador.retenciones_aplicadas?.length"
-                        class="rounded-xl bg-slate-50 p-4 text-center text-sm text-slate-500">No se aplican retenciones.</p>
-                </div>
-                <div class="flex justify-between border-t border-slate-200 pt-4 text-sm">
-                    <span class="text-slate-600">Total retenciones</span>
-                    <strong class="text-slate-900" x-text="formatearMoneda(resultadoSimulador?.total_retenciones)"></strong>
-                </div>
-            </div>
+        <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div class="flex flex-col gap-3 border-b border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 class="text-lg font-bold text-slate-900">Facturas registradas</h2><p class="mt-1 text-sm text-slate-500">Una factura pagada conserva la fecha y su programación.</p></div><div class="flex gap-2"><input x-model="filtroFacturas" @keyup.enter="listarFacturas" type="search" placeholder="Factura, NIT o proveedor" class="rounded-lg border-slate-300 text-sm"><button type="button" @click="listarFacturas" class="rounded-lg bg-slate-900 px-3 text-sm font-bold text-white">Buscar</button></div></div>
+            <div class="overflow-x-auto"><table class="min-w-[850px] w-full text-left text-sm"><thead class="bg-slate-50 text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Proveedor</th><th class="px-4 py-3">Factura</th><th class="px-4 py-3">Fecha</th><th class="px-4 py-3">Concepto</th><th class="px-4 py-3 text-right">Total</th><th class="px-4 py-3">Estado</th><th class="px-4 py-3"></th></tr></thead><tbody class="divide-y divide-slate-100"><template x-for="item in facturas" :key="item.id"><tr><td class="px-4 py-3"><strong class="block text-slate-800" x-text="item.beneficiario"></strong><span class="text-xs text-slate-500" x-text="item.documento"></span></td><td class="px-4 py-3 font-semibold" x-text="item.numero_factura"></td><td class="px-4 py-3 text-slate-600"><span x-text="formatearFecha(item.fecha_emision)"></span><p x-show="item.fecha_pago" class="text-xs text-emerald-700">Pagada: <span x-text="formatearFecha(item.fecha_pago)"></span></p></td><td class="px-4 py-3 text-slate-600" x-text="item.tipo_gasto.replaceAll('_',' ')"></td><td class="px-4 py-3 text-right font-bold" x-text="formatearMoneda(item.subtotal + item.iva - item.anticipo)"></td><td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-bold" :class="estadoClase(item.estado)" x-text="item.estado"></span></td><td class="px-4 py-3 text-right"><div x-show="item.estado === 'Pendiente'" class="flex justify-end gap-3"><button type="button" @click="editarFactura(item)" class="text-xs font-bold text-cyan-700">Editar</button><button type="button" @click="anularFactura(item)" class="text-xs font-bold text-red-600">Anular</button></div></td></tr></template></tbody></table></div>
+            <p x-show="!facturas.length" class="p-10 text-center text-sm text-slate-500">No se encontraron facturas.</p>
         </section>
+    </div>
+
+    <!-- CONFIGURACIÓN -->
+    <div x-show="tab === 'configuracion'" class="space-y-5">
+        <section class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_430px]">
+            <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div class="flex items-center justify-between border-b border-slate-200 p-5"><div><h2 class="text-lg font-bold text-slate-900">Bases y porcentajes</h2><p class="mt-1 text-sm text-slate-500">Cada cambio tiene vigencia; las programaciones anteriores no se recalculan.</p></div><button type="button" @click="editarRegla()" class="rounded-lg bg-cyan-600 px-3 py-2 text-sm font-bold text-white">Nueva regla</button></div>
+                <div class="overflow-x-auto"><table class="min-w-[950px] w-full text-left text-sm"><thead class="bg-slate-50 text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Concepto</th><th class="px-4 py-3">Documento</th><th class="px-4 py-3 text-right">Base</th><th class="px-4 py-3 text-right">Fuente D / ND</th><th class="px-4 py-3 text-right">IVA / ReteIVA</th><th class="px-4 py-3">Vigencia</th><th class="px-4 py-3"></th></tr></thead><tbody class="divide-y divide-slate-100"><template x-for="item in reglas" :key="item.id"><tr :class="!item.activo && 'opacity-50'"><td class="px-4 py-3"><strong class="block text-slate-800" x-text="item.nombre"></strong><span class="text-xs text-slate-500" x-text="item.concepto"></span></td><td class="px-4 py-3 text-slate-600" x-text="item.tipo_documento_pago.replaceAll('_',' ')"></td><td class="px-4 py-3 text-right" x-text="formatearMoneda(item.base_minima)"></td><td class="px-4 py-3 text-right"><span x-text="item.porcentaje_fuente_declarante"></span>% / <span x-text="item.porcentaje_fuente_no_declarante"></span>%</td><td class="px-4 py-3 text-right"><span x-text="item.porcentaje_iva"></span>% / <span x-text="item.porcentaje_reteiva"></span>%</td><td class="px-4 py-3 text-xs text-slate-600"><span x-text="formatearFecha(item.vigencia_desde)"></span><span x-show="item.vigencia_hasta"> a <span x-text="formatearFecha(item.vigencia_hasta)"></span></span></td><td class="px-4 py-3 text-right"><button type="button" @click="editarRegla(item)" class="text-xs font-bold text-cyan-700">Editar</button></td></tr></template></tbody></table></div>
+            </div>
+
+            <form @submit.prevent="guardarRegla" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="font-bold text-slate-900" x-text="regla.id ? 'Editar regla' : 'Configurar regla'"></h2>
+                <div class="mt-4 grid gap-3 sm:grid-cols-2">
+                    <label class="sm:col-span-2"><span class="mb-1 block text-sm font-semibold">Nombre</span><input x-model.trim="regla.nombre" required class="w-full rounded-lg border-slate-300 text-sm"></label>
+                    <label><span class="mb-1 block text-sm font-semibold">Concepto</span><select x-model="regla.concepto" class="w-full rounded-lg border-slate-300 text-sm"><template x-for="item in conceptos" :key="item[0]"><option :value="item[0]" x-text="item[1]"></option></template></select></label>
+                    <label><span class="mb-1 block text-sm font-semibold">Documento</span><select x-model="regla.tipo_documento_pago" class="w-full rounded-lg border-slate-300 text-sm"><option value="cualquiera">Cualquiera</option><option value="cuenta_cobro">Cuenta de cobro</option><option value="factura_electronica">Factura electrónica</option></select></label>
+                    <label><span class="mb-1 block text-sm font-semibold">Base mínima</span><input x-model.number="regla.base_minima" type="number" min="0" step="0.01" required class="w-full rounded-lg border-slate-300 text-sm"></label>
+                    <label><span class="mb-1 block text-sm font-semibold">Fuente declarante %</span><input x-model.number="regla.porcentaje_fuente_declarante" type="number" min="0" max="100" step="0.0001" required class="w-full rounded-lg border-slate-300 text-sm"></label>
+                    <label><span class="mb-1 block text-sm font-semibold">Fuente no declarante %</span><input x-model.number="regla.porcentaje_fuente_no_declarante" type="number" min="0" max="100" step="0.0001" required class="w-full rounded-lg border-slate-300 text-sm"></label>
+                    <label><span class="mb-1 block text-sm font-semibold">IVA %</span><input x-model.number="regla.porcentaje_iva" type="number" min="0" max="100" step="0.0001" required class="w-full rounded-lg border-slate-300 text-sm"></label>
+                    <label><span class="mb-1 block text-sm font-semibold">ReteIVA %</span><input x-model.number="regla.porcentaje_reteiva" type="number" min="0" max="100" step="0.0001" required class="w-full rounded-lg border-slate-300 text-sm"></label>
+                    <label><span class="mb-1 block text-sm font-semibold">Base ReteICA</span><input x-model.number="regla.base_reteica" type="number" min="0" step="0.01" required class="w-full rounded-lg border-slate-300 text-sm"></label>
+                    <label><span class="mb-1 block text-sm font-semibold">ReteICA %</span><input x-model.number="regla.porcentaje_reteica" type="number" min="0" max="100" step="0.0001" required class="w-full rounded-lg border-slate-300 text-sm"></label>
+                    <label><span class="mb-1 block text-sm font-semibold">Vigente desde</span><input x-model="regla.vigencia_desde" type="date" required class="w-full rounded-lg border-slate-300 text-sm"></label>
+                    <label><span class="mb-1 block text-sm font-semibold">Vigente hasta</span><input x-model="regla.vigencia_hasta" type="date" class="w-full rounded-lg border-slate-300 text-sm"></label>
+                    <label class="flex items-center gap-2 rounded-lg bg-slate-50 p-3 sm:col-span-2"><input x-model="regla.activo" type="checkbox" class="rounded border-slate-300 text-cyan-600"><span class="text-sm font-semibold">Regla activa</span></label>
+                </div>
+                <button type="submit" :disabled="guardando" class="mt-4 w-full rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Guardar regla</button>
+            </form>
+        </section>
+
+        <section class="grid gap-5 xl:grid-cols-2">
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-lg font-bold text-slate-900">Perfil tributario del beneficiario</h2><p class="mt-1 text-sm text-slate-500">Las condiciones son combinables: gran contribuyente y autorretenedor pueden estar activos a la vez.</p>
+                <div class="relative mt-4"><div class="flex gap-2"><input x-model="busquedaPerfil" @keyup.enter.prevent="buscarBeneficiarios('perfil')" type="search" placeholder="Documento o nombre" class="min-w-0 flex-1 rounded-lg border-slate-300 text-sm"><button type="button" @click="buscarBeneficiarios('perfil')" class="rounded-lg bg-slate-900 px-4 text-sm font-bold text-white">Buscar</button></div><div x-show="perfiles.length" class="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border bg-white p-1 shadow-xl"><template x-for="item in perfiles" :key="item.id"><button type="button" @click="seleccionarPerfil(item)" class="block w-full rounded-md px-3 py-2 text-left hover:bg-cyan-50"><strong class="block text-sm" x-text="item.nombre"></strong><span class="text-xs text-slate-500" x-text="item.numero_documento"></span></button></template></div></div>
+                <div x-show="perfilSeleccionado" class="mt-4"><div class="rounded-xl bg-slate-950 p-4 text-white"><strong x-text="perfilSeleccionado?.nombre"></strong><p class="mt-1 text-xs text-slate-300"><span x-text="perfilSeleccionado?.numero_documento"></span> · <span x-text="perfilSeleccionado?.banco || 'Sin banco registrado'"></span></p></div><div class="mt-3 grid gap-2 sm:grid-cols-2"><template x-for="opcion in opcionesTributarias" :key="opcion[0]"><label class="flex cursor-pointer gap-3 rounded-xl border border-slate-200 p-3"><input x-model="perfilSeleccionado[opcion[0]]" type="checkbox" class="mt-0.5 rounded border-slate-300 text-cyan-600"><span><strong class="block text-sm text-slate-800" x-text="opcion[1]"></strong><span class="text-xs text-slate-500" x-text="opcion[2]"></span></span></label></template></div><button type="button" @click="guardarPerfil" :disabled="guardando" class="mt-4 w-full rounded-lg bg-cyan-600 px-4 py-2.5 text-sm font-bold text-white">Guardar perfil</button></div>
+            </div>
+
+            <form @submit.prevent="simularRetenciones" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-lg font-bold text-slate-900">Simulador</h2><p class="mt-1 text-sm text-slate-500">Usa el mismo motor y las mismas reglas de las programaciones reales.</p>
+                <div class="mt-4 grid gap-3 sm:grid-cols-2"><label><span class="mb-1 block text-sm font-semibold">Concepto</span><select x-model="simulador.tipo_pago" class="w-full rounded-lg border-slate-300 text-sm"><template x-for="item in conceptos" :key="item[0]"><option :value="item[0]" x-text="item[1]"></option></template></select></label><label><span class="mb-1 block text-sm font-semibold">Documento</span><select x-model="simulador.tipo_documento_pago" class="w-full rounded-lg border-slate-300 text-sm"><option value="cuenta_cobro">Cuenta de cobro</option><option value="factura_electronica">Factura electrónica</option></select></label><label><span class="mb-1 block text-sm font-semibold">Subtotal</span><input x-model.number="simulador.subtotal" type="number" min="0" required class="w-full rounded-lg border-slate-300 text-sm"></label><label><span class="mb-1 block text-sm font-semibold">Anticipo</span><input x-model.number="simulador.anticipo" type="number" min="0" class="w-full rounded-lg border-slate-300 text-sm"></label><label class="sm:col-span-2"><span class="mb-1 block text-sm font-semibold">Ciudad del servicio</span><input x-model="simulador.ciudad_servicio" class="w-full rounded-lg border-slate-300 text-sm" placeholder="Ej. Medellín"></label><label class="flex items-center gap-2 rounded-lg bg-slate-50 p-3"><input x-model="simulador.tiene_iva" type="checkbox" class="rounded border-slate-300 text-cyan-600"><span class="text-sm font-semibold">Cobra IVA</span></label><label class="flex items-center gap-2 rounded-lg bg-slate-50 p-3"><input x-model="simulador.persona.declarante_renta" type="checkbox" class="rounded border-slate-300 text-cyan-600"><span class="text-sm font-semibold">Declarante</span></label></div>
+                <div class="mt-3 grid gap-2 sm:grid-cols-2"><template x-for="opcion in opcionesTributarias.filter(item => !['facturador_electronico','declarante_renta'].includes(item[0]))" :key="opcion[0]"><label class="flex items-center gap-2 rounded-lg border border-slate-200 p-2 text-sm"><input x-model="simulador.persona[opcion[0]]" type="checkbox" class="rounded border-slate-300 text-cyan-600"><span x-text="opcion[1]"></span></label></template></div>
+                <button type="submit" class="mt-4 w-full rounded-lg border border-cyan-300 bg-cyan-50 px-4 py-2.5 text-sm font-bold text-cyan-800">Calcular</button>
+                <div x-show="resultadoSimulador" class="mt-4 rounded-xl bg-slate-950 p-4 text-white"><div class="grid grid-cols-2 gap-3 text-sm"><div><span class="block text-xs text-slate-400">Base mínima</span><strong x-text="formatearMoneda(resultadoSimulador?.base_minima)"></strong></div><div><span class="block text-xs text-slate-400">Retenciones</span><strong x-text="formatearMoneda(resultadoSimulador?.total_retenciones)"></strong></div></div><div class="mt-3 flex justify-between border-t border-white/20 pt-3"><span>Neto</span><strong class="text-lg text-emerald-300" x-text="formatearMoneda(resultadoSimulador?.valor_neto)"></strong></div></div>
+            </form>
+        </section>
+    </div>
+
+    <!-- HISTORIAL -->
+    <div x-show="tab === 'historial'" class="space-y-5">
+        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div><h2 class="text-lg font-bold text-slate-900">Historial de pagos</h2><p class="mt-1 text-sm text-slate-500">Filtra por uno o varios meses, corte, estado, fecha o beneficiario.</p></div>
+            <form @submit.prevent="listarProgramaciones(true)" class="mt-5 space-y-4"><div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"><label><span class="mb-1 block text-xs font-bold uppercase text-slate-500">Año</span><input x-model.number="filtrosHistorial.anio" type="number" class="w-full rounded-lg border-slate-300 text-sm"></label><label><span class="mb-1 block text-xs font-bold uppercase text-slate-500">Corte</span><select x-model="filtrosHistorial.quincena" class="w-full rounded-lg border-slate-300 text-sm"><option value="">Ambos</option><option value="1">Día 15</option><option value="2">Día 30</option></select></label><label><span class="mb-1 block text-xs font-bold uppercase text-slate-500">Estado</span><select x-model="filtrosHistorial.estado" class="w-full rounded-lg border-slate-300 text-sm"><option value="">Todos</option><option>Borrador</option><option>Revisión</option><option>Aprobado</option><option>Pagado</option><option>Cancelado</option></select></label><label><span class="mb-1 block text-xs font-bold uppercase text-slate-500">Desde</span><input x-model="filtrosHistorial.desde" type="date" class="w-full rounded-lg border-slate-300 text-sm"></label><label><span class="mb-1 block text-xs font-bold uppercase text-slate-500">Hasta</span><input x-model="filtrosHistorial.hasta" type="date" class="w-full rounded-lg border-slate-300 text-sm"></label><label><span class="mb-1 block text-xs font-bold uppercase text-slate-500">Documento o nombre</span><input x-model.trim="filtrosHistorial.buscar" type="search" class="w-full rounded-lg border-slate-300 text-sm"></label></div><div><p class="mb-2 text-xs font-bold uppercase text-slate-500">Meses</p><div class="flex flex-wrap gap-2"><template x-for="mes in meses" :key="mes.valor"><button type="button" @click="alternarMes(mes.valor)" class="rounded-full border px-3 py-1.5 text-xs font-bold" :class="filtrosHistorial.meses.includes(mes.valor) ? 'border-cyan-600 bg-cyan-600 text-white' : 'border-slate-300 text-slate-600'" x-text="mes.nombre.slice(0,3)"></button></template></div></div><button type="submit" class="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-bold text-white">Aplicar filtros</button></form>
+        </section>
+        <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div class="overflow-x-auto"><table class="min-w-[900px] w-full text-left text-sm"><thead class="bg-slate-50 text-xs uppercase text-slate-500"><tr><th class="px-5 py-3">Fecha programada</th><th class="px-5 py-3">Periodo</th><th class="px-5 py-3">Estado</th><th class="px-5 py-3 text-right">Pagos</th><th class="px-5 py-3 text-right">Retenciones</th><th class="px-5 py-3 text-right">Neto</th><th class="px-5 py-3">Pago real</th><th class="px-5 py-3"></th></tr></thead><tbody class="divide-y divide-slate-100"><template x-for="item in programaciones" :key="item.id"><tr class="hover:bg-slate-50"><td class="px-5 py-3 font-bold text-slate-800" x-text="formatearFecha(item.fecha_pago_programada)"></td><td class="px-5 py-3 text-slate-600"><span x-text="nombreMes(item.mes)"></span> <span x-text="item.anio"></span> · <span x-text="etiquetaCorte(item)"></span></td><td class="px-5 py-3"><span class="rounded-full px-2 py-1 text-xs font-bold" :class="estadoClase(item.estado)" x-text="item.estado"></span></td><td class="px-5 py-3 text-right" x-text="item.total_pagos"></td><td class="px-5 py-3 text-right text-rose-700" x-text="formatearMoneda(item.retenciones)"></td><td class="px-5 py-3 text-right font-bold text-emerald-700" x-text="formatearMoneda(item.total_neto)"></td><td class="px-5 py-3 text-slate-600" x-text="item.pagado_at ? formatearFechaHora(item.pagado_at) : 'Pendiente'"></td><td class="px-5 py-3 text-right"><button type="button" @click="abrirProgramacion(item.id, true)" class="text-xs font-bold text-cyan-700">Ver pagos</button></td></tr></template></tbody></table></div><p x-show="!programaciones.length" class="p-10 text-center text-sm text-slate-500">No hay resultados con esos filtros.</p></section>
+    </div>
+
+    <!-- AJUSTE MANUAL -->
+    <div x-show="ajuste" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" @keydown.escape.window="ajuste = null">
+        <div @click.outside="ajuste = null" class="w-full max-w-2xl rounded-2xl bg-white shadow-2xl">
+            <div class="flex items-start justify-between border-b border-slate-200 p-5"><div><p class="text-xs font-bold uppercase text-amber-700">Ajuste manual auditado</p><h2 class="mt-1 text-lg font-bold text-slate-900" x-text="ajuste?.detalle?.tercero"></h2><p class="text-sm text-slate-500" x-text="ajuste?.detalle?.referencia"></p></div><button type="button" @click="ajuste = null" class="text-2xl text-slate-400">×</button></div>
+            <div class="space-y-3 p-5"><template x-for="item in (ajuste?.retenciones || [])" :key="item.tipo"><div class="grid gap-3 rounded-xl bg-slate-50 p-3 sm:grid-cols-[1fr_130px_160px]"><div><strong class="text-sm text-slate-800" x-text="item.tipo"></strong><p class="text-xs text-slate-500">Base: <span x-text="formatearMoneda(item.base)"></span></p></div><label><span class="mb-1 block text-xs text-slate-500">Porcentaje</span><input x-model.number="item.porcentaje" @input="recalcularRetencion(item)" type="number" min="0" max="100" step="0.0001" class="w-full rounded-lg border-slate-300 text-sm"></label><label><span class="mb-1 block text-xs text-slate-500">Valor a retener</span><input x-model.number="item.valor" type="number" min="0" step="0.01" class="w-full rounded-lg border-slate-300 text-sm"></label></div></template><label class="block"><span class="mb-1 block text-sm font-bold text-slate-700">Motivo obligatorio</span><textarea x-model.trim="ajuste.motivo" rows="2" maxlength="500" placeholder="Ej. Solicitud expresa del proveedor…" class="w-full rounded-lg border-slate-300 text-sm"></textarea></label></div>
+            <div class="flex justify-end gap-2 border-t border-slate-200 p-5"><button type="button" @click="ajuste = null" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-700">Cancelar</button><button type="button" @click="guardarAjuste" :disabled="guardando" class="rounded-lg bg-slate-950 px-4 py-2 text-sm font-bold text-white">Guardar ajuste</button></div>
+        </div>
     </div>
 </div>

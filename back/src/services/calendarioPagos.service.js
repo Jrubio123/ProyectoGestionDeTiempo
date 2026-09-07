@@ -38,9 +38,9 @@ function addUtcDays(date, days) {
 
 function calcularFechaPago(anio, mes, quincena) {
   const periodo = validarPeriodo(anio, mes, quincena);
-  let fecha = periodo.quincena === 1
-    ? new Date(Date.UTC(periodo.anio, periodo.mes - 1, 15))
-    : new Date(Date.UTC(periodo.anio, periodo.mes, 0));
+  const ultimoDia = new Date(Date.UTC(periodo.anio, periodo.mes, 0)).getUTCDate();
+  const diaNominal = periodo.quincena === 1 ? 15 : Math.min(30, ultimoDia);
+  let fecha = new Date(Date.UTC(periodo.anio, periodo.mes - 1, diaNominal));
 
   while (!getDayInfo(fecha).habil) fecha = addUtcDays(fecha, -1);
   return toIsoDate(fecha);

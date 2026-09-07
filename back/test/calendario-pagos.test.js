@@ -8,9 +8,14 @@ const {
 } = require("../src/services/calendarioPagos.service");
 
 test("mueve el pago al día hábil inmediatamente anterior", () => {
-  // El 15 de agosto de 2026 cae sábado y el 31 de mayo cae domingo.
+  // El 15 de agosto de 2026 cae sábado y el 30 de mayo cae sábado.
   assert.equal(calcularFechaPago(2026, 8, 1), "2026-08-14");
   assert.equal(calcularFechaPago(2026, 5, 2), "2026-05-29");
+});
+
+test("el segundo corte usa el día 30 y solo febrero usa su último día", () => {
+  assert.equal(calcularFechaPago(2026, 7, 2), "2026-07-30");
+  assert.equal(calcularFechaPago(2028, 2, 2), "2028-02-29");
 });
 
 test("calcula ambos cortes con festivos colombianos", () => {

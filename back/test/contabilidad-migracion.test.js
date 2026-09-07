@@ -7,6 +7,10 @@ const migration = fs.readFileSync(
   path.resolve(__dirname, "../../db/migrations/2026-09-02-contabilidad-proyeccion-pagos.sql"),
   "utf8"
 );
+const operationMigration = fs.readFileSync(
+  path.resolve(__dirname, "../../db/migrations/2026-09-07-contabilidad-operacion.sql"),
+  "utf8"
+);
 
 test("modela los regímenes tributarios como banderas combinables", () => {
   for (const column of [
@@ -26,4 +30,13 @@ test("modela los regímenes tributarios como banderas combinables", () => {
 test("migra y retira el régimen único si existía en una instalación anterior", () => {
   assert.match(migration, /column_name = 'regimen_tributario'/);
   assert.match(migration, /DROP COLUMN IF EXISTS regimen_tributario/);
+});
+
+test("agrega configuración vigente, anticipos y snapshots bancarios", () => {
+  assert.match(operationMigration, /CREATE TABLE IF NOT EXISTS contabilidad_reglas_retencion/i);
+  assert.match(operationMigration, /ADD COLUMN IF NOT EXISTS es_economia_naranja BOOLEAN/i);
+  assert.match(operationMigration, /datos_beneficiario_snapshot JSONB/i);
+  assert.match(operationMigration, /regla_snapshot JSONB/i);
+  assert.match(operationMigration, /anticipo NUMERIC\(15,2\)/i);
+  assert.match(operationMigration, /uq_facturas_proveedor_numero_normalizado/i);
 });

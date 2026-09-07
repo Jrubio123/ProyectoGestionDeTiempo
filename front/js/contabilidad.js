@@ -1,29 +1,109 @@
 window.contabilidadApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
-    const ahora = new Date();
+    const hoy = new Date();
+    const nuevaFactura = () => ({
+        id: null,
+        persona_id: "",
+        numero_factura: "",
+        fecha_emision: hoy.toISOString().slice(0, 10),
+        fecha_vencimiento: "",
+        fecha_pago_preferida: "",
+        concepto: "",
+        ciudad_servicio: "",
+        subtotal: "",
+        tiene_iva: true,
+        iva: 0,
+        anticipo: 0,
+        tipo_gasto: "servicio",
+        moneda: "COP",
+        soporte_url: ""
+    });
+    const nuevaRegla = () => ({
+        id: null,
+        concepto: "servicio",
+        tipo_documento_pago: "cualquiera",
+        nombre: "",
+        base_minima: 0,
+        porcentaje_fuente_declarante: 0,
+        porcentaje_fuente_no_declarante: 0,
+        porcentaje_iva: 19,
+        porcentaje_reteiva: 15,
+        base_reteica: 785610,
+        porcentaje_reteica: 0.18,
+        vigencia_desde: hoy.toISOString().slice(0, 10),
+        vigencia_hasta: "",
+        activo: true
+    });
 
     return {
-        tab: "proyecciones",
+        tab: "programaciones",
+        tabsCargados: new Set(),
         meses: [
             "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
             "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
         ].map((nombre, index) => ({ nombre, valor: index + 1 })),
+        conceptos: [
+            ["consultor", "Consultor"],
+            ["honorarios", "Honorarios"],
+            ["compra", "Compra"],
+            ["servicio", "Servicio"],
+            ["arrendamiento_inmueble", "Arrendamiento de inmueble"],
+            ["arrendamiento_mueble", "Arrendamiento de mueble"]
+        ],
         opcionesTributarias: [
-            { campo: "es_gran_contribuyente", nombre: "Gran contribuyente", efecto: "No aplica ReteIVA" },
-            { campo: "es_autorretenedor", nombre: "Autorretenedor", efecto: "No aplica ReteFuente" },
-            { campo: "es_regimen_simple", nombre: "Régimen simple", efecto: "No aplica ReteFuente" },
-            { campo: "es_entidad_sin_animo_lucro", nombre: "Entidad sin ánimo de lucro", efecto: "No aplica ReteFuente" }
+            ["factura_en_colombia", "Factura en Colombia", "Desactivado: Capitalink, pago directo sin impuestos"],
+            ["facturador_electronico", "Facturador electrónico", "Define el documento y la base aplicable"],
+            ["declarante_renta", "Declarante de renta", "Usa la tarifa para declarantes"],
+            ["es_gran_contribuyente", "Gran contribuyente", "No aplica ReteIVA"],
+            ["es_autorretenedor", "Autorretenedor", "No aplica ReteFuente"],
+            ["es_regimen_simple", "Régimen simple", "No aplica ReteFuente; sí ReteIVA"],
+            ["es_entidad_sin_animo_lucro", "Entidad sin ánimo de lucro", "No aplica ReteFuente"],
+            ["es_economia_naranja", "Economía naranja", "No aplica ReteFuente"]
         ],
         generacion: {
-            anio: ahora.getFullYear(),
-            mes: ahora.getMonth() + 1,
-            quincena: ahora.getDate() <= 15 ? 1 : 2,
+            anio: hoy.getFullYear(),
+            mes: hoy.getMonth() + 1,
+            quincena: hoy.getDate() <= 15 ? 1 : 2,
             trm_oficial: ""
         },
+        filtrosHistorial: {
+            anio: hoy.getFullYear(),
+            meses: [],
+            quincena: "",
+            estado: "",
+            buscar: "",
+            desde: "",
+            hasta: ""
+        },
+        vistaPrevia: null,
+        programaciones: [],
+        proyeccion: null,
+        resumen: null,
+        detalles: [],
+        auditoria: [],
+        filtroDetalle: "",
+        tipoDetalle: "",
+        facturas: [],
+        filtroFacturas: "",
+        factura: nuevaFactura(),
+        busquedaBeneficiario: "",
+        beneficiarios: [],
+        beneficiarioSeleccionado: null,
+        simulacionFactura: null,
+        reglas: [],
+        regla: nuevaRegla(),
+        busquedaPerfil: "",
+        perfiles: [],
+        perfilSeleccionado: null,
+        ajuste: null,
+        mostrarAuditoria: false,
         simulador: {
             tipo_pago: "consultor",
+            tipo_documento_pago: "cuenta_cobro",
             subtotal: 2000000,
-            iva: 0,
+            tiene_iva: false,
+            anticipo: 0,
+            ciudad_servicio: "",
             persona: {
                 factura_en_colombia: true,
                 declarante_renta: true,
@@ -31,27 +111,28 @@ window.contabilidadApp = function () {
                 es_autorretenedor: false,
                 es_regimen_simple: false,
                 es_entidad_sin_animo_lucro: false,
-                ciudad_residencia: ""
+                es_economia_naranja: false
             }
         },
-        loteId: "",
-        proyeccion: null,
-        resumen: null,
-        detalles: [],
-        resultadoGeneracion: null,
-        limbo: [],
-        vistaPrevia: null,
         resultadoSimulador: null,
-        previsualizando: false,
-        generando: false,
-        consultando: false,
-        transicionando: false,
-        simulando: false,
+        cargando: false,
+        guardando: false,
         error: "",
         mensaje: "",
 
-        init() {
+        async init() {
+            this.tabsCargados.add("programaciones");
+            await this.listarProgramaciones(false);
+        },
+
+        async cambiarTab(tab) {
+            this.tab = tab;
             this.limpiarAlertas();
+            if (this.tabsCargados.has(tab)) return;
+            this.tabsCargados.add(tab);
+            if (tab === "facturas") await this.listarFacturas();
+            if (tab === "configuracion") await this.listarReglas();
+            if (tab === "historial") await this.listarProgramaciones(true);
         },
 
         limpiarAlertas() {
@@ -59,14 +140,8 @@ window.contabilidadApp = function () {
             this.mensaje = "";
         },
 
-        limpiarVistaPrevia() {
-            this.vistaPrevia = null;
-            this.resultadoGeneracion = null;
-            this.limpiarAlertas();
-        },
-
-        mensajeError(error, respaldo) {
-            return error?.response?.data?.error || error?.message || respaldo;
+        errorDe(error, fallback) {
+            return error?.response?.data?.error || error?.message || fallback;
         },
 
         payloadPeriodo() {
@@ -75,197 +150,445 @@ window.contabilidadApp = function () {
                 mes: Number(this.generacion.mes),
                 quincena: Number(this.generacion.quincena)
             };
-            if (this.generacion.trm_oficial !== "" && this.generacion.trm_oficial !== null) {
-                payload.trm_oficial = Number(this.generacion.trm_oficial);
-            }
+            if (this.generacion.trm_oficial) payload.trm_oficial = Number(this.generacion.trm_oficial);
             return payload;
         },
 
-        async previsualizarProyeccion() {
+        async cargarDisponibles() {
             this.limpiarAlertas();
-            this.previsualizando = true;
+            this.cargando = true;
             try {
-                const response = await window.axios.post(
+                const { data } = await window.axios.post(
                     `${API}/api/contabilidad/proyeccion/previsualizar`,
                     this.payloadPeriodo()
                 );
-                this.vistaPrevia = response.data;
-                this.proyeccion = null;
-                this.resumen = null;
-                this.detalles = [];
+                this.vistaPrevia = data;
+                if (data.proyeccion_existente?.id) await this.abrirProgramacion(data.proyeccion_existente.id);
             } catch (error) {
                 this.vistaPrevia = null;
-                this.error = this.mensajeError(error, "No fue posible buscar los pagos disponibles.");
+                this.error = this.errorDe(error, "No fue posible cargar los pagos disponibles.");
             } finally {
-                this.previsualizando = false;
+                this.cargando = false;
             }
         },
 
-        async generarProyeccion() {
-            if (!this.vistaPrevia?.resumen?.puede_generar) {
-                this.error = "Primero busca y confirma los pagos disponibles.";
-                return;
-            }
+        async crearProgramacion() {
+            if (!this.vistaPrevia?.resumen?.puede_generar) return;
             this.limpiarAlertas();
-            this.generando = true;
+            this.guardando = true;
             try {
-                const response = await window.axios.post(
+                const { data } = await window.axios.post(
                     `${API}/api/contabilidad/proyeccion/generar`,
                     this.payloadPeriodo()
                 );
-                this.loteId = response.data?.proyeccion?.id || "";
-                this.resultadoGeneracion = response.data?.resumen || null;
-                this.limbo = response.data?.limbo || [];
-                this.mensaje = "La proyección se generó en estado Borrador.";
-                if (this.loteId) await this.consultarProyeccion(false);
+                await this.abrirProgramacion(data.proyeccion.id);
+                await this.listarProgramaciones(false);
+                this.vistaPrevia = null;
+                this.mensaje = "Programación creada en borrador.";
             } catch (error) {
-                const codigo = error?.response?.data?.codigo;
-                this.error = codigo === "PROYECCION_SIN_DETALLES"
-                    ? "Los pagos disponibles cambiaron mientras confirmabas. Vuelve a buscarlos antes de crear el lote."
-                    : this.mensajeError(error, "No fue posible generar la proyección.");
-                this.limbo = error?.response?.data?.datos?.limbo || [];
+                this.error = this.errorDe(error, "No fue posible crear la programación.");
             } finally {
-                this.generando = false;
+                this.guardando = false;
             }
         },
 
-        async abrirProyeccionExistente() {
-            const id = this.vistaPrevia?.proyeccion_existente?.id;
-            if (!id) return;
-            this.loteId = id;
-            await this.consultarProyeccion();
-        },
-
-        async consultarProyeccion(limpiar = true) {
-            if (limpiar) this.limpiarAlertas();
-            const id = String(this.loteId || "").trim();
-            if (!id) {
-                this.error = "Ingresa el ID de la proyección.";
-                return;
-            }
-            this.consultando = true;
+        async listarProgramaciones(conFiltros = false) {
+            this.cargando = true;
             try {
-                const response = await window.axios.get(`${API}/api/contabilidad/proyeccion/${encodeURIComponent(id)}/detalles`);
-                this.proyeccion = response.data?.proyeccion || null;
-                this.resumen = response.data?.resumen || null;
-                this.detalles = response.data?.detalles || [];
-                this.loteId = this.proyeccion?.id || id;
+                const params = conFiltros ? {
+                    ...this.filtrosHistorial,
+                    meses: this.filtrosHistorial.meses.join(",")
+                } : {};
+                Object.keys(params).forEach((key) => {
+                    if (params[key] === "" || params[key] === null) delete params[key];
+                });
+                const { data } = await window.axios.get(`${API}/api/contabilidad/proyecciones`, { params });
+                this.programaciones = data.items || [];
             } catch (error) {
-                this.proyeccion = null;
-                this.resumen = null;
-                this.detalles = [];
-                this.error = this.mensajeError(error, "No fue posible consultar la proyección.");
+                this.error = this.errorDe(error, "No fue posible consultar las programaciones.");
             } finally {
-                this.consultando = false;
+                this.cargando = false;
             }
+        },
+
+        async abrirProgramacion(id, irAProgramaciones = false) {
+            this.limpiarAlertas();
+            this.cargando = true;
+            try {
+                const { data } = await window.axios.get(
+                    `${API}/api/contabilidad/proyeccion/${encodeURIComponent(id)}/detalles`
+                );
+                this.proyeccion = data.proyeccion;
+                this.resumen = data.resumen;
+                this.detalles = data.detalles || [];
+                this.mostrarAuditoria = false;
+                if (irAProgramaciones) this.tab = "programaciones";
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible abrir la programación.");
+            } finally {
+                this.cargando = false;
+            }
+        },
+
+        get detallesFiltrados() {
+            const buscar = this.normalizar(this.filtroDetalle);
+            return this.detalles.filter((item) => {
+                const coincideTipo = !this.tipoDetalle || item.origen_tipo === this.tipoDetalle;
+                const contenido = this.normalizar(`${item.tercero} ${item.numero_documento} ${item.referencia}`);
+                return coincideTipo && (!buscar || contenido.includes(buscar));
+            });
         },
 
         get accionesDisponibles() {
-            const estado = this.normalizarTexto(this.proyeccion?.estado);
+            const estado = this.normalizar(this.proyeccion?.estado);
             if (estado === "borrador") return [{ estado: "Revisión", label: "Enviar a revisión" }];
-            if (estado === "revision") return [{ estado: "Aprobado", label: "Aprobar lote" }];
-            if (estado === "aprobado") return [{ estado: "Pagado", label: "Marcar como pagado" }];
+            if (estado === "revision") return [{ estado: "Aprobado", label: "Aprobar programación" }];
+            if (estado === "aprobado") return [{ estado: "Pagado", label: "Marcar como pagada" }];
             return [];
         },
 
-        async transicionar(accion) {
-            if (!this.proyeccion?.id || !accion?.estado) return;
-            const confirmado = window.confirm(`¿Confirmas que deseas cambiar el lote a ${accion.estado}?`);
-            if (!confirmado) return;
-            this.limpiarAlertas();
-            this.transicionando = true;
+        async cambiarEstado(accion) {
+            if (!window.confirm(`¿Confirmas: ${accion.label.toLowerCase()}?`)) return;
+            this.guardando = true;
             try {
                 await window.axios.post(
                     `${API}/api/contabilidad/proyeccion/${encodeURIComponent(this.proyeccion.id)}/transicion`,
                     { estado: accion.estado }
                 );
-                await this.consultarProyeccion(false);
-                this.mensaje = `El lote cambió a ${accion.estado}.`;
+                await this.abrirProgramacion(this.proyeccion.id);
+                await this.listarProgramaciones(false);
+                this.mensaje = `La programación quedó en estado ${accion.estado}.`;
             } catch (error) {
-                this.error = this.mensajeError(error, "No fue posible cambiar el estado del lote.");
+                this.error = this.errorDe(error, "No fue posible cambiar el estado.");
             } finally {
-                this.transicionando = false;
+                this.guardando = false;
+            }
+        },
+
+        abrirAjuste(detalle) {
+            const existentes = new Map((detalle.retenciones_aplicadas || []).map((item) => [item.tipo, item]));
+            const base = Number(detalle.subtotal || 0);
+            const iva = Number(detalle.iva || 0);
+            this.ajuste = {
+                detalle,
+                motivo: detalle.motivo_ajuste || "",
+                retenciones: [
+                    { tipo: "ReteFuente", porcentaje: 0, base, valor: 0, ...(existentes.get("ReteFuente") || {}) },
+                    { tipo: "ReteIVA", porcentaje: 0, base: iva, valor: 0, ...(existentes.get("ReteIVA") || {}) },
+                    { tipo: "ReteICA", porcentaje: 0, base, valor: 0, ...(existentes.get("ReteICA") || {}) }
+                ]
+            };
+        },
+
+        recalcularRetencion(item) {
+            item.valor = Math.round(Number(item.base || 0) * Number(item.porcentaje || 0)) / 100;
+        },
+
+        async guardarAjuste() {
+            if (!this.ajuste?.motivo.trim()) {
+                this.error = "Indica el motivo del ajuste.";
+                return;
+            }
+            this.guardando = true;
+            try {
+                await window.axios.put(
+                    `${API}/api/contabilidad/proyeccion/detalle/${this.ajuste.detalle.id}/retenciones`,
+                    { retenciones: this.ajuste.retenciones, motivo: this.ajuste.motivo }
+                );
+                const id = this.proyeccion.id;
+                this.ajuste = null;
+                await this.abrirProgramacion(id);
+                this.mensaje = "Retenciones actualizadas y registradas en la auditoría.";
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible guardar el ajuste.");
+            } finally {
+                this.guardando = false;
+            }
+        },
+
+        async verAuditoria() {
+            this.mostrarAuditoria = !this.mostrarAuditoria;
+            if (!this.mostrarAuditoria || this.auditoria.length) return;
+            try {
+                const { data } = await window.axios.get(
+                    `${API}/api/contabilidad/proyeccion/${this.proyeccion.id}/auditoria`
+                );
+                this.auditoria = data.items || [];
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible consultar la auditoría.");
+            }
+        },
+
+        async exportarBanco() {
+            try {
+                const response = await window.axios.get(
+                    `${API}/api/contabilidad/proyeccion/${this.proyeccion.id}/exportar-banco`,
+                    { responseType: "blob" }
+                );
+                const blob = new Blob([response.data], { type: "text/csv;charset=utf-8" });
+                const enlace = document.createElement("a");
+                enlace.href = URL.createObjectURL(blob);
+                enlace.download = `pagos-${this.proyeccion.anio}-${String(this.proyeccion.mes).padStart(2, "0")}-corte-${this.proyeccion.quincena === 1 ? "15" : "30"}.csv`;
+                enlace.click();
+                URL.revokeObjectURL(enlace.href);
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible descargar el archivo bancario.");
+            }
+        },
+
+        async buscarBeneficiarios(destino = "factura") {
+            const valor = destino === "perfil" ? this.busquedaPerfil : this.busquedaBeneficiario;
+            if (String(valor).trim().length < 2) return;
+            try {
+                const { data } = await window.axios.get(`${API}/api/contabilidad/beneficiarios`, {
+                    params: { buscar: valor }
+                });
+                if (destino === "perfil") this.perfiles = data.items || [];
+                else this.beneficiarios = data.items || [];
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible buscar beneficiarios.");
+            }
+        },
+
+        seleccionarBeneficiario(item) {
+            this.beneficiarioSeleccionado = item;
+            this.factura.persona_id = item.id;
+            this.busquedaBeneficiario = `${item.numero_documento} — ${item.nombre}`;
+            this.beneficiarios = [];
+            this.simulacionFactura = null;
+        },
+
+        seleccionarPerfil(item) {
+            this.perfilSeleccionado = JSON.parse(JSON.stringify(item));
+            this.busquedaPerfil = `${item.numero_documento} — ${item.nombre}`;
+            this.perfiles = [];
+        },
+
+        limpiarFactura() {
+            this.factura = nuevaFactura();
+            this.beneficiarioSeleccionado = null;
+            this.busquedaBeneficiario = "";
+            this.beneficiarios = [];
+            this.simulacionFactura = null;
+        },
+
+        async simularFactura() {
+            if (!this.factura.persona_id || !Number(this.factura.subtotal)) {
+                this.error = "Selecciona el beneficiario e ingresa el subtotal.";
+                return null;
+            }
+            try {
+                const { data } = await window.axios.post(`${API}/api/contabilidad/retenciones/simular`, {
+                    persona_id: this.factura.persona_id,
+                    tipo_pago: this.factura.tipo_gasto,
+                    tipo_documento_pago: "factura_electronica",
+                    subtotal: Number(this.factura.subtotal),
+                    tiene_iva: this.factura.tiene_iva,
+                    anticipo: Number(this.factura.anticipo || 0),
+                    ciudad_servicio: this.factura.ciudad_servicio,
+                    fecha_aplicacion: this.factura.fecha_pago_preferida || this.factura.fecha_emision
+                });
+                this.simulacionFactura = data;
+                this.factura.iva = data.iva;
+                return data;
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible calcular la factura.");
+                return null;
+            }
+        },
+
+        async guardarFactura() {
+            this.limpiarAlertas();
+            const calculo = await this.simularFactura();
+            if (!calculo) return;
+            this.guardando = true;
+            try {
+                const payload = { ...this.factura, iva: calculo.iva };
+                const request = this.factura.id
+                    ? window.axios.put(`${API}/api/contabilidad/facturas-proveedores/${this.factura.id}`, payload)
+                    : window.axios.post(`${API}/api/contabilidad/facturas-proveedores`, payload);
+                await request;
+                this.limpiarFactura();
+                await this.listarFacturas();
+                this.mensaje = "Factura guardada y lista para su fecha de pago.";
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible guardar la factura.");
+            } finally {
+                this.guardando = false;
+            }
+        },
+
+        editarFactura(item) {
+            this.factura = {
+                ...nuevaFactura(),
+                ...item,
+                fecha_emision: String(item.fecha_emision || "").slice(0, 10),
+                fecha_vencimiento: String(item.fecha_vencimiento || "").slice(0, 10),
+                fecha_pago_preferida: String(item.fecha_pago_preferida || "").slice(0, 10),
+                soporte_url: item.documento_soporte?.url || ""
+            };
+            this.beneficiarioSeleccionado = { id: item.persona_id, nombre: item.beneficiario, numero_documento: item.documento };
+            this.busquedaBeneficiario = `${item.documento} — ${item.beneficiario}`;
+            this.simulacionFactura = null;
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        },
+
+        async anularFactura(item) {
+            if (!window.confirm(`¿Anular la factura ${item.numero_factura}?`)) return;
+            try {
+                await window.axios.delete(`${API}/api/contabilidad/facturas-proveedores/${item.id}`);
+                await this.listarFacturas();
+                this.mensaje = "Factura anulada.";
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible anular la factura.");
+            }
+        },
+
+        async listarFacturas() {
+            try {
+                const { data } = await window.axios.get(`${API}/api/contabilidad/facturas-proveedores`, {
+                    params: { buscar: this.filtroFacturas }
+                });
+                this.facturas = data.items || [];
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible consultar las facturas.");
+            }
+        },
+
+        async guardarPerfil() {
+            if (!this.perfilSeleccionado?.id) return;
+            this.guardando = true;
+            try {
+                const payload = Object.fromEntries(this.opcionesTributarias.map(([campo]) => [campo, !!this.perfilSeleccionado[campo]]));
+                await window.axios.put(
+                    `${API}/api/contabilidad/beneficiarios/${this.perfilSeleccionado.id}/perfil-tributario`,
+                    payload
+                );
+                this.mensaje = "Perfil tributario actualizado.";
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible guardar el perfil.");
+            } finally {
+                this.guardando = false;
+            }
+        },
+
+        async listarReglas() {
+            try {
+                const { data } = await window.axios.get(`${API}/api/contabilidad/configuracion/reglas`);
+                this.reglas = data.items || [];
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible consultar la configuración.");
+            }
+        },
+
+        editarRegla(item = null) {
+            this.regla = item ? {
+                ...JSON.parse(JSON.stringify(item)),
+                vigencia_desde: String(item.vigencia_desde || "").slice(0, 10),
+                vigencia_hasta: String(item.vigencia_hasta || "").slice(0, 10)
+            } : nuevaRegla();
+        },
+
+        async guardarRegla() {
+            this.guardando = true;
+            try {
+                const request = this.regla.id
+                    ? window.axios.put(`${API}/api/contabilidad/configuracion/reglas/${this.regla.id}`, this.regla)
+                    : window.axios.post(`${API}/api/contabilidad/configuracion/reglas`, this.regla);
+                await request;
+                await this.listarReglas();
+                this.regla = nuevaRegla();
+                this.mensaje = "Regla contable guardada.";
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible guardar la regla.");
+            } finally {
+                this.guardando = false;
             }
         },
 
         async simularRetenciones() {
-            this.limpiarAlertas();
-            this.simulando = true;
             try {
-                const response = await window.axios.post(`${API}/api/contabilidad/retenciones/simular`, {
-                    tipo_pago: this.simulador.tipo_pago,
+                const { data } = await window.axios.post(`${API}/api/contabilidad/retenciones/simular`, {
+                    ...this.simulador,
                     subtotal: Number(this.simulador.subtotal),
-                    iva: Number(this.simulador.iva || 0),
-                    persona: { ...this.simulador.persona }
+                    anticipo: Number(this.simulador.anticipo || 0)
                 });
-                this.resultadoSimulador = response.data;
+                this.resultadoSimulador = data;
             } catch (error) {
-                this.resultadoSimulador = null;
-                this.error = this.mensajeError(error, "No fue posible simular las retenciones.");
-            } finally {
-                this.simulando = false;
+                this.error = this.errorDe(error, "No fue posible simular las retenciones.");
             }
         },
 
-        normalizarTexto(value) {
-            return String(value || "")
-                .normalize("NFD")
-                .replace(/[\u0300-\u036f]/g, "")
-                .toLowerCase()
-                .trim();
+        alternarMes(mes) {
+            const index = this.filtrosHistorial.meses.indexOf(mes);
+            if (index >= 0) this.filtrosHistorial.meses.splice(index, 1);
+            else this.filtrosHistorial.meses.push(mes);
         },
 
-        nombreMes(numero) {
-            return this.meses.find((item) => item.valor === Number(numero))?.nombre || "Periodo";
+        normalizar(value) {
+            return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
         },
 
-        estadoClase(estado) {
-            const clases = {
+        nombreMes(value) {
+            return this.meses.find((item) => item.valor === Number(value))?.nombre || "Mes";
+        },
+
+        tituloProgramacion(item) {
+            return `Programación de pagos — ${this.formatearFecha(item?.fecha_pago_programada)}`;
+        },
+
+        etiquetaCorte(item) {
+            if (Number(item?.quincena) === 1) return "Corte del 15";
+            return Number(item?.mes) === 2 ? "Corte de febrero" : "Corte del 30";
+        },
+
+        estadoClase(value) {
+            const map = {
                 borrador: "bg-amber-100 text-amber-800",
                 revision: "bg-blue-100 text-blue-800",
                 aprobado: "bg-violet-100 text-violet-800",
                 pagado: "bg-emerald-100 text-emerald-800",
-                cancelado: "bg-slate-200 text-slate-700"
+                cancelado: "bg-slate-200 text-slate-700",
+                pendiente: "bg-amber-100 text-amber-800",
+                proyectada: "bg-blue-100 text-blue-800",
+                pagada: "bg-emerald-100 text-emerald-800",
+                anulada: "bg-slate-200 text-slate-600"
             };
-            return clases[this.normalizarTexto(estado)] || "bg-slate-100 text-slate-700";
+            return map[this.normalizar(value)] || "bg-slate-100 text-slate-700";
         },
 
-        tipoOrigen(tipo) {
-            return {
-                cuenta_cobro: "Cuenta de cobro",
-                factura_proveedor: "Factura de proveedor",
-                nomina: "Nómina"
-            }[tipo] || tipo || "Sin origen";
+        tipoOrigen(value) {
+            return { cuenta_cobro: "Cuenta de cobro", factura_proveedor: "Factura", nomina: "Nómina" }[value] || value;
         },
 
-        formatearMoneda(value) {
-            const numero = Number(value || 0);
+        nombreConcepto(value) {
+            return this.conceptos.find(([id]) => id === value)?.[1] || value;
+        },
+
+        formatearMoneda(value, currency = "COP") {
+            const number = Number(value || 0);
             return new Intl.NumberFormat("es-CO", {
                 style: "currency",
-                currency: "COP",
-                maximumFractionDigits: 0
-            }).format(Number.isFinite(numero) ? numero : 0);
+                currency,
+                maximumFractionDigits: currency === "COP" ? 0 : 2
+            }).format(Number.isFinite(number) ? number : 0);
         },
 
-        formatearValorOrigen(value, moneda = "COP") {
-            const numero = Number(value || 0);
-            const codigo = String(moneda || "COP").toUpperCase();
-            try {
-                return new Intl.NumberFormat("es-CO", {
-                    style: "currency",
-                    currency: codigo,
-                    maximumFractionDigits: 2
-                }).format(Number.isFinite(numero) ? numero : 0);
-            } catch (_) {
-                return `${codigo} ${Number.isFinite(numero) ? numero.toLocaleString("es-CO") : "0"}`;
-            }
+        formatearValorOrigen(value, currency = "COP") {
+            return this.formatearMoneda(value, currency || "COP");
         },
 
-        formatearFecha(value) {
-            if (!value) return "Sin fecha";
-            const partes = String(value).slice(0, 10).split("-");
-            if (partes.length !== 3) return String(value);
-            return `${partes[2]}/${partes[1]}/${partes[0]}`;
+        formatearFecha(value, includeTime = false) {
+            if (!value) return "—";
+            const dateValue = new Date(includeTime ? value : `${String(value).slice(0, 10)}T12:00:00`);
+            return new Intl.DateTimeFormat("es-CO", includeTime
+                ? { dateStyle: "medium", timeStyle: "short" }
+                : { day: "2-digit", month: "2-digit", year: "numeric" }
+            ).format(dateValue);
+        },
+
+        formatearFechaHora(value) {
+            return this.formatearFecha(value, true);
         }
     };
 };

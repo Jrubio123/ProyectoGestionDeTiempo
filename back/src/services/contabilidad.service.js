@@ -95,11 +95,50 @@ function personaFromRow(row) {
     es_autorretenedor: row.es_autorretenedor,
     es_regimen_simple: row.es_regimen_simple,
     es_entidad_sin_animo_lucro: row.es_entidad_sin_animo_lucro,
+    es_economia_naranja: row.es_economia_naranja,
     facturador_electronico: row.facturador_electronico,
     acumulado_facturacion_anual: row.acumulado_facturacion_anual,
     declarante_renta: row.declarante_renta,
-    ciudad_residencia: row.ciudad_residencia
+    ciudad_residencia: row.ciudad_residencia,
+    tipo_contrato: row.tipo_contrato
   };
+}
+
+function snapshotBeneficiario(row = {}) {
+  return {
+    persona_id: row.persona_public_id || null,
+    tipo_documento: row.tipo_documento || null,
+    tipo_documento_bancario: row.tipo_documento_bancario || null,
+    numero_documento: row.numero_documento || null,
+    nombre: row.tercero || null,
+    email: row.correo_electronico || row.correo_silver || null,
+    banco: row.banco || null,
+    codigo_banco: row.codigo_conversor || null,
+    codigo_bancolombia: row.codigo_bancolombia || null,
+    tipo_cuenta: row.tipo_cuenta || null,
+    tipo_transaccion: row.tipo_transaccion || null,
+    numero_cuenta: row.numero_cuenta || null
+  };
+}
+
+async function consultarReglaVigente(client, tipoPago, tipoDocumentoPago, fecha) {
+  if (tipoPago === "nomina") return null;
+  const result = await client.query(
+    `SELECT public_id::text, concepto, tipo_documento_pago, nombre, base_minima,
+            porcentaje_fuente_declarante, porcentaje_fuente_no_declarante,
+            porcentaje_iva, porcentaje_reteiva, base_reteica, porcentaje_reteica,
+            vigencia_desde, vigencia_hasta
+       FROM contabilidad_reglas_retencion
+      WHERE concepto = $1 AND activo = TRUE
+        AND tipo_documento_pago IN ($2, 'cualquiera')
+        AND vigencia_desde <= $3::date
+        AND (vigencia_hasta IS NULL OR vigencia_hasta >= $3::date)
+      ORDER BY CASE WHEN tipo_documento_pago = $2 THEN 0 ELSE 1 END,
+               vigencia_desde DESC, id DESC
+      LIMIT 1`,
+    [tipoPago, tipoDocumentoPago || "cualquiera", fecha]
+  );
+  return result.rows[0] || null;
 }
 
 function mapProyeccion(row) {
@@ -154,7 +193,12 @@ function prepararDetalle({
   iva = 0,
   moneda,
   trmOficial,
-  esNomina = false
+  esNomina = false,
+  anticipo = 0,
+  tipoDocumentoPago = "cuenta_cobro",
+  ciudadServicio = "",
+  regla = null,
+  beneficiario = {}
 }) {
   const valorOriginal = roundMoney(Number(subtotal));
   const monedaOriginal = esNomina ? "COP" : monedaOrigen({ moneda_origen: moneda }, persona);
@@ -174,7 +218,11 @@ function prepararDetalle({
     subtotal: subtotalCop,
     iva: ivaCop,
     persona,
-    tipo_pago: esNomina ? "nomina" : tipoPago
+    tipo_pago: esNomina ? "nomina" : tipoPago,
+    tipo_documento_pago: tipoDocumentoPago,
+    anticipo,
+    ciudad_servicio: ciudadServicio,
+    regla: regla || {}
   });
 
   return {
@@ -182,13 +230,17 @@ function prepararDetalle({
     origen_id: origenId,
     persona_id: persona.id,
     tipo_pago: calculo.tipo_pago,
+    tipo_documento_pago: tipoDocumentoPago,
     moneda_origen: monedaOriginal,
     valor_origen: valorOriginal,
     trm_aplicada: requiereTrm ? trmOficial : null,
     subtotal: calculo.subtotal,
+    anticipo: calculo.anticipo,
     iva: calculo.iva,
     retenciones_aplicadas: calculo.retenciones_aplicadas,
-    valor_neto: calculo.valor_neto
+    valor_neto: calculo.valor_neto,
+    datos_beneficiario_snapshot: snapshotBeneficiario(beneficiario),
+    regla_snapshot: regla || calculo.regla_aplicada || {}
   };
 }
 
@@ -205,13 +257,14 @@ async function insertarDetalle(client, proyeccionId, detalle, userId) {
   const result = await client.query(
     `
     INSERT INTO proyeccion_pagos_detalle (
-      proyeccion_id, origen_tipo, origen_id, persona_id, tipo_pago,
+      proyeccion_id, origen_tipo, origen_id, persona_id, tipo_pago, tipo_documento_pago,
       moneda_origen, valor_origen, trm_aplicada, subtotal, iva,
-      retenciones_aplicadas, valor_neto, created_by
+      anticipo, retenciones_aplicadas, valor_neto,
+      datos_beneficiario_snapshot, regla_snapshot, created_by
     ) VALUES (
-      $1, $2, $3, $4, $5,
-      $6, $7, $8, $9, $10,
-      $11::jsonb, $12, $13
+      $1, $2, $3, $4, $5, $6,
+      $7, $8, $9, $10, $11,
+      $12, $13::jsonb, $14, $15::jsonb, $16::jsonb, $17
     )
     RETURNING id, public_id
     `,
@@ -221,13 +274,17 @@ async function insertarDetalle(client, proyeccionId, detalle, userId) {
       detalle.origen_id,
       detalle.persona_id,
       detalle.tipo_pago,
+      detalle.tipo_documento_pago,
       detalle.moneda_origen,
       detalle.valor_origen,
       detalle.trm_aplicada,
       detalle.subtotal,
       detalle.iva,
+      detalle.anticipo || 0,
       JSON.stringify(detalle.retenciones_aplicadas),
       detalle.valor_neto,
+      JSON.stringify(detalle.datos_beneficiario_snapshot || {}),
+      JSON.stringify(detalle.regla_snapshot || {}),
       userId
     ]
   );
@@ -245,11 +302,19 @@ async function consultarCuentasPendientes(client, { bloquear = true } = {}) {
       p.numero_documento,
       p.factura_en_colombia, p.es_gran_contribuyente, p.es_autorretenedor,
       p.es_regimen_simple, p.es_entidad_sin_animo_lucro, p.facturador_electronico,
-      p.acumulado_facturacion_anual, p.declarante_renta, p.ciudad_residencia,
+      p.es_economia_naranja, p.acumulado_facturacion_anual, p.declarante_renta,
+      p.ciudad_residencia, p.tipo_contrato,
+      di.titulo AS tipo_documento, di.codigo_bancario AS tipo_documento_bancario,
+      p.correo_electronico, p.correo_silver, b.titulo AS banco,
+      b.codigo_bancolombia, b.codigo_conversor, tcb.titulo AS tipo_cuenta,
+      tcb.tipo_transaccion, p.numero_cuenta,
       COALESCE(p.moneda_cobro::text, u.moneda_cobro::text, 'COP') AS moneda_origen
     FROM cuenta_cobro cc
     LEFT JOIN usuarios u ON u.id = cc.created_by
     LEFT JOIN personas p ON p.id = u.persona_id
+    LEFT JOIN documento_identidad di ON di.id = p.tipo_documento_id
+    LEFT JOIN bancos b ON b.id = p.banco_id
+    LEFT JOIN tipo_cuenta_bancaria tcb ON tcb.id = p.tipo_cuenta_id
     WHERE cc.estado::text = 'Aprobado'
       AND cc.proyeccion_pago_id IS NULL
     ORDER BY cc.id
@@ -258,23 +323,42 @@ async function consultarCuentasPendientes(client, { bloquear = true } = {}) {
   return result.rows;
 }
 
-async function consultarFacturasPendientes(client, fechaLimite, { bloquear = true } = {}) {
+function fechaNominalPeriodo(periodo) {
+  const ultimoDia = new Date(Date.UTC(periodo.anio, periodo.mes, 0)).getUTCDate();
+  const dia = Number(periodo.quincena) === 1 ? 15 : Math.min(30, ultimoDia);
+  return `${periodo.anio}-${String(periodo.mes).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
+}
+
+async function consultarFacturasPendientes(client, periodoOFecha, { bloquear = true } = {}) {
+  const fechaLimite = periodoOFecha && typeof periodoOFecha === "object"
+    ? fechaNominalPeriodo(periodoOFecha)
+    : periodoOFecha;
   const result = await client.query(`
     SELECT
       fp.id, fp.public_id::text, fp.numero_factura AS referencia,
-      fp.fecha_emision, fp.concepto, fp.subtotal, fp.iva, fp.tipo_gasto,
+      fp.fecha_emision, fp.fecha_vencimiento, fp.concepto, fp.subtotal, fp.iva,
+      fp.anticipo, fp.tiene_iva, fp.ciudad_servicio, fp.moneda, fp.tipo_gasto,
       p.id AS persona_id, p.public_id::text AS persona_public_id,
       BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) AS tercero,
       p.numero_documento,
       p.factura_en_colombia, p.es_gran_contribuyente, p.es_autorretenedor,
       p.es_regimen_simple, p.es_entidad_sin_animo_lucro, p.facturador_electronico,
-      p.acumulado_facturacion_anual, p.declarante_renta, p.ciudad_residencia,
-      COALESCE(p.moneda_cobro::text, 'COP') AS moneda_origen
+      p.es_economia_naranja, p.acumulado_facturacion_anual, p.declarante_renta,
+      p.ciudad_residencia, p.tipo_contrato,
+      di.titulo AS tipo_documento, di.codigo_bancario AS tipo_documento_bancario,
+      p.correo_electronico, p.correo_silver, b.titulo AS banco,
+      b.codigo_bancolombia, b.codigo_conversor, tcb.titulo AS tipo_cuenta,
+      tcb.tipo_transaccion, p.numero_cuenta,
+      COALESCE(fp.moneda, p.moneda_cobro::text, 'COP') AS moneda_origen
     FROM facturas_proveedores fp
     JOIN personas p ON p.id = fp.persona_id
+    LEFT JOIN documento_identidad di ON di.id = p.tipo_documento_id
+    LEFT JOIN bancos b ON b.id = p.banco_id
+    LEFT JOIN tipo_cuenta_bancaria tcb ON tcb.id = p.tipo_cuenta_id
     WHERE fp.estado = 'Pendiente'
       AND fp.proyeccion_pago_id IS NULL
       AND fp.fecha_emision <= $1::date
+      AND (fp.fecha_pago_preferida IS NULL OR fp.fecha_pago_preferida <= $1::date)
     ORDER BY fp.fecha_emision, fp.id
     ${bloquear ? "FOR UPDATE OF fp" : ""}
   `, [fechaLimite]);
@@ -291,10 +375,18 @@ async function consultarNominaPendiente(client, periodo, { bloquear = true } = {
       p.numero_documento,
       p.factura_en_colombia, p.es_gran_contribuyente, p.es_autorretenedor,
       p.es_regimen_simple, p.es_entidad_sin_animo_lucro, p.facturador_electronico,
-      p.acumulado_facturacion_anual, p.declarante_renta, p.ciudad_residencia,
+      p.es_economia_naranja, p.acumulado_facturacion_anual, p.declarante_renta,
+      p.ciudad_residencia, p.tipo_contrato,
+      di.titulo AS tipo_documento, di.codigo_bancario AS tipo_documento_bancario,
+      p.correo_electronico, p.correo_silver, b.titulo AS banco,
+      b.codigo_bancolombia, b.codigo_conversor, tcb.titulo AS tipo_cuenta,
+      tcb.tipo_transaccion, p.numero_cuenta,
       'COP' AS moneda_origen
     FROM nomina_pagos_manual np
     JOIN personas p ON p.id = np.persona_id
+    LEFT JOIN documento_identidad di ON di.id = p.tipo_documento_id
+    LEFT JOIN bancos b ON b.id = p.banco_id
+    LEFT JOIN tipo_cuenta_bancaria tcb ON tcb.id = p.tipo_cuenta_id
     WHERE np.anio = $1 AND np.mes = $2 AND np.quincena = $3
       AND np.estado = 'Pendiente'
       AND np.proyeccion_pago_id IS NULL
@@ -306,7 +398,27 @@ async function consultarNominaPendiente(client, periodo, { bloquear = true } = {
   return result.rows;
 }
 
-function construirVistaPrevia({ input, cuentas = [], facturas = [], nominas = [], existente = null }) {
+function reglaParaVista(reglas, tipoPago, tipoDocumentoPago) {
+  return reglas.find((item) =>
+    item.concepto === tipoPago && item.tipo_documento_pago === tipoDocumentoPago
+  ) || reglas.find((item) =>
+    item.concepto === tipoPago && item.tipo_documento_pago === "cualquiera"
+  ) || null;
+}
+
+function resumenCalculo(detalle) {
+  return {
+    subtotal: detalle.subtotal,
+    iva: detalle.iva,
+    anticipo: detalle.anticipo,
+    retefuente: retencionValue(detalle.retenciones_aplicadas, "ReteFuente"),
+    reteiva: retencionValue(detalle.retenciones_aplicadas, "ReteIVA"),
+    reteica: retencionValue(detalle.retenciones_aplicadas, "ReteICA"),
+    valor_neto: detalle.valor_neto
+  };
+}
+
+function construirVistaPrevia({ input, cuentas = [], facturas = [], nominas = [], reglas = [], existente = null }) {
   const pagos = [];
   const cuentasOtraQuincena = [];
   const cuentasLimbo = [];
@@ -336,12 +448,35 @@ function construirVistaPrevia({ input, cuentas = [], facturas = [], nominas = []
     } else if (clasificacion.quincena !== input.quincena) {
       cuentasOtraQuincena.push(resumenCuenta);
     } else {
+      const esVinculado = normalizeText(cuenta.tipo_contrato) === "vinculado";
+      const tipoPago = esVinculado ? "nomina" : "consultor";
+      const tipoDocumentoPago = esVinculado
+        ? "nomina"
+        : (cuenta.facturador_electronico ? "factura_electronica" : "cuenta_cobro");
+      try {
+        resumenCuenta.calculo = resumenCalculo(prepararDetalle({
+          origenTipo: "cuenta_cobro",
+          origenId: cuenta.id,
+          persona: personaFromRow(cuenta),
+          tipoPago,
+          tipoDocumentoPago,
+          subtotal: cuenta.total_cuenta_cobro,
+          moneda: cuenta.moneda_origen,
+          trmOficial: input.trm_oficial,
+          esNomina: esVinculado,
+          regla: reglaParaVista(reglas, tipoPago, tipoDocumentoPago),
+          beneficiario: cuenta
+        }));
+      } catch (error) {
+        if (error?.code !== "TRM_REQUERIDA") throw error;
+        resumenCuenta.error_calculo = error.message;
+      }
       pagos.push(resumenCuenta);
     }
   }
 
   for (const factura of facturas) {
-    pagos.push({
+    const pago = {
       id: factura.public_id,
       origen_tipo: "factura_proveedor",
       tercero: factura.tercero || "Persona sin nombre",
@@ -351,11 +486,32 @@ function construirVistaPrevia({ input, cuentas = [], facturas = [], nominas = []
       moneda_origen: monedaOrigen(factura, personaFromRow(factura)),
       fecha_emision: factura.fecha_emision || null,
       tipo_pago: factura.tipo_gasto
-    });
+    };
+    try {
+      pago.calculo = resumenCalculo(prepararDetalle({
+        origenTipo: "factura_proveedor",
+        origenId: factura.id,
+        persona: personaFromRow(factura),
+        tipoPago: factura.tipo_gasto,
+        tipoDocumentoPago: "factura_electronica",
+        subtotal: factura.subtotal,
+        iva: factura.iva,
+        anticipo: factura.anticipo,
+        ciudadServicio: factura.ciudad_servicio,
+        moneda: factura.moneda_origen,
+        trmOficial: input.trm_oficial,
+        regla: reglaParaVista(reglas, factura.tipo_gasto, "factura_electronica"),
+        beneficiario: factura
+      }));
+    } catch (error) {
+      if (error?.code !== "TRM_REQUERIDA") throw error;
+      pago.error_calculo = error.message;
+    }
+    pagos.push(pago);
   }
 
   for (const nomina of nominas) {
-    pagos.push({
+    const pago = {
       id: nomina.public_id,
       origen_tipo: "nomina",
       tercero: nomina.tercero || "Persona sin nombre",
@@ -363,11 +519,24 @@ function construirVistaPrevia({ input, cuentas = [], facturas = [], nominas = []
       referencia: `Nómina ${input.anio}-${String(input.mes).padStart(2, "0")} Q${input.quincena}`,
       valor_origen: Number(nomina.valor_neto || 0),
       moneda_origen: "COP"
-    });
+    };
+    pago.calculo = resumenCalculo(prepararDetalle({
+      origenTipo: "nomina",
+      origenId: nomina.id,
+      persona: personaFromRow(nomina),
+      tipoPago: "nomina",
+      tipoDocumentoPago: "nomina",
+      subtotal: nomina.valor_neto,
+      moneda: "COP",
+      esNomina: true,
+      beneficiario: nomina
+    }));
+    pagos.push(pago);
   }
 
   const requiereTrm = pagos.some((pago) => pago.moneda_origen !== "COP");
   const trmFaltante = requiereTrm && !input.trm_oficial;
+  const calculados = pagos.map((pago) => pago.calculo).filter(Boolean);
   return {
     periodo: {
       anio: input.anio,
@@ -385,6 +554,14 @@ function construirVistaPrevia({ input, cuentas = [], facturas = [], nominas = []
       cuentas_otra_quincena: cuentasOtraQuincena.length,
       cuentas_en_limbo: cuentasLimbo.length,
       cuentas_aprobadas_pendientes: cuentas.length,
+      subtotal: roundMoney(calculados.reduce((total, item) => total + item.subtotal, 0)),
+      iva: roundMoney(calculados.reduce((total, item) => total + item.iva, 0)),
+      anticipos: roundMoney(calculados.reduce((total, item) => total + item.anticipo, 0)),
+      retenciones: roundMoney(calculados.reduce(
+        (total, item) => total + item.retefuente + item.reteiva + item.reteica,
+        0
+      )),
+      total_neto: roundMoney(calculados.reduce((total, item) => total + item.valor_neto, 0)),
       requiere_trm: requiereTrm,
       trm_faltante: trmFaltante,
       puede_generar: pagos.length > 0 && !trmFaltante && !existente
@@ -401,7 +578,7 @@ async function previsualizarProyeccion(req, res, deps = {}) {
   const dbPool = deps.pool || pool;
   try {
     const input = validarGeneracion(req.body || {});
-    const [existenteResult, cuentas, facturas, nominas] = await Promise.all([
+    const [existenteResult, cuentas, facturas, nominas, reglasResult] = await Promise.all([
       dbPool.query(
         `SELECT public_id::text, mes, anio, quincena, trm_oficial, estado,
                 fecha_pago_programada, created_at, updated_at
@@ -411,14 +588,25 @@ async function previsualizarProyeccion(req, res, deps = {}) {
         [input.anio, input.mes, input.quincena]
       ),
       consultarCuentasPendientes(dbPool, { bloquear: false }),
-      consultarFacturasPendientes(dbPool, input.fecha_pago_programada, { bloquear: false }),
-      consultarNominaPendiente(dbPool, input, { bloquear: false })
+      consultarFacturasPendientes(dbPool, input, { bloquear: false }),
+      consultarNominaPendiente(dbPool, input, { bloquear: false }),
+      dbPool.query(
+        `SELECT concepto, tipo_documento_pago, base_minima,
+                porcentaje_fuente_declarante, porcentaje_fuente_no_declarante,
+                porcentaje_iva, porcentaje_reteiva, base_reteica, porcentaje_reteica
+           FROM contabilidad_reglas_retencion
+          WHERE activo = TRUE AND vigencia_desde <= $1::date
+            AND (vigencia_hasta IS NULL OR vigencia_hasta >= $1::date)
+          ORDER BY vigencia_desde DESC, id DESC`,
+        [input.fecha_pago_programada]
+      )
     ]);
     return res.json(construirVistaPrevia({
       input,
       cuentas,
       facturas,
       nominas,
+      reglas: reglasResult.rows,
       existente: existenteResult.rows[0] || null
     }));
   } catch (error) {
@@ -471,7 +659,7 @@ async function generarProyeccion(req, res, deps = {}) {
     );
     const lote = loteResult.rows[0];
     const cuentas = await consultarCuentasPendientes(client);
-    const facturas = await consultarFacturasPendientes(client, input.fecha_pago_programada);
+    const facturas = await consultarFacturasPendientes(client, input);
     const nominas = await consultarNominaPendiente(client, input);
 
     const detalles = [];
@@ -512,16 +700,33 @@ async function generarProyeccion(req, res, deps = {}) {
           "CUENTA_SIN_TOTAL"
         );
       }
+      const esVinculado = normalizeText(cuenta.tipo_contrato) === "vinculado";
+      const tipoPago = esVinculado ? "nomina" : "consultor";
+      const tipoDocumentoPago = esVinculado
+        ? "nomina"
+        : (cuenta.facturador_electronico ? "factura_electronica" : "cuenta_cobro");
+      const regla = esVinculado
+        ? null
+        : await consultarReglaVigente(
+          client,
+          tipoPago,
+          tipoDocumentoPago,
+          input.fecha_pago_programada
+        );
       detalles.push({
         data: prepararDetalle({
           origenTipo: "cuenta_cobro",
           origenId: cuenta.id,
           persona: personaFromRow(cuenta),
-          tipoPago: "consultor",
+          tipoPago,
+          tipoDocumentoPago,
           subtotal: cuenta.total_cuenta_cobro,
           iva: 0,
           moneda: cuenta.moneda_origen,
-          trmOficial: input.trm_oficial
+          trmOficial: input.trm_oficial,
+          esNomina: esVinculado,
+          regla,
+          beneficiario: cuenta
         }),
         publicId: cuenta.public_id,
         clasificacion
@@ -529,16 +734,28 @@ async function generarProyeccion(req, res, deps = {}) {
     }
 
     for (const factura of facturas) {
+      const tipoDocumentoPago = "factura_electronica";
+      const regla = await consultarReglaVigente(
+        client,
+        factura.tipo_gasto,
+        tipoDocumentoPago,
+        input.fecha_pago_programada
+      );
       detalles.push({
         data: prepararDetalle({
           origenTipo: "factura_proveedor",
           origenId: factura.id,
           persona: personaFromRow(factura),
           tipoPago: factura.tipo_gasto,
+          tipoDocumentoPago,
           subtotal: factura.subtotal,
           iva: factura.iva,
+          anticipo: factura.anticipo,
+          ciudadServicio: factura.ciudad_servicio,
           moneda: factura.moneda_origen,
-          trmOficial: input.trm_oficial
+          trmOficial: input.trm_oficial,
+          regla,
+          beneficiario: factura
         }),
         publicId: factura.public_id
       });
@@ -554,7 +771,9 @@ async function generarProyeccion(req, res, deps = {}) {
           subtotal: nomina.valor_neto,
           moneda: "COP",
           trmOficial: null,
-          esNomina: true
+          esNomina: true,
+          tipoDocumentoPago: "nomina",
+          beneficiario: nomina
         }),
         publicId: nomina.public_id
       });
@@ -644,7 +863,7 @@ async function simularRetenciones(req, res, deps = {}) {
         SELECT public_id::text, factura_en_colombia,
                es_gran_contribuyente, es_autorretenedor,
                es_regimen_simple, es_entidad_sin_animo_lucro,
-               facturador_electronico, acumulado_facturacion_anual,
+               es_economia_naranja, facturador_electronico, acumulado_facturacion_anual,
                declarante_renta, ciudad_residencia
         FROM personas WHERE public_id = $1 LIMIT 1
         `,
@@ -653,11 +872,26 @@ async function simularRetenciones(req, res, deps = {}) {
       if (!result.rows[0]) throw new ContabilidadError("Persona no encontrada", 404, "PERSONA_NO_ENCONTRADA");
       persona = { ...result.rows[0], ...(persona || {}) };
     }
+    const tipoPago = req.body?.tipo_pago;
+    const tipoDocumentoPago = req.body?.tipo_documento_pago ||
+      (persona?.facturador_electronico ? "factura_electronica" : "cuenta_cobro");
+    const fechaAplicacion = req.body?.fecha_aplicacion || new Date().toISOString().slice(0, 10);
+    const regla = await consultarReglaVigente(
+      dbPool,
+      normalizeText(tipoPago).replace(/[\s-]+/g, "_"),
+      tipoDocumentoPago,
+      fechaAplicacion
+    );
     return res.json(calcularRetenciones({
       subtotal: req.body?.subtotal,
       iva: req.body?.iva ?? 0,
       persona: persona || {},
-      tipo_pago: req.body?.tipo_pago
+      tipo_pago: tipoPago,
+      tipo_documento_pago: tipoDocumentoPago,
+      tiene_iva: req.body?.tiene_iva,
+      anticipo: req.body?.anticipo ?? 0,
+      ciudad_servicio: req.body?.ciudad_servicio,
+      regla: regla || {}
     }));
   } catch (error) {
     return handleError(res, error, "simulando las retenciones");
@@ -674,31 +908,42 @@ function retencionValue(retenciones, tipo) {
 
 function mapDetalle(row) {
   const retenciones = parseJsonArray(row.retenciones_aplicadas);
+  const beneficiario = parseJsonObject(row.datos_beneficiario_snapshot);
   const subtotal = Number(row.subtotal || 0);
   const iva = Number(row.iva || 0);
+  const anticipo = Number(row.anticipo || 0);
   return {
     id: row.public_id,
     origen_tipo: row.origen_tipo,
     origen_id: row.origen_public_id,
     referencia: row.referencia || null,
     persona_id: row.persona_public_id,
-    tercero: row.tercero,
-    numero_documento: row.numero_documento || null,
-    banco: row.banco || null,
-    tipo_cuenta: row.tipo_cuenta || null,
-    numero_cuenta: row.numero_cuenta || null,
+    tercero: beneficiario.nombre || row.tercero,
+    numero_documento: beneficiario.numero_documento || row.numero_documento || null,
+    tipo_documento_bancario: beneficiario.tipo_documento_bancario || row.tipo_documento_bancario || null,
+    banco: beneficiario.banco || row.banco || null,
+    codigo_banco: beneficiario.codigo_banco || row.codigo_banco || null,
+    tipo_cuenta: beneficiario.tipo_cuenta || row.tipo_cuenta || null,
+    tipo_transaccion: beneficiario.tipo_transaccion || row.tipo_transaccion || null,
+    numero_cuenta: beneficiario.numero_cuenta || row.numero_cuenta || null,
+    email: beneficiario.email || row.email || null,
     tipo_pago: row.tipo_pago,
+    tipo_documento_pago: row.tipo_documento_pago || null,
     moneda_origen: row.moneda_origen,
     valor_origen: Number(row.valor_origen || 0),
     trm_aplicada: row.trm_aplicada === null ? null : Number(row.trm_aplicada),
     subtotal,
     iva,
     bruto: roundMoney(subtotal + iva),
+    anticipo,
     retenciones_aplicadas: retenciones,
     retefuente: retencionValue(retenciones, "ReteFuente"),
     reteiva: retencionValue(retenciones, "ReteIVA"),
     reteica: retencionValue(retenciones, "ReteICA"),
     valor_neto: Number(row.valor_neto || 0),
+    calculo_origen: row.calculo_origen || "Automatico",
+    motivo_ajuste: row.motivo_ajuste || null,
+    regla_aplicada: parseJsonObject(row.regla_snapshot),
     created_at: row.created_at,
     updated_at: row.updated_at
   };
@@ -741,12 +986,17 @@ async function getDetallesProyeccion(req, res, deps = {}) {
         END AS referencia,
         p.public_id::text AS persona_public_id,
         BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) AS tercero,
-        p.numero_documento, b.titulo AS banco, tcb.titulo AS tipo_cuenta,
-        p.numero_cuenta, d.tipo_pago, d.moneda_origen, d.valor_origen,
-        d.trm_aplicada, d.subtotal, d.iva, d.retenciones_aplicadas,
-        d.valor_neto, d.created_at, d.updated_at
+        p.numero_documento, di.codigo_bancario AS tipo_documento_bancario,
+        b.titulo AS banco, b.codigo_conversor AS codigo_banco,
+        tcb.titulo AS tipo_cuenta, tcb.tipo_transaccion,
+        p.numero_cuenta, COALESCE(p.correo_electronico, p.correo_silver) AS email,
+        d.tipo_pago, d.tipo_documento_pago, d.moneda_origen, d.valor_origen,
+        d.trm_aplicada, d.subtotal, d.iva, d.anticipo, d.retenciones_aplicadas,
+        d.valor_neto, d.datos_beneficiario_snapshot, d.regla_snapshot,
+        d.calculo_origen, d.motivo_ajuste, d.created_at, d.updated_at
       FROM proyeccion_pagos_detalle d
       JOIN personas p ON p.id = d.persona_id
+      LEFT JOIN documento_identidad di ON di.id = p.tipo_documento_id
       LEFT JOIN bancos b ON b.id = p.banco_id
       LEFT JOIN tipo_cuenta_bancaria tcb ON tcb.id = p.tipo_cuenta_id
       LEFT JOIN cuenta_cobro cc
@@ -767,7 +1017,10 @@ async function getDetallesProyeccion(req, res, deps = {}) {
       proyeccion: mapProyeccion(loteResult.rows[0]),
       resumen: {
         total_detalles: detalles.length,
+        total_subtotal: roundMoney(detalles.reduce((total, item) => total + item.subtotal, 0)),
+        total_iva: roundMoney(detalles.reduce((total, item) => total + item.iva, 0)),
         total_bruto: roundMoney(detalles.reduce((total, item) => total + item.bruto, 0)),
+        total_anticipos: roundMoney(detalles.reduce((total, item) => total + item.anticipo, 0)),
         total_retenciones: roundMoney(detalles.reduce(
           (total, item) => total + item.retefuente + item.reteiva + item.reteica,
           0
@@ -836,7 +1089,7 @@ async function actualizarRetencionesDetalle(req, res, deps = {}) {
     await client.query("BEGIN");
     const result = await client.query(
       `
-      SELECT d.id, d.public_id::text, d.proyeccion_id, d.subtotal, d.iva,
+      SELECT d.id, d.public_id::text, d.proyeccion_id, d.subtotal, d.iva, d.anticipo,
              d.retenciones_aplicadas, d.valor_neto, pp.estado
       FROM proyeccion_pagos_detalle d
       JOIN proyeccion_pagos pp ON pp.id = d.proyeccion_id
@@ -855,7 +1108,13 @@ async function actualizarRetencionesDetalle(req, res, deps = {}) {
         "PROYECCION_NO_EDITABLE"
       );
     }
-    const bruto = roundMoney(Number(detalle.subtotal) + Number(detalle.iva));
+    const bruto = roundMoney(
+      Number(detalle.subtotal) + Number(detalle.iva) - Number(detalle.anticipo || 0)
+    );
+    const motivo = String(req.body?.motivo || "").trim().slice(0, 500);
+    if (!motivo) {
+      throw new ContabilidadError("Debe indicar el motivo del ajuste manual");
+    }
     const normalizadas = validarRetencionesManuales(
       req.body?.retenciones_aplicadas ?? req.body?.retenciones,
       bruto
@@ -865,11 +1124,13 @@ async function actualizarRetencionesDetalle(req, res, deps = {}) {
       `
       UPDATE proyeccion_pagos_detalle
       SET retenciones_aplicadas = $1::jsonb, valor_neto = $2,
+          calculo_origen = 'Manual', motivo_ajuste = $3,
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = $3
-      RETURNING public_id::text, retenciones_aplicadas, valor_neto, updated_at
+      WHERE id = $4
+      RETURNING public_id::text, retenciones_aplicadas, valor_neto,
+                calculo_origen, motivo_ajuste, updated_at
       `,
-      [JSON.stringify(normalizadas.retenciones), valorNeto, detalle.id]
+      [JSON.stringify(normalizadas.retenciones), valorNeto, motivo, detalle.id]
     );
     await registrarAuditoria(client, {
       proyeccionId: detalle.proyeccion_id,
@@ -882,7 +1143,7 @@ async function actualizarRetencionesDetalle(req, res, deps = {}) {
         retenciones_nuevas: normalizadas.retenciones,
         valor_neto_anterior: Number(detalle.valor_neto),
         valor_neto_nuevo: valorNeto,
-        motivo: String(req.body?.motivo || "").trim().slice(0, 500) || null
+        motivo
       },
       userId: req.user.id
     });
@@ -954,6 +1215,38 @@ async function sincronizarFuentesPorTransicion(client, proyeccionId, estadoDesti
   );
 }
 
+async function validarProgramacionAprobable(client, proyeccionId) {
+  const result = await client.query(
+    `SELECT public_id::text, datos_beneficiario_snapshot
+       FROM proyeccion_pagos_detalle
+      WHERE proyeccion_id = $1`,
+    [proyeccionId]
+  );
+  if (!result.rows.length) {
+    throw new ContabilidadError("La programación no tiene pagos", 409, "PROYECCION_SIN_DETALLES");
+  }
+  const requeridos = [
+    "tipo_documento_bancario",
+    "numero_documento",
+    "nombre",
+    "codigo_banco",
+    "tipo_transaccion",
+    "numero_cuenta"
+  ];
+  const incompletos = result.rows.filter((row) => {
+    const datos = parseJsonObject(row.datos_beneficiario_snapshot);
+    return requeridos.some((campo) => !String(datos[campo] ?? "").trim());
+  });
+  if (incompletos.length) {
+    throw new ContabilidadError(
+      `${incompletos.length} pago(s) tienen datos bancarios incompletos`,
+      422,
+      "DATOS_BANCARIOS_INCOMPLETOS",
+      { detalles: incompletos.map((item) => item.public_id) }
+    );
+  }
+}
+
 async function transicionarProyeccion(req, res, deps = {}) {
   const dbPool = deps.pool || pool;
   let client;
@@ -981,16 +1274,19 @@ async function transicionarProyeccion(req, res, deps = {}) {
         "TRANSICION_NO_PERMITIDA"
       );
     }
+    if (destino === ESTADOS.APROBADO) {
+      await validarProgramacionAprobable(client, current.id);
+    }
     const updatedResult = await client.query(
       `
       UPDATE proyeccion_pagos
-      SET estado = $1,
-          revisado_por = CASE WHEN $1 = 'Revisión' THEN $2 ELSE revisado_por END,
-          revisado_at = CASE WHEN $1 = 'Revisión' THEN CURRENT_TIMESTAMP ELSE revisado_at END,
-          aprobado_por = CASE WHEN $1 = 'Aprobado' THEN $2 ELSE aprobado_por END,
-          aprobado_at = CASE WHEN $1 = 'Aprobado' THEN CURRENT_TIMESTAMP ELSE aprobado_at END,
-          pagado_por = CASE WHEN $1 = 'Pagado' THEN $2 ELSE pagado_por END,
-          pagado_at = CASE WHEN $1 = 'Pagado' THEN CURRENT_TIMESTAMP ELSE pagado_at END,
+      SET estado = $1::varchar,
+          revisado_por = CASE WHEN $1::varchar = 'Revisión' THEN $2 ELSE revisado_por END,
+          revisado_at = CASE WHEN $1::varchar = 'Revisión' THEN CURRENT_TIMESTAMP ELSE revisado_at END,
+          aprobado_por = CASE WHEN $1::varchar = 'Aprobado' THEN $2 ELSE aprobado_por END,
+          aprobado_at = CASE WHEN $1::varchar = 'Aprobado' THEN CURRENT_TIMESTAMP ELSE aprobado_at END,
+          pagado_por = CASE WHEN $1::varchar = 'Pagado' THEN $2 ELSE pagado_por END,
+          pagado_at = CASE WHEN $1::varchar = 'Pagado' THEN CURRENT_TIMESTAMP ELSE pagado_at END,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $3
       RETURNING public_id::text, mes, anio, quincena, trm_oficial, estado,
@@ -1040,11 +1336,20 @@ async function actualizarCicloCuentaCobro(req, res, deps = {}) {
         p.id AS persona_id, p.public_id::text AS persona_public_id,
         p.factura_en_colombia, p.es_gran_contribuyente, p.es_autorretenedor,
         p.es_regimen_simple, p.es_entidad_sin_animo_lucro, p.facturador_electronico,
-        p.acumulado_facturacion_anual, p.declarante_renta, p.ciudad_residencia,
+        p.es_economia_naranja, p.acumulado_facturacion_anual, p.declarante_renta,
+        p.ciudad_residencia, p.tipo_contrato,
+        BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) AS tercero, p.numero_documento,
+        di.titulo AS tipo_documento, di.codigo_bancario AS tipo_documento_bancario,
+        p.correo_electronico, p.correo_silver, b.titulo AS banco,
+        b.codigo_bancolombia, b.codigo_conversor, tcb.titulo AS tipo_cuenta,
+        tcb.tipo_transaccion, p.numero_cuenta,
         COALESCE(p.moneda_cobro::text, u.moneda_cobro::text, 'COP') AS moneda_origen
       FROM cuenta_cobro cc
       LEFT JOIN usuarios u ON u.id = cc.created_by
       LEFT JOIN personas p ON p.id = u.persona_id
+      LEFT JOIN documento_identidad di ON di.id = p.tipo_documento_id
+      LEFT JOIN bancos b ON b.id = p.banco_id
+      LEFT JOIN tipo_cuenta_bancaria tcb ON tcb.id = p.tipo_cuenta_id
       WHERE cc.public_id = $1
       LIMIT 1
       FOR UPDATE OF cc
@@ -1095,7 +1400,8 @@ async function actualizarCicloCuentaCobro(req, res, deps = {}) {
         }
         const targetResult = await client.query(
           `
-          SELECT id, public_id::text, anio, mes, quincena, estado, trm_oficial
+          SELECT id, public_id::text, anio, mes, quincena, estado, trm_oficial,
+                 fecha_pago_programada
           FROM proyeccion_pagos
           WHERE anio = $1 AND mes = $2 AND quincena = $3
             AND estado <> 'Cancelado' AND id <> $4
@@ -1114,30 +1420,47 @@ async function actualizarCicloCuentaCobro(req, res, deps = {}) {
         }
 
         if (target) {
+          const esVinculado = normalizeText(cuenta.tipo_contrato) === "vinculado";
+          const tipoPago = esVinculado ? "nomina" : "consultor";
+          const tipoDocumentoPago = esVinculado
+            ? "nomina"
+            : (cuenta.facturador_electronico ? "factura_electronica" : "cuenta_cobro");
+          const regla = esVinculado
+            ? null
+            : await consultarReglaVigente(client, tipoPago, tipoDocumentoPago, target.fecha_pago_programada);
           const recalculado = prepararDetalle({
             origenTipo: "cuenta_cobro",
             origenId: cuenta.id,
             persona: personaFromRow(cuenta),
-            tipoPago: "consultor",
+            tipoPago,
+            tipoDocumentoPago,
             subtotal: cuenta.total_cuenta_cobro,
             iva: 0,
             moneda: cuenta.moneda_origen,
-            trmOficial: target.trm_oficial === null ? null : Number(target.trm_oficial)
+            trmOficial: target.trm_oficial === null ? null : Number(target.trm_oficial),
+            esNomina: esVinculado,
+            regla,
+            beneficiario: cuenta
           });
           await client.query(
             `
             UPDATE proyeccion_pagos_detalle
-            SET proyeccion_id = $1, tipo_pago = $2, moneda_origen = $3,
-                valor_origen = $4, trm_aplicada = $5, subtotal = $6, iva = $7,
-                retenciones_aplicadas = $8::jsonb, valor_neto = $9,
+            SET proyeccion_id = $1, tipo_pago = $2, tipo_documento_pago = $3,
+                moneda_origen = $4, valor_origen = $5, trm_aplicada = $6,
+                subtotal = $7, iva = $8, anticipo = $9,
+                retenciones_aplicadas = $10::jsonb, valor_neto = $11,
+                datos_beneficiario_snapshot = $12::jsonb, regla_snapshot = $13::jsonb,
+                calculo_origen = 'Automatico', motivo_ajuste = NULL,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = $10
+            WHERE id = $14
             `,
             [
-              target.id, recalculado.tipo_pago, recalculado.moneda_origen,
-              recalculado.valor_origen, recalculado.trm_aplicada, recalculado.subtotal,
-              recalculado.iva, JSON.stringify(recalculado.retenciones_aplicadas),
-              recalculado.valor_neto, detalle.id
+              target.id, recalculado.tipo_pago, recalculado.tipo_documento_pago,
+              recalculado.moneda_origen, recalculado.valor_origen, recalculado.trm_aplicada,
+              recalculado.subtotal, recalculado.iva, recalculado.anticipo,
+              JSON.stringify(recalculado.retenciones_aplicadas), recalculado.valor_neto,
+              JSON.stringify(recalculado.datos_beneficiario_snapshot),
+              JSON.stringify(recalculado.regla_snapshot), detalle.id
             ]
           );
           await client.query(
@@ -1278,6 +1601,7 @@ module.exports = {
     canonicalRetentionType,
     construirVistaPrevia,
     esExterior,
+    fechaNominalPeriodo,
     mapDetalle,
     mapProyeccion,
     monedaOrigen,

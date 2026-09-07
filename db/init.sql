@@ -2040,6 +2040,7 @@ CREATE INDEX idx_registro_asignaciones_compuesto ON registro_asignaciones(
 \ir migrations/2026-08-28-entregas-perfil-tarifas-consultor.sql
 \ir migrations/2026-09-01-entregas-consultores-modulos.sql
 \ir migrations/2026-09-02-contabilidad-proyeccion-pagos.sql
+\ir migrations/2026-09-07-contabilidad-operacion.sql
 
 
 

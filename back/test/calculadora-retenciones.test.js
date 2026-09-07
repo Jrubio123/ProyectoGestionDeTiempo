@@ -127,11 +127,37 @@ test("diferencia servicios declarantes y no declarantes", () => {
   const noDeclarante = calcularRetenciones({
     subtotal: 200_000,
     persona: { factura_en_colombia: true, declarante: false },
-    tipo_pago: "arriendo"
+    tipo_pago: "servicio"
   });
   assert.equal(declarante.retenciones_aplicadas[0].porcentaje, 4);
   assert.equal(noDeclarante.retenciones_aplicadas[0].porcentaje, 6);
   assert.equal(normalizeTipoPago("Nómina"), "nomina");
+});
+
+test("aplica bases distintas para arrendamientos de inmuebles y muebles", () => {
+  const inmueble = calcularRetenciones({
+    subtotal: 100_000,
+    persona: { factura_en_colombia: true, declarante: true },
+    tipo_pago: "arrendamiento_inmueble"
+  });
+  const mueble = calcularRetenciones({
+    subtotal: 500_000,
+    persona: { factura_en_colombia: true, declarante: true },
+    tipo_pago: "arrendamiento_mueble"
+  });
+  assert.equal(inmueble.retenciones_aplicadas[0].porcentaje, 3.5);
+  assert.deepEqual(mueble.retenciones_aplicadas, []);
+});
+
+test("consultor con factura electrónica retiene desde un peso", () => {
+  const result = calcularRetenciones({
+    subtotal: 100_000,
+    persona: { factura_en_colombia: true },
+    tipo_pago: "consultor",
+    tipo_documento_pago: "factura_electronica"
+  });
+  assert.equal(result.base_minima, 1);
+  assert.equal(result.retenciones_aplicadas[0].porcentaje, 3.5);
 });
 
 test("mantiene compatibilidad con la firma posicional del servicio", () => {

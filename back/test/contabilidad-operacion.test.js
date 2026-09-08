@@ -52,3 +52,33 @@ test("rechaza conceptos y porcentajes contables inválidos", () => {
     /entre 0 y 100/
   );
 });
+
+test("valida y normaliza los datos de un proveedor", () => {
+  const proveedor = _private.validarProveedor({
+    tipo_persona: "Jurídica",
+    tipo_documento_id: "53622f9d-39c9-471a-bff1-cc2ca5acefc9",
+    numero_documento: " 900.271.114-1 ",
+    nombre: " Equipos SAS ",
+    email: "PAGOS@EJEMPLO.COM",
+    factura_en_colombia: true,
+    facturador_electronico: true
+  });
+
+  assert.equal(proveedor.numeroDocumento, "9002711141");
+  assert.equal(proveedor.nombre, "Equipos SAS");
+  assert.equal(proveedor.email, "pagos@ejemplo.com");
+  assert.equal(proveedor.facturadorElectronico, true);
+});
+
+test("exige completar todos los datos bancarios cuando se registra uno", () => {
+  assert.throws(
+    () => _private.validarProveedor({
+      tipo_persona: "Natural",
+      tipo_documento_id: "b1e39e41-86fe-4dca-a383-7614bd145684",
+      numero_documento: "43279660",
+      nombre: "Andrea Londoño",
+      banco_id: "b1e39e41-86fe-4dca-a383-7614bd145684"
+    }),
+    /Completa banco, tipo y número de cuenta/
+  );
+});

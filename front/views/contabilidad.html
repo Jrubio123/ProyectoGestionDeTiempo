@@ -196,14 +196,20 @@
     </div>
 
     <!-- FACTURAS DE PROVEEDORES -->
-    <div x-show="tab === 'facturas'" class="grid gap-5 xl:grid-cols-[430px_minmax(0,1fr)]">
+    <div x-show="tab === 'facturas'" class="space-y-5">
+        <section class="flex flex-col gap-4 rounded-2xl border border-cyan-200 bg-cyan-50 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div><p class="text-xs font-bold uppercase tracking-wide text-cyan-700">Proveedores</p><h2 class="mt-1 text-xl font-bold text-slate-900">Busca el proveedor o regístralo antes de cargar la factura</h2><p class="mt-1 text-sm text-slate-600">Aquí quedan asociados su documento, cuenta bancaria y condiciones tributarias.</p></div>
+            <button type="button" @click="abrirRegistroProveedor" class="shrink-0 rounded-lg bg-cyan-700 px-5 py-3 text-sm font-bold text-white shadow-sm">+ Registrar proveedor</button>
+        </section>
+        <div class="grid gap-5 xl:grid-cols-[430px_minmax(0,1fr)]">
         <form @submit.prevent="guardarFactura" class="h-fit rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div class="flex items-center justify-between"><div><p class="text-xs font-bold uppercase tracking-wide text-cyan-700">Proveedor</p><h2 class="mt-1 text-lg font-bold text-slate-900" x-text="factura.id ? 'Editar factura' : 'Registrar factura'"></h2></div><button x-show="factura.id" type="button" @click="limpiarFactura()" class="text-xs font-bold text-slate-500">Cancelar edición</button></div>
             <div class="relative mt-5">
-                <label class="mb-1 block text-sm font-semibold text-slate-700">NIT, documento o nombre</label>
-                <div class="flex gap-2"><input x-model="busquedaBeneficiario" @keyup.enter.prevent="buscarBeneficiarios('factura')" type="search" class="min-w-0 flex-1 rounded-lg border-slate-300 text-sm" placeholder="Ej. 901299175"><button type="button" @click="buscarBeneficiarios('factura')" class="rounded-lg border border-slate-300 px-3 text-sm font-bold">Buscar</button></div>
+                <label class="mb-1 block text-sm font-semibold text-slate-700">1. Buscar proveedor por NIT, documento o nombre</label>
+                <div class="flex gap-2"><input x-ref="busquedaProveedor" x-model="busquedaBeneficiario" @input="busquedaBeneficiarioRealizada = false; beneficiarios = []" @keyup.enter.prevent="buscarBeneficiarios('factura')" type="search" class="min-w-0 flex-1 rounded-lg border-slate-300 text-sm" placeholder="Ej. 901299175"><button type="button" @click="buscarBeneficiarios('factura')" class="rounded-lg border border-slate-300 px-3 text-sm font-bold">Buscar</button></div>
                 <div x-show="beneficiarios.length" class="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl"><template x-for="item in beneficiarios" :key="item.id"><button type="button" @click="seleccionarBeneficiario(item)" class="block w-full rounded-md px-3 py-2 text-left hover:bg-cyan-50"><strong class="block text-sm text-slate-800" x-text="item.nombre"></strong><span class="text-xs text-slate-500"><span x-text="item.numero_documento"></span> · <span x-text="item.banco || 'Sin banco'"></span></span></button></template></div>
             </div>
+            <div x-show="busquedaBeneficiarioRealizada && !beneficiarios.length && !beneficiarioSeleccionado" class="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><span>No se encontró el proveedor.</span> <button type="button" @click="abrirRegistroProveedor" class="font-bold underline">Registrarlo ahora</button></div>
             <div x-show="beneficiarioSeleccionado" class="mt-3 rounded-xl border p-3 text-sm" :class="beneficiarioSeleccionado?.datos_bancarios_completos === false ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'"><strong x-text="beneficiarioSeleccionado?.nombre"></strong><p class="mt-1 text-xs" x-text="beneficiarioSeleccionado?.datos_bancarios_completos === false ? 'Faltan datos bancarios; podrás registrar la factura, pero no exportar el pago.' : `${beneficiarioSeleccionado?.banco || ''} · ${beneficiarioSeleccionado?.numero_cuenta || ''}`"></p></div>
             <div class="mt-4 grid gap-3 sm:grid-cols-2">
                 <label><span class="mb-1 block text-sm font-semibold text-slate-700">Número de factura</span><input x-model.trim="factura.numero_factura" required class="w-full rounded-lg border-slate-300 text-sm"></label>
@@ -229,7 +235,45 @@
             <div class="overflow-x-auto"><table class="min-w-[850px] w-full text-left text-sm"><thead class="bg-slate-50 text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Proveedor</th><th class="px-4 py-3">Factura</th><th class="px-4 py-3">Fecha</th><th class="px-4 py-3">Concepto</th><th class="px-4 py-3 text-right">Total</th><th class="px-4 py-3">Estado</th><th class="px-4 py-3"></th></tr></thead><tbody class="divide-y divide-slate-100"><template x-for="item in facturas" :key="item.id"><tr><td class="px-4 py-3"><strong class="block text-slate-800" x-text="item.beneficiario"></strong><span class="text-xs text-slate-500" x-text="item.documento"></span></td><td class="px-4 py-3 font-semibold" x-text="item.numero_factura"></td><td class="px-4 py-3 text-slate-600"><span x-text="formatearFecha(item.fecha_emision)"></span><p x-show="item.fecha_pago" class="text-xs text-emerald-700">Pagada: <span x-text="formatearFecha(item.fecha_pago)"></span></p></td><td class="px-4 py-3 text-slate-600" x-text="item.tipo_gasto.replaceAll('_',' ')"></td><td class="px-4 py-3 text-right font-bold" x-text="formatearMoneda(item.subtotal + item.iva - item.anticipo)"></td><td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-bold" :class="estadoClase(item.estado)" x-text="item.estado"></span></td><td class="px-4 py-3 text-right"><div x-show="item.estado === 'Pendiente'" class="flex justify-end gap-3"><button type="button" @click="editarFactura(item)" class="text-xs font-bold text-cyan-700">Editar</button><button type="button" @click="anularFactura(item)" class="text-xs font-bold text-red-600">Anular</button></div></td></tr></template></tbody></table></div>
             <p x-show="!facturas.length" class="p-10 text-center text-sm text-slate-500">No se encontraron facturas.</p>
         </section>
+        </div>
     </div>
+
+    <template x-if="mostrarProveedor">
+        <div class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 md:items-center" @keydown.escape.window="cerrarRegistroProveedor()">
+            <form @submit.prevent="guardarProveedor" class="my-4 w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+                <div class="flex items-start justify-between border-b border-slate-200 p-5">
+                    <div><p class="text-xs font-bold uppercase tracking-wide text-cyan-700">Nuevo proveedor</p><h2 class="mt-1 text-xl font-bold text-slate-900">Datos para facturación y pago</h2><p class="mt-1 text-sm text-slate-500">Después de guardarlo quedará seleccionado en la factura.</p></div>
+                    <button type="button" @click="cerrarRegistroProveedor" class="text-2xl text-slate-400" aria-label="Cerrar">×</button>
+                </div>
+                <div class="max-h-[72vh] space-y-6 overflow-y-auto p-5">
+                    <section>
+                        <h3 class="text-sm font-bold uppercase tracking-wide text-slate-500">Identificación</h3>
+                        <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                            <label><span class="mb-1 block text-sm font-semibold text-slate-700">Tipo de persona</span><select x-model="proveedor.tipo_persona" @change="seleccionarTipoDocumentoProveedor" required class="w-full rounded-lg border-slate-300 text-sm"><option>Natural</option><option>Jurídica</option></select></label>
+                            <label><span class="mb-1 block text-sm font-semibold text-slate-700">Tipo de documento</span><select x-model="proveedor.tipo_documento_id" required class="w-full rounded-lg border-slate-300 text-sm"><option value="">Seleccionar</option><template x-for="item in catalogosProveedor.documentos" :key="item.id"><option :value="item.id" x-text="item.titulo"></option></template></select></label>
+                            <label><span class="mb-1 block text-sm font-semibold text-slate-700">NIT o documento</span><input x-model.trim="proveedor.numero_documento" required maxlength="50" class="w-full rounded-lg border-slate-300 text-sm" placeholder="Sin puntos ni espacios"></label>
+                            <label class="sm:col-span-2"><span class="mb-1 block text-sm font-semibold text-slate-700">Nombre o razón social</span><input x-model.trim="proveedor.nombre" required maxlength="200" class="w-full rounded-lg border-slate-300 text-sm"></label>
+                            <label><span class="mb-1 block text-sm font-semibold text-slate-700">Correo de pagos</span><input x-model.trim="proveedor.email" type="email" maxlength="255" class="w-full rounded-lg border-slate-300 text-sm"></label>
+                            <label><span class="mb-1 block text-sm font-semibold text-slate-700">Ciudad</span><input x-model.trim="proveedor.ciudad_residencia" maxlength="100" class="w-full rounded-lg border-slate-300 text-sm" placeholder="Para ReteICA"></label>
+                        </div>
+                    </section>
+                    <section class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <h3 class="text-sm font-bold uppercase tracking-wide text-slate-500">Cuenta para el pago</h3><p class="mt-1 text-xs text-slate-500">Puede dejarse vacía temporalmente, pero será obligatoria para exportar el pago al banco.</p>
+                        <div class="mt-3 grid gap-3 sm:grid-cols-3">
+                            <label><span class="mb-1 block text-sm font-semibold text-slate-700">Banco</span><select x-model="proveedor.banco_id" class="w-full rounded-lg border-slate-300 text-sm"><option value="">Sin registrar</option><template x-for="item in catalogosProveedor.bancos" :key="item.id"><option :value="item.id" x-text="item.titulo"></option></template></select></label>
+                            <label><span class="mb-1 block text-sm font-semibold text-slate-700">Tipo de cuenta</span><select x-model="proveedor.tipo_cuenta_id" class="w-full rounded-lg border-slate-300 text-sm"><option value="">Sin registrar</option><template x-for="item in catalogosProveedor.tipos_cuenta" :key="item.id"><option :value="item.id" x-text="item.titulo"></option></template></select></label>
+                            <label><span class="mb-1 block text-sm font-semibold text-slate-700">Número de cuenta</span><input x-model.trim="proveedor.numero_cuenta" maxlength="50" class="w-full rounded-lg border-slate-300 text-sm"></label>
+                        </div>
+                    </section>
+                    <section>
+                        <h3 class="text-sm font-bold uppercase tracking-wide text-slate-500">Perfil tributario</h3>
+                        <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4"><template x-for="opcion in opcionesTributarias" :key="opcion[0]"><label class="flex cursor-pointer gap-3 rounded-xl border border-slate-200 p-3"><input x-model="proveedor[opcion[0]]" type="checkbox" class="mt-0.5 rounded border-slate-300 text-cyan-600"><span><strong class="block text-sm text-slate-800" x-text="opcion[1]"></strong><span class="text-xs text-slate-500" x-text="opcion[2]"></span></span></label></template></div>
+                    </section>
+                </div>
+                <div class="flex justify-end gap-3 border-t border-slate-200 bg-slate-50 p-4"><button type="button" @click="cerrarRegistroProveedor" class="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-bold text-slate-600">Cancelar</button><button type="submit" :disabled="guardandoProveedor" class="rounded-lg bg-cyan-700 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50" x-text="guardandoProveedor ? 'Guardando…' : 'Guardar proveedor'"></button></div>
+            </form>
+        </div>
+    </template>
 
     <!-- CONFIGURACIÓN -->
     <div x-show="tab === 'configuracion'" class="space-y-5">

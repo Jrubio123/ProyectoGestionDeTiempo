@@ -11,6 +11,7 @@ const CONCEPTOS = new Set([
   "arrendamiento_mueble"
 ]);
 const DOCUMENTOS_PAGO = new Set(["cuenta_cobro", "factura_electronica", "cualquiera"]);
+const TIPOS_PERSONA = new Set(["Natural", "Jurídica"]);
 
 class OperacionContableError extends Error {
   constructor(message, statusCode = 400, code = "CONTABILIDAD_VALIDATION") {
@@ -74,11 +75,14 @@ function handleError(res, error, action) {
   }
   if (error?.code === "23505") {
     const duplicateInvoice = String(error.constraint || "").includes("facturas_proveedores");
+    const duplicateProvider = String(error.constraint || "").includes("personas_numero_documento");
     return res.status(409).json({
-      error: duplicateInvoice
+      error: duplicateProvider
+        ? "Ya existe una persona o proveedor con ese documento"
+        : duplicateInvoice
         ? "Ya existe una factura con ese número para el beneficiario"
         : "Ya existe una regla con el mismo concepto, documento y fecha inicial",
-      codigo: duplicateInvoice ? "FACTURA_DUPLICADA" : "REGLA_DUPLICADA"
+      codigo: duplicateProvider ? "PROVEEDOR_DUPLICADO" : duplicateInvoice ? "FACTURA_DUPLICADA" : "REGLA_DUPLICADA"
     });
   }
   console.error(`[contabilidad] Error ${action}:`, error);
@@ -91,6 +95,135 @@ function parseMonths(value) {
     .map(Number)
     .filter((item) => Number.isInteger(item) && item >= 1 && item <= 12);
   return [...new Set(months)];
+}
+
+const BENEFICIARIO_SELECT = `SELECT p.public_id::text AS id, p.numero_documento,
+              BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) AS nombre,
+              p.tipo_persona, di.public_id::text AS tipo_documento_id,
+              di.titulo AS tipo_documento, di.codigo_bancario AS tipo_documento_bancario,
+              b.public_id::text AS banco_id, b.titulo AS banco, b.codigo_conversor AS codigo_banco,
+              tcb.public_id::text AS tipo_cuenta_id, tcb.titulo AS tipo_cuenta, tcb.tipo_transaccion,
+              p.numero_cuenta, COALESCE(p.correo_electronico, p.correo_silver) AS email,
+              p.factura_en_colombia, p.facturador_electronico, p.declarante_renta,
+              p.es_gran_contribuyente, p.es_autorretenedor, p.es_regimen_simple,
+              p.es_entidad_sin_animo_lucro, p.es_economia_naranja,
+              p.ciudad_residencia,
+              (p.banco_id IS NOT NULL AND p.tipo_cuenta_id IS NOT NULL
+                AND NULLIF(BTRIM(p.numero_cuenta), '') IS NOT NULL) AS datos_bancarios_completos
+         FROM personas p
+         LEFT JOIN documento_identidad di ON di.id = p.tipo_documento_id
+         LEFT JOIN bancos b ON b.id = p.banco_id
+         LEFT JOIN tipo_cuenta_bancaria tcb ON tcb.id = p.tipo_cuenta_id`;
+
+function validarProveedor(body = {}) {
+  const tipoPersona = text(body.tipo_persona, 20);
+  if (!TIPOS_PERSONA.has(tipoPersona)) throw new OperacionContableError("Selecciona el tipo de persona");
+  const tipoDocumentoId = uuid(body.tipo_documento_id, "tipo de documento");
+  const numeroDocumento = text(body.numero_documento, 50).replace(/[.\s-]+/g, "").toUpperCase();
+  if (numeroDocumento.length < 3) throw new OperacionContableError("El documento es obligatorio");
+  const nombre = text(body.nombre, 200);
+  if (!nombre) throw new OperacionContableError("El nombre o razón social es obligatorio");
+  const email = text(body.email, 255).toLowerCase();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new OperacionContableError("El correo electrónico no es válido");
+  }
+  const bancoId = body.banco_id ? uuid(body.banco_id, "banco") : null;
+  const tipoCuentaId = body.tipo_cuenta_id ? uuid(body.tipo_cuenta_id, "tipo de cuenta") : null;
+  const numeroCuenta = text(body.numero_cuenta, 50).replace(/\s+/g, "");
+  const tieneAlgunDatoBancario = Boolean(bancoId || tipoCuentaId || numeroCuenta);
+  if (tieneAlgunDatoBancario && !(bancoId && tipoCuentaId && numeroCuenta)) {
+    throw new OperacionContableError("Completa banco, tipo y número de cuenta");
+  }
+  return {
+    tipoPersona,
+    tipoDocumentoId,
+    numeroDocumento,
+    nombre,
+    email: email || null,
+    ciudad: text(body.ciudad_residencia, 100) || null,
+    bancoId,
+    tipoCuentaId,
+    numeroCuenta: numeroCuenta || null,
+    facturaEnColombia: bool(body.factura_en_colombia, true),
+    facturadorElectronico: bool(body.facturador_electronico),
+    declaranteRenta: bool(body.declarante_renta),
+    esGranContribuyente: bool(body.es_gran_contribuyente),
+    esAutorretenedor: bool(body.es_autorretenedor),
+    esRegimenSimple: bool(body.es_regimen_simple),
+    esEntidadSinAnimoLucro: bool(body.es_entidad_sin_animo_lucro),
+    esEconomiaNaranja: bool(body.es_economia_naranja)
+  };
+}
+
+async function resolverCatalogo(dbPool, tabla, id, etiqueta) {
+  if (!id) return null;
+  const result = await dbPool.query(
+    `SELECT id FROM ${tabla} WHERE public_id = $1 AND activo = TRUE LIMIT 1`,
+    [id]
+  );
+  if (!result.rows[0]) throw new OperacionContableError(`${etiqueta} no encontrado o inactivo`);
+  return result.rows[0].id;
+}
+
+async function listarCatalogosProveedores(req, res, deps = {}) {
+  const dbPool = deps.pool || pool;
+  try {
+    const [documentos, bancos, tiposCuenta] = await Promise.all([
+      dbPool.query(`SELECT public_id::text AS id, titulo, codigo_bancario
+                      FROM documento_identidad WHERE activo = TRUE ORDER BY titulo`),
+      dbPool.query(`SELECT public_id::text AS id, titulo, codigo_conversor
+                      FROM bancos WHERE activo = TRUE ORDER BY titulo`),
+      dbPool.query(`SELECT public_id::text AS id, titulo, tipo_cuenta, tipo_transaccion
+                      FROM tipo_cuenta_bancaria WHERE activo = TRUE ORDER BY tipo_cuenta, titulo`)
+    ]);
+    return res.json({ documentos: documentos.rows, bancos: bancos.rows, tipos_cuenta: tiposCuenta.rows });
+  } catch (error) {
+    return handleError(res, error, "consultando los catálogos de proveedores");
+  }
+}
+
+async function crearBeneficiario(req, res, deps = {}) {
+  const dbPool = deps.pool || pool;
+  try {
+    const proveedor = validarProveedor(req.body || {});
+    const existente = await dbPool.query(
+      `SELECT 1 FROM personas
+        WHERE REGEXP_REPLACE(UPPER(COALESCE(numero_documento, '')), '[^A-Z0-9]', '', 'g') = $1
+        LIMIT 1`,
+      [proveedor.numeroDocumento]
+    );
+    if (existente.rows[0]) {
+      throw new OperacionContableError("Ya existe una persona o proveedor con ese documento", 409, "PROVEEDOR_DUPLICADO");
+    }
+    const [tipoDocumentoId, bancoId, tipoCuentaId] = await Promise.all([
+      resolverCatalogo(dbPool, "documento_identidad", proveedor.tipoDocumentoId, "Tipo de documento"),
+      resolverCatalogo(dbPool, "bancos", proveedor.bancoId, "Banco"),
+      resolverCatalogo(dbPool, "tipo_cuenta_bancaria", proveedor.tipoCuentaId, "Tipo de cuenta")
+    ]);
+    const result = await dbPool.query(
+      `INSERT INTO personas (
+         numero_documento, tipo_documento_id, nombre, tipo_persona,
+         correo_electronico, ciudad_residencia, banco_id, tipo_cuenta_id, numero_cuenta,
+         factura_en_colombia, facturador_electronico, declarante_renta,
+         es_gran_contribuyente, es_autorretenedor, es_regimen_simple,
+         es_entidad_sin_animo_lucro, es_economia_naranja, moneda_cobro, created_by
+       ) VALUES (
+         $1, $2, $3, $4::tipo_persona, $5, $6, $7, $8, $9,
+         $10, $11, $12, $13, $14, $15, $16, $17, 'COP'::tipo_moneda, $18
+       ) RETURNING id`,
+      [
+        proveedor.numeroDocumento, tipoDocumentoId, proveedor.nombre, proveedor.tipoPersona,
+        proveedor.email, proveedor.ciudad, bancoId, tipoCuentaId, proveedor.numeroCuenta,
+        proveedor.facturaEnColombia, proveedor.facturadorElectronico, proveedor.declaranteRenta,
+        proveedor.esGranContribuyente, proveedor.esAutorretenedor, proveedor.esRegimenSimple,
+        proveedor.esEntidadSinAnimoLucro, proveedor.esEconomiaNaranja, req.user?.id || null
+      ]
+    );
+    const creado = await dbPool.query(`${BENEFICIARIO_SELECT} WHERE p.id = $1`, [result.rows[0].id]);
+    return res.status(201).json(creado.rows[0]);
+  } catch (error) {
+    return handleError(res, error, "registrando el proveedor");
+  }
 }
 
 async function listarProyecciones(req, res, deps = {}) {
@@ -149,22 +282,7 @@ async function buscarBeneficiarios(req, res, deps = {}) {
     const buscar = text(req.query.buscar || req.query.documento, 120);
     if (buscar.length < 2) return res.json({ items: [] });
     const result = await dbPool.query(
-      `SELECT p.public_id::text AS id, p.numero_documento,
-              BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) AS nombre,
-              di.titulo AS tipo_documento, di.codigo_bancario AS tipo_documento_bancario,
-              b.titulo AS banco, b.codigo_conversor AS codigo_banco,
-              tcb.titulo AS tipo_cuenta, tcb.tipo_transaccion,
-              p.numero_cuenta, COALESCE(p.correo_electronico, p.correo_silver) AS email,
-              p.factura_en_colombia, p.facturador_electronico, p.declarante_renta,
-              p.es_gran_contribuyente, p.es_autorretenedor, p.es_regimen_simple,
-              p.es_entidad_sin_animo_lucro, p.es_economia_naranja,
-              p.ciudad_residencia,
-              (p.banco_id IS NOT NULL AND p.tipo_cuenta_id IS NOT NULL
-                AND NULLIF(BTRIM(p.numero_cuenta), '') IS NOT NULL) AS datos_bancarios_completos
-         FROM personas p
-         LEFT JOIN documento_identidad di ON di.id = p.tipo_documento_id
-         LEFT JOIN bancos b ON b.id = p.banco_id
-         LEFT JOIN tipo_cuenta_bancaria tcb ON tcb.id = p.tipo_cuenta_id
+      `${BENEFICIARIO_SELECT}
         WHERE p.estado = 'activo'
           AND (p.numero_documento ILIKE $1
             OR BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) ILIKE $1)
@@ -671,11 +789,13 @@ module.exports = {
   anularFactura,
   buscarBeneficiarios,
   consultarAuditoria,
+  crearBeneficiario,
   crearFactura,
   crearRegla,
   exportarArchivoBancario,
+  listarCatalogosProveedores,
   listarFacturas,
   listarProyecciones,
   listarReglas,
-  _private: { bool, date, mapFactura, money, parseMonths, validarFactura, validarRegla }
+  _private: { bool, date, mapFactura, money, parseMonths, validarFactura, validarProveedor, validarRegla }
 };

@@ -34,6 +34,25 @@ window.contabilidadApp = function () {
         vigencia_hasta: "",
         activo: true
     });
+    const nuevoProveedor = () => ({
+        tipo_persona: "Jurídica",
+        tipo_documento_id: "",
+        numero_documento: "",
+        nombre: "",
+        email: "",
+        ciudad_residencia: "",
+        banco_id: "",
+        tipo_cuenta_id: "",
+        numero_cuenta: "",
+        factura_en_colombia: true,
+        facturador_electronico: true,
+        declarante_renta: true,
+        es_gran_contribuyente: false,
+        es_autorretenedor: false,
+        es_regimen_simple: false,
+        es_entidad_sin_animo_lucro: false,
+        es_economia_naranja: false
+    });
 
     return {
         tab: "programaciones",
@@ -87,8 +106,12 @@ window.contabilidadApp = function () {
         filtroFacturas: "",
         factura: nuevaFactura(),
         busquedaBeneficiario: "",
+        busquedaBeneficiarioRealizada: false,
         beneficiarios: [],
         beneficiarioSeleccionado: null,
+        mostrarProveedor: false,
+        proveedor: nuevoProveedor(),
+        catalogosProveedor: { documentos: [], bancos: [], tipos_cuenta: [] },
         simulacionFactura: null,
         reglas: [],
         regla: nuevaRegla(),
@@ -117,6 +140,7 @@ window.contabilidadApp = function () {
         resultadoSimulador: null,
         cargando: false,
         guardando: false,
+        guardandoProveedor: false,
         error: "",
         mensaje: "",
 
@@ -130,7 +154,7 @@ window.contabilidadApp = function () {
             this.limpiarAlertas();
             if (this.tabsCargados.has(tab)) return;
             this.tabsCargados.add(tab);
-            if (tab === "facturas") await this.listarFacturas();
+            if (tab === "facturas") await Promise.all([this.listarFacturas(), this.cargarCatalogosProveedores()]);
             if (tab === "configuracion") await this.listarReglas();
             if (tab === "historial") await this.listarProgramaciones(true);
         },
@@ -344,9 +368,61 @@ window.contabilidadApp = function () {
                     params: { buscar: valor }
                 });
                 if (destino === "perfil") this.perfiles = data.items || [];
-                else this.beneficiarios = data.items || [];
+                else {
+                    this.beneficiarios = data.items || [];
+                    this.busquedaBeneficiarioRealizada = true;
+                }
             } catch (error) {
                 this.error = this.errorDe(error, "No fue posible buscar beneficiarios.");
+            }
+        },
+
+        async cargarCatalogosProveedores() {
+            if (this.catalogosProveedor.documentos.length) return;
+            try {
+                const { data } = await window.axios.get(`${API}/api/contabilidad/catalogos-proveedores`);
+                this.catalogosProveedor = {
+                    documentos: data.documentos || [],
+                    bancos: data.bancos || [],
+                    tipos_cuenta: data.tipos_cuenta || []
+                };
+                this.seleccionarTipoDocumentoProveedor();
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible cargar los datos para registrar proveedores.");
+            }
+        },
+
+        seleccionarTipoDocumentoProveedor() {
+            const esperado = this.proveedor.tipo_persona === "Jurídica" ? "nit" : "ciudadan";
+            const documento = this.catalogosProveedor.documentos.find((item) => this.normalizar(item.titulo).includes(esperado));
+            if (documento) this.proveedor.tipo_documento_id = documento.id;
+        },
+
+        async abrirRegistroProveedor() {
+            this.limpiarAlertas();
+            this.proveedor = nuevoProveedor();
+            await this.cargarCatalogosProveedores();
+            this.seleccionarTipoDocumentoProveedor();
+            this.mostrarProveedor = true;
+        },
+
+        cerrarRegistroProveedor() {
+            if (this.guardandoProveedor) return;
+            this.mostrarProveedor = false;
+        },
+
+        async guardarProveedor() {
+            this.limpiarAlertas();
+            this.guardandoProveedor = true;
+            try {
+                const { data } = await window.axios.post(`${API}/api/contabilidad/beneficiarios`, this.proveedor);
+                this.seleccionarBeneficiario(data);
+                this.mostrarProveedor = false;
+                this.mensaje = "Proveedor registrado y seleccionado para la factura.";
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible registrar el proveedor.");
+            } finally {
+                this.guardandoProveedor = false;
             }
         },
 
@@ -355,6 +431,7 @@ window.contabilidadApp = function () {
             this.factura.persona_id = item.id;
             this.busquedaBeneficiario = `${item.numero_documento} — ${item.nombre}`;
             this.beneficiarios = [];
+            this.busquedaBeneficiarioRealizada = false;
             this.simulacionFactura = null;
         },
 
@@ -369,6 +446,7 @@ window.contabilidadApp = function () {
             this.beneficiarioSeleccionado = null;
             this.busquedaBeneficiario = "";
             this.beneficiarios = [];
+            this.busquedaBeneficiarioRealizada = false;
             this.simulacionFactura = null;
         },
 

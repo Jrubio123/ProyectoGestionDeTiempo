@@ -12,7 +12,9 @@ router.use(CONTABILIDAD_ACCESS);
 
 router.get("/proyecciones", operation.listarProyecciones);
 router.get("/beneficiarios", operation.buscarBeneficiarios);
+router.post("/beneficiarios", operation.crearBeneficiario);
 router.put("/beneficiarios/:id/perfil-tributario", operation.actualizarPerfilTributario);
+router.get("/catalogos-proveedores", operation.listarCatalogosProveedores);
 router.get("/facturas-proveedores", operation.listarFacturas);
 router.post("/facturas-proveedores", operation.crearFactura);
 router.put("/facturas-proveedores/:id", operation.actualizarFactura);

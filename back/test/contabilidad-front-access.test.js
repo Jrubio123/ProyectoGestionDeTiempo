@@ -30,10 +30,14 @@ test("el menú de contabilidad se muestra solo a los tres roles autorizados", ()
 
 test("la vista usa los endpoints del módulo de contabilidad", () => {
   const viewScript = read("front/js/contabilidad.js");
+  const viewHtml = read("front/views/contabilidad.html");
 
   assert.match(viewScript, /\/api\/contabilidad\/proyeccion\/generar/);
   assert.match(viewScript, /\/api\/contabilidad\/proyeccion\/previsualizar/);
   assert.match(viewScript, /\/api\/contabilidad\/proyeccion\/\$\{encodeURIComponent\(id\)\}\/detalles/);
   assert.match(viewScript, /\/api\/contabilidad\/retenciones\/simular/);
+  assert.match(viewScript, /post\(`\$\{API\}\/api\/contabilidad\/beneficiarios`/);
+  assert.match(viewScript, /\/api\/contabilidad\/catalogos-proveedores/);
   assert.match(viewScript, /\/api\/contabilidad\/proyeccion\/\$\{encodeURIComponent\(this\.proyeccion\.id\)\}\/transicion/);
+  assert.match(viewHtml, /\+ Registrar proveedor/);
 });

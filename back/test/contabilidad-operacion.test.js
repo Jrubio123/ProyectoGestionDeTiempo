@@ -25,6 +25,22 @@ test("valida una factura completa y normaliza sus valores", () => {
   assert.equal(factura.soporte.url, "https://example.test/factura.pdf");
 });
 
+test("mapea la empresa y el pago automático de una factura", () => {
+  const factura = _private.mapFactura({
+    id: "f29b6b0e-52e8-4b30-a5ac-e77d4ad89795",
+    persona_id: "0fcd02c2-719b-49dd-81e3-fc126c7b9e38",
+    empresa: "SILVER",
+    fecha_emision: "2026-09-01",
+    created_at: "2026-09-07T09:00:00-05:00",
+    subtotal: 100000,
+    iva: 0,
+    anticipo: 0
+  });
+
+  assert.equal(factura.empresa, "SILVER");
+  assert.equal(factura.fecha_pago_calculada, "2026-09-30");
+});
+
 test("rechaza conceptos y porcentajes contables inválidos", () => {
   assert.throws(
     () => _private.validarFactura({

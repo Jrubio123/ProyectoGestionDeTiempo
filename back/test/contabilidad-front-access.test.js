@@ -40,4 +40,8 @@ test("la vista usa los endpoints del módulo de contabilidad", () => {
   assert.match(viewScript, /\/api\/contabilidad\/catalogos-proveedores/);
   assert.match(viewScript, /\/api\/contabilidad\/proyeccion\/\$\{encodeURIComponent\(this\.proyeccion\.id\)\}\/transicion/);
   assert.match(viewHtml, /\+ Registrar proveedor/);
+  assert.match(viewHtml, /Capitalink/);
+  assert.match(viewHtml, /Todos los pagos/);
+  assert.match(viewScript, /editarFacturaDesdeProyeccion/);
+  assert.match(viewScript, /moverCuentaVista/);
 });

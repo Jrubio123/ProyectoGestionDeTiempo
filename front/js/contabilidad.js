@@ -100,10 +100,16 @@ window.contabilidadApp = function () {
         resumen: null,
         detalles: [],
         auditoria: [],
+        empresaVista: "SILVER",
+        filtroVista: "",
+        tipoVista: "",
+        empresaDetalle: "SILVER",
         filtroDetalle: "",
         tipoDetalle: "",
         facturas: [],
         filtroFacturas: "",
+        empresaFacturas: "",
+        estadoFacturas: "",
         factura: nuevaFactura(),
         busquedaBeneficiario: "",
         busquedaBeneficiarioRealizada: false,
@@ -187,6 +193,10 @@ window.contabilidadApp = function () {
                     this.payloadPeriodo()
                 );
                 this.vistaPrevia = data;
+                const pagos = data.pagos || [];
+                this.empresaVista = pagos.some((item) => this.empresaPago(item) === "SILVER")
+                    ? "SILVER"
+                    : "CAPITALINK";
                 if (data.proyeccion_existente?.id) await this.abrirProgramacion(data.proyeccion_existente.id);
             } catch (error) {
                 this.vistaPrevia = null;
@@ -245,6 +255,9 @@ window.contabilidadApp = function () {
                 this.proyeccion = data.proyeccion;
                 this.resumen = data.resumen;
                 this.detalles = data.detalles || [];
+                this.empresaDetalle = this.detalles.some((item) => this.empresaPago(item) === "SILVER")
+                    ? "SILVER"
+                    : "CAPITALINK";
                 this.mostrarAuditoria = false;
                 if (irAProgramaciones) this.tab = "programaciones";
             } catch (error) {
@@ -254,13 +267,38 @@ window.contabilidadApp = function () {
             }
         },
 
+        get pagosVistaFiltrados() {
+            const buscar = this.normalizar(this.filtroVista);
+            return (this.vistaPrevia?.pagos || []).filter((item) => {
+                const coincideEmpresa = this.empresaPago(item) === this.empresaVista;
+                const coincideTipo = !this.tipoVista || item.origen_tipo === this.tipoVista;
+                const contenido = this.normalizar(`${item.tercero} ${item.numero_documento} ${item.referencia}`);
+                return coincideEmpresa && coincideTipo && (!buscar || contenido.includes(buscar));
+            });
+        },
+
+        get resumenEmpresaVista() {
+            const pagos = (this.vistaPrevia?.pagos || []).filter(
+                (item) => this.empresaPago(item) === this.empresaVista
+            );
+            return {
+                pagos: pagos.length,
+                neto: pagos.reduce((total, item) => total + Number(item.calculo?.valor_neto || 0), 0)
+            };
+        },
+
         get detallesFiltrados() {
             const buscar = this.normalizar(this.filtroDetalle);
             return this.detalles.filter((item) => {
+                const coincideEmpresa = this.empresaPago(item) === this.empresaDetalle;
                 const coincideTipo = !this.tipoDetalle || item.origen_tipo === this.tipoDetalle;
                 const contenido = this.normalizar(`${item.tercero} ${item.numero_documento} ${item.referencia}`);
-                return coincideTipo && (!buscar || contenido.includes(buscar));
+                return coincideEmpresa && coincideTipo && (!buscar || contenido.includes(buscar));
             });
+        },
+
+        cantidadEmpresa(items, empresa) {
+            return (items || []).filter((item) => this.empresaPago(item) === empresa).length;
         },
 
         get accionesDisponibles() {
@@ -525,11 +563,54 @@ window.contabilidadApp = function () {
         async listarFacturas() {
             try {
                 const { data } = await window.axios.get(`${API}/api/contabilidad/facturas-proveedores`, {
-                    params: { buscar: this.filtroFacturas }
+                    params: {
+                        buscar: this.filtroFacturas,
+                        empresa: this.empresaFacturas,
+                        estado: this.estadoFacturas
+                    }
                 });
                 this.facturas = data.items || [];
+                return this.facturas;
             } catch (error) {
                 this.error = this.errorDe(error, "No fue posible consultar las facturas.");
+                return [];
+            }
+        },
+
+        async editarFacturaDesdeProyeccion(item) {
+            this.tab = "facturas";
+            this.tabsCargados.add("facturas");
+            this.filtroFacturas = item.referencia || "";
+            this.empresaFacturas = this.empresaPago(item);
+            this.estadoFacturas = "Pendiente";
+            const [facturas] = await Promise.all([
+                this.listarFacturas(),
+                this.cargarCatalogosProveedores()
+            ]);
+            const factura = facturas.find((actual) => actual.id === item.id);
+            if (!factura) {
+                this.error = "La factura ya no está pendiente o no se encontró.";
+                return;
+            }
+            this.editarFactura(factura);
+        },
+
+        async moverCuentaVista(item) {
+            const ciclo = Number(this.generacion.quincena) === 1 ? "Q2" : "Q1";
+            const destino = ciclo === "Q1" ? "15" : "30";
+            if (!window.confirm(`¿Mover esta cuenta al pago del día ${destino}?`)) return;
+            this.guardando = true;
+            try {
+                await window.axios.put(
+                    `${API}/api/contabilidad/cuenta_cobro/${encodeURIComponent(item.id)}/ciclo`,
+                    { ciclo_proyeccion_asignado: ciclo }
+                );
+                await this.cargarDisponibles();
+                this.mensaje = `Cuenta movida al corte del día ${destino}.`;
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible mover la cuenta de cobro.");
+            } finally {
+                this.guardando = false;
             }
         },
 
@@ -637,6 +718,15 @@ window.contabilidadApp = function () {
 
         tipoOrigen(value) {
             return { cuenta_cobro: "Cuenta de cobro", factura_proveedor: "Factura", nomina: "Nómina" }[value] || value;
+        },
+
+        empresaPago(item = {}) {
+            const empresa = String(item.empresa || "").trim().toUpperCase();
+            if (["SILVER", "CAPITALINK"].includes(empresa)) return empresa;
+            if (item.origen_tipo === "nomina") return "SILVER";
+            return String(item.moneda_origen || item.moneda || "COP").toUpperCase() === "COP"
+                ? "SILVER"
+                : "CAPITALINK";
         },
 
         nombreConcepto(value) {

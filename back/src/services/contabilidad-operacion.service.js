@@ -1,5 +1,6 @@
 const { pool } = require("../db");
 const { calcularRetenciones } = require("./calculadoraRetenciones.service");
+const { calcularProgramacionFactura } = require("./calendarioPagos.service");
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CONCEPTOS = new Set([
@@ -343,10 +344,12 @@ function mapFactura(row) {
     persona_id: row.persona_id,
     documento: row.numero_documento,
     beneficiario: row.beneficiario,
+    empresa: row.empresa,
     numero_factura: row.numero_factura,
     fecha_emision: row.fecha_emision,
     fecha_vencimiento: row.fecha_vencimiento,
     fecha_pago_preferida: row.fecha_pago_preferida,
+    fecha_pago_calculada: calcularProgramacionFactura(row.created_at || row.fecha_emision).fecha_pago_programada,
     concepto: row.concepto,
     ciudad_servicio: row.ciudad_servicio,
     subtotal: Number(row.subtotal || 0),
@@ -367,6 +370,7 @@ function mapFactura(row) {
 const FACTURA_SELECT = `
   SELECT fp.public_id::text AS id, p.public_id::text AS persona_id,
          p.numero_documento, BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) AS beneficiario,
+         CASE WHEN p.factura_en_colombia IS FALSE THEN 'CAPITALINK' ELSE 'SILVER' END AS empresa,
          fp.numero_factura, fp.fecha_emision, fp.fecha_vencimiento, fp.fecha_pago_preferida,
          fp.concepto, fp.ciudad_servicio, fp.subtotal, fp.tiene_iva, fp.iva, fp.anticipo,
          fp.tipo_gasto, fp.moneda, fp.documento_soporte, fp.estado,
@@ -391,6 +395,9 @@ async function listarFacturas(req, res, deps = {}) {
         OR p.numero_documento ILIKE $${params.length}
         OR BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) ILIKE $${params.length})`);
     }
+    const empresa = text(req.query.empresa, 20).toUpperCase();
+    if (empresa === "CAPITALINK") conditions.push("p.factura_en_colombia IS FALSE");
+    if (empresa === "SILVER") conditions.push("p.factura_en_colombia IS NOT FALSE");
     const result = await dbPool.query(
       `${FACTURA_SELECT}
        ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}

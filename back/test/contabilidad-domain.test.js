@@ -110,5 +110,15 @@ test("previsualiza pagos antes de crear el lote y explica los excluidos", () => 
   assert.equal(preview.resumen.cuentas_en_limbo, 1);
   assert.equal(preview.resumen.puede_generar, true);
   assert.equal(preview.pagos[0].tercero, "Consultor de prueba");
+  assert.equal(preview.pagos[0].empresa, "SILVER");
   assert.equal(preview.excluidos.cuentas_en_limbo[0].motivo, "sin_fecha_de_archivo");
+});
+
+test("separa Capitalink de Silver y siempre clasifica nómina como Silver", () => {
+  assert.equal(_private.empresaDesdePersona({ factura_en_colombia: false }), "CAPITALINK");
+  assert.equal(_private.empresaDesdePersona({ factura_en_colombia: true }), "SILVER");
+  assert.equal(
+    _private.empresaDesdePersona({ factura_en_colombia: false }, { esNomina: true }),
+    "SILVER"
+  );
 });

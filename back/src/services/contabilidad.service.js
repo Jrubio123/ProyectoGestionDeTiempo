@@ -8,6 +8,8 @@ const {
 const {
   CalendarioPagosValidationError,
   calcularFechaPago,
+  calcularProgramacionFactura,
+  dateToBogotaIso,
   determinarQuincenaCuenta,
   normalizeCiclo,
   validarPeriodo
@@ -106,6 +108,7 @@ function personaFromRow(row) {
 
 function snapshotBeneficiario(row = {}) {
   return {
+    empresa: row.empresa || null,
     persona_id: row.persona_public_id || null,
     tipo_documento: row.tipo_documento || null,
     tipo_documento_bancario: row.tipo_documento_bancario || null,
@@ -178,6 +181,11 @@ function esExterior(persona) {
     ["false", "0", "no"].includes(normalizeText(persona?.factura_en_colombia));
 }
 
+function empresaDesdePersona(persona, { esNomina = false } = {}) {
+  if (esNomina) return "SILVER";
+  return esExterior(persona) ? "CAPITALINK" : "SILVER";
+}
+
 function monedaOrigen(row, persona) {
   const moneda = String(row.moneda_origen || "").trim().toUpperCase();
   if (esExterior(persona) && (!moneda || moneda === "COP")) return "USD";
@@ -202,6 +210,7 @@ function prepararDetalle({
 }) {
   const valorOriginal = roundMoney(Number(subtotal));
   const monedaOriginal = esNomina ? "COP" : monedaOrigen({ moneda_origen: moneda }, persona);
+  const empresa = empresaDesdePersona(persona, { esNomina });
   const requiereTrm = !esNomina && esExterior(persona) && monedaOriginal !== "COP";
   if (requiereTrm && !trmOficial) {
     throw new ContabilidadError(
@@ -239,7 +248,7 @@ function prepararDetalle({
     iva: calculo.iva,
     retenciones_aplicadas: calculo.retenciones_aplicadas,
     valor_neto: calculo.valor_neto,
-    datos_beneficiario_snapshot: snapshotBeneficiario(beneficiario),
+    datos_beneficiario_snapshot: snapshotBeneficiario({ ...beneficiario, empresa }),
     regla_snapshot: regla || calculo.regla_aplicada || {}
   };
 }
@@ -337,6 +346,7 @@ async function consultarFacturasPendientes(client, periodoOFecha, { bloquear = t
     SELECT
       fp.id, fp.public_id::text, fp.numero_factura AS referencia,
       fp.fecha_emision, fp.fecha_vencimiento, fp.concepto, fp.subtotal, fp.iva,
+      fp.fecha_pago_preferida, fp.created_at AS fecha_carga,
       fp.anticipo, fp.tiene_iva, fp.ciudad_servicio, fp.moneda, fp.tipo_gasto,
       p.id AS persona_id, p.public_id::text AS persona_public_id,
       BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) AS tercero,
@@ -358,11 +368,15 @@ async function consultarFacturasPendientes(client, periodoOFecha, { bloquear = t
     WHERE fp.estado = 'Pendiente'
       AND fp.proyeccion_pago_id IS NULL
       AND fp.fecha_emision <= $1::date
-      AND (fp.fecha_pago_preferida IS NULL OR fp.fecha_pago_preferida <= $1::date)
     ORDER BY fp.fecha_emision, fp.id
     ${bloquear ? "FOR UPDATE OF fp" : ""}
   `, [fechaLimite]);
-  return result.rows;
+  return result.rows.filter((factura) => {
+    const fechaElegible = factura.fecha_pago_preferida
+      ? dateToBogotaIso(factura.fecha_pago_preferida)
+      : calcularProgramacionFactura(factura.fecha_carga || factura.fecha_emision).fecha_pago_programada;
+    return fechaElegible <= fechaLimite;
+  });
 }
 
 async function consultarNominaPendiente(client, periodo, { bloquear = true } = {}) {
@@ -424,6 +438,8 @@ function construirVistaPrevia({ input, cuentas = [], facturas = [], nominas = []
   const cuentasLimbo = [];
 
   for (const cuenta of cuentas) {
+    const persona = personaFromRow(cuenta);
+    const esVinculado = normalizeText(cuenta.tipo_contrato) === "vinculado";
     const clasificacion = determinarQuincenaCuenta({
       anio: input.anio,
       mes: input.mes,
@@ -437,7 +453,8 @@ function construirVistaPrevia({ input, cuentas = [], facturas = [], nominas = []
       numero_documento: cuenta.numero_documento || null,
       referencia: cuenta.referencia || null,
       valor_origen: Number(cuenta.total_cuenta_cobro || 0),
-      moneda_origen: monedaOrigen(cuenta, personaFromRow(cuenta)),
+      moneda_origen: monedaOrigen(cuenta, persona),
+      empresa: empresaDesdePersona(persona, { esNomina: esVinculado }),
       fecha_ultimo_archivo: clasificacion.fecha_ultimo_archivo,
       ciclo: clasificacion.ciclo,
       motivo: clasificacion.motivo || null,
@@ -448,7 +465,6 @@ function construirVistaPrevia({ input, cuentas = [], facturas = [], nominas = []
     } else if (clasificacion.quincena !== input.quincena) {
       cuentasOtraQuincena.push(resumenCuenta);
     } else {
-      const esVinculado = normalizeText(cuenta.tipo_contrato) === "vinculado";
       const tipoPago = esVinculado ? "nomina" : "consultor";
       const tipoDocumentoPago = esVinculado
         ? "nomina"
@@ -457,7 +473,7 @@ function construirVistaPrevia({ input, cuentas = [], facturas = [], nominas = []
         resumenCuenta.calculo = resumenCalculo(prepararDetalle({
           origenTipo: "cuenta_cobro",
           origenId: cuenta.id,
-          persona: personaFromRow(cuenta),
+          persona,
           tipoPago,
           tipoDocumentoPago,
           subtotal: cuenta.total_cuenta_cobro,
@@ -476,6 +492,7 @@ function construirVistaPrevia({ input, cuentas = [], facturas = [], nominas = []
   }
 
   for (const factura of facturas) {
+    const persona = personaFromRow(factura);
     const pago = {
       id: factura.public_id,
       origen_tipo: "factura_proveedor",
@@ -483,15 +500,18 @@ function construirVistaPrevia({ input, cuentas = [], facturas = [], nominas = []
       numero_documento: factura.numero_documento || null,
       referencia: factura.referencia || factura.concepto || null,
       valor_origen: roundMoney(Number(factura.subtotal || 0) + Number(factura.iva || 0)),
-      moneda_origen: monedaOrigen(factura, personaFromRow(factura)),
+      moneda_origen: monedaOrigen(factura, persona),
+      empresa: empresaDesdePersona(persona),
       fecha_emision: factura.fecha_emision || null,
+      fecha_pago_programada: factura.fecha_pago_preferida ||
+        calcularProgramacionFactura(factura.fecha_carga || factura.fecha_emision).fecha_pago_programada,
       tipo_pago: factura.tipo_gasto
     };
     try {
       pago.calculo = resumenCalculo(prepararDetalle({
         origenTipo: "factura_proveedor",
         origenId: factura.id,
-        persona: personaFromRow(factura),
+        persona,
         tipoPago: factura.tipo_gasto,
         tipoDocumentoPago: "factura_electronica",
         subtotal: factura.subtotal,
@@ -518,7 +538,8 @@ function construirVistaPrevia({ input, cuentas = [], facturas = [], nominas = []
       numero_documento: nomina.numero_documento || null,
       referencia: `Nómina ${input.anio}-${String(input.mes).padStart(2, "0")} Q${input.quincena}`,
       valor_origen: Number(nomina.valor_neto || 0),
-      moneda_origen: "COP"
+      moneda_origen: "COP",
+      empresa: "SILVER"
     };
     pago.calculo = resumenCalculo(prepararDetalle({
       origenTipo: "nomina",
@@ -929,6 +950,10 @@ function mapDetalle(row) {
     email: beneficiario.email || row.email || null,
     tipo_pago: row.tipo_pago,
     tipo_documento_pago: row.tipo_documento_pago || null,
+    empresa: beneficiario.empresa || empresaDesdePersona(
+      { factura_en_colombia: row.factura_en_colombia },
+      { esNomina: row.origen_tipo === "nomina" }
+    ),
     moneda_origen: row.moneda_origen,
     valor_origen: Number(row.valor_origen || 0),
     trm_aplicada: row.trm_aplicada === null ? null : Number(row.trm_aplicada),
@@ -986,7 +1011,8 @@ async function getDetallesProyeccion(req, res, deps = {}) {
         END AS referencia,
         p.public_id::text AS persona_public_id,
         BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)) AS tercero,
-        p.numero_documento, di.codigo_bancario AS tipo_documento_bancario,
+        p.numero_documento, p.factura_en_colombia,
+        di.codigo_bancario AS tipo_documento_bancario,
         b.titulo AS banco, b.codigo_conversor AS codigo_banco,
         tcb.titulo AS tipo_cuenta, tcb.tipo_transaccion,
         p.numero_cuenta, COALESCE(p.correo_electronico, p.correo_silver) AS email,
@@ -1600,6 +1626,7 @@ module.exports = {
     TRANSICIONES,
     canonicalRetentionType,
     construirVistaPrevia,
+    empresaDesdePersona,
     esExterior,
     fechaNominalPeriodo,
     mapDetalle,

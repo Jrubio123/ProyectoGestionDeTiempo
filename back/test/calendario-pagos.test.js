@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const {
   calcularCortes,
   calcularFechaPago,
+  calcularProgramacionFactura,
   determinarQuincenaCuenta,
   extraerFechaUltimoArchivo
 } = require("../src/services/calendarioPagos.service");
@@ -25,6 +26,19 @@ test("calcula ambos cortes con festivos colombianos", () => {
     inicio_q2: "2026-10-16",
     corte_q2: "2026-10-22"
   });
+});
+
+test("programa facturas por fecha de carga y permite que el día de corte pase al siguiente pago", () => {
+  const segundoPago = calcularProgramacionFactura("2026-09-07T09:00:00-05:00");
+  assert.equal(segundoPago.quincena, 2);
+  assert.equal(segundoPago.fecha_pago_programada, "2026-09-30");
+
+  const siguienteMes = calcularProgramacionFactura("2026-09-22T09:00:00-05:00");
+  assert.deepEqual(
+    { anio: siguienteMes.anio, mes: siguienteMes.mes, quincena: siguienteMes.quincena },
+    { anio: 2026, mes: 10, quincena: 1 }
+  );
+  assert.equal(siguienteMes.fecha_pago_programada, "2026-10-15");
 });
 
 test("clasifica por la fecha del último archivo", () => {

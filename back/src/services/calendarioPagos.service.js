@@ -73,6 +73,33 @@ function calcularCortes(anio, mes) {
   };
 }
 
+function calcularProgramacionFactura(fechaCarga) {
+  const fecha = dateToBogotaIso(fechaCarga);
+  if (!fecha) throw new CalendarioPagosValidationError("fecha_carga no es una fecha válida");
+  const [anio, mes] = fecha.split("-").map(Number);
+  const cortes = calcularCortes(anio, mes);
+  let periodo;
+
+  // Para facturas, el día exacto del corte ya se considera cerrado.
+  if (fecha < cortes.corte_q1) {
+    periodo = { anio, mes, quincena: 1 };
+  } else if (fecha < cortes.corte_q2) {
+    periodo = { anio, mes, quincena: 2 };
+  } else {
+    periodo = mes === 12
+      ? { anio: anio + 1, mes: 1, quincena: 1 }
+      : { anio, mes: mes + 1, quincena: 1 };
+  }
+
+  return {
+    ...periodo,
+    ciclo: `Q${periodo.quincena}`,
+    fecha_carga: fecha,
+    fecha_pago_programada: calcularFechaPago(periodo.anio, periodo.mes, periodo.quincena),
+    cortes
+  };
+}
+
 function dateToBogotaIso(value) {
   if (value instanceof Date) {
     if (Number.isNaN(value.getTime())) return null;
@@ -199,6 +226,7 @@ module.exports = {
   CalendarioPagosValidationError,
   calcularCortes,
   calcularFechaPago,
+  calcularProgramacionFactura,
   dateToBogotaIso,
   determinarQuincenaCuenta,
   extraerFechaUltimoArchivo,

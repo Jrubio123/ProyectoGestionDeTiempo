@@ -654,6 +654,167 @@ async function registrarAuditoria(client, {
   );
 }
 
+async function recolectarDetallesPendientes(client, input) {
+  const cuentas = await consultarCuentasPendientes(client);
+  const facturas = await consultarFacturasPendientes(client, input);
+  const nominas = await consultarNominaPendiente(client, input);
+  const detalles = [];
+  const limbo = [];
+  let cuentasOtraQuincena = 0;
+
+  for (const cuenta of cuentas) {
+    const clasificacion = determinarQuincenaCuenta({
+      anio: input.anio,
+      mes: input.mes,
+      datos_adjuntos: parseJsonObject(cuenta.datos_adjuntos),
+      ciclo_proyeccion_asignado: cuenta.ciclo_proyeccion_asignado
+    });
+    if (!clasificacion.quincena) {
+      limbo.push({
+        cuenta_cobro_id: cuenta.public_id,
+        motivo: clasificacion.motivo,
+        fecha_ultimo_archivo: clasificacion.fecha_ultimo_archivo,
+        cortes: clasificacion.cortes
+      });
+      continue;
+    }
+    if (clasificacion.quincena !== input.quincena) {
+      cuentasOtraQuincena += 1;
+      continue;
+    }
+    if (!cuenta.persona_id) {
+      throw new ContabilidadError(
+        `La cuenta ${cuenta.public_id} no tiene una persona asociada`,
+        422,
+        "CUENTA_SIN_PERSONA"
+      );
+    }
+    if (!Number.isFinite(Number(cuenta.total_cuenta_cobro)) || Number(cuenta.total_cuenta_cobro) < 0) {
+      throw new ContabilidadError(
+        `La cuenta ${cuenta.public_id} no tiene un total válido`,
+        422,
+        "CUENTA_SIN_TOTAL"
+      );
+    }
+    const esVinculado = normalizeText(cuenta.tipo_contrato) === "vinculado";
+    const tipoPago = esVinculado ? "nomina" : "consultor";
+    const tipoDocumentoPago = esVinculado
+      ? "nomina"
+      : (cuenta.facturador_electronico ? "factura_electronica" : "cuenta_cobro");
+    const regla = esVinculado
+      ? null
+      : await consultarReglaVigente(
+        client,
+        tipoPago,
+        tipoDocumentoPago,
+        input.fecha_pago_programada
+      );
+    detalles.push({
+      data: prepararDetalle({
+        origenTipo: "cuenta_cobro",
+        origenId: cuenta.id,
+        persona: personaFromRow(cuenta),
+        tipoPago,
+        tipoDocumentoPago,
+        subtotal: cuenta.total_cuenta_cobro,
+        iva: 0,
+        moneda: cuenta.moneda_origen,
+        trmOficial: input.trm_oficial,
+        esNomina: esVinculado,
+        regla,
+        beneficiario: cuenta
+      }),
+      publicId: cuenta.public_id,
+      clasificacion
+    });
+  }
+
+  for (const factura of facturas) {
+    const tipoDocumentoPago = "factura_electronica";
+    const regla = await consultarReglaVigente(
+      client,
+      factura.tipo_gasto,
+      tipoDocumentoPago,
+      input.fecha_pago_programada
+    );
+    detalles.push({
+      data: prepararDetalle({
+        origenTipo: "factura_proveedor",
+        origenId: factura.id,
+        persona: personaFromRow(factura),
+        tipoPago: factura.tipo_gasto,
+        tipoDocumentoPago,
+        subtotal: factura.subtotal,
+        iva: factura.iva,
+        anticipo: factura.anticipo,
+        ciudadServicio: factura.ciudad_servicio,
+        moneda: factura.moneda_origen,
+        trmOficial: input.trm_oficial,
+        regla,
+        beneficiario: factura
+      }),
+      publicId: factura.public_id
+    });
+  }
+
+  for (const nomina of nominas) {
+    detalles.push({
+      data: prepararDetalle({
+        origenTipo: "nomina",
+        origenId: nomina.id,
+        persona: personaFromRow(nomina),
+        tipoPago: "nomina",
+        subtotal: nomina.valor_neto,
+        moneda: "COP",
+        trmOficial: null,
+        esNomina: true,
+        tipoDocumentoPago: "nomina",
+        beneficiario: nomina
+      }),
+      publicId: nomina.public_id
+    });
+  }
+
+  return { detalles, limbo, cuentasOtraQuincena };
+}
+
+async function insertarYAsignarDetalles(client, proyeccionId, detalles, userId) {
+  const conteos = { cuenta_cobro: 0, factura_proveedor: 0, nomina: 0 };
+  let totalNeto = 0;
+
+  for (const item of detalles) {
+    const inserted = await insertarDetalle(client, proyeccionId, item.data, userId);
+    item.detalleId = inserted.id;
+    conteos[item.data.origen_tipo] += 1;
+    totalNeto = roundMoney(totalNeto + Number(item.data.valor_neto));
+
+    if (item.data.origen_tipo === "cuenta_cobro") {
+      await client.query(
+        `UPDATE cuenta_cobro
+         SET proyeccion_pago_id = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [proyeccionId, item.data.origen_id]
+      );
+    } else if (item.data.origen_tipo === "factura_proveedor") {
+      await client.query(
+        `UPDATE facturas_proveedores
+         SET proyeccion_pago_id = $1, estado = 'Proyectada', updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [proyeccionId, item.data.origen_id]
+      );
+    } else {
+      await client.query(
+        `UPDATE nomina_pagos_manual
+         SET proyeccion_pago_id = $1, estado = 'Proyectada', updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [proyeccionId, item.data.origen_id]
+      );
+    }
+  }
+
+  return { conteos, totalNeto };
+}
+
 async function generarProyeccion(req, res, deps = {}) {
   const dbPool = deps.pool || pool;
   let client;
@@ -679,126 +840,7 @@ async function generarProyeccion(req, res, deps = {}) {
       [input.mes, input.anio, input.quincena, input.trm_oficial, input.fecha_pago_programada, req.user.id]
     );
     const lote = loteResult.rows[0];
-    const cuentas = await consultarCuentasPendientes(client);
-    const facturas = await consultarFacturasPendientes(client, input);
-    const nominas = await consultarNominaPendiente(client, input);
-
-    const detalles = [];
-    const limbo = [];
-    let cuentasOtraQuincena = 0;
-
-    for (const cuenta of cuentas) {
-      const clasificacion = determinarQuincenaCuenta({
-        anio: input.anio,
-        mes: input.mes,
-        datos_adjuntos: parseJsonObject(cuenta.datos_adjuntos),
-        ciclo_proyeccion_asignado: cuenta.ciclo_proyeccion_asignado
-      });
-      if (!clasificacion.quincena) {
-        limbo.push({
-          cuenta_cobro_id: cuenta.public_id,
-          motivo: clasificacion.motivo,
-          fecha_ultimo_archivo: clasificacion.fecha_ultimo_archivo,
-          cortes: clasificacion.cortes
-        });
-        continue;
-      }
-      if (clasificacion.quincena !== input.quincena) {
-        cuentasOtraQuincena += 1;
-        continue;
-      }
-      if (!cuenta.persona_id) {
-        throw new ContabilidadError(
-          `La cuenta ${cuenta.public_id} no tiene una persona asociada`,
-          422,
-          "CUENTA_SIN_PERSONA"
-        );
-      }
-      if (!Number.isFinite(Number(cuenta.total_cuenta_cobro)) || Number(cuenta.total_cuenta_cobro) < 0) {
-        throw new ContabilidadError(
-          `La cuenta ${cuenta.public_id} no tiene un total válido`,
-          422,
-          "CUENTA_SIN_TOTAL"
-        );
-      }
-      const esVinculado = normalizeText(cuenta.tipo_contrato) === "vinculado";
-      const tipoPago = esVinculado ? "nomina" : "consultor";
-      const tipoDocumentoPago = esVinculado
-        ? "nomina"
-        : (cuenta.facturador_electronico ? "factura_electronica" : "cuenta_cobro");
-      const regla = esVinculado
-        ? null
-        : await consultarReglaVigente(
-          client,
-          tipoPago,
-          tipoDocumentoPago,
-          input.fecha_pago_programada
-        );
-      detalles.push({
-        data: prepararDetalle({
-          origenTipo: "cuenta_cobro",
-          origenId: cuenta.id,
-          persona: personaFromRow(cuenta),
-          tipoPago,
-          tipoDocumentoPago,
-          subtotal: cuenta.total_cuenta_cobro,
-          iva: 0,
-          moneda: cuenta.moneda_origen,
-          trmOficial: input.trm_oficial,
-          esNomina: esVinculado,
-          regla,
-          beneficiario: cuenta
-        }),
-        publicId: cuenta.public_id,
-        clasificacion
-      });
-    }
-
-    for (const factura of facturas) {
-      const tipoDocumentoPago = "factura_electronica";
-      const regla = await consultarReglaVigente(
-        client,
-        factura.tipo_gasto,
-        tipoDocumentoPago,
-        input.fecha_pago_programada
-      );
-      detalles.push({
-        data: prepararDetalle({
-          origenTipo: "factura_proveedor",
-          origenId: factura.id,
-          persona: personaFromRow(factura),
-          tipoPago: factura.tipo_gasto,
-          tipoDocumentoPago,
-          subtotal: factura.subtotal,
-          iva: factura.iva,
-          anticipo: factura.anticipo,
-          ciudadServicio: factura.ciudad_servicio,
-          moneda: factura.moneda_origen,
-          trmOficial: input.trm_oficial,
-          regla,
-          beneficiario: factura
-        }),
-        publicId: factura.public_id
-      });
-    }
-
-    for (const nomina of nominas) {
-      detalles.push({
-        data: prepararDetalle({
-          origenTipo: "nomina",
-          origenId: nomina.id,
-          persona: personaFromRow(nomina),
-          tipoPago: "nomina",
-          subtotal: nomina.valor_neto,
-          moneda: "COP",
-          trmOficial: null,
-          esNomina: true,
-          tipoDocumentoPago: "nomina",
-          beneficiario: nomina
-        }),
-        publicId: nomina.public_id
-      });
-    }
+    const { detalles, limbo, cuentasOtraQuincena } = await recolectarDetallesPendientes(client, input);
 
     if (detalles.length === 0) {
       throw new ContabilidadError(
@@ -809,37 +851,12 @@ async function generarProyeccion(req, res, deps = {}) {
       );
     }
 
-    const conteos = { cuenta_cobro: 0, factura_proveedor: 0, nomina: 0 };
-    let totalNeto = 0;
-    for (const item of detalles) {
-      const inserted = await insertarDetalle(client, lote.id, item.data, req.user.id);
-      item.detalleId = inserted.id;
-      conteos[item.data.origen_tipo] += 1;
-      totalNeto = roundMoney(totalNeto + Number(item.data.valor_neto));
-
-      if (item.data.origen_tipo === "cuenta_cobro") {
-        await client.query(
-          `UPDATE cuenta_cobro
-           SET proyeccion_pago_id = $1, updated_at = CURRENT_TIMESTAMP
-           WHERE id = $2`,
-          [lote.id, item.data.origen_id]
-        );
-      } else if (item.data.origen_tipo === "factura_proveedor") {
-        await client.query(
-          `UPDATE facturas_proveedores
-           SET proyeccion_pago_id = $1, estado = 'Proyectada', updated_at = CURRENT_TIMESTAMP
-           WHERE id = $2`,
-          [lote.id, item.data.origen_id]
-        );
-      } else {
-        await client.query(
-          `UPDATE nomina_pagos_manual
-           SET proyeccion_pago_id = $1, estado = 'Proyectada', updated_at = CURRENT_TIMESTAMP
-           WHERE id = $2`,
-          [lote.id, item.data.origen_id]
-        );
-      }
-    }
+    const { conteos, totalNeto } = await insertarYAsignarDetalles(
+      client,
+      lote.id,
+      detalles,
+      req.user.id
+    );
 
     await registrarAuditoria(client, {
       proyeccionId: lote.id,
@@ -867,6 +884,114 @@ async function generarProyeccion(req, res, deps = {}) {
       try { await client.query("ROLLBACK"); } catch (_) { }
     }
     return handleError(res, error, "generando la proyección");
+  } finally {
+    if (client) client.release();
+  }
+}
+
+async function sincronizarProyeccion(req, res, deps = {}) {
+  const dbPool = deps.pool || pool;
+  let client;
+  try {
+    const id = assertUuid(req.params.id, "id");
+    const trmSolicitada = toPositiveMoneyOrNull(req.body?.trm_oficial, "trm_oficial");
+    client = await dbPool.connect();
+    await client.query("BEGIN");
+
+    const result = await client.query(
+      `SELECT id, public_id::text, mes, anio, quincena, trm_oficial, estado,
+              fecha_pago_programada
+         FROM proyeccion_pagos
+        WHERE public_id = $1
+        LIMIT 1
+        FOR UPDATE`,
+      [id]
+    );
+    const proyeccion = result.rows[0];
+    if (!proyeccion) {
+      throw new ContabilidadError("Proyección no encontrada", 404, "PROYECCION_NO_ENCONTRADA");
+    }
+    if (![ESTADOS.BORRADOR, ESTADOS.REVISION].includes(proyeccion.estado)) {
+      throw new ContabilidadError(
+        "Solo se pueden agregar pagos a una proyección en Borrador o Revisión",
+        409,
+        "PROYECCION_NO_EDITABLE"
+      );
+    }
+
+    const trmActual = proyeccion.trm_oficial === null ? null : Number(proyeccion.trm_oficial);
+    if (trmActual && trmSolicitada && trmActual !== trmSolicitada) {
+      throw new ContabilidadError(
+        "La TRM de una proyección existente no se puede reemplazar",
+        409,
+        "TRM_NO_EDITABLE"
+      );
+    }
+    if (!trmActual && trmSolicitada) {
+      await client.query(
+        `UPDATE proyeccion_pagos
+            SET trm_oficial = $1, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2`,
+        [trmSolicitada, proyeccion.id]
+      );
+    }
+
+    await client.query(
+      `SELECT pg_advisory_xact_lock($1, $2)`,
+      [20260902, Number(proyeccion.anio) * 100 + Number(proyeccion.mes)]
+    );
+    const input = {
+      anio: Number(proyeccion.anio),
+      mes: Number(proyeccion.mes),
+      quincena: Number(proyeccion.quincena),
+      trm_oficial: trmActual || trmSolicitada,
+      fecha_pago_programada: dateToBogotaIso(proyeccion.fecha_pago_programada)
+    };
+    const { detalles, limbo, cuentasOtraQuincena } = await recolectarDetallesPendientes(client, input);
+
+    if (detalles.length === 0) {
+      await client.query("COMMIT");
+      return res.json({
+        agregados: 0,
+        resumen: { cuenta_cobro: 0, factura_proveedor: 0, nomina: 0 },
+        cuentas_otra_quincena: cuentasOtraQuincena,
+        limbo
+      });
+    }
+
+    const { conteos, totalNeto } = await insertarYAsignarDetalles(
+      client,
+      proyeccion.id,
+      detalles,
+      req.user.id
+    );
+    await registrarAuditoria(client, {
+      proyeccionId: proyeccion.id,
+      evento: "PAGOS_AGREGADOS",
+      estadoAnterior: proyeccion.estado,
+      estadoNuevo: proyeccion.estado,
+      datos: {
+        conteos,
+        total_agregado: totalNeto,
+        cuentas_otra_quincena: cuentasOtraQuincena,
+        limbo
+      },
+      userId: req.user.id
+    });
+    await client.query("COMMIT");
+
+    return res.json({
+      agregados: detalles.length,
+      resumen: conteos,
+      total_agregado: totalNeto,
+      cuentas_otra_quincena: cuentasOtraQuincena,
+      limbo
+    });
+  } catch (error) {
+    if (client) {
+      try { await client.query("ROLLBACK"); } catch (_) { }
+    }
+    return handleError(res, error, "agregando pagos a la proyección");
   } finally {
     if (client) client.release();
   }
@@ -1619,6 +1744,7 @@ module.exports = {
   getDetallesProyeccion,
   previsualizarProyeccion,
   simularRetenciones,
+  sincronizarProyeccion,
   transicionarProyeccion,
   _private: {
     ContabilidadError,

@@ -44,4 +44,17 @@ test("la vista usa los endpoints del módulo de contabilidad", () => {
   assert.match(viewHtml, /Todos los pagos/);
   assert.match(viewScript, /editarFacturaDesdeProyeccion/);
   assert.match(viewScript, /moverCuentaVista/);
+  assert.match(viewScript, /agregar-pendientes/);
+  assert.match(viewHtml, /Agregar pagos pendientes/);
+  assert.match(viewHtml, /@click\.stop="abrirAjuste\(item\)"/);
+});
+
+test("la API permite agregar pagos nuevos solo mediante la programación existente", () => {
+  const routes = read("back/src/routes/contabilidad.routes.js");
+  const service = read("back/src/services/contabilidad.service.js");
+
+  assert.match(routes, /proyeccion\/:id\/agregar-pendientes/);
+  assert.match(service, /async function sincronizarProyeccion/);
+  assert.match(service, /Solo se pueden agregar pagos a una proyección en Borrador o Revisión/);
+  assert.match(service, /evento: "PAGOS_AGREGADOS"/);
 });

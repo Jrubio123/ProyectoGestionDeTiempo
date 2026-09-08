@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { _private } = require("../src/services/contabilidad.service");
+const contabilidad = require("../src/services/contabilidad.service");
+const { _private } = contabilidad;
 
 test("convierte Capitalink a COP con la TRM y no aplica retenciones locales", () => {
   const detalle = _private.prepararDetalle({
@@ -121,4 +122,45 @@ test("separa Capitalink de Silver y siempre clasifica nómina como Silver", () =
     _private.empresaDesdePersona({ factura_en_colombia: false }, { esNomina: true }),
     "SILVER"
   );
+});
+
+test("sincroniza una programación editable sin duplicar cuando no hay pagos nuevos", async () => {
+  const consultas = [];
+  const client = {
+    async query(sql) {
+      const texto = String(sql);
+      consultas.push(texto);
+      if (texto.includes("FROM proyeccion_pagos") && texto.includes("FOR UPDATE")) {
+        return {
+          rows: [{
+            id: 7,
+            public_id: "bb11b60c-713b-4e9c-8894-484864488fdf",
+            mes: 9,
+            anio: 2026,
+            quincena: 1,
+            trm_oficial: null,
+            estado: "Borrador",
+            fecha_pago_programada: "2026-09-15"
+          }]
+        };
+      }
+      return { rows: [] };
+    },
+    release() { }
+  };
+  const response = {
+    statusCode: 200,
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.body = body; return this; }
+  };
+
+  await contabilidad.sincronizarProyeccion({
+    params: { id: "bb11b60c-713b-4e9c-8894-484864488fdf" },
+    body: {},
+    user: { id: 12 }
+  }, response, { pool: { async connect() { return client; } } });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.agregados, 0);
+  assert.equal(consultas.some((sql) => sql === "COMMIT"), true);
 });

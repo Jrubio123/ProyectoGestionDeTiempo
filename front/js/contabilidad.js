@@ -267,6 +267,32 @@ window.contabilidadApp = function () {
             }
         },
 
+        async agregarPagosPendientes() {
+            if (!this.proyeccion?.id) return;
+            if (!window.confirm("Se agregarán los pagos nuevos que correspondan a este corte. ¿Continuar?")) return;
+            this.limpiarAlertas();
+            this.guardando = true;
+            try {
+                const payload = {};
+                const trm = this.proyeccion.trm_oficial || this.generacion.trm_oficial;
+                if (trm) payload.trm_oficial = Number(trm);
+                const { data } = await window.axios.post(
+                    `${API}/api/contabilidad/proyeccion/${encodeURIComponent(this.proyeccion.id)}/agregar-pendientes`,
+                    payload
+                );
+                this.auditoria = [];
+                await this.abrirProgramacion(this.proyeccion.id);
+                await this.listarProgramaciones(false);
+                this.mensaje = data.agregados
+                    ? `Se agregaron ${data.agregados} pago(s) nuevo(s) a la programación.`
+                    : "No hay pagos nuevos que correspondan a este corte.";
+            } catch (error) {
+                this.error = this.errorDe(error, "No fue posible agregar los pagos pendientes.");
+            } finally {
+                this.guardando = false;
+            }
+        },
+
         get pagosVistaFiltrados() {
             const buscar = this.normalizar(this.filtroVista);
             return (this.vistaPrevia?.pagos || []).filter((item) => {

@@ -25,6 +25,7 @@ router.put("/configuracion/reglas/:id", operation.actualizarRegla);
 router.post("/retenciones/simular", service.simularRetenciones);
 router.post("/proyeccion/previsualizar", service.previsualizarProyeccion);
 router.post("/proyeccion/generar", service.generarProyeccion);
+router.post("/proyeccion/:id/agregar-pendientes", service.sincronizarProyeccion);
 router.get("/proyeccion/:id/auditoria", operation.consultarAuditoria);
 router.get("/proyeccion/:id/exportar-banco", operation.exportarArchivoBancario);
 router.get("/proyeccion/:id/detalles", service.getDetallesProyeccion);

@@ -18,7 +18,9 @@ router.post("/personas/desde-microsoft", MEMBERSHIP, service.materializeMicrosof
 router.patch("/personas/:id/fabrica", MEMBERSHIP, service.updateFactoryMembership);
 
 router.get("/dashboard", MANAGEMENT, service.getDashboard);
+router.get("/historial", MANAGEMENT, service.getCapacityHistory);
 router.post("/bolsas-reuniones", MANAGEMENT, service.assignMeetingBags);
+router.delete("/bolsas-reuniones/:id", MANAGEMENT, service.deleteMeetingBag);
 router.get("/bolsas-reuniones/:id/movimientos", MANAGEMENT, service.getMeetingBagHistory);
 router.get("/mi-capacidad", SELF_FACTORY, service.getMyCapacity);
 router.post("/mi-reuniones", SELF_FACTORY, service.createMyMeeting);

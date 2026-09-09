@@ -197,5 +197,5 @@ test("el banner del anexo depende del estado de firma y no de updated_at", () =>
 
   assert.match(dashboardSource, /ultimoFirmado && activos\.some\(\(item\) => item\.estado_firma !== "firmado"\)/);
   assert.doesNotMatch(dashboardSource, /updatedAt > firmadoAt/);
-  assert.match(routerSource, /20260812-anexo-estado-firma/);
+  assert.match(routerSource, /20260909-capacidad-historial/);
 });

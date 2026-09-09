@@ -3,7 +3,7 @@ const test = require("node:test");
 const path = require("node:path");
 
 const scriptPath = path.resolve(__dirname, "../../front/js/capacidad-fabrica.js");
-const homeScriptPath = path.resolve(__dirname, "../../front/js/inicio.js");
+const homeScriptPath = path.resolve(__dirname, "../../front/js/mi-capacidad-fabrica.js");
 
 function createApp() {
   global.window = {};
@@ -16,7 +16,7 @@ function createHomeApp() {
   global.window = {};
   delete require.cache[homeScriptPath];
   require(homeScriptPath);
-  return global.window.inicioApp();
+  return global.window.miCapacidadFabricaApp();
 }
 
 test("calcula las horas cuando cambia el porcentaje", () => {
@@ -80,6 +80,7 @@ test("inicializa una actividad para varios responsables", () => {
   assert.equal(app.actividad.cliente_id, "");
   assert.deepEqual(app.actividad.persona_ids, []);
   assert.deepEqual(app.actividad.bolsa_ids, {});
+  assert.equal(app.actividad.consumir_bolsa, false);
 });
 
 test("selecciona varios responsables para una actividad", () => {
@@ -98,6 +99,7 @@ test("exige una bolsa con saldo para cada reunión programada", () => {
   const app = createApp();
   app.actividad = {
     categoria_codigo: "REUNIONES",
+    consumir_bolsa: true,
     persona_ids: ["persona-1"],
     bolsa_ids: { "persona-1": "bolsa-1" },
     horas: 3
@@ -112,6 +114,8 @@ test("exige una bolsa con saldo para cada reunión programada", () => {
   assert.equal(app.actividadBolsasValidas(), false);
   app.actividad.bolsa_ids["persona-1"] = "";
   assert.equal(app.actividadBolsasValidas(), false);
+  app.actividad.consumir_bolsa = false;
+  assert.equal(app.actividadBolsasValidas(), true);
 });
 
 test("edita la bolsa usando el total actual, no horas adicionales", () => {

@@ -1,4 +1,4 @@
-window.inicioApp = function () {
+window.miCapacidadFabricaApp = function () {
     const API = window.API_BASE || "http://localhost:4000";
 
     function todayInBogota() {

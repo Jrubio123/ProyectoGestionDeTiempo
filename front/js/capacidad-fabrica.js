@@ -14,6 +14,12 @@ window.capacidadFabricaApp = function () {
         return `${values.year}-${values.month}-${values.day}`;
     }
 
+    function dateDaysAgo(days) {
+        const date = new Date(`${todayInBogota()}T12:00:00.000Z`);
+        date.setUTCDate(date.getUTCDate() - days);
+        return date.toISOString().slice(0, 10);
+    }
+
     return {
         roleKey: "other",
         puedeGestionar: false,
@@ -54,6 +60,11 @@ window.capacidadFabricaApp = function () {
         cargandoHistorial: false,
         historial: [],
         historialTitulo: "",
+        historialCapacidad: { bolsas: [], requerimientos: [] },
+        filtroHistorialPersona: "",
+        historialDesde: dateDaysAgo(90),
+        historialHasta: todayInBogota(),
+        cargandoHistorialCapacidad: false,
 
         async init() {
             this.roleKey = window.auth?.getRoleKey?.() || "other";
@@ -225,6 +236,7 @@ window.capacidadFabricaApp = function () {
                 cliente_id: "",
                 persona_ids: [],
                 bolsa_ids: {},
+                consumir_bolsa: false,
                 titulo: "",
                 categoria_codigo: defaultCategory?.codigo || "",
                 horas: "",
@@ -264,6 +276,26 @@ window.capacidadFabricaApp = function () {
                 this.error = this.errorText(error, "No se creó la actividad puntual.");
             } finally {
                 this.guardandoActividad = false;
+            }
+        },
+
+        async cargarHistorialCapacidad() {
+            if (!this.puedeGestionar) return;
+            this.cargandoHistorialCapacidad = true;
+            this.error = "";
+            try {
+                const response = await axios.get(`${API}/capacidad-fabrica/historial`, this.authConfig({
+                    params: {
+                        persona_id: this.filtroHistorialPersona || undefined,
+                        desde: this.historialDesde,
+                        hasta: this.historialHasta
+                    }
+                }));
+                this.historialCapacidad = response.data || { bolsas: [], requerimientos: [] };
+            } catch (error) {
+                this.error = this.errorText(error, "No se cargó el historial de capacidad.");
+            } finally {
+                this.cargandoHistorialCapacidad = false;
             }
         },
 
@@ -323,6 +355,23 @@ window.capacidadFabricaApp = function () {
                 this.error = this.errorText(error, "No se cargó el historial de la bolsa.");
             } finally {
                 this.cargandoMovimientosBolsa = false;
+            }
+        },
+
+        async eliminarBolsa(person, bag) {
+            if (!bag?.id) return;
+            if (!window.confirm(`¿Eliminar la bolsa "${bag.nombre}" de ${person.persona}?`)) return;
+            this.error = "";
+            try {
+                await axios.delete(
+                    `${API}/capacidad-fabrica/bolsas-reuniones/${bag.id}`,
+                    this.authConfig()
+                );
+                await this.cargarDashboard();
+                if (this.tab === "historial") await this.cargarHistorialCapacidad();
+                this.notify("Bolsa eliminada y conservada en el historial.");
+            } catch (error) {
+                this.error = this.errorText(error, "No se eliminó la bolsa.");
             }
         },
 
@@ -613,7 +662,7 @@ window.capacidadFabricaApp = function () {
         },
 
         actividadBolsasValidas() {
-            if (this.actividad.categoria_codigo !== "REUNIONES") return true;
+            if (!this.actividad.consumir_bolsa) return true;
             const hours = Number(this.actividad.horas || 0);
             if (!(hours > 0)) return false;
             return (this.actividad.persona_ids || []).every((personId) => {

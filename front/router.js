@@ -1,6 +1,7 @@
 // Mapa ruta -> script de vista. null = no necesita JS propio.
 const viewScripts = {
-    inicio:                           "/js/inicio.js",
+    inicio:                           null,
+    "mi-capacidad-fabrica":          "/js/mi-capacidad-fabrica.js",
     "entregas-servicio":             "/js/entregas-servicio.js",
     cliente:                          "/js/cliente.js",
     tarifas:                          "/js/tarifas.js",
@@ -36,7 +37,7 @@ const viewScripts = {
 // Guardar la promesa (no solo el resultado) evita inyectar el mismo
 // archivo dos veces si llegan dos navegaciones rápidas antes del onload.
 const _scriptPromises = new Map();
-const APP_ASSET_VERSION = "20260908-contabilidad-pagos-pendientes";
+const APP_ASSET_VERSION = "20260909-capacidad-historial";
 
 function loadScript(src) {
     if (_scriptPromises.has(src)) return _scriptPromises.get(src);
@@ -93,6 +94,7 @@ async function loadView(view) {
 
 const routes = {
     inicio: "inicio",
+    "mi-capacidad-fabrica": "mi-capacidad-fabrica",
     "entregas-servicio": "entregas-servicio",
     cliente: "cliente",
     tarifas: "tarifas",
@@ -151,7 +153,7 @@ function router() {
             "azure-devops-prueba",
             "gestion-consultores"
         ],
-        fabrica: ["inicio"],
+        fabrica: ["inicio", "mi-capacidad-fabrica"],
         consultor_principal: [
             "inicio",
             "mis-asignaciones-consultor",

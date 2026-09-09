@@ -14,7 +14,7 @@ function getRoleRoutes() {
             "soportes-cuentas-cobro",
             "gestion-consultores"
         ],
-        fabrica: ["inicio"],
+        fabrica: ["inicio", "mi-capacidad-fabrica"],
         consultor_principal: [
             "inicio",
             "mis-asignaciones-consultor",
@@ -51,6 +51,7 @@ function getRoleRoutes() {
 function getAllSearchViews() {
     return [
         { label: "Inicio", hash: "#inicio" },
+        { label: "Registrar capacidad", hash: "#mi-capacidad-fabrica" },
         { label: "Clientes", hash: "#cliente" },
         { label: "Tarifas", hash: "#tarifas" },
         { label: "Asignación Coordinador", hash: "#asignacion-coordinador" },

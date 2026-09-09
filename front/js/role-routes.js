@@ -37,7 +37,7 @@ window.roleAccess = (function () {
             "capacidad-fabrica",
             "azure-devops-prueba"
         ],
-        fabrica: ["inicio"],
+        fabrica: ["inicio", "mi-capacidad-fabrica"],
         comercial: [
             "inicio",
             "asignacion-consultor",
@@ -71,6 +71,7 @@ window.roleAccess = (function () {
 
     const searchViews = [
         { label: "Inicio", hash: "#inicio" },
+        { label: "Registrar capacidad", hash: "#mi-capacidad-fabrica" },
         { label: "Clientes", hash: "#cliente" },
         { label: "Tarifas", hash: "#tarifas" },
         { label: "Asignacion Coordinador", hash: "#asignacion-coordinador" },

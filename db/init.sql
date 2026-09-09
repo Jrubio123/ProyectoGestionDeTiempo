@@ -746,7 +746,10 @@ CREATE TABLE bolsas_reuniones_capacidad
     semana_inicio DATE NOT NULL,
     semana_fin DATE NOT NULL,
     estado VARCHAR(20) NOT NULL DEFAULT 'ABIERTA'
-        CHECK (estado IN ('ABIERTA', 'CERRADA')),
+        CHECK (estado IN ('ABIERTA', 'CERRADA', 'ELIMINADA')),
+    eliminado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    eliminado_at TIMESTAMPTZ,
+    motivo_eliminacion VARCHAR(500),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT ck_bolsa_reuniones_semana CHECK (semana_fin = semana_inicio + 4)
@@ -758,6 +761,9 @@ CREATE INDEX idx_bolsas_reuniones_semana
 CREATE INDEX idx_bolsas_reuniones_persona_semana
     ON bolsas_reuniones_capacidad(persona_id, semana_inicio, created_at);
 
+CREATE INDEX idx_bolsas_reuniones_historial
+    ON bolsas_reuniones_capacidad(persona_id, semana_inicio DESC, estado);
+
 CREATE TABLE actividades_capacidad
 (
     id BIGSERIAL PRIMARY KEY,
@@ -767,6 +773,7 @@ CREATE TABLE actividades_capacidad
     categoria_codigo VARCHAR(40) NOT NULL REFERENCES categorias_esfuerzo_capacidad(codigo),
     fecha DATE NOT NULL,
     horas NUMERIC(8,2) NOT NULL CHECK (horas > 0 AND horas <= 168),
+    consume_bolsa BOOLEAN NOT NULL DEFAULT FALSE,
     origen VARCHAR(20) NOT NULL CHECK (origen IN ('AUTORREGISTRO', 'COORDINADOR', 'MIGRACION')),
     estado VARCHAR(20) NOT NULL DEFAULT 'ACTIVA' CHECK (estado IN ('ACTIVA', 'CANCELADA')),
     creado_por INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,

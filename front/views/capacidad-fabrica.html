@@ -30,6 +30,7 @@
         <nav class="flex gap-5 overflow-x-auto text-sm font-medium">
             <button x-show="puedeGestionar" @click="tab = 'dashboard'; cargarDashboard()" class="border-b-2 px-1 py-3" :class="tab === 'dashboard' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'">Capacidad semanal</button>
             <button x-show="puedeGestionar" @click="tab = 'requerimientos'" class="border-b-2 px-1 py-3" :class="tab === 'requerimientos' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'">Requerimientos</button>
+            <button x-show="puedeGestionar" @click="tab = 'historial'; cargarHistorialCapacidad()" class="border-b-2 px-1 py-3" :class="tab === 'historial' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'">Historial</button>
             <button @click="tab = 'personas'" class="border-b-2 px-1 py-3" :class="tab === 'personas' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'">Integrantes de Fábrica</button>
         </nav>
     </div>
@@ -100,7 +101,7 @@
                             <template x-for="bag in person.bolsas_reuniones || []" :key="bag.id">
                                 <div class="flex flex-col gap-2 rounded-lg border border-violet-100 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
                                     <div><strong class="text-sm text-slate-800" x-text="bag.nombre"></strong><p class="mt-1 text-sm text-slate-700"><strong><span x-text="formatNumber(bag.horas_consumidas)"></span> h</strong> consumidas de <strong><span x-text="formatNumber(bag.horas_asignadas)"></span> h</strong> · saldo <strong><span x-text="formatNumber(bag.horas_disponibles)"></span> h</strong></p></div>
-                                    <div class="flex shrink-0 gap-2"><button @click="verHistorialBolsa(person, bag)" class="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">Historial</button><button @click="abrirBolsa(person, bag)" class="rounded-lg border border-violet-200 px-3 py-2 text-xs font-semibold text-violet-700">Editar</button></div>
+                                    <div class="flex shrink-0 gap-2"><button @click="verHistorialBolsa(person, bag)" class="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">Historial</button><button @click="abrirBolsa(person, bag)" class="rounded-lg border border-violet-200 px-3 py-2 text-xs font-semibold text-violet-700">Editar</button><button @click="eliminarBolsa(person, bag)" :disabled="bag.tiene_consumos" :title="bag.tiene_consumos ? 'No se puede eliminar porque tiene consumos registrados' : 'Eliminar bolsa'" class="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 disabled:cursor-not-allowed disabled:opacity-40">Eliminar</button></div>
                                 </div>
                             </template>
                             <p x-show="!person.bolsas_reuniones?.length" class="text-sm text-amber-700">Sin bolsas asignadas para esta semana.</p>
@@ -142,6 +143,28 @@
             <div x-show="!cargando && !(dashboard.personas || []).length" class="rounded-xl border border-dashed border-slate-300 p-10 text-center text-slate-500">
                 No hay integrantes de Fábrica para este corte semanal.
             </div>
+        </div>
+    </section>
+
+    <!-- Historial consolidado -->
+    <section x-show="tab === 'historial' && puedeGestionar" class="space-y-5">
+        <div class="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-4">
+            <label class="text-sm font-medium text-slate-700">Persona<select x-model="filtroHistorialPersona" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><option value="">Todas</option><template x-for="person in integrantesFabrica()" :key="person.id"><option :value="person.id" x-text="`${person.nombre || ''} ${person.apellidos || ''}`.trim()"></option></template></select></label>
+            <label class="text-sm font-medium text-slate-700">Desde<input type="date" x-model="historialDesde" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
+            <label class="text-sm font-medium text-slate-700">Hasta<input type="date" x-model="historialHasta" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
+            <div class="flex items-end"><button @click="cargarHistorialCapacidad()" :disabled="cargandoHistorialCapacidad" class="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" x-text="cargandoHistorialCapacidad ? 'Consultando…' : 'Aplicar filtros'"></button></div>
+        </div>
+
+        <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div class="border-b border-slate-200 px-5 py-4"><h2 class="font-semibold text-slate-900">Historial de bolsas</h2><p class="mt-1 text-xs text-slate-500">Las bolsas agotadas, eliminadas y de semanas anteriores permanecen disponibles para consulta.</p></div>
+            <table class="min-w-full text-sm"><thead class="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Persona</th><th class="px-4 py-3">Bolsa</th><th class="px-4 py-3">Semana</th><th class="px-4 py-3">Estado</th><th class="px-4 py-3 text-right">Asignadas</th><th class="px-4 py-3 text-right">Consumidas</th><th class="px-4 py-3 text-right">Saldo</th><th class="px-4 py-3"></th></tr></thead><tbody class="divide-y divide-slate-100"><template x-for="bag in historialCapacidad.bolsas || []" :key="bag.id"><tr><td class="px-4 py-3" x-text="bag.persona"></td><td class="px-4 py-3 font-semibold" x-text="bag.nombre"></td><td class="whitespace-nowrap px-4 py-3"><span x-text="formatDate(bag.semana_inicio)"></span> – <span x-text="formatDate(bag.semana_fin)"></span></td><td class="px-4 py-3"><span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold" x-text="bag.estado"></span></td><td class="px-4 py-3 text-right" x-text="`${formatNumber(bag.horas_asignadas)} h`"></td><td class="px-4 py-3 text-right" x-text="`${formatNumber(bag.horas_consumidas)} h`"></td><td class="px-4 py-3 text-right" x-text="`${formatNumber(bag.horas_disponibles)} h`"></td><td class="px-4 py-3 text-right"><button @click="verHistorialBolsa({ persona: bag.persona }, bag)" class="text-xs font-semibold text-blue-600">Ver gastos</button></td></tr></template></tbody></table>
+            <p x-show="!cargandoHistorialCapacidad && !historialCapacidad.bolsas?.length" class="p-8 text-center text-slate-500">No hay bolsas en el periodo seleccionado.</p>
+        </div>
+
+        <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div class="border-b border-slate-200 px-5 py-4"><h2 class="font-semibold text-slate-900">Historial de requerimientos locales</h2></div>
+            <table class="min-w-full text-sm"><thead class="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Fecha</th><th class="px-4 py-3">Persona</th><th class="px-4 py-3">Cliente</th><th class="px-4 py-3">Requerimiento</th><th class="px-4 py-3">Evento</th><th class="px-4 py-3">Estado</th><th class="px-4 py-3 text-right">Effort</th></tr></thead><tbody class="divide-y divide-slate-100"><template x-for="(item, index) in historialCapacidad.requerimientos || []" :key="`${item.id}:${item.valido_desde}:${index}`"><tr><td class="whitespace-nowrap px-4 py-3" x-text="formatDate(item.valido_desde, true)"></td><td class="px-4 py-3" x-text="item.persona || 'Sin asignar'"></td><td class="px-4 py-3" x-text="item.cliente || '—'"></td><td class="px-4 py-3 font-medium" x-text="item.titulo"></td><td class="px-4 py-3" x-text="item.evento"></td><td class="px-4 py-3" x-text="item.estado"></td><td class="px-4 py-3 text-right" x-text="item.effort_total === null ? 'Pendiente' : `${formatNumber(item.effort_total)} h`"></td></tr></template></tbody></table>
+            <p x-show="!cargandoHistorialCapacidad && !historialCapacidad.requerimientos?.length" class="p-8 text-center text-slate-500">No hay cambios de requerimientos locales en el periodo seleccionado.</p>
         </div>
     </section>
 
@@ -268,15 +291,34 @@
         <div @click.outside="modalMovimientosBolsa = false" class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl sm:p-6">
             <div class="flex items-start justify-between"><div><h2 class="text-xl font-bold text-slate-900">Historial de bolsa</h2><p class="mt-1 text-sm text-slate-500"><span x-text="historialBolsa.bolsa?.persona"></span> · <span x-text="historialBolsa.bolsa?.nombre"></span></p></div><button @click="modalMovimientosBolsa = false" class="text-2xl text-slate-400">×</button></div>
             <p x-show="cargandoMovimientosBolsa" class="py-10 text-center text-slate-500">Cargando…</p>
-            <div x-show="!cargandoMovimientosBolsa" class="mt-5 space-y-3"><template x-for="movement in historialBolsa.movimientos || []" :key="movement.id"><article class="flex items-start justify-between gap-4 rounded-lg border border-slate-200 p-4"><div><div class="flex items-center gap-2"><span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600" x-text="movement.tipo"></span><strong class="text-sm" x-text="movement.motivo || movement.actividad || 'Movimiento de bolsa'"></strong></div><p class="mt-2 text-xs text-slate-500"><span x-text="movement.registrado_por || 'Sistema'"></span> · <span x-text="formatDate(movement.created_at, true)"></span></p></div><span class="whitespace-nowrap font-bold" :class="Number(movement.horas_delta) >= 0 ? 'text-emerald-600' : 'text-red-600'" x-text="`${Number(movement.horas_delta) >= 0 ? '+' : ''}${formatNumber(movement.horas_delta)} h`"></span></article></template><p x-show="!historialBolsa.movimientos?.length" class="py-8 text-center text-slate-500">Sin movimientos.</p></div>
+            <div x-show="!cargandoMovimientosBolsa" class="mt-5 space-y-3">
+                <template x-for="movement in historialBolsa.movimientos || []" :key="movement.id">
+                    <article class="flex items-start justify-between gap-4 rounded-lg border border-slate-200 p-4">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600" x-text="movement.tipo"></span>
+                                <strong class="text-sm" x-text="movement.motivo || movement.actividad || 'Movimiento de bolsa'"></strong>
+                            </div>
+                            <p x-show="movement.actividad_id" class="mt-2 text-xs text-slate-600">
+                                <span x-text="movement.cliente || 'Sin cliente'"></span> ·
+                                <span x-text="formatDate(movement.actividad_fecha)"></span> ·
+                                <span x-text="String(movement.categoria_codigo || 'Actividad').replaceAll('_', ' ')"></span>
+                            </p>
+                            <p class="mt-1 text-xs text-slate-500"><span x-text="movement.registrado_por || 'Sistema'"></span> · <span x-text="formatDate(movement.created_at, true)"></span></p>
+                        </div>
+                        <span class="whitespace-nowrap font-bold" :class="Number(movement.horas_delta) >= 0 ? 'text-emerald-600' : 'text-red-600'" x-text="`${Number(movement.horas_delta) >= 0 ? '+' : ''}${formatNumber(movement.horas_delta)} h`"></span>
+                    </article>
+                </template>
+                <p x-show="!historialBolsa.movimientos?.length" class="py-8 text-center text-slate-500">Sin movimientos.</p>
+            </div>
         </div>
     </div>
 
     <!-- Modal actividad puntual -->
     <div x-show="modalActividad" class="fixed inset-0 z-50 !m-0 flex items-center justify-center bg-slate-900/50 p-4" @keydown.escape.window="modalActividad = false">
-        <div @click.outside="modalActividad = false" class="w-full max-w-2xl rounded-2xl bg-white px-4 pb-4 pt-3 shadow-xl sm:px-6 sm:pb-6 sm:pt-4">
+        <div @click.outside="modalActividad = false" class="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white px-4 pb-4 pt-3 shadow-xl sm:px-6 sm:pb-6 sm:pt-4">
             <div class="flex items-start justify-between gap-4">
-                <div><h2 class="text-xl font-bold text-slate-900">Nueva actividad</h2><p class="mt-1 text-sm text-slate-500">Asigna la misma actividad a uno o varios integrantes. Las reuniones descuentan su bolsa semanal.</p></div>
+                <div><h2 class="text-xl font-bold text-slate-900">Nueva actividad</h2><p class="mt-1 text-sm text-slate-500">Asigna la misma actividad a uno o varios integrantes y decide si debe descontar una bolsa.</p></div>
                 <button @click="modalActividad = false" class="text-2xl text-slate-400">×</button>
             </div>
             <form @submit.prevent="guardarActividad()" class="mt-5 space-y-4">
@@ -287,11 +329,12 @@
                     <label class="text-sm font-medium text-slate-700">Categoría<select required x-model="actividad.categoria_codigo" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"><template x-for="category in catalogos.categorias_actividad || []" :key="category.codigo"><option :value="category.codigo" x-text="category.nombre"></option></template></select></label>
                     <label class="text-sm font-medium text-slate-700">Horas<input required type="number" min="0.01" step="0.01" x-model.number="actividad.horas" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
                     <label class="text-sm font-medium text-slate-700">Fecha<input required type="date" x-model="actividad.fecha" :min="dashboard.semana?.fecha_inicio" :max="dashboard.semana?.fecha_fin" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"></label>
+                    <label class="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-medium text-slate-700 md:col-span-2"><input type="checkbox" x-model="actividad.consumir_bolsa" class="rounded border-slate-300"><span><strong>Consumir horas de una bolsa</strong><small class="block font-normal text-slate-500">Si se desactiva, la actividad contará en capacidad pero no descontará ninguna bolsa.</small></span></label>
                 </div>
-                <div x-show="actividad.categoria_codigo === 'REUNIONES'" class="space-y-3 rounded-lg border border-violet-200 bg-violet-50 p-3">
+                <div x-show="actividad.consumir_bolsa" class="max-h-64 space-y-3 overflow-y-auto rounded-lg border border-violet-200 bg-violet-50 p-3">
                     <p class="text-sm font-semibold text-violet-800">Bolsa que se descontará a cada responsable</p>
                     <template x-for="personId in actividad.persona_ids || []" :key="personId">
-                        <label class="block text-sm font-medium text-slate-700"><span x-text="nombreIntegrante(personId)"></span><select :required="actividad.categoria_codigo === 'REUNIONES'" x-model="actividad.bolsa_ids[personId]" class="mt-1 w-full rounded-lg border border-violet-200 bg-white px-3 py-2"><option value="">Selecciona una bolsa</option><template x-for="bag in bolsasActividadPersona(personId)" :key="bag.id"><option :value="bag.id" :disabled="bag.estado !== 'ABIERTA' || Number(bag.horas_disponibles) < Number(actividad.horas || 0)" x-text="`${bag.nombre} · saldo ${formatNumber(bag.horas_disponibles)} h`"></option></template></select><span x-show="!bolsasActividadPersona(personId).length" class="mt-1 block text-xs font-normal text-red-600">No tiene bolsas para esta semana.</span></label>
+                        <label class="block text-sm font-medium text-slate-700"><span x-text="nombreIntegrante(personId)"></span><select :required="actividad.consumir_bolsa" x-model="actividad.bolsa_ids[personId]" class="mt-1 w-full rounded-lg border border-violet-200 bg-white px-3 py-2"><option value="">Selecciona una bolsa</option><template x-for="bag in bolsasActividadPersona(personId)" :key="bag.id"><option :value="bag.id" :disabled="bag.estado !== 'ABIERTA' || Number(bag.horas_disponibles) < Number(actividad.horas || 0)" x-text="`${bag.nombre} · saldo ${formatNumber(bag.horas_disponibles)} h`"></option></template></select><span x-show="!bolsasActividadPersona(personId).length" class="mt-1 block text-xs font-normal text-red-600">No tiene bolsas para esta semana.</span></label>
                     </template>
                 </div>
                 <div class="flex justify-end gap-3"><button type="button" @click="modalActividad = false" class="rounded-lg border border-slate-300 px-4 py-2 text-sm">Cancelar</button><button type="submit" :disabled="guardandoActividad || !actividad.persona_ids?.length || !actividadBolsasValidas()" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" x-text="guardandoActividad ? 'Guardando…' : 'Planificar actividad'"></button></div>

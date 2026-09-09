@@ -608,7 +608,7 @@ async function resolveCurrentFactoryPerson(db, userId) {
   return result.rows[0];
 }
 
-async function getBagsWithBalances(db, personId, weekStart, lock = false) {
+async function getBagsWithBalances(db, personId, weekStart, lock = false, includeDeleted = false) {
   if (lock) {
     await db.query(
       `SELECT id FROM bolsas_reuniones_capacidad
@@ -635,9 +635,10 @@ async function getBagsWithBalances(db, personId, weekStart, lock = false) {
      LEFT JOIN bolsa_reuniones_movimientos m ON m.bolsa_id = b.id
      LEFT JOIN usuarios u ON u.id = b.coordinador_id
      WHERE b.persona_id = $1 AND b.semana_inicio = $2
+       AND ($3::boolean = TRUE OR b.estado <> 'ELIMINADA')
      GROUP BY b.id, u.id
      ORDER BY b.created_at, b.id`,
-    [personId, weekStart]
+    [personId, weekStart, includeDeleted]
   );
   return result.rows;
 }
@@ -666,6 +667,7 @@ async function createCapacityActivity(db, {
   const { date, week } = resolveWorkWeek(payload.fecha);
   const hours = validatePositiveHours(payload.horas);
   const category = await resolveActivityCategory(db, payload.categoria_codigo, forceMeetings);
+  const shouldConsumeBag = fixedPerson ? true : payload.consumir_bolsa === true;
   const relatedClient = await resolveActiveClient(db, payload.cliente_id, false);
   const people = fixedPerson
     ? [fixedPerson]
@@ -677,7 +679,7 @@ async function createCapacityActivity(db, {
     );
 
   const bagsByPerson = new Map();
-  if (category.usa_bolsa) {
+  if (shouldConsumeBag) {
     const errors = [];
     for (const person of people) {
       const bags = await getBagsWithBalances(db, person.id, week.startDate, true);
@@ -699,7 +701,7 @@ async function createCapacityActivity(db, {
     }
     if (errors.length) {
       throw new CapacityError(
-        `No se puede registrar la reunión. ${errors.join("; ")}. Solicita una ampliación al coordinador.`,
+        `No se puede registrar la actividad. ${errors.join("; ")}. Solicita una ampliación al coordinador.`,
         409
       );
     }
@@ -707,10 +709,10 @@ async function createCapacityActivity(db, {
 
   const activityResult = await db.query(
     `INSERT INTO actividades_capacidad
-       (titulo, cliente_id, categoria_codigo, fecha, horas, origen, creado_por)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (titulo, cliente_id, categoria_codigo, fecha, horas, consume_bolsa, origen, creado_por)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING id, public_id::text AS public_id`,
-    [title, relatedClient?.id || null, category.codigo, date, hours, origin, actorId]
+    [title, relatedClient?.id || null, category.codigo, date, hours, shouldConsumeBag, origin, actorId]
   );
   const activity = activityResult.rows[0];
   for (const person of people) {
@@ -1167,6 +1169,52 @@ async function assignMeetingBags(req, res) {
   }
 }
 
+async function deleteMeetingBag(req, res) {
+  try {
+    const reason = cleanText(req.body?.motivo, 500) || "Bolsa eliminada por coordinación";
+    const result = await withTransaction(async (client) => {
+      const bagResult = await client.query(
+        `SELECT id, public_id::text AS public_id, estado
+         FROM bolsas_reuniones_capacidad
+         WHERE public_id = $1
+         FOR UPDATE`,
+        [req.params.id]
+      );
+      const bag = bagResult.rows[0];
+      if (!bag) throw new CapacityError("Bolsa no encontrada.", 404);
+      if (bag.estado === "ELIMINADA") return { id: bag.public_id, eliminada: true };
+
+      const totalsResult = await client.query(
+        `SELECT EXISTS (
+                  SELECT 1 FROM bolsa_reuniones_movimientos
+                  WHERE bolsa_id = $1 AND tipo = 'CONSUMO'
+                ) AS tiene_consumos`,
+        [bag.id]
+      );
+      const totals = totalsResult.rows[0];
+      if (totals.tiene_consumos) {
+        throw new CapacityError(
+          "No se puede eliminar una bolsa que ya tiene consumos. Déjala con saldo cero o consérvala como historial.",
+          409
+        );
+      }
+
+      await client.query(
+        `UPDATE bolsas_reuniones_capacidad
+         SET estado = 'ELIMINADA', eliminado_por = $1,
+             eliminado_at = CURRENT_TIMESTAMP, motivo_eliminacion = $2,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3`,
+        [req.user?.id, reason, bag.id]
+      );
+      return { id: bag.public_id, eliminada: true };
+    });
+    return res.json(result);
+  } catch (error) {
+    return handleError(res, error, "Error eliminando la bolsa de reuniones");
+  }
+}
+
 async function getMyCapacity(req, res) {
   try {
     const { week } = resolveWorkWeek(req.query?.fecha || dateStringInBogota(new Date()));
@@ -1230,10 +1278,90 @@ async function getMyCapacity(req, res) {
   }
 }
 
+async function getCapacityHistory(req, res) {
+  try {
+    const today = dateStringInBogota(new Date());
+    const defaultStartDate = new Date(`${today}T12:00:00.000Z`);
+    defaultStartDate.setUTCDate(defaultStartDate.getUTCDate() - 90);
+    const from = normalizeDateInput(
+      req.query?.desde || defaultStartDate.toISOString().slice(0, 10),
+      "inicio del historial"
+    );
+    const to = normalizeDateInput(req.query?.hasta || today, "fin del historial");
+    if (from > to) throw new CapacityError("La fecha inicial no puede ser posterior a la fecha final.");
+    const personPublicId = cleanText(req.query?.persona_id, 80);
+
+    const [bagsResult, requirementsResult] = await Promise.all([
+      pool.query(
+        `SELECT b.public_id::text AS id, b.nombre, b.semana_inicio, b.semana_fin,
+                b.estado, b.eliminado_at, b.motivo_eliminacion,
+                p.public_id::text AS persona_id,
+                CONCAT_WS(' ', p.nombre, p.apellidos) AS persona,
+                u.nombre_usuario AS coordinador,
+                ue.nombre_usuario AS eliminado_por,
+                COALESCE(SUM(m.horas_delta), 0)::float8 AS horas_disponibles,
+                COALESCE(SUM(m.horas_delta) FILTER (
+                  WHERE m.tipo IN ('ASIGNACION', 'AJUSTE')
+                ), 0)::float8 AS horas_asignadas,
+                ABS(COALESCE(SUM(m.horas_delta) FILTER (
+                  WHERE m.tipo = 'CONSUMO'
+                ), 0))::float8
+                - COALESCE(SUM(m.horas_delta) FILTER (
+                  WHERE m.tipo = 'REVERSO'
+                ), 0)::float8 AS horas_consumidas
+         FROM bolsas_reuniones_capacidad b
+         JOIN personas p ON p.id = b.persona_id
+         LEFT JOIN usuarios u ON u.id = b.coordinador_id
+         LEFT JOIN usuarios ue ON ue.id = b.eliminado_por
+         LEFT JOIN bolsa_reuniones_movimientos m ON m.bolsa_id = b.id
+         WHERE b.semana_inicio <= $2
+           AND b.semana_fin >= $1
+           AND ($3::text IS NULL OR p.public_id::text = $3)
+         GROUP BY b.id, p.id, u.id, ue.id
+         ORDER BY b.semana_inicio DESC, p.nombre, b.created_at DESC`,
+        [from, to, personPublicId]
+      ),
+      pool.query(
+        `SELECT r.public_id::text AS id, r.titulo, r.tipo,
+                COALESCE(c.titulo, r.cliente_nombre_origen) AS cliente,
+                p.public_id::text AS persona_id,
+                COALESCE(
+                  NULLIF(BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)), ''),
+                  r.responsable_nombre
+                ) AS persona,
+                h.evento, e.nombre AS estado,
+                h.effort_total::float8 AS effort_total, h.prioridad,
+                h.fecha_inicio, h.fecha_fin, h.valido_desde, h.valido_hasta,
+                u.nombre_usuario AS registrado_por
+         FROM requerimientos_capacidad_historial h
+         JOIN requerimientos_capacidad r ON r.id = h.requerimiento_id
+         JOIN estados_requerimiento_capacidad e ON e.id = h.estado_id
+         LEFT JOIN clientes c ON c.id = r.cliente_id
+         LEFT JOIN personas p ON p.id = h.persona_id
+         LEFT JOIN usuarios u ON u.id = h.registrado_por
+         WHERE r.origen = 'MANUAL' AND r.tipo_registro = 'REQUERIMIENTO'
+           AND h.valido_desde::date BETWEEN $1 AND $2
+           AND ($3::text IS NULL OR p.public_id::text = $3)
+         ORDER BY h.valido_desde DESC, h.id DESC`,
+        [from, to, personPublicId]
+      )
+    ]);
+
+    return res.json({
+      filtros: { persona_id: personPublicId, desde: from, hasta: to },
+      bolsas: bagsResult.rows,
+      requerimientos: requirementsResult.rows
+    });
+  } catch (error) {
+    return handleError(res, error, "Error consultando el historial de capacidad");
+  }
+}
+
 async function getMeetingBagHistory(req, res) {
   try {
     const bagResult = await pool.query(
       `SELECT b.public_id::text AS id, b.nombre, b.semana_inicio, b.semana_fin,
+              b.estado, b.eliminado_at, b.motivo_eliminacion,
               CONCAT_WS(' ', p.nombre, p.apellidos) AS persona
        FROM bolsas_reuniones_capacidad b
        JOIN personas p ON p.id = b.persona_id
@@ -1244,11 +1372,14 @@ async function getMeetingBagHistory(req, res) {
     const movementsResult = await pool.query(
       `SELECT m.public_id::text AS id, m.tipo, m.horas_delta::float8 AS horas_delta,
               m.motivo, m.created_at, u.nombre_usuario AS registrado_por,
-              a.public_id::text AS actividad_id, a.titulo AS actividad
+              a.public_id::text AS actividad_id, a.titulo AS actividad,
+              a.fecha AS actividad_fecha, a.categoria_codigo,
+              a.estado AS actividad_estado, c.titulo AS cliente
        FROM bolsa_reuniones_movimientos m
        LEFT JOIN usuarios u ON u.id = m.registrado_por
        LEFT JOIN actividad_capacidad_responsables ar ON ar.id = m.actividad_responsable_id
        LEFT JOIN actividades_capacidad a ON a.id = ar.actividad_id
+       LEFT JOIN clientes c ON c.id = a.cliente_id
        JOIN bolsas_reuniones_capacidad b ON b.id = m.bolsa_id
        WHERE b.public_id = $1
        ORDER BY m.created_at DESC, m.id DESC`,
@@ -1533,7 +1664,7 @@ async function getDashboard(req, res) {
       pool.query(
         `SELECT a.public_id::text AS actividad_id, ar.persona_id, a.titulo,
                 c.titulo AS cliente, a.categoria_codigo, a.fecha,
-                ar.horas::float8 AS horas, a.origen, a.estado,
+                ar.horas::float8 AS horas, a.consume_bolsa, a.origen, a.estado,
                 u.nombre_usuario AS creado_por
          FROM actividades_capacidad a
          JOIN actividad_capacidad_responsables ar ON ar.actividad_id = a.id
@@ -1547,6 +1678,7 @@ async function getDashboard(req, res) {
         `SELECT b.persona_id, b.public_id::text AS bolsa_id, b.nombre, b.estado,
                 b.semana_inicio, b.semana_fin,
                 u.nombre_usuario AS coordinador, u.email AS coordinador_correo,
+                COALESCE(BOOL_OR(m.tipo = 'CONSUMO'), FALSE) AS tiene_consumos,
                 COALESCE(SUM(m.horas_delta), 0)::float8 AS horas_disponibles,
                 COALESCE(SUM(m.horas_delta) FILTER (
                   WHERE m.tipo IN ('ASIGNACION', 'AJUSTE')
@@ -1560,7 +1692,7 @@ async function getDashboard(req, res) {
          FROM bolsas_reuniones_capacidad b
          LEFT JOIN bolsa_reuniones_movimientos m ON m.bolsa_id = b.id
          LEFT JOIN usuarios u ON u.id = b.coordinador_id
-         WHERE b.semana_inicio = $1
+         WHERE b.semana_inicio = $1 AND b.estado <> 'ELIMINADA'
          GROUP BY b.id, u.id`,
         [week.startDate]
       )
@@ -1636,7 +1768,7 @@ async function getDashboard(req, res) {
         estado_codigo: "ACTIVA",
         categoria: activity.categoria_codigo,
         tipo_registro: "ACTIVIDAD_CAPACIDAD",
-        incluida_en_bolsa: activity.categoria_codigo === "REUNIONES",
+        incluida_en_bolsa: activity.consume_bolsa === true,
         effort_total: Number(activity.horas),
         effort_pendiente: false,
         porcentaje_fase: 100,
@@ -1682,6 +1814,7 @@ async function getDashboard(req, res) {
           horas_asignadas: Number(bag.horas_asignadas),
           horas_consumidas: Number(bag.horas_consumidas),
           horas_disponibles: Number(bag.horas_disponibles),
+          tiene_consumos: bag.tiene_consumos === true,
           coordinador: bag.coordinador,
           coordinador_correo: bag.coordinador_correo
         })),
@@ -1755,11 +1888,13 @@ module.exports = {
   CapacityError,
   assignMeetingBags,
   cancelCapacityActivity,
+  deleteMeetingBag,
   createManualActivity,
   createMyMeeting,
   createManualRequirement,
   getCatalogs,
   getDashboard,
+  getCapacityHistory,
   getMeetingBagHistory,
   getMyCapacity,
   getRequirementHistory,

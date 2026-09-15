@@ -1,0 +1,3060 @@
+-- ============================================================================
+-- ARCHIVO GENERADO PARA SUPABASE
+-- Fuente: db/init.sql + archivos referenciados mediante \ir
+-- No editar manualmente; ejecutar: node db/build-init-supabase.mjs
+-- Uso previsto: una base de datos nueva y vacía.
+-- ============================================================================
+
+-- ============================================================================
+-- Script de Inicialización - Base de Datos Gestión de Tiempo y Consultorías
+-- PostgreSQL 16
+-- Migración desde SharePoint/PowerApps
+-- ============================================================================
+
+-- Extensiones útiles
+CREATE EXTENSION
+IF NOT EXISTS "pg_trgm";
+-- Para búsquedas de texto
+
+
+-- ============================================================================
+-- TIPOS ENUMERADOS (Reemplazo de Choice de SharePoint)
+-- ============================================================================
+
+-- Estados de Aprobación
+CREATE TYPE tipo_aprobacion AS ENUM
+(
+    'Aprobado',
+    'Pendiente',
+    'Rechazado',
+    'Revisión'
+);
+
+-- Estados de Asignación
+CREATE TYPE tipo_estado_asignacion AS ENUM
+(
+    'Abierto',
+    'Cerrado',
+    'Proceso'
+);
+
+-- Estados de Asignación de Mesa/Fábrica
+CREATE TYPE tipo_estado_asignacion_mesa AS ENUM
+(
+    'Activo',
+    'Inactivo'
+);
+
+-- Tipos de Servicio
+CREATE TYPE tipo_servicio AS ENUM
+(
+    'Servicio',
+    'Incidente',
+    'Requerimiento'
+);
+
+-- Tipos de Permiso de Administrador
+CREATE TYPE tipo_permiso_admin AS ENUM
+(
+    'Crear Asignación'
+);
+
+-- Estados de Reporte
+CREATE TYPE tipo_estado_reporte AS ENUM
+(
+    'Aprobado',
+    'En_Firma',
+    'Pendiente',
+    'Rechazado',
+    'Revisión'
+);
+
+-- Estados de Mesa de Servicio
+CREATE TYPE tipo_estado_mesa AS ENUM
+(
+    'Cerrado',
+    'En proceso',
+    'Transferido Silver',
+    'Transferido Corona'
+);
+
+-- Estados de Fábrica
+CREATE TYPE tipo_estado_fabrica AS ENUM
+(
+    'En desarrollo',
+    'Finalizado'
+);
+
+-- Tipos de Persona
+CREATE TYPE tipo_persona AS ENUM
+(
+    'Natural',
+    'Jurídica'
+);
+
+-- Monedas
+CREATE TYPE tipo_moneda AS ENUM
+(
+    'COP',
+    'USD',
+    'EUR'
+);
+
+-- Tipos de Consultor
+CREATE TYPE tipo_consultor_enum AS ENUM
+(
+    'Principal',
+    'Asociado'
+);
+
+-- Grupo de usuario para onboarding
+CREATE TYPE grupo_usuario_tipo AS ENUM
+(
+    'ADMIN',
+    'COORDINADOR',
+    'CONSULTOR',
+    'CONTABILIDAD',
+    'COMERCIAL',
+    'Otro'
+);
+
+-- Grupo de distribucion para onboarding
+CREATE TYPE grupo_distribucion_tipo AS ENUM
+(
+    'Todos Silver',
+    'Vinculados',
+    'Responsable'
+);
+
+-- Cargos/perfiles para onboarding
+CREATE TYPE cargo_tipo AS ENUM
+(
+    'Analista Comercial',
+    'Analista de Soporte',
+    'Auxiliar Administrativa',
+    'Auxiliar Administrativa y de Talento Humano',
+    'Auxiliar Contable',
+    'Consultor .Net',
+    'Consultor ABAP',
+    'Consultor ABAP CPI',
+    'Consultor ABAP FIORI',
+    'Consultor ABAP ISH',
+    'Consultor ABAP TM',
+    'Consultor ABAP WORKFLOW',
+    'Consultor Basis',
+    'Consultor BI',
+    'Consultor BPC',
+    'Consultor Business One',
+    'Consultor CO',
+    'Consultor CS',
+    'Consultor DS',
+    'Consultor EWM',
+    'Consultor FI',
+    'Consultor FICO',
+    'Consultor FM',
+    'Consultor GRC',
+    'Consultor HCM',
+    'Consultor Integración',
+    'Consultor ISH',
+    'Consultor LETRA',
+    'Consultor MM',
+    'Consultor PM',
+    'Consultor PP',
+    'Consultor PP QM',
+    'Consultor PS',
+    'Consultor QM',
+    'Consultor RE',
+    'Consultor SD',
+    'Consultor SD LETRA',
+    'Consultor SQL',
+    'Consultor TM',
+    'Consultor TRM',
+    'Consultor WM',
+    'Consultor Workflow',
+    'Coordinadora de mesa de servicios',
+    'Coordinadora de Proyectos',
+    'Coordinadora de Servicios',
+    'Gerente Comercial',
+    'Gerente de Estrategia e Innovación',
+    'Gerente de Servicios',
+    'Líder Administrativa y de Talento Humano',
+    'Líder de Fabrica',
+    'Líder de Reclutamiento',
+    'Consultor Power BI',
+    'Consultor IBP'
+);
+
+-- Sexo de la persona
+CREATE TYPE tipo_sexo AS ENUM
+(
+    'Hombre',
+    'Mujer',
+    'Otro'
+);
+
+-- Tipo de contrato laboral
+CREATE TYPE tipo_contrato AS ENUM
+(
+    'Full time',
+    'Por horas',
+    'Aprendiz',
+    'Vinculado'
+);
+
+-- ============================================================================
+-- TABLAS DE CATÁLOGO (Tablas maestras sin dependencias)
+-- ============================================================================
+
+-- Tabla: Bancos
+CREATE TABLE bancos
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    titulo VARCHAR(255) NOT NULL,
+    codigo_bancolombia VARCHAR(50),
+    codigo_conversor VARCHAR(50),
+    activo BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_bancos_activo ON bancos(activo);
+
+COMMENT ON TABLE bancos IS 'Catálogo de bancos para cuentas de cobro';
+
+-- Tabla: Roles
+CREATE TABLE roles
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    titulo VARCHAR(255) NOT NULL UNIQUE,
+    descripcion TEXT,
+    activo BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_roles_activo ON roles(activo);
+
+COMMENT ON TABLE roles IS 'Roles de usuario en el sistema';
+
+-- Tabla: TipoCuentaBancaria
+CREATE TABLE tipo_cuenta_bancaria
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    titulo VARCHAR(255) NOT NULL,
+    tipo_cuenta INTEGER,
+    tipo_transaccion VARCHAR(100),
+    activo BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE tipo_cuenta_bancaria IS 'Tipos de cuenta bancaria (Ahorros, Corriente, etc)';
+
+-- Tabla: DocumentoIdentidad
+CREATE TABLE documento_identidad
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    titulo VARCHAR(255) NOT NULL UNIQUE,
+    codigo VARCHAR(10),
+    activo BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE documento_identidad IS 'Tipos de documento de identidad';
+
+-- Tabla: Clientes
+CREATE TABLE clientes
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    titulo VARCHAR(255) NOT NULL,
+    -- Nombre de la empresa
+    nit VARCHAR(50) UNIQUE NOT NULL,
+    prefijo VARCHAR(20),
+    correlativo INTEGER,
+    activo BOOLEAN DEFAULT true,
+    requiere_confirmacion_cliente BOOLEAN DEFAULT false,
+
+    -- Información adicional
+    direccion TEXT,
+    telefono VARCHAR(50),
+    email VARCHAR(255),
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_clientes_nit ON clientes(nit);
+CREATE INDEX idx_clientes_activo ON clientes(activo);
+CREATE INDEX idx_clientes_prefijo ON clientes(prefijo);
+
+COMMENT ON TABLE clientes IS 'Catálogo de clientes de la empresa';
+COMMENT ON COLUMN clientes.titulo IS 'Nombre de la empresa cliente';
+COMMENT ON COLUMN clientes.nit IS 'Número de identificación tributaria';
+COMMENT ON COLUMN clientes.requiere_confirmacion_cliente IS 'Si es true, las solicitudes de nuevo contrato quedan en pendiente de confirmación del cliente antes de enviarse a TH';
+
+-- Tabla: TipoAsignacion
+CREATE TABLE tipo_asignacion
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    titulo VARCHAR(255) NOT NULL UNIQUE,
+    -- Full Time, Part Time, Mesa Fábrica, etc
+    descripcion TEXT,
+    activo BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_tipo_asignacion_activo ON tipo_asignacion(activo);
+
+COMMENT ON TABLE tipo_asignacion IS 'Tipos de asignación de consultores';
+
+-- Tabla: Modulo
+CREATE TABLE modulo
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    titulo VARCHAR(50) NOT NULL UNIQUE,
+    -- IT, AT, FI
+    nombre_completo VARCHAR(255),
+    descripcion TEXT,
+    activo BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_modulo_activo ON modulo(activo);
+
+COMMENT ON TABLE modulo IS 'Módulos de consultoría (IT, AT, FI, etc)';
+
+-- Tablas auxiliares para conversión de números a letras
+CREATE TABLE period_1
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    group_number INTEGER NOT NULL,
+    titulo VARCHAR(50) NOT NULL
+);
+
+COMMENT ON TABLE period_1 IS 'Periodos para conversión de números a letras (Mil, Millón, Billón)';
+
+CREATE TABLE place_value_1
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    digit INTEGER NOT NULL,
+    titulo VARCHAR(50) NOT NULL,
+    column_value INTEGER NOT NULL
+);
+
+COMMENT ON TABLE place_value_1 IS 'Valores de lugar para conversión de números a letras';
+
+-- ============================================================================
+-- TABLA DE USUARIOS (Reemplazo de campos Person/Group de SharePoint)
+-- ============================================================================
+
+CREATE TABLE usuarios
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+
+    -- Información de usuario (Person/Group de SharePoint)
+    nombre_usuario VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash TEXT,
+    sharepoint_user_id INTEGER,
+    azure_oid VARCHAR(64),
+
+    -- Rol y estado
+    rol_usuario_id INTEGER REFERENCES roles(id),
+    rol_previo_fabrica_id INTEGER REFERENCES roles(id) ON DELETE SET NULL,
+    activo BOOLEAN DEFAULT true,
+
+    -- Datos bancarios
+    nro_cuenta_bancaria VARCHAR(50),
+    banco_id INTEGER REFERENCES bancos(id),
+    tipo_cuenta_id INTEGER REFERENCES tipo_cuenta_bancaria(id),
+
+    -- Información personal
+    tipo_documento_id INTEGER REFERENCES documento_identidad(id),
+    cedula VARCHAR(50),
+    direccion TEXT,
+    telefono VARCHAR(50),
+    ciudad VARCHAR(100),
+
+    -- Clasificación (antes eran Choice en SharePoint)
+    tipo_persona tipo_persona,
+    factura_en_colombia BOOLEAN,
+    moneda_cobro tipo_moneda DEFAULT 'COP',
+    tipo_consultor tipo_consultor_enum,
+
+    -- Relación jerárquica (auto-referencia)
+    id_consultor_principal INTEGER REFERENCES usuarios(id),
+
+    -- Información adicional
+    foto_url TEXT,
+    observaciones TEXT,
+    ultimo_inicio_sesion TIMESTAMP,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(255)
+);
+
+CREATE UNIQUE INDEX idx_usuarios_azure_oid ON usuarios(azure_oid);
+
+-- Índices para usuarios
+CREATE INDEX idx_usuarios_email ON usuarios(email);
+CREATE INDEX idx_usuarios_rol ON usuarios(rol_usuario_id);
+CREATE INDEX idx_usuarios_activo ON usuarios(activo);
+CREATE INDEX idx_usuarios_sharepoint_id ON usuarios(sharepoint_user_id);
+CREATE INDEX idx_usuarios_tipo_consultor ON usuarios(tipo_consultor);
+
+COMMENT ON TABLE usuarios IS 'Usuarios del sistema - Reemplaza campos Person/Group de SharePoint';
+COMMENT ON COLUMN usuarios.sharepoint_user_id IS 'ID del usuario en SharePoint para migración';
+COMMENT ON COLUMN usuarios.email IS 'Email del usuario - usado para mapear Person/Group';
+
+-- ============================================================================
+-- TABLA PERSONAS (fuente de verdad de datos personales)
+-- Creada después de usuarios para poder referenciar usuarios.id en created_by
+-- ============================================================================
+
+CREATE TABLE personas
+(
+    id        SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+
+    -- Identificación
+    numero_documento  VARCHAR(50) UNIQUE,
+    tipo_documento_id INTEGER REFERENCES documento_identidad(id),
+    estado            VARCHAR(20) NOT NULL DEFAULT 'activo'
+                        CHECK (estado IN ('activo', 'inactivo')),
+    pertenece_fabrica BOOLEAN NOT NULL DEFAULT FALSE,
+    azure_oid         VARCHAR(64),
+
+    -- Datos personales
+    nombre           VARCHAR(200),
+    apellidos        VARCHAR(200),
+    fecha_nacimiento DATE,
+    lugar_nacimiento VARCHAR(150),
+    lugar_expedicion VARCHAR(150),
+    nacionalidad     VARCHAR(100),
+    estado_civil     VARCHAR(30)
+        CHECK (estado_civil IS NULL OR estado_civil IN ('Soltero', 'Casado', 'Unión libre', 'Separado', 'Viudo')),
+    sexo             tipo_sexo,
+
+    -- Contacto principal
+    numero_contacto      VARCHAR(50),
+    correo_electronico   VARCHAR(255),
+    correo_silver        VARCHAR(255),
+    direccion_residencia TEXT,
+    barrio               VARCHAR(120),
+    ciudad_residencia    VARCHAR(100),
+    departamento_pais    VARCHAR(100),
+    pais_residencia      VARCHAR(100),
+
+    -- Profesional
+    titulo_profesional  TEXT,
+    tipo_persona        tipo_persona,
+    factura_en_colombia BOOLEAN,
+
+    -- Contacto de emergencia
+    nombre_contacto_emergencia   VARCHAR(200),
+    telefono_contacto_emergencia VARCHAR(50),
+    parentesco                   VARCHAR(100),
+
+    -- Datos bancarios
+    banco_id       INTEGER REFERENCES bancos(id),
+    tipo_cuenta_id INTEGER REFERENCES tipo_cuenta_bancaria(id),
+    numero_cuenta  VARCHAR(50),
+    moneda_cobro   tipo_moneda,
+
+    -- Composición familiar
+    composicion_familiar VARCHAR(100),
+    hijos                INTEGER DEFAULT 0,
+    personas_a_cargo     INTEGER DEFAULT 0,
+    edades_hijos         TEXT,
+    visa_paises          TEXT,
+    acepta_tratamiento_datos BOOLEAN,
+    tratamiento_datos_aceptado_at TIMESTAMP,
+
+    -- Seguridad social
+    eps VARCHAR(100),
+    afp VARCHAR(100),
+    arl VARCHAR(100),
+
+    -- Contrato (snapshot del estado actual)
+    tipo_contrato tipo_contrato,
+    modalidad     VARCHAR(50),
+
+    -- Datos laborales (contrato Vinculado)
+    tipo_trabajador        VARCHAR(100),
+    cargo                  VARCHAR(200),
+    salario_mensual        NUMERIC(15,2),
+    salario_moneda         VARCHAR(3) DEFAULT 'COP',
+    periodo_pago           VARCHAR(50),
+    periodo_prueba         VARCHAR(150),
+    jefe_inmediato         VARCHAR(200),
+    caja_compensacion      VARCHAR(100),
+    condiciones_especiales TEXT,
+    duracion_contrato      VARCHAR(100),
+    fecha_inicio_labores   DATE,
+    lugar_celebracion      VARCHAR(150),
+
+    -- Módulo asignado (de catálogo o libre)
+    modulo_id   INTEGER REFERENCES modulo(id),
+    modulo_otro VARCHAR(150),
+
+    -- Cliente asignado (de catálogo o libre)
+    cliente_id   INTEGER REFERENCES clientes(id),
+    cliente_otro VARCHAR(200),
+
+    -- Auditoría
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL
+);
+
+CREATE INDEX idx_personas_documento   ON personas(numero_documento);
+CREATE INDEX idx_personas_correo      ON personas(correo_electronico);
+CREATE UNIQUE INDEX idx_personas_correo_silver_lower
+    ON personas (LOWER(BTRIM(correo_silver)))
+    WHERE NULLIF(BTRIM(correo_silver), '') IS NOT NULL;
+CREATE UNIQUE INDEX idx_personas_azure_oid
+    ON personas(azure_oid)
+    WHERE NULLIF(BTRIM(azure_oid), '') IS NOT NULL;
+CREATE INDEX idx_personas_estado      ON personas(estado);
+CREATE INDEX idx_personas_pertenece_fabrica
+    ON personas(pertenece_fabrica)
+    WHERE pertenece_fabrica = TRUE;
+CREATE INDEX idx_personas_cliente     ON personas(cliente_id);
+CREATE INDEX idx_personas_modulo      ON personas(modulo_id);
+CREATE INDEX idx_personas_nombre_trgm ON personas USING gin(nombre gin_trgm_ops);
+
+COMMENT ON TABLE personas IS 'Datos permanentes de personas (físicas o jurídicas) vinculadas al sistema';
+COMMENT ON COLUMN personas.correo_silver IS 'Correo corporativo de Silver usado para vincular la persona con su identidad Microsoft.';
+COMMENT ON COLUMN personas.azure_oid IS 'Identificador estable de la persona en Microsoft Entra ID.';
+
+-- Vincular usuarios con personas (FK circular resuelta con ALTER después de crear personas)
+ALTER TABLE usuarios ADD COLUMN persona_id INTEGER REFERENCES personas(id);
+CREATE UNIQUE INDEX idx_usuarios_persona ON usuarios(persona_id) WHERE persona_id IS NOT NULL;
+
+-- ============================================================================
+-- CAPACIDAD DE FÁBRICA (Azure DevOps + requerimientos manuales)
+-- ============================================================================
+
+CREATE TABLE categorias_esfuerzo_capacidad
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    codigo VARCHAR(40) NOT NULL UNIQUE,
+    nombre VARCHAR(100) NOT NULL UNIQUE,
+    porcentaje_predeterminado NUMERIC(5,2) NOT NULL DEFAULT 0
+        CHECK (porcentaje_predeterminado BETWEEN 0 AND 100),
+    orden SMALLINT NOT NULL DEFAULT 0,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    aplica_distribucion BOOLEAN NOT NULL DEFAULT TRUE,
+    aplica_actividad BOOLEAN NOT NULL DEFAULT FALSE,
+    usa_bolsa BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO categorias_esfuerzo_capacidad
+    (codigo, nombre, porcentaje_predeterminado, orden,
+     aplica_distribucion, aplica_actividad, usa_bolsa)
+VALUES
+    ('DESARROLLO_PRUEBAS', 'Desarrollo y pruebas', 85, 10, TRUE, FALSE, FALSE),
+    ('DOCUMENTACION', 'Documentación', 15, 20, TRUE, FALSE, FALSE),
+    ('SOPORTE', 'Soporte', 0, 30, FALSE, TRUE, FALSE),
+    ('AJUSTES_GARANTIA', 'Ajustes y garantía', 0, 40, FALSE, TRUE, FALSE),
+    ('ESTIMACION', 'Estimación', 0, 50, FALSE, TRUE, FALSE),
+    ('REUNIONES', 'Reuniones', 0, 60, FALSE, TRUE, TRUE);
+
+CREATE TABLE estados_requerimiento_capacidad
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    codigo VARCHAR(50) NOT NULL UNIQUE,
+    nombre VARCHAR(120) NOT NULL UNIQUE,
+    consume_capacidad BOOLEAN NOT NULL DEFAULT FALSE,
+    categoria_codigo VARCHAR(40) REFERENCES categorias_esfuerzo_capacidad(codigo),
+    clasificacion VARCHAR(30) NOT NULL
+        CHECK (clasificacion IN ('espera', 'activo', 'pausado', 'completado', 'eliminado')),
+    es_terminal BOOLEAN NOT NULL DEFAULT FALSE,
+    permite_reactivacion BOOLEAN NOT NULL DEFAULT TRUE,
+    orden SMALLINT NOT NULL DEFAULT 0,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK ((consume_capacidad = TRUE AND categoria_codigo IS NOT NULL) OR consume_capacidad = FALSE)
+);
+
+INSERT INTO estados_requerimiento_capacidad
+    (codigo, nombre, consume_capacidad, categoria_codigo, clasificacion, es_terminal, permite_reactivacion, orden)
+VALUES
+    ('PLANIFICADO', 'Planificada', FALSE, NULL, 'activo', FALSE, TRUE, 5),
+    ('EN_ESTIMACION', 'En estimación', FALSE, NULL, 'activo', FALSE, TRUE, 10),
+    ('EN_APROBACION', 'En aprobación', FALSE, NULL, 'espera', FALSE, TRUE, 20),
+    ('APROBADO', 'Aprobado', FALSE, NULL, 'espera', FALSE, TRUE, 30),
+    ('EN_DESARROLLO', 'En desarrollo', TRUE, 'DESARROLLO_PRUEBAS', 'activo', FALSE, TRUE, 40),
+    ('EN_PRUEBAS', 'En pruebas', TRUE, 'DESARROLLO_PRUEBAS', 'activo', FALSE, TRUE, 50),
+    ('EN_AJUSTES', 'En ajustes', FALSE, NULL, 'activo', FALSE, TRUE, 60),
+    ('PRUEBAS_EXITOSAS', 'Pruebas exitosas', FALSE, NULL, 'espera', FALSE, TRUE, 70),
+    ('CERRADO', 'Cerrado', FALSE, NULL, 'completado', TRUE, FALSE, 80),
+    ('GARANTIA', 'Garantía', FALSE, NULL, 'activo', FALSE, TRUE, 90),
+    ('EN_ESPERA_CLIENTE', 'En espera cliente', FALSE, NULL, 'espera', FALSE, TRUE, 100),
+    ('PENDIENTE_PASO_PRD', 'Pendiente paso a PRD', FALSE, NULL, 'espera', FALSE, TRUE, 110),
+    ('REMOVED', 'Removed', FALSE, NULL, 'eliminado', TRUE, FALSE, 120),
+    ('CANCELADO', 'Cancelado', FALSE, NULL, 'pausado', FALSE, TRUE, 130);
+
+CREATE TABLE configuracion_capacidad_fabrica
+(
+    id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    horas_semanales NUMERIC(6,2) NOT NULL DEFAULT 42
+        CHECK (horas_semanales > 0 AND horas_semanales <= 168),
+    updated_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO configuracion_capacidad_fabrica (id, horas_semanales) VALUES (1, 42);
+
+CREATE TABLE personas_fabrica_historial
+(
+    id BIGSERIAL PRIMARY KEY,
+    persona_id INTEGER NOT NULL REFERENCES personas(id) ON DELETE CASCADE,
+    pertenece_fabrica BOOLEAN NOT NULL,
+    valido_desde TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    valido_hasta TIMESTAMPTZ,
+    registrado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    registrado_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX idx_personas_fabrica_version_abierta
+    ON personas_fabrica_historial(persona_id) WHERE valido_hasta IS NULL;
+CREATE INDEX idx_personas_fabrica_corte
+    ON personas_fabrica_historial(persona_id, valido_desde, valido_hasta);
+
+CREATE TABLE requerimientos_capacidad
+(
+    id BIGSERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    origen VARCHAR(20) NOT NULL CHECK (origen IN ('AZURE_DEVOPS', 'MANUAL')),
+    external_id BIGINT,
+    organizacion_azure VARCHAR(255),
+    azure_project_id VARCHAR(100),
+    azure_project_name VARCHAR(255),
+    cliente_id INTEGER REFERENCES clientes(id) ON DELETE RESTRICT,
+    cliente_nombre_origen VARCHAR(255),
+    tipo_registro VARCHAR(20) NOT NULL DEFAULT 'REQUERIMIENTO'
+        CHECK (tipo_registro IN ('REQUERIMIENTO', 'ACTIVIDAD')),
+    categoria_actividad_codigo VARCHAR(40)
+        REFERENCES categorias_esfuerzo_capacidad(codigo),
+    tipo VARCHAR(120) NOT NULL,
+    titulo TEXT NOT NULL,
+    estado_id INTEGER NOT NULL REFERENCES estados_requerimiento_capacidad(id),
+    estado_origen VARCHAR(120),
+    effort_total NUMERIC(10,2) CHECK (effort_total IS NULL OR effort_total >= 0),
+    prioridad SMALLINT CHECK (prioridad IS NULL OR prioridad > 0),
+    persona_id INTEGER REFERENCES personas(id) ON DELETE SET NULL,
+    responsable_azure_id VARCHAR(128),
+    responsable_correo VARCHAR(255),
+    responsable_nombre VARCHAR(255),
+    fecha_inicio DATE,
+    fecha_fin DATE,
+    azure_url TEXT,
+    source_created_at TIMESTAMPTZ,
+    source_changed_at TIMESTAMPTZ,
+    last_synced_at TIMESTAMPTZ,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    modified_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (origen, organizacion_azure, external_id),
+    CONSTRAINT ck_requerimiento_manual_effort
+        CHECK (origen <> 'MANUAL' OR effort_total IS NOT NULL),
+    CONSTRAINT ck_requerimiento_capacidad_origen CHECK (
+        (origen = 'AZURE_DEVOPS' AND external_id IS NOT NULL
+            AND organizacion_azure IS NOT NULL AND tipo_registro = 'REQUERIMIENTO')
+        OR (origen = 'MANUAL' AND (tipo_registro = 'ACTIVIDAD' OR cliente_id IS NOT NULL))
+    ),
+    CONSTRAINT ck_requerimiento_actividad CHECK (
+        (tipo_registro = 'REQUERIMIENTO' AND categoria_actividad_codigo IS NULL)
+        OR (tipo_registro = 'ACTIVIDAD' AND origen = 'MANUAL'
+            AND categoria_actividad_codigo IS NOT NULL AND effort_total > 0
+            AND fecha_inicio IS NOT NULL AND fecha_fin = fecha_inicio)
+    )
+);
+
+CREATE INDEX idx_requerimientos_capacidad_persona ON requerimientos_capacidad(persona_id);
+CREATE INDEX idx_requerimientos_capacidad_estado ON requerimientos_capacidad(estado_id);
+CREATE INDEX idx_requerimientos_capacidad_origen ON requerimientos_capacidad(origen);
+CREATE INDEX idx_requerimientos_capacidad_fecha_fin ON requerimientos_capacidad(fecha_fin);
+CREATE INDEX idx_requerimientos_capacidad_tipo_registro ON requerimientos_capacidad(tipo_registro);
+CREATE INDEX idx_requerimientos_capacidad_actividad_fecha
+    ON requerimientos_capacidad(fecha_inicio) WHERE tipo_registro = 'ACTIVIDAD';
+
+CREATE TABLE requerimiento_distribucion_capacidad
+(
+    id BIGSERIAL PRIMARY KEY,
+    requerimiento_id BIGINT NOT NULL REFERENCES requerimientos_capacidad(id) ON DELETE CASCADE,
+    categoria_id INTEGER NOT NULL REFERENCES categorias_esfuerzo_capacidad(id) ON DELETE RESTRICT,
+    porcentaje NUMERIC(5,2) NOT NULL CHECK (porcentaje BETWEEN 0 AND 100),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (requerimiento_id, categoria_id)
+);
+
+CREATE INDEX idx_requerimiento_distribucion_requerimiento
+    ON requerimiento_distribucion_capacidad(requerimiento_id);
+
+CREATE TABLE requerimientos_capacidad_historial
+(
+    id BIGSERIAL PRIMARY KEY,
+    requerimiento_id BIGINT NOT NULL REFERENCES requerimientos_capacidad(id) ON DELETE CASCADE,
+    evento VARCHAR(30) NOT NULL
+        CHECK (evento IN ('CREADO', 'SINCRONIZADO', 'ESTADO', 'PLANIFICACION', 'ASIGNACION', 'ARCHIVADO')),
+    estado_id INTEGER NOT NULL REFERENCES estados_requerimiento_capacidad(id),
+    persona_id INTEGER REFERENCES personas(id) ON DELETE SET NULL,
+    effort_total NUMERIC(10,2),
+    prioridad SMALLINT,
+    fecha_inicio DATE,
+    fecha_fin DATE,
+    porcentajes_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    datos_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    valido_desde TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    valido_hasta TIMESTAMPTZ,
+    source_changed_at TIMESTAMPTZ,
+    registrado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    registrado_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX idx_requerimiento_historial_version_abierta
+    ON requerimientos_capacidad_historial(requerimiento_id) WHERE valido_hasta IS NULL;
+CREATE INDEX idx_requerimiento_historial_corte
+    ON requerimientos_capacidad_historial(requerimiento_id, valido_desde, valido_hasta);
+CREATE INDEX idx_requerimiento_historial_persona
+    ON requerimientos_capacidad_historial(persona_id, valido_desde);
+
+CREATE TABLE bolsas_reuniones_capacidad
+(
+    id BIGSERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    nombre VARCHAR(200) NOT NULL,
+    persona_id INTEGER NOT NULL REFERENCES personas(id) ON DELETE RESTRICT,
+    coordinador_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,
+    semana_inicio DATE NOT NULL,
+    semana_fin DATE NOT NULL,
+    estado VARCHAR(20) NOT NULL DEFAULT 'ABIERTA'
+        CHECK (estado IN ('ABIERTA', 'CERRADA', 'ELIMINADA')),
+    eliminado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    eliminado_at TIMESTAMPTZ,
+    motivo_eliminacion VARCHAR(500),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ck_bolsa_reuniones_semana CHECK (semana_fin = semana_inicio + 4)
+);
+
+CREATE INDEX idx_bolsas_reuniones_semana
+    ON bolsas_reuniones_capacidad(semana_inicio, persona_id);
+
+CREATE INDEX idx_bolsas_reuniones_persona_semana
+    ON bolsas_reuniones_capacidad(persona_id, semana_inicio, created_at);
+
+CREATE INDEX idx_bolsas_reuniones_historial
+    ON bolsas_reuniones_capacidad(persona_id, semana_inicio DESC, estado);
+
+CREATE TABLE actividades_capacidad
+(
+    id BIGSERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    titulo VARCHAR(500) NOT NULL,
+    cliente_id INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
+    categoria_codigo VARCHAR(40) NOT NULL REFERENCES categorias_esfuerzo_capacidad(codigo),
+    fecha DATE NOT NULL,
+    horas NUMERIC(8,2) NOT NULL CHECK (horas > 0 AND horas <= 168),
+    consume_bolsa BOOLEAN NOT NULL DEFAULT FALSE,
+    origen VARCHAR(20) NOT NULL CHECK (origen IN ('AUTORREGISTRO', 'COORDINADOR', 'MIGRACION')),
+    estado VARCHAR(20) NOT NULL DEFAULT 'ACTIVA' CHECK (estado IN ('ACTIVA', 'CANCELADA')),
+    creado_por INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,
+    cancelado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    cancelado_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_actividades_capacidad_fecha
+    ON actividades_capacidad(fecha, categoria_codigo);
+
+CREATE TABLE actividad_capacidad_responsables
+(
+    id BIGSERIAL PRIMARY KEY,
+    actividad_id BIGINT NOT NULL REFERENCES actividades_capacidad(id) ON DELETE RESTRICT,
+    persona_id INTEGER NOT NULL REFERENCES personas(id) ON DELETE RESTRICT,
+    bolsa_id BIGINT REFERENCES bolsas_reuniones_capacidad(id) ON DELETE RESTRICT,
+    horas NUMERIC(8,2) NOT NULL CHECK (horas > 0 AND horas <= 168),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_actividad_capacidad_responsable UNIQUE (actividad_id, persona_id)
+);
+
+CREATE INDEX idx_actividad_responsables_persona
+    ON actividad_capacidad_responsables(persona_id, actividad_id);
+
+CREATE TABLE bolsa_reuniones_movimientos
+(
+    id BIGSERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    bolsa_id BIGINT NOT NULL REFERENCES bolsas_reuniones_capacidad(id) ON DELETE RESTRICT,
+    actividad_responsable_id BIGINT REFERENCES actividad_capacidad_responsables(id) ON DELETE RESTRICT,
+    tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('ASIGNACION', 'AJUSTE', 'CONSUMO', 'REVERSO')),
+    horas_delta NUMERIC(8,2) NOT NULL CHECK (horas_delta <> 0),
+    motivo VARCHAR(500),
+    registrado_por INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX uq_movimiento_consumo_responsable
+    ON bolsa_reuniones_movimientos(actividad_responsable_id, tipo)
+    WHERE actividad_responsable_id IS NOT NULL;
+CREATE INDEX idx_bolsa_movimientos_bolsa_fecha
+    ON bolsa_reuniones_movimientos(bolsa_id, created_at);
+
+CREATE TABLE exportaciones_personas_auditoria
+(
+    id BIGSERIAL PRIMARY KEY,
+    usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    tipo_exportacion VARCHAR(20) NOT NULL
+        CHECK (tipo_exportacion IN ('operativa', 'completa')),
+    filtro_rol VARCHAR(255) NOT NULL DEFAULT 'Todos',
+    total_registros INTEGER NOT NULL DEFAULT 0 CHECK (total_registros >= 0),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_exportaciones_personas_usuario
+    ON exportaciones_personas_auditoria(usuario_id, created_at DESC);
+
+-- Tabla: UsuarioLicenciasBackup
+CREATE TABLE usuario_licencias_backup
+(
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    backup_group_id UUID NOT NULL DEFAULT gen_random_uuid(),
+    usuario_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    usuario_public_id UUID NOT NULL,
+    azure_oid VARCHAR(64),
+    email VARCHAR(255),
+    sku_id VARCHAR(64) NOT NULL,
+    sku_part_number VARCHAR(255),
+    fecha_desactivacion TIMESTAMP NOT NULL DEFAULT NOW(),
+    desactivado_por_usuario_id INT REFERENCES usuarios(id) ON DELETE SET NULL,
+    desactivado_por_email VARCHAR(255),
+    restaurado BOOLEAN NOT NULL DEFAULT FALSE,
+    fecha_restauracion TIMESTAMP,
+    restaurado_por_usuario_id INT REFERENCES usuarios(id) ON DELETE SET NULL,
+    restaurado_por_email VARCHAR(255)
+);
+
+CREATE INDEX idx_usuario_licencias_backup_usuario ON usuario_licencias_backup(usuario_id);
+CREATE INDEX idx_usuario_licencias_backup_restaurado ON usuario_licencias_backup(restaurado);
+CREATE INDEX idx_usuario_licencias_backup_group ON usuario_licencias_backup(backup_group_id);
+CREATE INDEX idx_usuario_licencias_backup_fecha ON usuario_licencias_backup(fecha_desactivacion DESC);
+CREATE UNIQUE INDEX uq_usuario_licencias_backup_group_sku ON usuario_licencias_backup(backup_group_id, sku_id);
+
+COMMENT ON TABLE usuario_licencias_backup IS 'Snapshot de licencias removidas por usuario para restauración futura';
+
+-- ============================================================================
+-- TABLAS DE GESTIÓN DE CONSULTORÍAS
+-- ============================================================================
+
+-- Tabla: Consultorias
+CREATE TABLE consultorias (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    descripcion_consultoria TEXT,
+    id_cliente INTEGER NOT NULL REFERENCES clientes(id) ON DELETE RESTRICT,
+    
+    -- Coordinador (antes Person/Group, ahora FK a usuarios)
+    coordinador_responsable_id INTEGER REFERENCES usuarios
+(id) ON
+DELETE
+SET NULL
+,
+    
+    id_tipo_asignacion INTEGER REFERENCES tipo_asignacion
+(id) ON
+DELETE
+SET NULL
+,
+    asignado_consultor BOOLEAN DEFAULT false,
+    
+    activo BOOLEAN DEFAULT true,
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    modified_by INTEGER REFERENCES usuarios
+(id)
+);
+
+CREATE INDEX idx_consultorias_cliente ON consultorias(id_cliente);
+CREATE INDEX idx_consultorias_coordinador ON consultorias(coordinador_responsable_id);
+CREATE INDEX idx_consultorias_activo ON consultorias(activo);
+CREATE INDEX idx_consultorias_tipo ON consultorias(id_tipo_asignacion);
+
+COMMENT ON TABLE consultorias IS 'Proyectos de consultoría para clientes';
+
+-- Tabla: TarifaConsultor
+CREATE TABLE tarifa_consultor
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    id_cliente INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+
+    -- Consultor (antes Person/Group, ahora FK a usuarios)
+    consultor_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+
+    valor_tarifa DECIMAL(15, 2) NOT NULL,
+    modulo_id INTEGER REFERENCES modulo(id) ON DELETE SET NULL,
+    id_tipo_asignacion INTEGER REFERENCES tipo_asignacion(id) ON DELETE SET NULL,
+
+    -- En migraciones historicas, las tarifas vencidas deben cargarse con activo=false
+    -- para no chocar con el indice unico parcial de filas activas.
+    activo BOOLEAN DEFAULT true,
+    vigencia_desde DATE,
+    vigencia_hasta DATE,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Constraint para evitar duplicados
+    UNIQUE(id_cliente, consultor_id, modulo_id, id_tipo_asignacion, vigencia_desde)
+);
+
+CREATE INDEX idx_tarifa_cliente ON tarifa_consultor(id_cliente);
+CREATE INDEX idx_tarifa_consultor ON tarifa_consultor(consultor_id);
+CREATE INDEX idx_tarifa_modulo ON tarifa_consultor(modulo_id);
+CREATE INDEX idx_tarifa_activo ON tarifa_consultor(activo);
+CREATE UNIQUE INDEX idx_tarifa_unica_activa
+ON tarifa_consultor(id_cliente, consultor_id, modulo_id, id_tipo_asignacion)
+WHERE activo = true;
+
+COMMENT ON TABLE tarifa_consultor IS 'Tarifas por consultor, cliente y tipo de asignación';
+
+-- Tabla: RegistroAsignaciones
+CREATE TABLE registro_asignaciones
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    id_consultoria INTEGER NOT NULL REFERENCES consultorias(id) ON DELETE CASCADE,
+    id_tarifa INTEGER REFERENCES tarifa_consultor(id) ON DELETE SET NULL,
+    id_modulo INTEGER REFERENCES modulo(id) ON DELETE SET NULL,
+
+    -- Consultor (antes Person/Group, ahora FK a usuarios)
+    consultor_responsable_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+
+    -- Aprobación y estado (antes Choice en SharePoint)
+    aprobar_coordinador tipo_aprobacion DEFAULT 'Pendiente',
+    estado tipo_estado_asignacion DEFAULT 'Abierto',
+
+    -- Fechas
+    fecha_inicio DATE,
+    fecha_fin DATE,
+    fecha_cierre_mesa_fab DATE,
+
+    -- Valores
+    cantidad_dias INTEGER,
+    horas_asignadas DECIMAL(10, 2),
+    valor_hora DECIMAL(15, 2),
+    valor_dia DECIMAL(15, 2),
+    total_pagar DECIMAL(15, 2),
+    es_costo_total BOOLEAN DEFAULT false,
+
+    -- Información del caso
+    nro_caso_interno TEXT,
+    nro_caso_cliente TEXT,
+    tipo_servicio tipo_servicio,
+    observacion TEXT,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    modified_by INTEGER REFERENCES usuarios(id)
+);
+
+CREATE INDEX idx_registro_consultoria ON registro_asignaciones(id_consultoria);
+CREATE INDEX idx_registro_consultor ON registro_asignaciones(consultor_responsable_id);
+CREATE INDEX idx_registro_estado ON registro_asignaciones(estado);
+CREATE INDEX idx_registro_fechas ON registro_asignaciones(fecha_inicio, fecha_fin);
+
+COMMENT ON TABLE registro_asignaciones IS 'Asignaciones de consultores a proyectos';
+
+-- Tabla: CuentaCobro
+CREATE TABLE cuenta_cobro
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    descripcion TEXT,
+    fecha_correspondiente DATE,
+    total_cuenta_cobro DECIMAL(15, 2),
+    fecha_periodo_inicio DATE NOT NULL,
+    fecha_periodo_fin DATE NOT NULL,
+    total_letras TEXT,
+    -- Valor en letras
+    ciudad_cobro VARCHAR(255),
+
+    -- Archivos adjuntos (ruta o JSON con metadata)
+    datos_adjuntos JSONB,
+    -- Metadata de archivos adjuntos
+
+    -- Estado
+    estado tipo_estado_reporte DEFAULT 'Pendiente',
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by INTEGER REFERENCES usuarios(id)
+);
+
+CREATE INDEX idx_cuenta_cobro_fecha ON cuenta_cobro(fecha_correspondiente);
+CREATE INDEX idx_cuenta_cobro_periodo ON cuenta_cobro(fecha_periodo_inicio, fecha_periodo_fin);
+CREATE INDEX idx_cuenta_cobro_estado ON cuenta_cobro(estado);
+
+COMMENT ON TABLE cuenta_cobro IS 'Cuentas de cobro generadas';
+COMMENT ON COLUMN cuenta_cobro.datos_adjuntos IS 'Metadata de archivos adjuntos en formato JSON';
+
+-- Tabla: ReporteHoras
+CREATE TABLE reporte_horas
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    id_registro_asignacion INTEGER NOT NULL REFERENCES registro_asignaciones(id) ON DELETE CASCADE,
+    id_cuenta_cobro INTEGER REFERENCES cuenta_cobro(id) ON DELETE SET NULL,
+
+    -- Horas y días
+    horas_reportadas DECIMAL(10, 2),
+    cantidad_dias_reportados INTEGER,
+    total_cobrar DECIMAL(15, 2),
+
+    -- Información del reporte
+    requerimiento TEXT,
+    perfil_fabrica VARCHAR(100),
+    wricef VARCHAR(120),
+    es_costo_total BOOLEAN DEFAULT false,
+    nro_caso_int_ext TEXT,
+
+    -- Referencias (convertidas de texto "quemado" a lookup)
+    cliente_id INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
+    tipo_asignacion_id INTEGER REFERENCES tipo_asignacion(id) ON DELETE SET NULL,
+    modulo_id INTEGER REFERENCES modulo(id) ON DELETE SET NULL,
+
+    -- Usuarios (antes Person/Group o email quemado, ahora FK)
+    coordinador_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    consultor_responsable_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    consultor_principal_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+
+    -- Información de servicio
+    tipo_servicio VARCHAR(100),
+    -- Texto libre por ahora
+
+    -- Estados (antes Choice en SharePoint)
+    estado_reporte tipo_estado_reporte DEFAULT 'Pendiente',
+    estado_mesa_servicio tipo_estado_mesa,
+    estado_fabrica tipo_estado_fabrica,
+    aprobado_por INTEGER REFERENCES usuarios(id),
+    fecha_aprobacion TIMESTAMP,
+
+    -- Observaciones
+    motivo_rechazo TEXT,
+    observacion_mesa_fabrica TEXT,
+    fecha_cierre_mesa_fab DATE,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by INTEGER REFERENCES usuarios(id)
+);
+
+CREATE INDEX idx_reporte_asignacion ON reporte_horas(id_registro_asignacion);
+CREATE INDEX idx_reporte_estado ON reporte_horas(estado_reporte);
+CREATE INDEX idx_reporte_consultor ON reporte_horas(consultor_responsable_id);
+CREATE INDEX idx_reporte_aprobado_por ON reporte_horas(aprobado_por);
+CREATE INDEX idx_reporte_cliente ON reporte_horas(cliente_id);
+CREATE INDEX idx_reporte_cuenta_cobro ON reporte_horas(id_cuenta_cobro);
+CREATE INDEX idx_reporte_fechas ON reporte_horas(created_at, fecha_cierre_mesa_fab);
+
+COMMENT ON TABLE reporte_horas IS 'Reporte de horas trabajadas por los consultores';
+COMMENT ON COLUMN reporte_horas.cliente_id IS 'Antes estaba quemado como texto, ahora es FK';
+COMMENT ON COLUMN reporte_horas.coordinador_id IS 'Antes era email quemado, ahora es FK a usuarios';
+ALTER TABLE reporte_horas ADD COLUMN IF NOT EXISTS perfil_fabrica VARCHAR(100);
+ALTER TABLE reporte_horas ADD COLUMN IF NOT EXISTS wricef VARCHAR(120);
+
+-- Tabla: AsignacionesConsultoriaMesaFabrica
+CREATE TABLE asignaciones_consultoria_mesa_fabrica
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    id_consultoria INTEGER NOT NULL REFERENCES consultorias(id) ON DELETE CASCADE,
+
+    -- Consultor (antes Person/Group, ahora FK a usuarios)
+    consultor_responsable_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+
+    valor_hora DECIMAL(15, 2),
+    estado_asignacion tipo_estado_asignacion_mesa DEFAULT 'Activo',
+    id_modulo INTEGER REFERENCES modulo(id) ON DELETE SET NULL,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_asig_mesa_consultoria ON asignaciones_consultoria_mesa_fabrica(id_consultoria);
+CREATE INDEX idx_asig_mesa_consultor ON asignaciones_consultoria_mesa_fabrica(consultor_responsable_id);
+CREATE INDEX idx_asig_mesa_estado ON asignaciones_consultoria_mesa_fabrica(estado_asignacion);
+
+COMMENT ON TABLE asignaciones_consultoria_mesa_fabrica IS 'Asignaciones específicas de mesa de fábrica';
+
+CREATE TABLE permisos_administrador
+(
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+
+    coordinador_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+
+    tipo_permiso tipo_permiso_admin,
+    permiso_activo BOOLEAN DEFAULT true,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_permisos_coordinador ON permisos_administrador(coordinador_id);
+CREATE INDEX idx_permisos_activo ON permisos_administrador(permiso_activo);
+
+COMMENT ON TABLE permisos_administrador IS 'Permisos de coordinadores para acciones administrativas';
+
+CREATE TABLE solicitudes_rrhh (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    
+    coordinador_id INT NOT NULL REFERENCES usuarios(id),
+    cliente_id INT NOT NULL REFERENCES clientes(id),
+    modulo_id INT REFERENCES modulo(id),
+    
+    perfil VARCHAR(100) NOT NULL, 
+    nivel VARCHAR(20) NOT NULL 
+        CHECK (nivel IN ('Junior', 'Semi-senior', 'Senior')),
+    
+    tiempo VARCHAR(100),
+    ubicacion VARCHAR(50) NOT NULL DEFAULT 'Remoto' 
+        CHECK (ubicacion IN ('En sitio', 'Remoto', 'Híbrido')),
+    modalidad VARCHAR(50) NOT NULL DEFAULT 'Full time'
+        CHECK (modalidad IN ('Full time', 'Medio tiempo', 'Por horas')),
+    
+    fecha_inicio_esperada DATE,
+    
+    tipo_proyecto VARCHAR(50)
+        CHECK (tipo_proyecto IN ('Soporte', 'Roll out', 'Implementación', 'Mantenimiento', 'Migración')),
+    
+    experiencia TEXT,
+    
+    presupuesto VARCHAR(150), 
+    
+    descripcion TEXT,
+    informacion_adicional TEXT,
+    observaciones_rrhh TEXT,
+    
+    prioridad VARCHAR(20) DEFAULT 'Media' NOT NULL
+        CHECK (prioridad IN ('Alta', 'Media', 'Baja')),
+        
+    estado VARCHAR(50) DEFAULT 'Pendiente' NOT NULL
+        CHECK (estado IN ('Pendiente', 'Reclutamiento', 'Entrevistas', 'Contratado', 'Suspendido', 'Cerrado')),
+    
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+COMMENT ON TABLE solicitudes_rrhh IS 'Gestión de solicitudes de vacantes';
+COMMENT ON COLUMN solicitudes_rrhh.presupuesto IS 'Rango salarial o presupuesto estimado (Texto libre)';
+
+CREATE INDEX idx_rrhh_estado ON solicitudes_rrhh(estado);
+CREATE INDEX idx_rrhh_coordinador ON solicitudes_rrhh(coordinador_id);
+CREATE INDEX idx_rrhh_cliente ON solicitudes_rrhh(cliente_id);
+
+CREATE TABLE solicitudes_contratacion (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+
+    tipo_solicitud VARCHAR(20) NOT NULL
+        CHECK (tipo_solicitud IN ('Nuevo', 'Extension', 'Retiro')),
+    estado VARCHAR(50) NOT NULL DEFAULT 'Pendiente'
+        CHECK (estado IN (
+            'Pendiente',
+            'Pendiente Coordinador',
+            'Pendiente Comercial',
+            'En Proceso',
+            'Pendiente Confirmación Cliente',
+            'Pendiente Revision TH',
+            'Pendiente Correo Silver',
+            'Completado',
+            'Cancelado'
+        )),
+
+    coordinador_solicitante_id INT NOT NULL REFERENCES usuarios(id),
+    persona_usuario_id INT REFERENCES usuarios(id),
+    supervisor_id INT REFERENCES usuarios(id),
+    preregistro_id INT,
+    cliente_id INT REFERENCES clientes(id),
+    tipo_documento_id INT REFERENCES documento_identidad(id),
+    origen_flujo VARCHAR(20) NOT NULL DEFAULT 'coordinacion'
+        CHECK (origen_flujo IN ('rrhh', 'coordinacion')),
+
+    nombre VARCHAR(150) NOT NULL,
+    apellidos VARCHAR(150) NOT NULL,
+    numero_documento VARCHAR(50),
+    perfil VARCHAR(120),
+
+    correo_personal VARCHAR(255),
+    correo_empresarial VARCHAR(255),
+    telefono VARCHAR(50),
+    ubicacion VARCHAR(120),
+
+    grupo_app_tiempos VARCHAR(150),
+    grupo_distribucion VARCHAR(150),
+
+    moneda tipo_moneda,
+    tarifa_hora NUMERIC(15,2),
+    tarifa_mes NUMERIC(15,2),
+    tarifa_medio_tiempo NUMERIC(15,2),
+    tarifa_capacitacion NUMERIC(15,2),
+
+    modalidad_contrato VARCHAR(50)
+        CHECK (modalidad_contrato IN ('Full time', 'Medio tiempo', 'Por horas')),
+
+    fecha_inicio DATE,
+    fecha_fin DATE,
+    fecha_extension_desde DATE,
+    fecha_extension_hasta DATE,
+    fecha_retiro DATE,
+
+    necesidad_ti TEXT,
+    observaciones TEXT,
+    datos_extra JSONB DEFAULT '{}'::jsonb,
+
+    requiere_confirmacion_cliente BOOLEAN DEFAULT false,
+    crear_usuario_sistema BOOLEAN NOT NULL DEFAULT true,
+    correo_enviado_mesa BOOLEAN DEFAULT false,
+    correo_enviado_th BOOLEAN DEFAULT false,
+    correo_confirmacion_coordinador BOOLEAN DEFAULT false,
+    revisado_th_por INT REFERENCES usuarios(id),
+    fecha_revision_th TIMESTAMP,
+    observaciones_th TEXT,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+COMMENT ON TABLE solicitudes_contratacion IS 'Solicitudes de contrataciones y cambios de contrato (Nuevo, Extension, Retiro)';
+COMMENT ON COLUMN solicitudes_contratacion.estado IS 'Pendiente, Pendiente Coordinador, En Proceso, Pendiente Confirmación Cliente, Pendiente Revision TH, Pendiente Correo Silver, Completado o Cancelado';
+COMMENT ON COLUMN solicitudes_contratacion.requiere_confirmacion_cliente IS 'Cuando aplica (ej. HOLCIM), se debe confirmar con el cliente antes de enviar a TH';
+COMMENT ON COLUMN solicitudes_contratacion.origen_flujo IS 'Indica si la solicitud nació desde RRHH/preregistro o desde el flujo manual de coordinación';
+
+CREATE INDEX idx_contrataciones_tipo ON solicitudes_contratacion(tipo_solicitud);
+CREATE INDEX idx_contrataciones_estado ON solicitudes_contratacion(estado);
+CREATE INDEX idx_contrataciones_coordinador ON solicitudes_contratacion(coordinador_solicitante_id);
+CREATE INDEX idx_contrataciones_preregistro ON solicitudes_contratacion(preregistro_id) WHERE preregistro_id IS NOT NULL;
+CREATE INDEX idx_contrataciones_cliente ON solicitudes_contratacion(cliente_id);
+CREATE INDEX idx_contrataciones_documento ON solicitudes_contratacion(numero_documento);
+CREATE INDEX idx_contrataciones_created ON solicitudes_contratacion(created_at DESC);
+
+CREATE TABLE preregistro_personas (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+
+    id_solicitud_rrhh INT NOT NULL REFERENCES solicitudes_rrhh(id),
+
+    nombre VARCHAR(100) NOT NULL,
+    apellidos VARCHAR(100) NOT NULL,
+    tipo_documento_id INT NOT NULL REFERENCES documento_identidad(id),
+    numero_documento VARCHAR(50) NOT NULL,
+    telefono VARCHAR(30),
+    correo_personal VARCHAR(150) NOT NULL,
+    pais_ubicacion VARCHAR(100),
+    ciudad VARCHAR(100),
+
+    cargo cargo_tipo,
+    responsable_supervisor_id INT REFERENCES usuarios(id),
+    responsable_supervisor VARCHAR(150),
+    fecha_fin DATE,
+    moneda tipo_moneda,
+    pais_pago VARCHAR(100),
+    factura_en_colombia BOOLEAN,
+    tarifa_hora NUMERIC(15,2),
+    tarifa_mes NUMERIC(15,2),
+    tarifa_medio_tiempo NUMERIC(15,2),
+    tarifa_capacitacion NUMERIC(15,2),
+    vpn_corona BOOLEAN DEFAULT FALSE,
+    necesita_s_user BOOLEAN DEFAULT FALSE,
+    grupo_usuario grupo_usuario_tipo,
+    grupo_usuario_otro VARCHAR(150),
+    grupo_distribucion grupo_distribucion_tipo,
+    observaciones TEXT,
+
+    direccion TEXT,
+    tipo_persona tipo_persona,
+    banco_id INT REFERENCES bancos(id),
+    tipo_cuenta_id INT REFERENCES tipo_cuenta_bancaria(id),
+    tipo_cuenta VARCHAR(50),
+    numero_cuenta VARCHAR(50),
+    correo_silver VARCHAR(150) UNIQUE,
+    crear_usuario_sistema BOOLEAN NOT NULL DEFAULT true,
+
+    estado VARCHAR(50) NOT NULL DEFAULT 'Pendiente Coordinador'
+        CHECK (estado IN (
+            'Pendiente Coordinador',
+            'Pendiente Comercial',
+            'Pendiente Revision TH',
+            'Pendiente Correo Silver',
+            'Completado',
+            'Anulado'
+        )),
+
+    creado_por INT NOT NULL REFERENCES usuarios(id),
+    completado_coordinador_por INT REFERENCES usuarios(id),
+    completado_th_por INT REFERENCES usuarios(id),
+    aprobado_por INT REFERENCES usuarios(id),
+    anulado_por INT REFERENCES usuarios(id),
+
+    motivo_anulacion TEXT,
+    id_usuario_creado INT REFERENCES usuarios(id),
+
+    fecha_completado_coordinador TIMESTAMP,
+    fecha_completado_th TIMESTAMP,
+    fecha_aprobacion TIMESTAMP,
+    fecha_anulacion TIMESTAMP,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+
+    CHECK (
+      (grupo_usuario = 'Otro' AND grupo_usuario_otro IS NOT NULL)
+      OR (grupo_usuario IS NULL)
+      OR (grupo_usuario <> 'Otro' AND grupo_usuario_otro IS NULL)
+    )
+);
+
+CREATE INDEX idx_preregistro_solicitud ON preregistro_personas(id_solicitud_rrhh);
+CREATE INDEX idx_preregistro_estado ON preregistro_personas(estado);
+CREATE INDEX idx_preregistro_documento ON preregistro_personas(numero_documento);
+CREATE INDEX idx_preregistro_correo_personal ON preregistro_personas(correo_personal);
+CREATE INDEX idx_preregistro_correo_silver ON preregistro_personas(correo_silver) WHERE correo_silver IS NOT NULL;
+CREATE INDEX idx_preregistro_usuario_creado ON preregistro_personas(id_usuario_creado) WHERE id_usuario_creado IS NOT NULL;
+CREATE INDEX idx_preregistro_updated ON preregistro_personas(updated_at DESC);
+CREATE UNIQUE INDEX uq_preregistro_solicitud_activa ON preregistro_personas(id_solicitud_rrhh) WHERE estado <> 'Anulado';
+
+-- Vincular personas con preregistros (FK diferida porque preregistro_personas se crea después)
+ALTER TABLE personas ADD COLUMN preregistro_id INTEGER REFERENCES preregistro_personas(id) ON DELETE SET NULL;
+CREATE INDEX idx_personas_preregistro ON personas(preregistro_id);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'fk_solicitudes_contratacion_preregistro'
+  ) THEN
+    ALTER TABLE solicitudes_contratacion
+      ADD CONSTRAINT fk_solicitudes_contratacion_preregistro
+      FOREIGN KEY (preregistro_id) REFERENCES preregistro_personas(id);
+  END IF;
+END $$;
+
+-- ============================================================================
+-- FIRMA DE CONTRATOS: TOKENS PARA PROCESO DE LECTURA Y FIRMA
+-- ============================================================================
+
+CREATE TABLE tokens_firma_contrato (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    token VARCHAR(64) UNIQUE NOT NULL,
+    solicitud_id INT REFERENCES solicitudes_contratacion(id) ON DELETE SET NULL,
+    preregistro_id INT REFERENCES preregistro_personas(id) ON DELETE SET NULL,
+    nombre_persona VARCHAR(200) NOT NULL,
+    correo_personal VARCHAR(255) NOT NULL,
+    estado VARCHAR(20) NOT NULL DEFAULT 'pendiente'
+        CHECK (estado IN ('pendiente', 'en_proceso', 'completado', 'expirado')),
+    checks_completados JSONB NOT NULL DEFAULT '{"pdf1":false,"pdf2":false,"pdf3":false,"pdf4":false,"pdf5":false}',
+    docs_firma JSONB NOT NULL DEFAULT '[]',
+    firma_completada_notificacion_pendiente_at TIMESTAMP,
+    firma_completada_notificada_at TIMESTAMP,
+    firma_completada_notificada_a VARCHAR(255),
+    firma_completada_notificacion_intentos INTEGER NOT NULL DEFAULT 0,
+    firma_completada_notificacion_error TEXT,
+    generado_por INT REFERENCES usuarios(id) ON DELETE SET NULL,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_tokens_firma_token ON tokens_firma_contrato(token);
+CREATE INDEX idx_tokens_firma_estado ON tokens_firma_contrato(estado);
+CREATE INDEX idx_tokens_firma_correo ON tokens_firma_contrato(correo_personal);
+CREATE INDEX idx_tokens_firma_expires ON tokens_firma_contrato(expires_at);
+CREATE INDEX idx_tokens_firma_notificacion_pendiente
+    ON tokens_firma_contrato(firma_completada_notificacion_pendiente_at)
+    WHERE estado = 'completado' AND firma_completada_notificada_at IS NULL;
+
+COMMENT ON TABLE tokens_firma_contrato IS 'Tokens de acceso para el proceso publico de revision y firma de contratos';
+COMMENT ON COLUMN tokens_firma_contrato.checks_completados IS 'Estado de lectura de cada PDF informativo {pdf1, pdf2, pdf3, pdf4, pdf5}';
+COMMENT ON COLUMN tokens_firma_contrato.docs_firma IS 'Array de documentos de firma con request_id ClickSign, estado y URL OneDrive';
+
+CREATE TABLE clicksign_webhook_eventos (
+    id BIGSERIAL PRIMARY KEY,
+    event_key VARCHAR(64) NOT NULL UNIQUE,
+    payload JSONB NOT NULL,
+    estado VARCHAR(20) NOT NULL DEFAULT 'pendiente'
+        CHECK (estado IN ('pendiente', 'procesando', 'procesado', 'error')),
+    intentos INTEGER NOT NULL DEFAULT 0 CHECK (intentos >= 0),
+    siguiente_intento_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    ultimo_error TEXT,
+    recibido_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    procesado_at TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_clicksign_webhook_pendientes
+    ON clicksign_webhook_eventos (siguiente_intento_at, id)
+    WHERE estado IN ('pendiente', 'error');
+
+COMMENT ON TABLE clicksign_webhook_eventos IS
+    'Bandeja durable e idempotente de webhooks Click&Sign; el evento se persiste antes de responder HTTP 200';
+
+-- ============================================================================
+-- FIRMA DE CONTRATOS: ITEMS HISTÓRICOS DEL ANEXO TÉCNICO
+-- ============================================================================
+
+CREATE TABLE anexo_tecnico_items (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+
+    solicitud_contratacion_id INT REFERENCES solicitudes_contratacion(id) ON DELETE SET NULL,
+    preregistro_id INT REFERENCES preregistro_personas(id) ON DELETE SET NULL,
+    usuario_id INT REFERENCES usuarios(id) ON DELETE SET NULL,
+
+    nombre_persona VARCHAR(200) NOT NULL,
+    numero_documento VARCHAR(50),
+    correo_personal VARCHAR(255),
+
+    tipo_asignacion VARCHAR(20) NOT NULL
+        CHECK (tipo_asignacion IN ('full_time', 'medio_tiempo', 'horas', 'capacitacion', 'proyecto')),
+    cliente_id INT REFERENCES clientes(id) ON DELETE SET NULL,
+    cliente_nombre VARCHAR(200),
+    modulo_id INT REFERENCES modulo(id) ON DELETE SET NULL,
+    modulo_nombre VARCHAR(200),
+
+    moneda VARCHAR(10) CHECK (moneda IN ('COP', 'USD', 'EUR')),
+    valor_tarifa NUMERIC(15,2) NOT NULL CHECK (valor_tarifa >= 0),
+    fecha_inicio DATE NOT NULL,
+    fecha_fin DATE NOT NULL,
+    fecha_fin_calculada BOOLEAN NOT NULL DEFAULT false,
+
+    origen VARCHAR(20) NOT NULL DEFAULT 'manual'
+        CHECK (origen IN ('manual', 'automatico')),
+    estado VARCHAR(20) NOT NULL DEFAULT 'activo'
+        CHECK (estado IN ('activo', 'finalizado', 'cancelado')),
+    estado_firma VARCHAR(20) NOT NULL DEFAULT 'pendiente'
+        CHECK (estado_firma IN ('pendiente', 'enviado', 'firmado')),
+    solicitante_id INT REFERENCES usuarios(id) ON DELETE SET NULL,
+    rol_solicitante TEXT,
+    creado_por INT REFERENCES usuarios(id) ON DELETE SET NULL,
+    updated_by INT REFERENCES usuarios(id) ON DELETE SET NULL,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+
+    CONSTRAINT anexo_tecnico_items_origen_proceso_check CHECK (
+      solicitud_contratacion_id IS NOT NULL
+      OR preregistro_id IS NOT NULL
+      OR usuario_id IS NOT NULL
+      OR NULLIF(BTRIM(numero_documento), '') IS NOT NULL
+    ),
+    CONSTRAINT anexo_tecnico_items_cliente_por_tipo_check CHECK (
+      (
+        tipo_asignacion IN ('full_time', 'medio_tiempo', 'proyecto')
+        AND (cliente_id IS NOT NULL OR NULLIF(BTRIM(cliente_nombre), '') IS NOT NULL)
+      )
+      OR tipo_asignacion IN ('horas', 'capacitacion')
+    ),
+    CONSTRAINT anexo_tecnico_items_fechas_check
+      CHECK (fecha_fin >= fecha_inicio)
+);
+
+CREATE INDEX idx_anexo_tecnico_items_doc ON anexo_tecnico_items(numero_documento);
+CREATE INDEX idx_anexo_tecnico_items_correo ON anexo_tecnico_items(correo_personal);
+CREATE INDEX idx_anexo_tecnico_items_estado ON anexo_tecnico_items(estado);
+CREATE INDEX idx_anexo_tecnico_items_estado_firma ON anexo_tecnico_items(estado_firma);
+CREATE INDEX idx_anexo_tecnico_items_usuario ON anexo_tecnico_items(usuario_id);
+CREATE INDEX idx_anexo_tecnico_items_modulo ON anexo_tecnico_items(modulo_id);
+CREATE INDEX idx_anexo_tecnico_items_solicitud ON anexo_tecnico_items(solicitud_contratacion_id) WHERE solicitud_contratacion_id IS NOT NULL;
+CREATE INDEX idx_anexo_tecnico_items_preregistro ON anexo_tecnico_items(preregistro_id) WHERE preregistro_id IS NOT NULL;
+CREATE INDEX idx_anexo_tecnico_items_fecha ON anexo_tecnico_items(fecha_inicio, fecha_fin);
+
+COMMENT ON TABLE anexo_tecnico_items IS 'Historial acumulado de filas del Anexo Tecnico por persona';
+COMMENT ON COLUMN anexo_tecnico_items.tipo_asignacion IS 'full_time, medio_tiempo, horas, capacitacion o proyecto';
+COMMENT ON COLUMN anexo_tecnico_items.modulo_nombre IS 'Nombre libre del modulo cuando no existe en el catalogo';
+COMMENT ON COLUMN anexo_tecnico_items.fecha_fin_calculada IS 'true cuando fecha_fin se asignó automáticamente al 31 de diciembre; la fecha sigue siendo editable';
+
+CREATE TABLE tokens_firma_anexo_individual (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    token VARCHAR(64) UNIQUE NOT NULL,
+
+    usuario_id INT REFERENCES usuarios(id) ON DELETE CASCADE,
+    persona_id INT REFERENCES personas(id) ON DELETE CASCADE,
+    anexo_item_ids INT[] NOT NULL,
+
+    correo_firmante VARCHAR(255) NOT NULL,
+    nombre_persona VARCHAR(200) NOT NULL,
+
+    estado VARCHAR(20) NOT NULL DEFAULT 'enviado'
+        CHECK (estado IN ('enviado', 'firmado', 'rechazado', 'cancelado')),
+
+    request_id VARCHAR(150) UNIQUE,
+    contract_id VARCHAR(200) UNIQUE,
+    signature_id VARCHAR(150),
+    url_firma TEXT,
+
+    onedrive_url TEXT,
+    onedrive_carpeta TEXT,
+    onedrive_carpeta_url TEXT,
+
+    archivo_estado VARCHAR(20) DEFAULT 'pendiente',
+    archivo_error TEXT,
+    archivo_origen TEXT,
+    archivo_file_id TEXT,
+    archivo_file_group TEXT,
+    archivo_file_type TEXT,
+    archivo_file_name TEXT,
+    archivo_catalogo_origen TEXT,
+    archivo_catalogo JSONB NOT NULL DEFAULT '[]'::jsonb,
+    archivo_catalogo_actualizado_en TIMESTAMP,
+    archivo_intentos INTEGER NOT NULL DEFAULT 0,
+    ultimo_intento_archivo_en TIMESTAMP,
+
+    firmado_at TIMESTAMP,
+    cancelado_at TIMESTAMP,
+    cancelado_por INT REFERENCES usuarios(id) ON DELETE SET NULL,
+
+    firma_notificada_at TIMESTAMP,
+    firma_notificada_a TEXT,
+
+    invitacion_enviada_at TIMESTAMP,
+    invitacion_enviada_a TEXT,
+    invitacion_error TEXT,
+
+    generado_por INT REFERENCES usuarios(id) ON DELETE SET NULL,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+
+    CONSTRAINT tokens_firma_anexo_identidad_check
+      CHECK (usuario_id IS NOT NULL OR persona_id IS NOT NULL)
+);
+
+CREATE INDEX idx_tokens_firma_anexo_token ON tokens_firma_anexo_individual(token);
+CREATE INDEX idx_tokens_firma_anexo_usuario ON tokens_firma_anexo_individual(usuario_id);
+CREATE INDEX idx_tokens_firma_anexo_persona ON tokens_firma_anexo_individual(persona_id);
+CREATE INDEX idx_tokens_firma_anexo_estado ON tokens_firma_anexo_individual(estado);
+CREATE INDEX idx_tokens_firma_anexo_request ON tokens_firma_anexo_individual(request_id) WHERE request_id IS NOT NULL;
+CREATE INDEX idx_tokens_firma_anexo_contract ON tokens_firma_anexo_individual(contract_id) WHERE contract_id IS NOT NULL;
+CREATE INDEX idx_tokens_firma_anexo_usuario_enviado
+    ON tokens_firma_anexo_individual(usuario_id, estado)
+    WHERE estado = 'enviado';
+CREATE INDEX idx_tokens_firma_anexo_persona_enviado
+    ON tokens_firma_anexo_individual(persona_id, estado)
+    WHERE persona_id IS NOT NULL AND estado = 'enviado';
+
+COMMENT ON TABLE tokens_firma_anexo_individual IS 'Procesos de firma individual para anexos tecnicos por usuario o persona';
+
+-- ============================================================================
+-- COMPAT: PUBLIC ID FOR EXISTING DATABASES
+-- ============================================================================
+
+DO $$
+DECLARE
+  t TEXT;
+  has_unique_public_id BOOLEAN;
+  tables TEXT[] := ARRAY[
+    'bancos',
+    'roles',
+    'tipo_cuenta_bancaria',
+    'documento_identidad',
+    'clientes',
+    'tipo_asignacion',
+    'modulo',
+    'period_1',
+    'place_value_1',
+    'usuarios',
+    'consultorias',
+    'tarifa_consultor',
+    'registro_asignaciones',
+    'cuenta_cobro',
+    'reporte_horas',
+    'asignaciones_consultoria_mesa_fabrica',
+    'permisos_administrador',
+    'solicitudes_rrhh',
+    'preregistro_personas'
+  ];
+BEGIN
+  FOREACH t IN ARRAY tables
+  LOOP
+    EXECUTE format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS public_id UUID', t);
+    EXECUTE format('UPDATE %I SET public_id = gen_random_uuid() WHERE public_id IS NULL', t);
+    EXECUTE format('ALTER TABLE %I ALTER COLUMN public_id SET DEFAULT gen_random_uuid()', t);
+    EXECUTE format('ALTER TABLE %I ALTER COLUMN public_id SET NOT NULL', t);
+
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_class tbl
+      JOIN pg_catalog.pg_namespace ns ON ns.oid = tbl.relnamespace
+      JOIN pg_catalog.pg_index i ON i.indrelid = tbl.oid
+      JOIN pg_catalog.pg_attribute a ON a.attrelid = tbl.oid
+      WHERE ns.nspname = current_schema()
+        AND tbl.relname = t
+        AND a.attname = 'public_id'
+        AND a.attnum = ANY(i.indkey)
+        AND i.indisunique
+    ) INTO has_unique_public_id;
+
+    IF NOT has_unique_public_id THEN
+      EXECUTE format('CREATE UNIQUE INDEX IF NOT EXISTS idx_%I_public_id ON %I(public_id)', t, t);
+    END IF;
+  END LOOP;
+END $$;
+
+-- ============================================================================
+-- FUNCIONES Y TRIGGERS
+-- ============================================================================
+
+-- Función para actualizar el campo updated_at automáticamente
+CREATE OR REPLACE FUNCTION update_updated_at_column
+()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Aplicar trigger a todas las tablas relevantes
+DO $$
+DECLARE
+    t TEXT;
+BEGIN
+    FOR t IN
+    SELECT table_name
+    FROM information_schema.columns
+    WHERE column_name = 'updated_at'
+        AND table_schema = 'public'
+    LOOP
+    EXECUTE format(
+            'DROP TRIGGER IF EXISTS update_%I_updated_at ON %I',
+            t, t
+        );
+    EXECUTE format
+    ('
+            CREATE TRIGGER update_%I_updated_at 
+            BEFORE UPDATE ON %I
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()',
+            t, t
+        );
+END
+LOOP;
+END;
+$$;
+
+-- ============================================================================
+-- DATOS INICIALES (SEED DATA)
+-- ============================================================================
+
+
+-- Insertar roles básicos
+INSERT INTO roles
+    (titulo, descripcion, activo)
+VALUES
+    ('Administrador', 'Administrador del sistema con todos los permisos', true),
+    ('Coordinador', 'Coordinador de proyectos', true),
+    ('Consultor', 'Consultor externo o interno', true),
+    ('Contabilidad', 'equipo contable', true),
+    ('Reclutador', 'Usuario encargado de reclutar y gestionar candidatos y consultores', true),
+    ('Talento Humano', 'Usuario de Talento Humano para onboarding y aprobacion de preregistros', true),
+    ('Comercial', 'Usuario del área comercial para solicitudes de contratación', true),
+    ('Fábrica', 'Integrante interno cuya capacidad semanal es medida', true);
+
+INSERT INTO documento_identidad
+    (titulo, codigo, activo)
+VALUES
+    ('Cédula de Ciudadanía', 'CC', true),
+    ('Cédula de Extranjería', 'CE', true),
+    ('Pasaporte', 'PA', true),
+    ('NIT', 'NIT', true),
+    ('Otras', 'OT', true)
+ON CONFLICT (titulo) DO NOTHING;
+
+
+-- Insertar tipos de asignación (actualizado según tu lista)
+INSERT INTO tipo_asignacion
+    (titulo, descripcion, activo)
+VALUES
+    ('Full time', 'Asignación de tiempo completo (40 horas/semana)', true),
+    ('Part Time', 'Asignación de medio tiempo', true),
+    ('Tiempo y costo fijo', 'Proyectos con tiempo y costo definidos desde el inicio', true),
+    ('Horas por demanda', 'Horas asignadas según demanda del cliente', true),
+    ('Mesa de servicio', 'Soporte continuo por mesa de servicio/service desk', true),
+    ('Fábrica', 'Modelo de fábrica para desarrollo y soporte', true),
+    ('Hora Adicional Diurna', 'Horas adicionales trabajadas en jornada diurna', true),
+    ('Hora Adicional Nocturna', 'Horas adicionales trabajadas en jornada nocturna', true),
+    ('Hora Adicional Nocturna Dominical/Festivo', 'Horas adicionales nocturnas trabajadas en domingo o festivo', true),
+    ('Hora Adicional Diurna Dominical/Festivo', 'Horas adicionales diurnas trabajadas en domingo o festivo', true)
+ON CONFLICT (titulo) DO NOTHING;
+
+-- ============================================================================
+-- VISTAS ÚTILES
+-- ============================================================================
+
+-- Vista: Asignaciones activas con información completa
+CREATE OR REPLACE VIEW v_asignaciones_activas AS
+SELECT
+    ra.id,
+    ra.nro_caso_interno,
+    ra.nro_caso_cliente,
+    c.titulo as cliente,
+    c.nit as cliente_nit,
+    u.nombre_usuario as consultor,
+    u.email as consultor_email,
+    coord.nombre_usuario as coordinador,
+    m.titulo as modulo,
+    m.nombre_completo as modulo_nombre,
+    ta.titulo as tipo_asignacion,
+    ra.fecha_inicio,
+    ra.fecha_fin,
+    ra.estado,
+    ra.aprobar_coordinador,
+    ra.total_pagar,
+    ra.valor_hora,
+    ra.cantidad_dias,
+    con.descripcion_consultoria
+FROM registro_asignaciones ra
+    JOIN consultorias con ON ra.id_consultoria = con.id
+    JOIN clientes c ON con.id_cliente = c.id
+    LEFT JOIN usuarios u ON ra.consultor_responsable_id = u.id
+    LEFT JOIN usuarios coord ON con.coordinador_responsable_id = coord.id
+    LEFT JOIN modulo m ON ra.id_modulo = m.id
+    LEFT JOIN tipo_asignacion ta ON con.id_tipo_asignacion = ta.id
+WHERE ra.estado IN ('Abierto', 'Proceso');
+
+COMMENT ON VIEW v_asignaciones_activas IS 'Vista de asignaciones activas con toda la información relacionada';
+
+-- Vista: Reporte de horas pendientes de aprobar
+CREATE OR REPLACE VIEW v_reportes_pendientes AS
+SELECT
+    rh.id,
+    c.titulo as cliente,
+    c.nit as cliente_nit,
+    u.nombre_usuario as consultor,
+    u.email as consultor_email,
+    coord.nombre_usuario as coordinador,
+    rh.horas_reportadas,
+    rh.cantidad_dias_reportados,
+    rh.total_cobrar,
+    rh.estado_reporte,
+    rh.nro_caso_int_ext,
+    m.titulo as modulo,
+    rh.created_at as fecha_reporte,
+    rh.fecha_cierre_mesa_fab
+FROM reporte_horas rh
+    LEFT JOIN clientes c ON rh.cliente_id = c.id
+    LEFT JOIN usuarios u ON rh.consultor_responsable_id = u.id
+    LEFT JOIN usuarios coord ON rh.coordinador_id = coord.id
+    LEFT JOIN modulo m ON rh.modulo_id = m.id
+WHERE rh.estado_reporte = 'Pendiente';
+
+COMMENT ON VIEW v_reportes_pendientes IS 'Vista de reportes de horas pendientes de aprobar';
+
+-- Vista: Consultores activos con su información completa
+CREATE OR REPLACE VIEW v_consultores_activos AS
+SELECT
+    u.id,
+    u.nombre_usuario,
+    u.email,
+    COALESCE(p.numero_documento, u.cedula)       AS cedula,
+    COALESCE(p.numero_contacto, u.telefono)      AS telefono,
+    r.titulo as rol,
+    u.tipo_consultor,
+    u.moneda_cobro,
+    COALESCE(b_p.titulo, b_u.titulo)             AS banco,
+    COALESCE(p.numero_cuenta, u.nro_cuenta_bancaria) AS nro_cuenta_bancaria,
+    COALESCE(tc_p.titulo, tc_u.titulo)           AS tipo_cuenta,
+    cp.nombre_usuario as consultor_principal,
+    u.activo
+FROM usuarios u
+    LEFT JOIN roles r                  ON u.rol_usuario_id  = r.id
+    LEFT JOIN personas p               ON u.persona_id      = p.id
+    LEFT JOIN bancos b_p               ON p.banco_id        = b_p.id
+    LEFT JOIN bancos b_u               ON u.banco_id        = b_u.id
+    LEFT JOIN tipo_cuenta_bancaria tc_p ON p.tipo_cuenta_id = tc_p.id
+    LEFT JOIN tipo_cuenta_bancaria tc_u ON u.tipo_cuenta_id = tc_u.id
+    LEFT JOIN usuarios cp              ON u.id_consultor_principal = cp.id
+WHERE u.activo = true
+    AND r.titulo IN ('Consultor', 'Consultor Principal');
+
+COMMENT ON VIEW v_consultores_activos IS 'Vista de consultores activos con información completa';
+
+-- Vista: Resumen de facturación por cliente
+CREATE OR REPLACE VIEW v_facturacion_por_cliente AS
+SELECT
+    c.id as cliente_id,
+    c.titulo as cliente,
+    c.nit,
+    COUNT(DISTINCT cc.id) as total_cuentas_cobro,
+    SUM(cc.total_cuenta_cobro) as total_facturado,
+    COUNT(DISTINCT rh.id) as total_reportes,
+    SUM(rh.horas_reportadas) as total_horas,
+    MAX(cc.fecha_correspondiente) as ultima_factura
+FROM clientes c
+    LEFT JOIN reporte_horas rh ON c.id = rh.cliente_id
+    LEFT JOIN cuenta_cobro cc ON rh.id_cuenta_cobro = cc.id
+GROUP BY c.id, c.titulo, c.nit;
+
+COMMENT ON VIEW v_facturacion_por_cliente IS 'Resumen de facturación por cliente';
+
+-- Vista: Tarifas vigentes
+CREATE OR REPLACE VIEW v_tarifas_vigentes AS
+SELECT
+    tc.id,
+    c.titulo as cliente,
+    u.nombre_usuario as consultor,
+    u.email as consultor_email,
+    m.titulo as modulo,
+    ta.titulo as tipo_asignacion,
+    tc.valor_tarifa,
+    tc.vigencia_desde,
+    tc.vigencia_hasta,
+    tc.activo
+FROM tarifa_consultor tc
+    JOIN clientes c ON tc.id_cliente = c.id
+    JOIN usuarios u ON tc.consultor_id = u.id
+    LEFT JOIN modulo m ON tc.modulo_id = m.id
+    LEFT JOIN tipo_asignacion ta ON tc.id_tipo_asignacion = ta.id
+WHERE tc.activo = true
+    AND (tc.vigencia_hasta IS NULL OR tc.vigencia_hasta >= CURRENT_DATE);
+
+COMMENT ON VIEW v_tarifas_vigentes IS 'Tarifas vigentes de consultores';
+
+-- Vista: Usuario completo con datos de persona
+CREATE OR REPLACE VIEW v_usuarios_completo AS
+SELECT
+    u.id,
+    u.public_id,
+    u.nombre_usuario,
+    u.email,
+    u.azure_oid,
+    u.activo,
+    u.tipo_consultor,
+    u.moneda_cobro,
+    u.foto_url,
+    u.observaciones,
+    u.ultimo_inicio_sesion,
+    u.persona_id,
+
+    r.titulo           AS rol,
+    cp.nombre_usuario  AS consultor_principal,
+
+    -- Persona
+    p.public_id        AS persona_public_id,
+    p.estado           AS persona_estado,
+    p.numero_documento,
+    p.tipo_documento_id,
+    di.titulo          AS tipo_documento,
+    di.codigo          AS tipo_documento_codigo,
+    p.tipo_persona,
+    p.factura_en_colombia,
+    p.nombre           AS persona_nombre,
+    p.apellidos        AS persona_apellidos,
+    p.numero_contacto  AS telefono,
+    p.correo_electronico,
+    p.direccion_residencia AS direccion,
+    p.ciudad_residencia    AS ciudad,
+    p.departamento_pais,
+    p.pais_residencia,
+    p.barrio,
+    p.titulo_profesional,
+    p.sexo,
+    p.fecha_nacimiento,
+    p.lugar_nacimiento,
+    p.lugar_expedicion,
+    p.nacionalidad,
+    p.estado_civil,
+    p.nombre_contacto_emergencia,
+    p.telefono_contacto_emergencia,
+    p.parentesco,
+    p.eps,
+    p.afp,
+    p.arl,
+    p.composicion_familiar,
+    p.hijos,
+    p.personas_a_cargo,
+    p.edades_hijos,
+    p.visa_paises,
+    p.acepta_tratamiento_datos,
+    p.tratamiento_datos_aceptado_at,
+    p.tipo_contrato,
+    p.modalidad,
+    p.modulo_id,
+    m.titulo           AS modulo_titulo,
+    p.modulo_otro,
+    p.cliente_id,
+    cl.titulo          AS cliente_titulo,
+    p.cliente_otro,
+    p.banco_id,
+    b.titulo           AS banco,
+    p.tipo_cuenta_id,
+    tcb.titulo         AS tipo_cuenta,
+    p.numero_cuenta    AS nro_cuenta_bancaria,
+    p.preregistro_id
+
+FROM usuarios u
+LEFT JOIN roles r                  ON u.rol_usuario_id    = r.id
+LEFT JOIN personas p               ON u.persona_id        = p.id
+LEFT JOIN documento_identidad di   ON p.tipo_documento_id = di.id
+LEFT JOIN bancos b                 ON p.banco_id          = b.id
+LEFT JOIN tipo_cuenta_bancaria tcb ON p.tipo_cuenta_id    = tcb.id
+LEFT JOIN modulo m                 ON p.modulo_id         = m.id
+LEFT JOIN clientes cl              ON p.cliente_id        = cl.id
+LEFT JOIN usuarios cp              ON u.id_consultor_principal = cp.id;
+
+COMMENT ON VIEW v_usuarios_completo IS 'Vista completa de usuarios con datos de persona, bancarios y de contrato';
+
+-- ============================================================================
+-- FUNCIONES ÚTILES
+-- ============================================================================
+
+-- Función para obtener la tarifa de un consultor
+CREATE OR REPLACE FUNCTION obtener_tarifa_consultor
+(
+    p_consultor_id INTEGER,
+    p_cliente_id INTEGER,
+    p_modulo_id INTEGER DEFAULT NULL,
+    p_tipo_asignacion_id INTEGER DEFAULT NULL
+)
+RETURNS DECIMAL AS $$
+DECLARE
+    v_tarifa DECIMAL;
+BEGIN
+    SELECT valor_tarifa
+    INTO v_tarifa
+    FROM tarifa_consultor
+    WHERE consultor_id = p_consultor_id
+        AND id_cliente = p_cliente_id
+        AND (p_modulo_id IS NULL OR modulo_id = p_modulo_id)
+        AND (p_tipo_asignacion_id IS NULL OR id_tipo_asignacion = p_tipo_asignacion_id)
+        AND activo = true
+        AND (vigencia_hasta IS NULL OR vigencia_hasta >= CURRENT_DATE)
+    ORDER BY vigencia_desde DESC
+    LIMIT 1;
+    
+    RETURN COALESCE(v_tarifa
+    , 0);
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION obtener_tarifa_consultor IS 'Obtiene la tarifa vigente de un consultor para un cliente';
+
+-- Función para convertir número a letras (simplificada)
+CREATE OR REPLACE FUNCTION numero_a_letras
+(numero DECIMAL)
+RETURNS TEXT AS $$
+BEGIN
+    -- Implementación simplificada
+    -- En producción, implementar lógica completa usando las tablas period_1 y place_value_1
+    RETURN TRIM(TO_CHAR(numero, '999,999,999,999.99')) || ' pesos';
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION numero_a_letras IS 'Convierte un número a su representación en letras (simplificado)';
+
+-- ============================================================================
+-- POLÍTICAS DE SEGURIDAD (RLS - Row Level Security)
+-- ============================================================================
+
+-- Habilitar RLS en tablas sensibles
+ALTER TABLE usuarios ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reporte_horas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cuenta_cobro ENABLE ROW LEVEL SECURITY;
+
+-- Política: Los usuarios solo pueden ver sus propios reportes
+CREATE POLICY reporte_horas_consultor_policy ON reporte_horas
+    FOR
+SELECT
+    USING (consultor_responsable_id = current_setting('app.current_user_id')::INTEGER);
+
+-- Política: Los coordinadores pueden ver reportes de sus consultorías
+CREATE POLICY reporte_horas_coordinador_policy ON reporte_horas
+    FOR
+SELECT
+    USING (coordinador_id = current_setting('app.current_user_id')::INTEGER);
+
+-- Política: Admins pueden ver todo
+CREATE POLICY reporte_horas_admin_policy ON reporte_horas
+    FOR ALL
+    USING
+(
+        EXISTS
+(
+            SELECT 1
+FROM usuarios u
+    JOIN roles r ON u.rol_usuario_id = r.id
+WHERE u.id = current_setting('app.current_user_id')
+::INTEGER
+            AND r.titulo = 'Administrador'
+        )
+    );
+
+-- ============================================================================
+-- ÍNDICES ADICIONALES PARA OPTIMIZACIÓN
+-- ============================================================================
+
+-- Índices de texto para búsquedas
+CREATE INDEX idx_clientes_titulo_trgm ON clientes USING gin
+(titulo gin_trgm_ops);
+CREATE INDEX idx_usuarios_nombre_trgm ON usuarios USING gin
+(nombre_usuario gin_trgm_ops);
+
+-- Índices compuestos para queries frecuentes
+CREATE INDEX idx_reporte_horas_compuesto ON reporte_horas(
+    estado_reporte, consultor_responsable_id, created_at DESC
+);
+
+CREATE INDEX idx_registro_asignaciones_compuesto ON registro_asignaciones(
+    estado, consultor_responsable_id, fecha_inicio DESC
+);
+
+-- ============================================================================
+-- FIN DEL SCRIPT
+-- ============================================================================
+
+-- Módulo de entregas de servicio. Se mantiene separado para compartir exactamente
+-- el mismo esquema entre instalaciones nuevas y bases existentes.
+-- >>> INICIO ARCHIVO INCLUIDO: db/migrations/2026-08-25-entregas-servicio.sql
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS contactos_cliente (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    cliente_id INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+    nombre VARCHAR(255) NOT NULL,
+    cargo VARCHAR(150),
+    telefono VARCHAR(50),
+    email VARCHAR(255),
+    es_contacto_principal BOOLEAN NOT NULL DEFAULT false,
+    activo BOOLEAN NOT NULL DEFAULT true,
+    created_by INTEGER REFERENCES usuarios(id),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT contactos_cliente_nombre_no_vacio CHECK (BTRIM(nombre) <> '')
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_contactos_cliente_principal_activo
+    ON contactos_cliente(cliente_id)
+    WHERE es_contacto_principal = true AND activo = true;
+CREATE INDEX IF NOT EXISTS idx_contactos_cliente_cliente
+    ON contactos_cliente(cliente_id, activo);
+
+CREATE TABLE IF NOT EXISTS entregas_servicio (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    cliente_id INTEGER NOT NULL REFERENCES clientes(id),
+    coordinador_asignado_id INTEGER NOT NULL REFERENCES usuarios(id),
+    tipo_servicio VARCHAR(20) NOT NULL,
+    nombre_servicio VARCHAR(255) NOT NULL,
+    estado VARCHAR(30) NOT NULL DEFAULT 'REGISTRADA',
+    perfil_cliente VARCHAR(20) NOT NULL,
+    analisis_adaptabilidad TEXT NOT NULL,
+    acuerdos_comerciales TEXT,
+    creado_por INTEGER NOT NULL REFERENCES usuarios(id),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT entregas_servicio_tipo_check
+        CHECK (tipo_servicio IN ('PROYECTO', 'MESA_SERVICIO', 'OUTSOURCING')),
+    CONSTRAINT entregas_servicio_estado_check
+        CHECK (estado IN ('REGISTRADA', 'ACEPTADA', 'EN_PROCESO', 'CERRADA', 'CANCELADA')),
+    CONSTRAINT entregas_servicio_perfil_check
+        CHECK (perfil_cliente IN ('CLAVE', 'NO_CLAVE', 'POR_DEFINIR')),
+    CONSTRAINT entregas_servicio_nombre_no_vacio CHECK (BTRIM(nombre_servicio) <> ''),
+    CONSTRAINT entregas_servicio_adaptabilidad_no_vacia CHECK (BTRIM(analisis_adaptabilidad) <> '')
+);
+
+CREATE INDEX IF NOT EXISTS idx_entregas_servicio_cliente
+    ON entregas_servicio(cliente_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_entregas_servicio_coordinador
+    ON entregas_servicio(coordinador_asignado_id, estado, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_entregas_servicio_creador
+    ON entregas_servicio(creado_por, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS entregas_servicio_contactos (
+    entrega_servicio_id INTEGER NOT NULL REFERENCES entregas_servicio(id) ON DELETE CASCADE,
+    contacto_cliente_id INTEGER NOT NULL REFERENCES contactos_cliente(id),
+    tipo_contacto VARCHAR(30) NOT NULL DEFAULT 'INTERVENTOR',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (entrega_servicio_id, contacto_cliente_id, tipo_contacto),
+    CONSTRAINT entregas_servicio_contactos_tipo_check
+        CHECK (tipo_contacto IN ('PRINCIPAL', 'INTERVENTOR', 'FACTURACION'))
+);
+
+CREATE TABLE IF NOT EXISTS entregas_servicio_consultores (
+    entrega_servicio_id INTEGER NOT NULL REFERENCES entregas_servicio(id) ON DELETE CASCADE,
+    consultor_id INTEGER NOT NULL REFERENCES usuarios(id),
+    es_principal BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (entrega_servicio_id, consultor_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_entrega_consultor_principal
+    ON entregas_servicio_consultores(entrega_servicio_id)
+    WHERE es_principal = true;
+
+CREATE TABLE IF NOT EXISTS entregas_servicio_modulos (
+    id SERIAL PRIMARY KEY,
+    entrega_servicio_id INTEGER NOT NULL REFERENCES entregas_servicio(id) ON DELETE CASCADE,
+    modulo_id INTEGER REFERENCES modulo(id),
+    modulo_otro VARCHAR(150),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT entregas_servicio_modulo_origen_check CHECK (
+        (modulo_id IS NOT NULL AND modulo_otro IS NULL)
+        OR (modulo_id IS NULL AND NULLIF(BTRIM(modulo_otro), '') IS NOT NULL)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_entrega_modulo_catalogo
+    ON entregas_servicio_modulos(entrega_servicio_id, modulo_id)
+    WHERE modulo_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_entrega_modulo_otro
+    ON entregas_servicio_modulos(entrega_servicio_id, LOWER(BTRIM(modulo_otro)))
+    WHERE modulo_otro IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS entregas_servicio_proyecto (
+    entrega_servicio_id INTEGER PRIMARY KEY REFERENCES entregas_servicio(id) ON DELETE CASCADE,
+    objeto_proyecto TEXT NOT NULL,
+    valor_total NUMERIC(18,2) NOT NULL,
+    moneda VARCHAR(3) NOT NULL DEFAULT 'COP',
+    forma_pago TEXT NOT NULL,
+    equipo_estimacion TEXT NOT NULL,
+    tarifas_consultoria TEXT NOT NULL,
+    CONSTRAINT entrega_proyecto_valor_check CHECK (valor_total >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS entregas_servicio_mesa (
+    entrega_servicio_id INTEGER PRIMARY KEY REFERENCES entregas_servicio(id) ON DELETE CASCADE,
+    detalle_tarifas TEXT NOT NULL,
+    forma_pago TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS entregas_servicio_outsourcing (
+    entrega_servicio_id INTEGER PRIMARY KEY REFERENCES entregas_servicio(id) ON DELETE CASCADE,
+    tiempo_descripcion VARCHAR(255) NOT NULL,
+    tarifa NUMERIC(18,2) NOT NULL,
+    valor_cliente NUMERIC(18,2) NOT NULL,
+    moneda VARCHAR(3) NOT NULL DEFAULT 'COP',
+    tiene_contrato BOOLEAN NOT NULL,
+    CONSTRAINT entrega_outsourcing_tarifa_check CHECK (tarifa >= 0),
+    CONSTRAINT entrega_outsourcing_valor_cliente_check CHECK (valor_cliente >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS entregas_servicio_documentos (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    entrega_servicio_id INTEGER NOT NULL REFERENCES entregas_servicio(id) ON DELETE CASCADE,
+    tipo_documento VARCHAR(30) NOT NULL DEFAULT 'PROPUESTA_COMERCIAL',
+    origen VARCHAR(20) NOT NULL,
+    nombre_archivo VARCHAR(255),
+    web_url TEXT NOT NULL,
+    graph_drive_id TEXT,
+    graph_item_id TEXT,
+    estado_carga VARCHAR(20) NOT NULL DEFAULT 'DISPONIBLE',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT entregas_documentos_origen_check CHECK (origen IN ('ONEDRIVE', 'LINK_EXTERNO')),
+    CONSTRAINT entregas_documentos_estado_check CHECK (estado_carga IN ('DISPONIBLE', 'ERROR')),
+    CONSTRAINT entregas_documentos_url_no_vacia CHECK (BTRIM(web_url) <> '')
+);
+
+CREATE INDEX IF NOT EXISTS idx_entregas_documentos_entrega
+    ON entregas_servicio_documentos(entrega_servicio_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS entregas_servicio_notificaciones (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    entrega_servicio_id INTEGER NOT NULL REFERENCES entregas_servicio(id) ON DELETE CASCADE,
+    tipo VARCHAR(30) NOT NULL DEFAULT 'ASIGNACION',
+    destinatarios JSONB NOT NULL DEFAULT '{}'::jsonb,
+    estado VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',
+    intentos INTEGER NOT NULL DEFAULT 0,
+    ultimo_error TEXT,
+    enviado_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT entregas_notificaciones_tipo_check CHECK (tipo IN ('ASIGNACION')),
+    CONSTRAINT entregas_notificaciones_estado_check CHECK (estado IN ('PENDIENTE', 'ENVIADA', 'ERROR'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_entregas_notificaciones_pendientes
+    ON entregas_servicio_notificaciones(estado, created_at)
+    WHERE estado IN ('PENDIENTE', 'ERROR');
+
+DROP TRIGGER IF EXISTS update_contactos_cliente_updated_at ON contactos_cliente;
+CREATE TRIGGER update_contactos_cliente_updated_at
+    BEFORE UPDATE ON contactos_cliente
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_entregas_servicio_updated_at ON entregas_servicio;
+CREATE TRIGGER update_entregas_servicio_updated_at
+    BEFORE UPDATE ON entregas_servicio
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_entregas_servicio_notificaciones_updated_at ON entregas_servicio_notificaciones;
+CREATE TRIGGER update_entregas_servicio_notificaciones_updated_at
+    BEFORE UPDATE ON entregas_servicio_notificaciones
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+COMMIT;
+-- <<< FIN ARCHIVO INCLUIDO: db/migrations/2026-08-25-entregas-servicio.sql
+
+-- >>> INICIO ARCHIVO INCLUIDO: db/migrations/2026-08-25-z-entregas-consultores-externos.sql
+-- Debe ejecutarse después de 2026-08-25-entregas-servicio.sql.
+BEGIN;
+
+ALTER TABLE entregas_servicio_consultores
+  DROP CONSTRAINT entregas_servicio_consultores_pkey;
+
+ALTER TABLE entregas_servicio_consultores
+  ADD COLUMN id BIGSERIAL,
+  ADD COLUMN public_id UUID NOT NULL DEFAULT gen_random_uuid(),
+  ADD COLUMN nombre_externo VARCHAR(255),
+  ADD COLUMN telefono_externo VARCHAR(50),
+  ALTER COLUMN consultor_id DROP NOT NULL;
+
+ALTER TABLE entregas_servicio_consultores
+  ADD CONSTRAINT entregas_servicio_consultores_pkey PRIMARY KEY (id),
+  ADD CONSTRAINT entregas_servicio_consultores_public_id_unique UNIQUE (public_id),
+  ADD CONSTRAINT entregas_servicio_consultor_origen_check CHECK (
+    (consultor_id IS NOT NULL AND nombre_externo IS NULL AND telefono_externo IS NULL)
+    OR (
+      consultor_id IS NULL
+      AND NULLIF(BTRIM(nombre_externo), '') IS NOT NULL
+      AND NULLIF(BTRIM(telefono_externo), '') IS NOT NULL
+    )
+  );
+
+CREATE UNIQUE INDEX uq_entrega_consultor_usuario
+  ON entregas_servicio_consultores(entrega_servicio_id, consultor_id)
+  WHERE consultor_id IS NOT NULL;
+
+CREATE UNIQUE INDEX uq_entrega_consultor_externo
+  ON entregas_servicio_consultores(
+    entrega_servicio_id,
+    LOWER(BTRIM(nombre_externo)),
+    BTRIM(telefono_externo)
+  )
+  WHERE consultor_id IS NULL;
+
+COMMIT;
+-- <<< FIN ARCHIVO INCLUIDO: db/migrations/2026-08-25-z-entregas-consultores-externos.sql
+
+-- >>> INICIO ARCHIVO INCLUIDO: db/migrations/2026-08-25-zz-entregas-enlaces.sql
+CREATE TABLE IF NOT EXISTS entregas_servicio_enlaces (
+    id SERIAL PRIMARY KEY,
+    public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    entrega_servicio_id INTEGER NOT NULL REFERENCES entregas_servicio(id) ON DELETE CASCADE,
+    titulo VARCHAR(255) NOT NULL,
+    url TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_entrega_servicio_enlace UNIQUE (entrega_servicio_id, url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entregas_servicio_enlaces_entrega
+    ON entregas_servicio_enlaces(entrega_servicio_id);
+
+-- Conserva los enlaces registrados antes de retirar la carga de archivos.
+INSERT INTO entregas_servicio_enlaces (public_id, entrega_servicio_id, titulo, url, created_at)
+SELECT public_id, entrega_servicio_id, nombre_archivo, web_url, created_at
+FROM entregas_servicio_documentos
+WHERE origen = 'LINK_EXTERNO'
+ON CONFLICT (entrega_servicio_id, url) DO NOTHING;
+-- <<< FIN ARCHIVO INCLUIDO: db/migrations/2026-08-25-zz-entregas-enlaces.sql
+
+-- >>> INICIO ARCHIVO INCLUIDO: db/migrations/2026-08-26-entregas-tarifa-consultoria.sql
+ALTER TABLE entregas_servicio_proyecto
+    ADD COLUMN IF NOT EXISTS tarifa_consultoria NUMERIC(18,2),
+    ADD COLUMN IF NOT EXISTS moneda_tarifa_consultoria VARCHAR(3) NOT NULL DEFAULT 'COP';
+
+ALTER TABLE entregas_servicio_proyecto
+    ALTER COLUMN tarifas_consultoria DROP NOT NULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'entrega_proyecto_tarifa_consultoria_check'
+    ) THEN
+        ALTER TABLE entregas_servicio_proyecto
+            ADD CONSTRAINT entrega_proyecto_tarifa_consultoria_check
+            CHECK (tarifa_consultoria IS NULL OR tarifa_consultoria >= 0);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'entrega_proyecto_moneda_tarifa_check'
+    ) THEN
+        ALTER TABLE entregas_servicio_proyecto
+            ADD CONSTRAINT entrega_proyecto_moneda_tarifa_check
+            CHECK (moneda_tarifa_consultoria IN ('COP', 'USD', 'EUR'));
+    END IF;
+END $$;
+-- <<< FIN ARCHIVO INCLUIDO: db/migrations/2026-08-26-entregas-tarifa-consultoria.sql
+
+-- >>> INICIO ARCHIVO INCLUIDO: db/migrations/2026-08-26-z-entregas-forma-pago-monetaria.sql
+ALTER TABLE entregas_servicio_proyecto
+    ADD COLUMN IF NOT EXISTS valor_forma_pago NUMERIC(18,2),
+    ADD COLUMN IF NOT EXISTS moneda_forma_pago VARCHAR(3) NOT NULL DEFAULT 'COP';
+
+UPDATE entregas_servicio_proyecto
+SET valor_forma_pago = 0
+WHERE valor_forma_pago IS NULL;
+
+UPDATE entregas_servicio_proyecto
+SET tarifa_consultoria = 0
+WHERE tarifa_consultoria IS NULL;
+
+ALTER TABLE entregas_servicio_proyecto
+    ALTER COLUMN valor_forma_pago SET NOT NULL,
+    ALTER COLUMN tarifa_consultoria SET NOT NULL,
+    DROP COLUMN IF EXISTS forma_pago,
+    DROP COLUMN IF EXISTS tarifas_consultoria;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'entrega_proyecto_valor_forma_pago_check'
+    ) THEN
+        ALTER TABLE entregas_servicio_proyecto
+            ADD CONSTRAINT entrega_proyecto_valor_forma_pago_check
+            CHECK (valor_forma_pago >= 0);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'entrega_proyecto_moneda_forma_pago_check'
+    ) THEN
+        ALTER TABLE entregas_servicio_proyecto
+            ADD CONSTRAINT entrega_proyecto_moneda_forma_pago_check
+            CHECK (moneda_forma_pago IN ('COP', 'USD', 'EUR'));
+    END IF;
+END $$;
+-- <<< FIN ARCHIVO INCLUIDO: db/migrations/2026-08-26-z-entregas-forma-pago-monetaria.sql
+
+-- >>> INICIO ARCHIVO INCLUIDO: db/migrations/2026-08-26-zz-restaurar-forma-pago-texto.sql
+ALTER TABLE entregas_servicio_proyecto
+    ADD COLUMN IF NOT EXISTS forma_pago TEXT;
+
+UPDATE entregas_servicio_proyecto
+SET forma_pago = 'Pendiente por definir'
+WHERE forma_pago IS NULL;
+
+ALTER TABLE entregas_servicio_proyecto
+    ALTER COLUMN forma_pago SET NOT NULL,
+    DROP COLUMN IF EXISTS valor_forma_pago,
+    DROP COLUMN IF EXISTS moneda_forma_pago;
+-- <<< FIN ARCHIVO INCLUIDO: db/migrations/2026-08-26-zz-restaurar-forma-pago-texto.sql
+
+-- >>> INICIO ARCHIVO INCLUIDO: db/migrations/2026-08-28-entregas-perfil-tarifas-consultor.sql
+BEGIN;
+
+-- El perfil pertenece al cliente y no a cada entrega.
+ALTER TABLE clientes
+    ADD COLUMN IF NOT EXISTS perfil_cliente VARCHAR(20);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'clientes_perfil_cliente_check'
+          AND conrelid = 'clientes'::regclass
+    ) THEN
+        ALTER TABLE clientes
+            ADD CONSTRAINT clientes_perfil_cliente_check
+            CHECK (perfil_cliente IS NULL OR perfil_cliente IN ('CLAVE', 'NO_CLAVE', 'POR_DEFINIR'));
+    END IF;
+END $$;
+
+-- Para clientes con entregas previas se conserva el perfil de la entrega más reciente.
+WITH perfil_reciente AS (
+    SELECT DISTINCT ON (cliente_id)
+        cliente_id,
+        perfil_cliente
+    FROM entregas_servicio
+    WHERE perfil_cliente IN ('CLAVE', 'NO_CLAVE', 'POR_DEFINIR')
+    ORDER BY cliente_id, created_at DESC, id DESC
+)
+UPDATE clientes c
+SET perfil_cliente = pr.perfil_cliente
+FROM perfil_reciente pr
+WHERE c.id = pr.cliente_id
+  AND c.perfil_cliente IS NULL;
+
+-- Se preservan las columnas antiguas para que un despliegue gradual no rompa el backend anterior.
+ALTER TABLE entregas_servicio
+    ALTER COLUMN perfil_cliente DROP NOT NULL,
+    ALTER COLUMN analisis_adaptabilidad DROP NOT NULL;
+
+ALTER TABLE entregas_servicio_consultores
+    ADD COLUMN IF NOT EXISTS tarifa_consultoria NUMERIC(18,2),
+    ADD COLUMN IF NOT EXISTS moneda_tarifa_consultoria VARCHAR(3) NOT NULL DEFAULT 'COP';
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'entrega_consultor_tarifa_check'
+          AND conrelid = 'entregas_servicio_consultores'::regclass
+    ) THEN
+        ALTER TABLE entregas_servicio_consultores
+            ADD CONSTRAINT entrega_consultor_tarifa_check
+            CHECK (tarifa_consultoria IS NULL OR tarifa_consultoria >= 0);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'entrega_consultor_moneda_tarifa_check'
+          AND conrelid = 'entregas_servicio_consultores'::regclass
+    ) THEN
+        ALTER TABLE entregas_servicio_consultores
+            ADD CONSTRAINT entrega_consultor_moneda_tarifa_check
+            CHECK (moneda_tarifa_consultoria IN ('COP', 'USD', 'EUR'));
+    END IF;
+END $$;
+
+-- Los proyectos anteriores tenían una tarifa global; se replica en sus consultores.
+UPDATE entregas_servicio_consultores ec
+SET tarifa_consultoria = p.tarifa_consultoria,
+    moneda_tarifa_consultoria = p.moneda_tarifa_consultoria
+FROM entregas_servicio_proyecto p
+WHERE p.entrega_servicio_id = ec.entrega_servicio_id
+  AND ec.tarifa_consultoria IS NULL
+  AND p.tarifa_consultoria IS NOT NULL;
+
+-- En outsourcing, la tarifa histórica representa el costo del consultor.
+UPDATE entregas_servicio_consultores ec
+SET tarifa_consultoria = o.tarifa,
+    moneda_tarifa_consultoria = o.moneda
+FROM entregas_servicio_outsourcing o
+WHERE o.entrega_servicio_id = ec.entrega_servicio_id
+  AND ec.tarifa_consultoria IS NULL;
+
+-- La tarifa global del proyecto deja de ser obligatoria para entregas nuevas.
+ALTER TABLE entregas_servicio_proyecto
+    ALTER COLUMN tarifa_consultoria DROP NOT NULL;
+
+ALTER TABLE entregas_servicio_outsourcing
+    ALTER COLUMN tarifa DROP NOT NULL;
+
+COMMIT;
+-- <<< FIN ARCHIVO INCLUIDO: db/migrations/2026-08-28-entregas-perfil-tarifas-consultor.sql
+
+-- >>> INICIO ARCHIVO INCLUIDO: db/migrations/2026-09-01-entregas-consultores-modulos.sql
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS entregas_servicio_consultores_modulos (
+    entrega_consultor_id BIGINT NOT NULL
+        REFERENCES entregas_servicio_consultores(id) ON DELETE CASCADE,
+    entrega_modulo_id INTEGER NOT NULL
+        REFERENCES entregas_servicio_modulos(id) ON DELETE CASCADE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (entrega_consultor_id, entrega_modulo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entrega_consultor_modulo_modulo
+    ON entregas_servicio_consultores_modulos(entrega_modulo_id);
+
+COMMIT;
+-- <<< FIN ARCHIVO INCLUIDO: db/migrations/2026-09-01-entregas-consultores-modulos.sql
+
+-- >>> INICIO ARCHIVO INCLUIDO: db/migrations/2026-09-02-contabilidad-proyeccion-pagos.sql
+BEGIN;
+
+-- Perfil tributario requerido por el motor de retenciones.
+ALTER TABLE personas
+  ADD COLUMN IF NOT EXISTS es_gran_contribuyente BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS es_autorretenedor BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS es_regimen_simple BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS es_entidad_sin_animo_lucro BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS facturador_electronico BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS acumulado_facturacion_anual NUMERIC(15,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS declarante_renta BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Compatibilidad para una base que haya alcanzado a recibir la primera versión
+-- del diseño: convierte el régimen único a su bandera equivalente antes de
+-- retirar la columna. Después de esto las banderas pueden combinarse libremente.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'personas'
+      AND column_name = 'regimen_tributario'
+  ) THEN
+    EXECUTE $sql$
+      UPDATE personas
+      SET es_gran_contribuyente = es_gran_contribuyente
+            OR LOWER(BTRIM(regimen_tributario)) = 'gran contribuyente',
+          es_autorretenedor = es_autorretenedor
+            OR LOWER(BTRIM(regimen_tributario)) = 'autorretenedor',
+          es_regimen_simple = es_regimen_simple
+            OR LOWER(BTRIM(regimen_tributario)) IN ('simple', 'régimen simple', 'regimen simple'),
+          es_entidad_sin_animo_lucro = es_entidad_sin_animo_lucro
+            OR LOWER(BTRIM(regimen_tributario)) IN ('esal', 'entidad sin ánimo de lucro', 'entidad sin animo de lucro')
+    $sql$;
+  END IF;
+END $$;
+
+ALTER TABLE personas
+  DROP COLUMN IF EXISTS regimen_tributario;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'personas_acumulado_facturacion_check'
+  ) THEN
+    ALTER TABLE personas
+      ADD CONSTRAINT personas_acumulado_facturacion_check
+      CHECK (acumulado_facturacion_anual >= 0);
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS proyeccion_pagos (
+  id SERIAL PRIMARY KEY,
+  public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+  mes SMALLINT NOT NULL CHECK (mes BETWEEN 1 AND 12),
+  anio SMALLINT NOT NULL CHECK (anio BETWEEN 2000 AND 2200),
+  quincena SMALLINT NOT NULL CHECK (quincena IN (1, 2)),
+  trm_oficial NUMERIC(10,2) CHECK (trm_oficial IS NULL OR trm_oficial > 0),
+  estado VARCHAR(20) NOT NULL DEFAULT 'Borrador'
+    CHECK (estado IN ('Borrador', 'Revisión', 'Aprobado', 'Pagado', 'Cancelado')),
+  fecha_pago_programada DATE NOT NULL,
+  revisado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  revisado_at TIMESTAMPTZ,
+  aprobado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  aprobado_at TIMESTAMPTZ,
+  pagado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  pagado_at TIMESTAMPTZ,
+  created_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_proyeccion_pagos_periodo_activa
+  ON proyeccion_pagos(anio, mes, quincena)
+  WHERE estado <> 'Cancelado';
+CREATE INDEX IF NOT EXISTS idx_proyeccion_pagos_estado_periodo
+  ON proyeccion_pagos(estado, anio DESC, mes DESC, quincena);
+CREATE INDEX IF NOT EXISTS idx_proyeccion_pagos_fecha_pago
+  ON proyeccion_pagos(fecha_pago_programada);
+
+ALTER TABLE cuenta_cobro
+  ADD COLUMN IF NOT EXISTS ciclo_proyeccion_asignado VARCHAR(20),
+  ADD COLUMN IF NOT EXISTS proyeccion_pago_id INTEGER REFERENCES proyeccion_pagos(id) ON DELETE SET NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'cuenta_cobro_ciclo_proyeccion_check'
+  ) THEN
+    ALTER TABLE cuenta_cobro
+      ADD CONSTRAINT cuenta_cobro_ciclo_proyeccion_check
+      CHECK (ciclo_proyeccion_asignado IS NULL OR ciclo_proyeccion_asignado IN ('Q1', 'Q2'));
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_cuenta_cobro_proyeccion
+  ON cuenta_cobro(proyeccion_pago_id);
+CREATE INDEX IF NOT EXISTS idx_cuenta_cobro_pendiente_proyeccion
+  ON cuenta_cobro(estado, ciclo_proyeccion_asignado)
+  WHERE proyeccion_pago_id IS NULL;
+
+CREATE TABLE IF NOT EXISTS facturas_proveedores (
+  id SERIAL PRIMARY KEY,
+  public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+  persona_id INTEGER NOT NULL REFERENCES personas(id) ON DELETE RESTRICT,
+  numero_factura VARCHAR(100) NOT NULL,
+  fecha_emision DATE NOT NULL,
+  concepto TEXT NOT NULL,
+  subtotal NUMERIC(15,2) NOT NULL CHECK (subtotal >= 0),
+  iva NUMERIC(15,2) NOT NULL DEFAULT 0 CHECK (iva >= 0),
+  tipo_gasto VARCHAR(20) NOT NULL CHECK (tipo_gasto IN ('compra', 'servicio', 'arriendo')),
+  estado VARCHAR(20) NOT NULL DEFAULT 'Pendiente'
+    CHECK (estado IN ('Pendiente', 'Proyectada', 'Pagada', 'Anulada')),
+  proyeccion_pago_id INTEGER REFERENCES proyeccion_pagos(id) ON DELETE SET NULL,
+  created_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (persona_id, numero_factura)
+);
+
+CREATE INDEX IF NOT EXISTS idx_facturas_proveedores_pendientes
+  ON facturas_proveedores(estado, fecha_emision)
+  WHERE proyeccion_pago_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_facturas_proveedores_persona
+  ON facturas_proveedores(persona_id);
+
+CREATE TABLE IF NOT EXISTS nomina_pagos_manual (
+  id SERIAL PRIMARY KEY,
+  public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+  mes SMALLINT NOT NULL CHECK (mes BETWEEN 1 AND 12),
+  anio SMALLINT NOT NULL CHECK (anio BETWEEN 2000 AND 2200),
+  quincena SMALLINT NOT NULL CHECK (quincena IN (1, 2)),
+  persona_id INTEGER NOT NULL REFERENCES personas(id) ON DELETE RESTRICT,
+  valor_neto NUMERIC(15,2) NOT NULL CHECK (valor_neto >= 0),
+  estado VARCHAR(20) NOT NULL DEFAULT 'Pendiente'
+    CHECK (estado IN ('Pendiente', 'Proyectada', 'Pagada', 'Anulada')),
+  proyeccion_pago_id INTEGER REFERENCES proyeccion_pagos(id) ON DELETE SET NULL,
+  created_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (anio, mes, quincena, persona_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_nomina_pagos_periodo
+  ON nomina_pagos_manual(anio, mes, quincena, estado)
+  WHERE proyeccion_pago_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_nomina_pagos_persona
+  ON nomina_pagos_manual(persona_id);
+
+CREATE TABLE IF NOT EXISTS proyeccion_pagos_detalle (
+  id SERIAL PRIMARY KEY,
+  public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+  proyeccion_id INTEGER NOT NULL REFERENCES proyeccion_pagos(id) ON DELETE CASCADE,
+  origen_tipo VARCHAR(30) NOT NULL
+    CHECK (origen_tipo IN ('cuenta_cobro', 'factura_proveedor', 'nomina')),
+  origen_id INTEGER NOT NULL,
+  persona_id INTEGER NOT NULL REFERENCES personas(id) ON DELETE RESTRICT,
+  tipo_pago VARCHAR(30) NOT NULL,
+  moneda_origen VARCHAR(3) NOT NULL DEFAULT 'COP',
+  valor_origen NUMERIC(15,2) NOT NULL CHECK (valor_origen >= 0),
+  trm_aplicada NUMERIC(10,2) CHECK (trm_aplicada IS NULL OR trm_aplicada > 0),
+  subtotal NUMERIC(15,2) NOT NULL CHECK (subtotal >= 0),
+  iva NUMERIC(15,2) NOT NULL DEFAULT 0 CHECK (iva >= 0),
+  retenciones_aplicadas JSONB NOT NULL DEFAULT '[]'::jsonb
+    CHECK (jsonb_typeof(retenciones_aplicadas) = 'array'),
+  valor_neto NUMERIC(15,2) NOT NULL CHECK (valor_neto >= 0),
+  created_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (proyeccion_id, origen_tipo, origen_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_proyeccion_detalle_proyeccion
+  ON proyeccion_pagos_detalle(proyeccion_id, origen_tipo);
+CREATE INDEX IF NOT EXISTS idx_proyeccion_detalle_persona
+  ON proyeccion_pagos_detalle(persona_id);
+
+CREATE TABLE IF NOT EXISTS proyeccion_pagos_auditoria (
+  id SERIAL PRIMARY KEY,
+  public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+  proyeccion_id INTEGER NOT NULL REFERENCES proyeccion_pagos(id) ON DELETE CASCADE,
+  detalle_id INTEGER REFERENCES proyeccion_pagos_detalle(id) ON DELETE SET NULL,
+  evento VARCHAR(50) NOT NULL,
+  estado_anterior VARCHAR(20),
+  estado_nuevo VARCHAR(20),
+  datos JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_proyeccion_auditoria_lote
+  ON proyeccion_pagos_auditoria(proyeccion_id, created_at);
+
+COMMIT;
+-- <<< FIN ARCHIVO INCLUIDO: db/migrations/2026-09-02-contabilidad-proyeccion-pagos.sql
+
+-- >>> INICIO ARCHIVO INCLUIDO: db/migrations/2026-09-07-contabilidad-operacion.sql
+BEGIN;
+
+ALTER TABLE personas
+  ADD COLUMN IF NOT EXISTS es_economia_naranja BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS moneda_cobro tipo_moneda;
+
+UPDATE personas p
+SET moneda_cobro = u.moneda_cobro
+FROM usuarios u
+WHERE u.persona_id = p.id
+  AND p.moneda_cobro IS NULL
+  AND u.moneda_cobro IS NOT NULL;
+
+ALTER TABLE documento_identidad
+  ADD COLUMN IF NOT EXISTS codigo_bancario VARCHAR(10);
+
+UPDATE documento_identidad
+SET codigo_bancario = CASE UPPER(BTRIM(codigo))
+  WHEN 'CC' THEN '1'
+  WHEN 'CE' THEN '2'
+  WHEN 'NIT' THEN '3'
+  WHEN 'TI' THEN '4'
+  WHEN 'PA' THEN '5'
+  WHEN 'DNI' THEN '6'
+  ELSE codigo_bancario
+END
+WHERE codigo_bancario IS NULL;
+
+INSERT INTO documento_identidad (titulo, codigo, codigo_bancario, activo)
+VALUES
+  ('Tarjeta de Identidad', 'TI', '4', TRUE),
+  ('DNI', 'DNI', '6', TRUE)
+ON CONFLICT (titulo) DO UPDATE
+SET codigo_bancario = EXCLUDED.codigo_bancario,
+    activo = TRUE,
+    updated_at = CURRENT_TIMESTAMP;
+
+ALTER TABLE facturas_proveedores
+  ADD COLUMN IF NOT EXISTS fecha_vencimiento DATE,
+  ADD COLUMN IF NOT EXISTS anticipo NUMERIC(15,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS tiene_iva BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS ciudad_servicio VARCHAR(120),
+  ADD COLUMN IF NOT EXISTS moneda VARCHAR(3) NOT NULL DEFAULT 'COP',
+  ADD COLUMN IF NOT EXISTS documento_soporte JSONB NOT NULL DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS fecha_pago_preferida DATE;
+
+ALTER TABLE facturas_proveedores
+  ALTER COLUMN tipo_gasto TYPE VARCHAR(40),
+  DROP CONSTRAINT IF EXISTS facturas_proveedores_tipo_gasto_check;
+
+UPDATE facturas_proveedores SET tiene_iva = TRUE WHERE iva > 0 AND tiene_iva = FALSE;
+UPDATE facturas_proveedores SET tipo_gasto = 'arrendamiento_inmueble' WHERE tipo_gasto = 'arriendo';
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'personas' AND column_name = 'moneda_cobro'
+  ) THEN
+    EXECUTE $sql$
+      UPDATE facturas_proveedores fp
+      SET moneda = COALESCE(NULLIF(p.moneda_cobro::text, ''), 'USD')
+      FROM personas p
+      WHERE p.id = fp.persona_id AND p.factura_en_colombia = FALSE
+    $sql$;
+  ELSE
+    UPDATE facturas_proveedores fp
+    SET moneda = 'USD'
+    FROM personas p
+    WHERE p.id = fp.persona_id AND p.factura_en_colombia = FALSE;
+  END IF;
+END $$;
+
+ALTER TABLE facturas_proveedores
+  ADD CONSTRAINT facturas_proveedores_tipo_gasto_check
+  CHECK (tipo_gasto IN (
+    'consultor', 'honorarios', 'compra', 'servicio',
+    'arrendamiento_inmueble', 'arrendamiento_mueble'
+  ));
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_facturas_proveedor_numero_normalizado
+  ON facturas_proveedores(persona_id, LOWER(BTRIM(numero_factura)));
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'facturas_proveedores_anticipo_check') THEN
+    ALTER TABLE facturas_proveedores
+      ADD CONSTRAINT facturas_proveedores_anticipo_check
+      CHECK (anticipo >= 0 AND anticipo <= subtotal + iva);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'facturas_proveedores_moneda_check') THEN
+    ALTER TABLE facturas_proveedores
+      ADD CONSTRAINT facturas_proveedores_moneda_check
+      CHECK (moneda IN ('COP', 'USD', 'EUR'));
+  END IF;
+END $$;
+
+ALTER TABLE proyeccion_pagos_detalle
+  ADD COLUMN IF NOT EXISTS anticipo NUMERIC(15,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS tipo_documento_pago VARCHAR(30),
+  ADD COLUMN IF NOT EXISTS datos_beneficiario_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS regla_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS calculo_origen VARCHAR(20) NOT NULL DEFAULT 'Automatico',
+  ADD COLUMN IF NOT EXISTS motivo_ajuste VARCHAR(500);
+
+UPDATE proyeccion_pagos_detalle d
+SET tipo_documento_pago = CASE
+      WHEN d.origen_tipo = 'nomina' THEN 'nomina'
+      WHEN d.origen_tipo = 'factura_proveedor' THEN 'factura_electronica'
+      WHEN p.facturador_electronico THEN 'factura_electronica'
+      ELSE 'cuenta_cobro'
+    END,
+    datos_beneficiario_snapshot = jsonb_build_object(
+      'persona_id', p.public_id::text,
+      'tipo_documento', di.titulo,
+      'tipo_documento_bancario', di.codigo_bancario,
+      'numero_documento', p.numero_documento,
+      'nombre', BTRIM(CONCAT_WS(' ', p.nombre, p.apellidos)),
+      'email', COALESCE(p.correo_electronico, p.correo_silver),
+      'banco', b.titulo,
+      'codigo_banco', b.codigo_conversor,
+      'codigo_bancolombia', b.codigo_bancolombia,
+      'tipo_cuenta', tcb.titulo,
+      'tipo_transaccion', tcb.tipo_transaccion,
+      'numero_cuenta', p.numero_cuenta
+    )
+FROM personas p
+LEFT JOIN documento_identidad di ON di.id = p.tipo_documento_id
+LEFT JOIN bancos b ON b.id = p.banco_id
+LEFT JOIN tipo_cuenta_bancaria tcb ON tcb.id = p.tipo_cuenta_id
+WHERE p.id = d.persona_id
+  AND (d.tipo_documento_pago IS NULL OR d.datos_beneficiario_snapshot = '{}'::jsonb);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'proyeccion_detalle_anticipo_check') THEN
+    ALTER TABLE proyeccion_pagos_detalle
+      ADD CONSTRAINT proyeccion_detalle_anticipo_check CHECK (anticipo >= 0);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'proyeccion_detalle_calculo_origen_check') THEN
+    ALTER TABLE proyeccion_pagos_detalle
+      ADD CONSTRAINT proyeccion_detalle_calculo_origen_check
+      CHECK (calculo_origen IN ('Automatico', 'Manual'));
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS contabilidad_reglas_retencion (
+  id SERIAL PRIMARY KEY,
+  public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+  concepto VARCHAR(40) NOT NULL,
+  tipo_documento_pago VARCHAR(30) NOT NULL DEFAULT 'cualquiera',
+  nombre VARCHAR(120) NOT NULL,
+  base_minima NUMERIC(15,2) NOT NULL DEFAULT 0 CHECK (base_minima >= 0),
+  porcentaje_fuente_declarante NUMERIC(7,4) NOT NULL DEFAULT 0 CHECK (porcentaje_fuente_declarante BETWEEN 0 AND 100),
+  porcentaje_fuente_no_declarante NUMERIC(7,4) NOT NULL DEFAULT 0 CHECK (porcentaje_fuente_no_declarante BETWEEN 0 AND 100),
+  porcentaje_iva NUMERIC(7,4) NOT NULL DEFAULT 19 CHECK (porcentaje_iva BETWEEN 0 AND 100),
+  porcentaje_reteiva NUMERIC(7,4) NOT NULL DEFAULT 15 CHECK (porcentaje_reteiva BETWEEN 0 AND 100),
+  base_reteica NUMERIC(15,2) NOT NULL DEFAULT 785610 CHECK (base_reteica >= 0),
+  porcentaje_reteica NUMERIC(7,4) NOT NULL DEFAULT 0.18 CHECK (porcentaje_reteica BETWEEN 0 AND 100),
+  vigencia_desde DATE NOT NULL DEFAULT CURRENT_DATE,
+  vigencia_hasta DATE,
+  activo BOOLEAN NOT NULL DEFAULT TRUE,
+  created_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  updated_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK (vigencia_hasta IS NULL OR vigencia_hasta >= vigencia_desde)
+);
+
+ALTER TABLE contabilidad_reglas_retencion
+  ADD COLUMN IF NOT EXISTS updated_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_contabilidad_reglas_vigentes
+  ON contabilidad_reglas_retencion(concepto, tipo_documento_pago, activo, vigencia_desde DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_contabilidad_reglas_inicio
+  ON contabilidad_reglas_retencion(concepto, tipo_documento_pago, vigencia_desde);
+
+INSERT INTO contabilidad_reglas_retencion (
+  concepto, tipo_documento_pago, nombre, base_minima,
+  porcentaje_fuente_declarante, porcentaje_fuente_no_declarante, vigencia_desde
+) VALUES
+  ('consultor', 'cuenta_cobro', 'Consultor con cuenta de cobro', 1750905, 3.5, 3.5, DATE '2026-09-07'),
+  ('consultor', 'factura_electronica', 'Consultor con factura electrónica', 1, 3.5, 3.5, DATE '2026-09-07'),
+  ('honorarios', 'cualquiera', 'Honorarios intelectuales', 1, 11, 10, DATE '2026-09-07'),
+  ('compra', 'cualquiera', 'Compras', 524000, 2.5, 3.5, DATE '2026-09-07'),
+  ('servicio', 'cualquiera', 'Servicios generales', 105000, 4, 6, DATE '2026-09-07'),
+  ('arrendamiento_inmueble', 'cualquiera', 'Arrendamiento de inmueble', 1, 3.5, 3.5, DATE '2026-09-07'),
+  ('arrendamiento_mueble', 'cualquiera', 'Arrendamiento de mueble', 524000, 4, 4, DATE '2026-09-07')
+ON CONFLICT (concepto, tipo_documento_pago, vigencia_desde) DO NOTHING;
+
+COMMIT;
+-- <<< FIN ARCHIVO INCLUIDO: db/migrations/2026-09-07-contabilidad-operacion.sql
+
+-- Insertar datos de módulos SAP con descripciones detalladas
+INSERT INTO modulo
+    (titulo, nombre_completo, descripcion, activo)
+VALUES
+    ('IT', 'Infraestructura Tecnológica', 'SAP Basis: Administración de sistemas, monitoreo, transporte y optimización de rendimiento SAP', true),
+    ('AT', 'Automatizaciones', 'Automatización de procesos en SAP mediante workflows, BAdIs y enhancements', true),
+    ('FI', 'Finanzas', 'SAP FI (Financial Accounting): Contabilidad general, cuentas por cobrar/pagar, activos fijos, closing', true),
+    ('CO', 'Controlling', 'SAP CO (Controlling): Cost center accounting, internal orders, product costing, profitability analysis', true),
+    ('TR', 'Tesorería', 'SAP TR (Treasury): Gestión de tesorería, cash management, gestión de riesgos financieros', true),
+    ('SD', 'Ventas', 'SAP SD (Sales & Distribution): Gestión de pedidos, entregas, facturación, pricing y shipping', true),
+    ('MM', 'Gestión de materiales', 'SAP MM (Materials Management): Compras, gestión de inventarios, valuation, invoice verification', true),
+    ('PP', 'Planificación de Producción', 'SAP PP (Production Planning): MRP, production orders, capacity planning, shop floor control', true),
+    ('QM', 'Gestión de calidad', 'SAP QM (Quality Management): Planificación de calidad, inspection, certificates, notification processing', true),
+    ('PM', 'Mantenimiento', 'SAP PM (Plant Maintenance): Mantenimiento preventivo/correctivo, órdenes de mantenimiento, gestión de equipos', true),
+    ('WF', 'Workflow', 'SAP Workflow: Automatización de procesos de negocio con aprobaciones y routing', true),
+    ('PS', 'Proyectos', 'SAP PS (Project System): Gestión de proyectos, WBS, networks, budgeting, settlement', true),
+    ('ABAP', 'Abap Developer', 'Desarrollo ABAP: Programación en ABAP, reports, interfaces, enhancements y forms', true),
+    ('ABAP TM', 'Abap TM', 'ABAP para Transportation Management: Desarrollo específico para módulo TM', true),
+    ('TM', 'Transportation management', 'SAP TM (Transportation Management): Planificación, ejecución y facturación de transporte', true),
+    ('HCM', 'Recursos Humanos', 'SAP HCM (Human Capital Management): Administración de personal, nómina, organización y tiempo', true),
+    ('BO', 'Business Objects', 'SAP BusinessObjects: Suite de business intelligence, reporting y dashboarding', true),
+    ('BW', 'Business Warehouse', 'SAP BW (Business Warehouse): Data warehousing, ETL, modeling, reporting y BEx', true),
+    ('Fiori', 'Fiori', 'SAP Fiori: UX para aplicaciones SAP basada en diseño responsive y user-friendly', true),
+    ('CPI', 'Cloud', 'SAP CPI (Cloud Platform Integration): Integración en la nube, middlewares y APIs', true),
+    ('BPC', 'Business Planning and Consolidation', 'SAP BPC: Planning, budgeting, forecasting y financial consolidation', true),
+    ('EWM', 'Extended Warehouse Manager', 'SAP EWM: Gestión avanzada de almacenes, cross-docking y yard management', true),
+    ('DS', 'Data Services', 'SAP Data Services: ETL, data quality, profiling y integration', true),
+    ('FM', 'Funds Management', 'SAP FM (Funds Management): Budgeting público, fondos y commitment management', true),
+    ('LETRA', 'Logistics (LE) Transportation (TRA)', 'Logística y transporte en SAP LE-TRA', true),
+    ('GRC', 'Governance Risk and Compliance', 'SAP GRC: Gestión de riesgos, controles de acceso y compliance', true),
+    ('SQL', 'MS SQL', 'Administración de bases de datos SQL Server para entornos SAP', true),
+    ('ISH', 'Gestión Hospitalaria', 'SAP IS-H (Industry Solution Healthcare): Soluciones para el sector salud', true),
+    ('SAC', 'SAP Analytic Cloud', 'SAP SAC: Analytics en la nube, planning y business intelligence', true),
+    ('BTP', 'SAP Business Technology Platform', 'SAP BTP: Plataforma para desarrollo, integración y extensión de aplicaciones', true),
+    ('WM', 'Gestión de Almacenes', 'SAP WM (Warehouse Management): Gestión básica de almacenes, picking y putaway', true),
+    ('PBI', 'Power BI', 'Integración de Power BI con SAP para reporting y visualizaciones', true),
+    ('.NET', '.NET', 'Desarrollo .NET para integraciones con SAP y aplicaciones complementarias', true),
+    ('B2B', 'B2B', 'Integraciones B2B con SAP mediante IDOCs, EDIs y middlewares', true),
+    ('MDG', 'NetWeaver Master Data Management', 'SAP MDG (Master Data Governance): Gestión y gobierno de datos maestros', true),
+    ('SLCM', 'Student Lifecycle Management', 'SAP SLCM: Solución para gestión del ciclo de vida estudiantil en educación', true),
+    ('Gerente', 'Gerente de proyectos', 'Project Management Office (PMO) para implementaciones SAP', true),
+    ('Datos', 'Ingeniero de datos', 'Data engineering, arquitectura de datos y gestión de data lakes para SAP', true),
+    ('TRM', 'Treasury and Risk Management', 'SAP TRM: Treasury avanzado y gestión de riesgos financieros', true),
+    ('IBP', 'Integrated Business Planning', 'SAP IBP: Planning de ventas y operaciones en tiempo real', true),
+    ('BASIS', 'BASIS', 'Administración SAP Basis: Instalación, configuración, monitoreo y performance tuning', true),
+    ('PI/PO', 'PI/PO', 'SAP Process Integration/Process Orchestration: Middleware para integraciones', true),
+    ('ARIBA', 'ARIBA', 'SAP Ariba: Procurement, sourcing y supply chain collaboration', true),
+    ('Cambio', 'Gestión del cambio', 'Change Management para implementaciones y transformaciones SAP', true),
+    ('CS', 'CS', 'SAP CS (Customer Service): Gestión de servicios post-venta y mantenimiento', true),
+    ('BCS', 'BCS', 'SAP BCS (Business Consolidation System): Consolidación financiera', true),
+    ('UIPath', 'UIPath', 'Automatización robótica de procesos (RPA) para SAP con UIPath', true),
+    ('DATOS', 'Datos maestros', 'Gestión y mantenimiento de datos maestros en SAP (materiales, clientes, proveedores)', true),
+    ('VMS', 'VMS', 'Vendor Management System para gestión de proveedores', true),
+    ('RE', 'Bienes Inmuebles', 'SAP RE (Real Estate): Gestión de activos inmobiliarios y leasing', true),
+    ('LBN', 'LBN', 'Logistics Business Network de SAP', true),
+    ('B1', 'Business One', 'SAP Business One: ERP para pequeñas y medianas empresas', true),
+    ('CML', 'CML', 'SAP Commercial Project Management', true),
+    ('SSF', 'SUCCESS FACTOR', 'SAP SuccessFactors: Solución completa de gestión del talento en la nube', true),
+    ('FICA', 'FI CONTRATOS', 'SAP FICA (Financial Contract Accounting): Contabilidad de contratos para utilities', true),
+    ('SSFF', 'Success Factor', 'SAP SuccessFactors especializado en áreas específicas', true),
+    ('C4C', 'C4C', 'SAP Cloud for Customer: CRM en la nube para ventas y servicio', true),
+    ('FRONTEND', 'FRONTEND', 'Desarrollo frontend para interfaces SAP: Fiori, WebDynpro, interfaces web', true);
+
+-- ============================================================================
+-- VACACIONES (solicitudes, aprobacion por correo y notificaciones)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS vacaciones_solicitudes (
+  id BIGSERIAL PRIMARY KEY,
+  public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+  solicitante_usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,
+  solicitante_persona_id INTEGER REFERENCES personas(id) ON DELETE SET NULL,
+  solicitante_nombre VARCHAR(255) NOT NULL,
+  solicitante_correo VARCHAR(320) NOT NULL,
+  jefe_usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  jefe_persona_id INTEGER REFERENCES personas(id) ON DELETE SET NULL,
+  jefe_azure_oid VARCHAR(64),
+  jefe_nombre VARCHAR(255) NOT NULL,
+  jefe_correo VARCHAR(320) NOT NULL,
+  fecha_inicio DATE NOT NULL,
+  fecha_fin DATE NOT NULL,
+  dias_habiles SMALLINT NOT NULL CHECK (dias_habiles > 0),
+  dias_disfrutados SMALLINT NOT NULL
+    CONSTRAINT vacaciones_dias_disfrutados_check CHECK (dias_disfrutados > 0),
+  dias_compensados SMALLINT NOT NULL DEFAULT 0
+    CONSTRAINT vacaciones_dias_compensados_check CHECK (dias_compensados >= 0),
+  fecha_regreso DATE NOT NULL,
+  observaciones TEXT,
+  estado VARCHAR(20) NOT NULL DEFAULT 'pendiente'
+    CHECK (estado IN ('pendiente', 'aprobada', 'rechazada', 'cancelada')),
+  comentario_decision TEXT,
+  decidido_at TIMESTAMPTZ,
+  decidido_por_usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  decidido_por_correo VARCHAR(320),
+  created_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK (fecha_fin >= fecha_inicio),
+  CHECK (fecha_regreso > fecha_fin),
+  CONSTRAINT vacaciones_dias_suma_check
+    CHECK (dias_habiles = dias_disfrutados + dias_compensados),
+  CONSTRAINT vacaciones_dias_compensados_max_check
+    CHECK (dias_compensados * 2 <= dias_habiles)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vacaciones_solicitante
+  ON vacaciones_solicitudes(solicitante_usuario_id, fecha_inicio DESC);
+CREATE INDEX IF NOT EXISTS idx_vacaciones_jefe
+  ON vacaciones_solicitudes(jefe_usuario_id, estado, fecha_inicio);
+CREATE INDEX IF NOT EXISTS idx_vacaciones_jefe_correo
+  ON vacaciones_solicitudes(LOWER(jefe_correo), estado);
+CREATE INDEX IF NOT EXISTS idx_vacaciones_vigencia
+  ON vacaciones_solicitudes(estado, fecha_inicio, fecha_fin);
+
+CREATE TABLE IF NOT EXISTS vacaciones_aprobacion_tokens (
+  id BIGSERIAL PRIMARY KEY,
+  solicitud_id BIGINT NOT NULL REFERENCES vacaciones_solicitudes(id) ON DELETE CASCADE,
+  token_hash CHAR(64) NOT NULL UNIQUE,
+  expira_at TIMESTAMPTZ NOT NULL,
+  usado_at TIMESTAMPTZ,
+  accion_usada VARCHAR(20) CHECK (accion_usada IS NULL OR accion_usada IN ('aprobar', 'rechazar')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vacaciones_token_pendiente
+  ON vacaciones_aprobacion_tokens(solicitud_id)
+  WHERE usado_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS vacaciones_destinatarios (
+  id BIGSERIAL PRIMARY KEY,
+  public_id UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+  origen VARCHAR(30) NOT NULL CHECK (origen IN ('personas', 'microsoft365', 'configuracion')),
+  persona_id INTEGER REFERENCES personas(id) ON DELETE SET NULL,
+  usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  azure_oid VARCHAR(64),
+  nombre VARCHAR(255) NOT NULL,
+  correo VARCHAR(320) NOT NULL,
+  cargo VARCHAR(255),
+  activo BOOLEAN NOT NULL DEFAULT TRUE,
+  created_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vacaciones_destinatario_correo
+  ON vacaciones_destinatarios(LOWER(correo));
+
+CREATE TABLE IF NOT EXISTS vacaciones_auditoria (
+  id BIGSERIAL PRIMARY KEY,
+  solicitud_id BIGINT NOT NULL REFERENCES vacaciones_solicitudes(id) ON DELETE CASCADE,
+  evento VARCHAR(40) NOT NULL,
+  usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  actor_correo VARCHAR(320),
+  datos JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_vacaciones_auditoria_solicitud
+  ON vacaciones_auditoria(solicitud_id, created_at);
+
+CREATE TABLE IF NOT EXISTS vacaciones_notificaciones (
+  id BIGSERIAL PRIMARY KEY,
+  solicitud_id BIGINT NOT NULL REFERENCES vacaciones_solicitudes(id) ON DELETE CASCADE,
+  tipo VARCHAR(40) NOT NULL,
+  destinatarios TEXT[] NOT NULL,
+  estado VARCHAR(20) NOT NULL CHECK (estado IN ('enviado', 'error')),
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_vacaciones_notificaciones_solicitud
+  ON vacaciones_notificaciones(solicitud_id, created_at);
+

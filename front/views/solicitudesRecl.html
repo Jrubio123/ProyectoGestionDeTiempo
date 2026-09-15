@@ -191,11 +191,11 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <input class="rrhh-input text-sm" x-model="formS1.nombre" placeholder="Nombre *">
                 <input class="rrhh-input text-sm" x-model="formS1.apellidos" placeholder="Apellidos *">
-                <select class="rrhh-input text-sm" x-model="formS1.tipo_documento">
-                    <option value="Cedula de Ciudadania">Cédula de Ciudadanía</option>
-                    <option value="Cedula de Extranjeria">Cédula de Extranjería</option>
-                    <option value="Pasaporte">Pasaporte</option>
-                    <option value="NIT">NIT</option>
+                <select class="rrhh-input text-sm" x-model="formS1.tipo_documento_id">
+                    <option value="">Tipo de documento *</option>
+                    <template x-for="doc in documentosIdentidad" :key="doc.id">
+                        <option :value="doc.id" x-text="doc.titulo"></option>
+                    </template>
                 </select>
                 <input class="rrhh-input text-sm" x-model="formS1.numero_documento" placeholder="Número de documento *">
                 <input class="rrhh-input text-sm" x-model="formS1.telefono" placeholder="Teléfono">

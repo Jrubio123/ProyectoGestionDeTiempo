@@ -4,6 +4,7 @@ const {
   resolveTipoCuentaBancaria,
   toLegacyTipoCuentaValue
 } = require("./services/tipo-cuenta-bancaria.service");
+const { resolveDocumentoIdentidadId } = require("./services/documento-identidad.service");
 
 module.exports = function registerPreregistroRoutes(deps) {
   const {
@@ -129,47 +130,6 @@ module.exports = function registerPreregistroRoutes(deps) {
     const raw = String(value || "").trim();
     if (!raw || WORK_LOCATION_MODES.has(normalizeDocKey(raw))) return null;
     return raw;
-  }
-
-  function classifyTipoDocumento(value) {
-    const key = normalizeDocKey(value);
-    if (!key) return null;
-    if (key === "cc" || key.includes("ciudadania") || key === "cedula" || key.includes("ceduladeciudadania")) return "cc";
-    if (key === "ce" || key.includes("extranjeria") || key.includes("ceduladeextranjeria")) return "ce";
-    if (key === "nit") return "nit";
-    if (key === "pa" || key.includes("pasaporte")) return "pasaporte";
-    return null;
-  }
-
-  async function resolveDocumentoIdentidadId(db, tipoDocumentoInput) {
-    const tipo = classifyTipoDocumento(tipoDocumentoInput);
-    if (!tipo) return null;
-
-    const result = await db.query(
-      `SELECT id, titulo
-       FROM documento_identidad
-       WHERE activo = true
-       ORDER BY id ASC`
-    );
-    const rows = Array.isArray(result.rows) ? result.rows : [];
-    if (!rows.length) return null;
-
-    const byTypeMatchers = {
-      cc: [/^cedula$/, /ceduladeciudadania/, /ciudadania/, /cedula/],
-      ce: [/ceduladeextranjeria/, /extranjeria/],
-      nit: [/^nit$/],
-      pasaporte: [/pasaporte/]
-    };
-
-    const matchers = byTypeMatchers[tipo] || [];
-    for (const row of rows) {
-      const titleKey = normalizeDocKey(row.titulo);
-      if (matchers.some((re) => re.test(titleKey))) {
-        return row.id;
-      }
-    }
-
-    return null;
   }
 
   function normalizeGrupoUsuarioInput(value) {
@@ -300,7 +260,8 @@ module.exports = function registerPreregistroRoutes(deps) {
       s.public_id AS solicitud_public_id,
       s.coordinador_id AS solicitud_coordinador_id,
       s.estado AS solicitud_estado,
-      p.nombre, p.apellidos, p.tipo_documento_id, di.titulo AS tipo_documento, p.numero_documento, p.telefono,
+      p.nombre, p.apellidos, p.tipo_documento_id, di.public_id AS tipo_documento_public_id,
+      di.titulo AS tipo_documento, p.numero_documento, p.telefono,
       p.correo_personal, p.pais_ubicacion, p.ciudad,
       p.fecha_fin, p.moneda, p.pais_pago, p.factura_en_colombia,
       p.tarifa_hora, p.tarifa_mes, p.tarifa_medio_tiempo, p.tarifa_capacitacion,
@@ -372,6 +333,7 @@ module.exports = function registerPreregistroRoutes(deps) {
       apellidos: row.apellidos,
       tipo_documento: row.tipo_documento,
       tipo_documento_id: row.tipo_documento_id || null,
+      tipo_documento_public_id: row.tipo_documento_public_id || null,
       numero_documento: row.numero_documento,
       telefono: row.telefono,
       correo_personal: row.correo_personal,
@@ -574,13 +536,13 @@ module.exports = function registerPreregistroRoutes(deps) {
   }
 
   app.post("/api/solicitudes-rrhh/:public_id/contratar", requireAccess({ roles: ["Reclutador", "Administrador"] }), async (req, res) => {
-    const { nombre, apellidos, tipo_documento, numero_documento, telefono, correo_personal, pais_ubicacion, ciudad,
+    const { nombre, apellidos, tipo_documento_id, tipo_documento, numero_documento, telefono, correo_personal, pais_ubicacion, ciudad,
             moneda, tarifa_mes, tarifa_hora } = req.body || {};
-    const docType = String(tipo_documento || "").trim();
+    const documentoRef = String(tipo_documento_id || "").trim() ? tipo_documento_id : tipo_documento;
     const monedaNorm = String(moneda || "").trim().toUpperCase();
     const facturaEnColombia = normalizeFacturaEnColombia(req.body?.factura_en_colombia);
 
-    if (!nombre || !apellidos || !docType || !numero_documento || !correo_personal) {
+    if (!nombre || !apellidos || !String(documentoRef || "").trim() || !numero_documento || !correo_personal) {
       return res.status(400).json({ error: "Faltan campos obligatorios de la seccion 1" });
     }
     if (facturaEnColombia === null) {
@@ -651,7 +613,7 @@ module.exports = function registerPreregistroRoutes(deps) {
         return res.status(409).json({ error: "Ya existe un preregistro activo para esta solicitud" });
       }
 
-      const tipoDocumentoId = await resolveDocumentoIdentidadId(client, docType);
+      const tipoDocumentoId = await resolveDocumentoIdentidadId(client, documentoRef);
       if (!tipoDocumentoId) {
         await client.query("ROLLBACK");
         return res.status(400).json({ error: "tipo_documento no encontrado en documento_identidad" });
@@ -881,6 +843,7 @@ module.exports = function registerPreregistroRoutes(deps) {
     const editable = [
       "nombre",
       "apellidos",
+      "tipo_documento_id",
       "tipo_documento",
       "numero_documento",
       "telefono",
@@ -962,8 +925,11 @@ module.exports = function registerPreregistroRoutes(deps) {
         if (field === "correo_personal" && !isValidEmail(req.body[field])) {
           return res.status(400).json({ error: "correo_personal no tiene formato valido" });
         }
-        if (field === "tipo_documento") {
-          const tipoDocumentoId = await resolveDocumentoIdentidadId(client, req.body[field]);
+        if (field === "tipo_documento_id" || field === "tipo_documento") {
+          const hasDocumentoId = Boolean(String(req.body?.tipo_documento_id || "").trim());
+          if (field === "tipo_documento" && hasDocumentoId) continue;
+          const documentoRef = hasDocumentoId ? req.body.tipo_documento_id : req.body?.tipo_documento;
+          const tipoDocumentoId = await resolveDocumentoIdentidadId(client, documentoRef);
           if (!tipoDocumentoId) {
             return res.status(400).json({ error: "tipo_documento no encontrado en documento_identidad" });
           }

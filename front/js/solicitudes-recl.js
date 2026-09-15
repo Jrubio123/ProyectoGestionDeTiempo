@@ -5,7 +5,7 @@ window.solicitudesReclApp = function () {
     const emptyS1 = () => ({
         nombre: "",
         apellidos: "",
-        tipo_documento: "Cedula de Ciudadania",
+        tipo_documento_id: "",
         numero_documento: "",
         telefono: "",
         correo_personal: "",
@@ -19,6 +19,7 @@ window.solicitudesReclApp = function () {
 
     return {
         solicitudes: [],
+        documentosIdentidad: [],
         preregistrosBySolicitud: {},
         filtro: "Todos",
         modalDetalle: false,
@@ -68,9 +69,33 @@ window.solicitudesReclApp = function () {
 
         async init() {
             this.initFechasExcel();
-            await this.cargarSolicitudes();
-            await this.cargarPreregistros();
+            await Promise.all([
+                this.cargarDocumentosIdentidad(),
+                this.cargarSolicitudes(),
+                this.cargarPreregistros()
+            ]);
             this.hidratarSolicitudesConPreregistro();
+        },
+
+        async cargarDocumentosIdentidad() {
+            try {
+                const res = await axios.get(`${API}/documentos-identidad`, this.getAuthConfig());
+                this.documentosIdentidad = Array.isArray(res.data) ? res.data : [];
+            } catch (e) {
+                this.documentosIdentidad = [];
+            }
+        },
+
+        resolverTipoDocumentoId(preregistro) {
+            const id = String(preregistro?.tipo_documento_public_id || preregistro?.tipo_documento_id || "");
+            const byId = this.documentosIdentidad.find((doc) => String(doc?.id || "") === id);
+            if (byId) return String(byId.id);
+
+            const titulo = String(preregistro?.tipo_documento || "").trim().toLocaleLowerCase();
+            const byTitle = this.documentosIdentidad.find(
+                (doc) => String(doc?.titulo || "").trim().toLocaleLowerCase() === titulo
+            );
+            return byTitle ? String(byTitle.id) : "";
         },
 
         async cargarSolicitudes() {
@@ -176,7 +201,7 @@ window.solicitudesReclApp = function () {
             this.formS1 = {
                 nombre: p.nombre || "",
                 apellidos: p.apellidos || "",
-                tipo_documento: p.tipo_documento || "Cedula de Ciudadania",
+                tipo_documento_id: this.resolverTipoDocumentoId(p),
                 numero_documento: p.numero_documento || "",
                 telefono: p.telefono || "",
                 correo_personal: p.correo_personal || "",
@@ -201,7 +226,7 @@ window.solicitudesReclApp = function () {
         },
 
         validarSeccion1() {
-            const req = ["nombre", "apellidos", "tipo_documento", "numero_documento", "correo_personal"];
+            const req = ["nombre", "apellidos", "tipo_documento_id", "numero_documento", "correo_personal"];
             for (const k of req) {
                 if (!String(this.formS1?.[k] || "").trim()) return false;
             }
@@ -226,7 +251,7 @@ window.solicitudesReclApp = function () {
             const payload = {
                 nombre: String(this.formS1.nombre || "").trim(),
                 apellidos: String(this.formS1.apellidos || "").trim(),
-                tipo_documento: String(this.formS1.tipo_documento || "").trim(),
+                tipo_documento_id: String(this.formS1.tipo_documento_id || "").trim(),
                 numero_documento: String(this.formS1.numero_documento || "").trim(),
                 telefono: String(this.formS1.telefono || "").trim() || null,
                 correo_personal: String(this.formS1.correo_personal || "").trim().toLowerCase(),

@@ -84,5 +84,13 @@ for (const [folder, fileName] of TEMPLATES) {
     doc.render({ PerfilOModulo: "BASIS", items: [] });
     const renderedText = getDocumentText(doc.getZip().generate({ type: "nodebuffer" }));
     assert.match(renderedText, /Consultoría en BASIS/i);
+    if (/Anexo/i.test(fileName)) {
+      assert.match(renderedText, /han celebrado un Contrato/);
+      assert.doesNotMatch(renderedText, /han celebrad un Contrato/);
+      assert.doesNotMatch(renderedText, /BASIS\s{2,}\(en adelante/);
+    }
+    if (fileName === "AnexoTecnicoCapital.docx") {
+      assert.match(renderedText, /\(en adelante el “Contrato”\), suscrito el/);
+    }
   });
 }

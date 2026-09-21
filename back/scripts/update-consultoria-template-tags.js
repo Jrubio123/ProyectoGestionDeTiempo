@@ -5,14 +5,30 @@ const PizZip = require("pizzip");
 
 const TAG = "{{PerfilOModulo}}";
 const TEMPLATES = [
-  ["contratos", "Contrato Prestación de Servicios .docx", ["SAP ABAP"]],
-  ["contratos", "ContratoPrestacionServicioCapital.docx", ["[SAP]", "[***]"]],
-  ["contratos", "Anexo Técnico.docx", ["SAP ABAP"]],
-  ["contratos", "AnexoTecnicoCapital.docx", ["[SAP]"]],
-  ["todoSilver", "Contrato Prestación de Servicios.docx", ["SAP ABAP"]],
-  ["todoSilver", "ContratoPrestacionServicioCapital.docx", ["[SAP]", "[***]"]],
-  ["todoSilver", "Anexo Técnico.docx", ["SAP ABAP"]],
-  ["todoSilver", "AnexoTecnicoCapital.docx", ["[SAP]"]]
+  ["contratos", "Contrato Prestación de Servicios .docx", [["SAP ABAP", TAG]]],
+  ["contratos", "ContratoPrestacionServicioCapital.docx", [["[SAP]", TAG], ["[***]", TAG]]],
+  ["contratos", "Anexo Técnico.docx", [
+    ["SAP ABAP", TAG],
+    ["han celebrad un Contrato", "han celebrado un Contrato"],
+    [`${TAG}  (en adelante`, `${TAG} (en adelante`]
+  ]],
+  ["contratos", "AnexoTecnicoCapital.docx", [
+    ["[SAP]", TAG],
+    ["han celebrad un Contrato", "han celebrado un Contrato"],
+    ["(en adelante el “Contrato suscrito el", "(en adelante el “Contrato”), suscrito el"]
+  ]],
+  ["todoSilver", "Contrato Prestación de Servicios.docx", [["SAP ABAP", TAG]]],
+  ["todoSilver", "ContratoPrestacionServicioCapital.docx", [["[SAP]", TAG], ["[***]", TAG]]],
+  ["todoSilver", "Anexo Técnico.docx", [
+    ["SAP ABAP", TAG],
+    ["han celebrad un Contrato", "han celebrado un Contrato"],
+    [`${TAG}  (en adelante`, `${TAG} (en adelante`]
+  ]],
+  ["todoSilver", "AnexoTecnicoCapital.docx", [
+    ["[SAP]", TAG],
+    ["han celebrad un Contrato", "han celebrado un Contrato"],
+    ["(en adelante el “Contrato suscrito el", "(en adelante el “Contrato”), suscrito el"]
+  ]]
 ];
 
 function decodeXml(value) {
@@ -97,7 +113,7 @@ function replaceAllInXml(xml, search, replacement) {
   return { xml: output, count };
 }
 
-function updateTemplate(folder, fileName, searchValues) {
+function updateTemplate(folder, fileName, replacements) {
   const filePath = path.resolve(__dirname, "..", "src", "static", folder, fileName);
   const zip = new PizZip(fs.readFileSync(filePath));
   let total = 0;
@@ -110,8 +126,8 @@ function updateTemplate(folder, fileName, searchValues) {
       xml = xml.replace(/<w:txml:space=/g, "<w:t xml:space=");
       repaired += malformedTags;
     }
-    for (const search of searchValues) {
-      const result = replaceAllInXml(xml, search, TAG);
+    for (const [search, replacement] of replacements) {
+      const result = replaceAllInXml(xml, search, replacement);
       xml = result.xml;
       total += result.count;
     }
@@ -127,6 +143,6 @@ function updateTemplate(folder, fileName, searchValues) {
   );
 }
 
-for (const [folder, fileName, searchValues] of TEMPLATES) {
-  updateTemplate(folder, fileName, searchValues);
+for (const [folder, fileName, replacements] of TEMPLATES) {
+  updateTemplate(folder, fileName, replacements);
 }

@@ -46,6 +46,9 @@ const {
   ANEXO_TIPO_LABELS,
   buildAnexoIndividualDocumentContext
 } = require("./services/anexo-individual-documento.service");
+const {
+  resolvePerfilModuloConsultoria
+} = require("./services/contrato-perfil-modulo.service");
 const { resolveTipoCuentaBancaria } = require("./services/tipo-cuenta-bancaria.service");
 const { env } = require("./config/env");
 const { requireAccess, requireAuthenticated, hasAccess } = require("./middlewares/access");
@@ -5383,6 +5386,7 @@ function buildContratoBaseTemplatePayload({ personaContext, proceso = {}, correo
     Correo: correoOverride || personaContext?.correoPersonal || proceso?.correo_personal || "",
     CorreoPersonal: correoOverride || personaContext?.correoPersonal || proceso?.correo_personal || "",
     Ciudad: personaContext?.ciudad || empresa.ciudad,
+    PerfilOModulo: resolvePerfilModuloConsultoria(personaContext),
     DiaMes: diaMes,
     MesTexto: mesTexto,
     Anio: anio,
@@ -5534,9 +5538,14 @@ async function buildContratoTemplatePayload({ docDefinition, personaContext, pro
   }
   const payload = buildContratoBaseTemplatePayload({ personaContext, proceso });
 
-  if (docDefinition?.doc_key === "anexo_tecnico") {
+  const usaAlcanceConsultoria = ["contrato_prestacion_servicios", "anexo_tecnico"]
+    .includes(docDefinition?.doc_key);
+  if (usaAlcanceConsultoria) {
     const items = await requirePersistedAnexoFromProceso(proceso, personaContext);
-    payload.items = (items || []).map(buildAnexoItemForTemplateRow);
+    payload.PerfilOModulo = resolvePerfilModuloConsultoria(personaContext, items);
+    if (docDefinition?.doc_key === "anexo_tecnico") {
+      payload.items = (items || []).map(buildAnexoItemForTemplateRow);
+    }
   }
 
   return payload;
@@ -5590,6 +5599,10 @@ async function generateAnexoIndividualPdfFromItems({ userRow, items, correoFirma
     correoOverride: documentContext.personaContext.correoPersonal
   });
   templatePayload.items = documentContext.items.map(buildAnexoItemForTemplateRow);
+  templatePayload.PerfilOModulo = resolvePerfilModuloConsultoria(
+    documentContext.personaContext,
+    documentContext.items
+  );
 
   const docxBuffer = renderDocxTemplateToBuffer({
     templateFile: docDefinition.template_file,

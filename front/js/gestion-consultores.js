@@ -32,8 +32,7 @@ window.gestionConsultoresApp = function () {
             tipo_consultor: "",
             id_consultor_principal: "",
             moneda_cobro: "COP",
-            factura_en_colombia: "",
-            tipo_persona: ""
+            factura_en_colombia: ""
         },
 
         personas: [],
@@ -128,8 +127,7 @@ window.gestionConsultoresApp = function () {
                 tipo_consultor: "",
                 id_consultor_principal: "",
                 moneda_cobro: "COP",
-                factura_en_colombia: "",
-                tipo_persona: ""
+                factura_en_colombia: ""
             };
             this.usuarioSeleccionado = "";
             this.consultorExistente = null;
@@ -274,7 +272,6 @@ window.gestionConsultoresApp = function () {
             this.addForm.factura_en_colombia =
                 data.factura_en_colombia === true ? "true" :
                 data.factura_en_colombia === false ? "false" : "";
-            this.addForm.tipo_persona = this.valorTipoPersonaForm(data.tipo_persona);
             this.addError = "";
         },
 
@@ -425,8 +422,7 @@ window.gestionConsultoresApp = function () {
                     cedula: this.ficha?.cedula || "",
                     telefono: this.ficha?.telefono || "",
                     direccion: this.ficha?.direccion || "",
-                    ciudad: this.ficha?.ciudad || "",
-                    tipo_persona: this.valorTipoPersonaForm(this.ficha?.tipo_persona)
+                    ciudad: this.ficha?.ciudad || ""
                 };
                 return;
             }
@@ -513,13 +509,12 @@ window.gestionConsultoresApp = function () {
             return mapa[rol] || "bg-slate-400";
         },
 
-        valorTipoPersonaForm(value) {
-            const raw = String(value || "").toLowerCase().trim();
-            const normalized = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            if (!raw) return "";
-            if (raw === "natural") return "Natural";
-            if (normalized === "juridica") return "Juridica";
-            return value;
+        esPersonaJuridica(value) {
+            return String(value || "")
+                .trim()
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase() === "juridica";
         },
 
         formatFechaHora(ts) {

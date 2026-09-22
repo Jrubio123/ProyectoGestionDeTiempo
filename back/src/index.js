@@ -9046,6 +9046,31 @@ function normalizeTipoPersonaForUsuariosInput(value) {
   return null;
 }
 
+function normalizePersonaJuridicaInput(tipoPersona, payload = {}) {
+  const fields = [
+    ["razon_social", "razón social"],
+    ["nit_empresa", "NIT de la empresa"],
+    ["representante_legal", "representante legal"],
+    ["tipo_documento_representante", "tipo de documento del representante"],
+    ["numero_documento_representante", "número de documento del representante"]
+  ];
+  const values = {};
+
+  for (const [field] of fields) {
+    values[field] = toNullableTrimmedString(payload[field]);
+  }
+
+  if (tipoPersona !== "Jurídica") {
+    for (const [field] of fields) values[field] = null;
+    return { values, missing: [] };
+  }
+
+  const missing = fields
+    .filter(([field]) => !values[field])
+    .map(([, label]) => label);
+  return { values, missing };
+}
+
 function normalizeTipoConsultorInput(value) {
   const raw = normalizeValue(value);
   if (!raw) return null;
@@ -9280,6 +9305,18 @@ app.put("/admin/personas/p/:personaId/personal", requireAccess({ roles: ["Admini
     if (tipo_persona && !tipoPersonaNormalizada) {
       return res.status(400).json({ error: "Tipo de persona inválido" });
     }
+    const personaJuridica = normalizePersonaJuridicaInput(tipoPersonaNormalizada, {
+      razon_social,
+      nit_empresa,
+      representante_legal,
+      tipo_documento_representante,
+      numero_documento_representante
+    });
+    if (personaJuridica.missing.length) {
+      return res.status(400).json({
+        error: `Para una persona jurídica son obligatorios: ${personaJuridica.missing.join(", ")}`
+      });
+    }
     const sexoNormalizado = toNullableTrimmedString(sexo);
     if (sexoNormalizado && !["Hombre", "Mujer", "Otro"].includes(sexoNormalizado)) {
       return res.status(400).json({ error: "Sexo inválido. Debe ser Hombre, Mujer u Otro" });
@@ -9300,11 +9337,11 @@ app.put("/admin/personas/p/:personaId/personal", requireAccess({ roles: ["Admini
         departamento_pais              = COALESCE($11, departamento_pais),
         titulo_profesional             = COALESCE($12, titulo_profesional),
         correo_electronico             = COALESCE($13, correo_electronico),
-        razon_social                   = COALESCE($14, razon_social),
-        nit_empresa                    = COALESCE($15, nit_empresa),
-        representante_legal            = COALESCE($16, representante_legal),
-        tipo_documento_representante   = COALESCE($17, tipo_documento_representante),
-        numero_documento_representante = COALESCE($18, numero_documento_representante),
+        razon_social                   = $14,
+        nit_empresa                    = $15,
+        representante_legal            = $16,
+        tipo_documento_representante   = $17,
+        numero_documento_representante = $18,
         updated_at                     = CURRENT_TIMESTAMP
       WHERE public_id = $19
         AND NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.persona_id = personas.id)
@@ -9323,11 +9360,11 @@ app.put("/admin/personas/p/:personaId/personal", requireAccess({ roles: ["Admini
       toNullableTrimmedString(departamento_pais),
       toNullableTrimmedString(titulo_profesional),
       toNullableTrimmedString(correo_electronico)?.toLowerCase() || null,
-      toNullableTrimmedString(razon_social),
-      toNullableTrimmedString(nit_empresa),
-      toNullableTrimmedString(representante_legal),
-      toNullableTrimmedString(tipo_documento_representante),
-      toNullableTrimmedString(numero_documento_representante),
+      personaJuridica.values.razon_social,
+      personaJuridica.values.nit_empresa,
+      personaJuridica.values.representante_legal,
+      personaJuridica.values.tipo_documento_representante,
+      personaJuridica.values.numero_documento_representante,
       personaId
     ]);
     if (result.rowCount === 0) return res.status(404).json({ error: "Persona standalone no encontrada. Si tiene usuario vinculado, usa PUT /admin/personas/:id/personal" });
@@ -9509,6 +9546,8 @@ app.post("/admin/personas", requireAccess({ roles: ["Administrador", "Talento Hu
     composicion_familiar, hijos, personas_a_cargo,
     eps, afp, arl, tipo_contrato, modalidad,
     modulo_id, modulo_otro, cliente_id, cliente_otro,
+    razon_social, nit_empresa, representante_legal,
+    tipo_documento_representante, numero_documento_representante,
     azure_oid
   } = req.body || {};
   void azure_oid;
@@ -9544,7 +9583,19 @@ app.post("/admin/personas", requireAccess({ roles: ["Administrador", "Talento Hu
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "Tipo de persona inválido" });
     }
-
+    const personaJuridica = normalizePersonaJuridicaInput(tipoPersonaNormalizada, {
+      razon_social,
+      nit_empresa,
+      representante_legal,
+      tipo_documento_representante,
+      numero_documento_representante
+    });
+    if (personaJuridica.missing.length) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        error: `Para una persona jurídica son obligatorios: ${personaJuridica.missing.join(", ")}`
+      });
+    }
     const sexoNormalizado = toNullableTrimmedString(sexo);
     const validSexos = ["Hombre", "Mujer", "Otro"];
     if (sexoNormalizado && !validSexos.includes(sexoNormalizado)) {
@@ -9577,11 +9628,14 @@ app.post("/admin/personas", requireAccess({ roles: ["Administrador", "Talento Hu
         composicion_familiar, hijos, personas_a_cargo,
         eps, afp, arl, tipo_contrato, modalidad,
         modulo_id, modulo_otro, cliente_id, cliente_otro,
+        razon_social, nit_empresa, representante_legal,
+        tipo_documento_representante, numero_documento_representante,
         created_by
       ) VALUES (
         $1,$2,$3,$4,$5,$6::tipo_sexo,$7,$8,$9,$10,$11,
         $12,$13::tipo_persona,$14,$15,$16,$17,$18,$19,$20,
-        $21,$22,$23,$24,$25,$26,$27::tipo_contrato,$28,$29,$30,$31,$32,$33
+        $21,$22,$23,$24,$25,$26,$27::tipo_contrato,$28,$29,$30,$31,$32,
+        $33,$34,$35,$36,$37,$38
       )
       RETURNING id, public_id, numero_documento, nombre, apellidos, estado, created_at
     `, [
@@ -9617,6 +9671,11 @@ app.post("/admin/personas", requireAccess({ roles: ["Administrador", "Talento Hu
       toNullableTrimmedString(modulo_otro),
       clienteRef.id,
       toNullableTrimmedString(cliente_otro),
+      personaJuridica.values.razon_social,
+      personaJuridica.values.nit_empresa,
+      personaJuridica.values.representante_legal,
+      personaJuridica.values.tipo_documento_representante,
+      personaJuridica.values.numero_documento_representante,
       req.user?.id || null
     ]);
 
@@ -10037,8 +10096,7 @@ app.post("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordin
     id_consultor_principal,
     consultor_principal_id,
     moneda_cobro,
-    factura_en_colombia,
-    tipo_persona
+    factura_en_colombia
   } = req.body || {};
   const nombreVal = toNullableTrimmedString(nombre);
   const apellidosVal = toNullableTrimmedString(apellidos);
@@ -10050,8 +10108,6 @@ app.post("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordin
   const ciudadVal = toNullableTrimmedString(ciudad);
   const direccionVal = toNullableTrimmedString(direccion);
   const numeroCuentaVal = toNullableTrimmedString(nro_cuenta_bancaria);
-  const tipoPersonaVal = toNullableTrimmedString(tipo_persona);
-  const tipoPersonaNormalizada = tipoPersonaVal ? normalizeTipoPersonaForUsuariosInput(tipoPersonaVal) : null;
   const tipoConsultorVal = toNullableTrimmedString(tipo_consultor);
   const tipoConsultorNormalizado = tipoConsultorVal ? normalizeTipoConsultorInput(tipoConsultorVal) : null;
   const monedaNormalizada = (toNullableTrimmedString(moneda_cobro) || "COP").toUpperCase();
@@ -10073,9 +10129,6 @@ app.post("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordin
   }
   if (!isValidEmailFormat(emailVal)) {
     return res.status(400).json({ error: "El email no tiene un formato valido" });
-  }
-  if (tipoPersonaVal && !tipoPersonaNormalizada) {
-    return res.status(400).json({ error: "Tipo de persona invalido" });
   }
   if (tipoConsultorVal && !tipoConsultorNormalizado) {
     return res.status(400).json({ error: "Tipo de consultor invalido" });
@@ -10159,7 +10212,7 @@ app.post("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordin
         nombreVal,
         apellidosVal,
         emailVal,
-        tipoPersonaNormalizada,
+        null,
         facturaEnColombiaNormalizada,
         telefonoVal,
         direccionVal,
@@ -10209,7 +10262,7 @@ app.post("/admin/consultores", requireAccess({ roles: ["Administrador", "Coordin
         telefonoVal,
         direccionVal,
         ciudadVal,
-        tipoPersonaNormalizada,
+        null,
         facturaEnColombiaNormalizada,
         monedaNormalizada,
         numeroCuentaVal,
@@ -10330,8 +10383,7 @@ app.put("/admin/consultores/:id", requireAccess({ roles: ["Administrador", "Coor
     id_consultor_principal,
     consultor_principal_id,
     moneda_cobro,
-    factura_en_colombia,
-    tipo_persona
+    factura_en_colombia
   } = req.body || {};
 
   const nombreVal = toNullableTrimmedString(nombre);
@@ -10344,8 +10396,6 @@ app.put("/admin/consultores/:id", requireAccess({ roles: ["Administrador", "Coor
   const ciudadVal = toNullableTrimmedString(ciudad);
   const direccionVal = toNullableTrimmedString(direccion);
   const numeroCuentaVal = toNullableTrimmedString(nro_cuenta_bancaria);
-  const tipoPersonaVal = toNullableTrimmedString(tipo_persona);
-  const tipoPersonaNormalizada = tipoPersonaVal ? normalizeTipoPersonaForUsuariosInput(tipoPersonaVal) : null;
   const tipoConsultorVal = toNullableTrimmedString(tipo_consultor);
   const tipoConsultorNormalizado = tipoConsultorVal ? normalizeTipoConsultorInput(tipoConsultorVal) : null;
   const monedaNormalizada = (toNullableTrimmedString(moneda_cobro) || "COP").toUpperCase();
@@ -10368,9 +10418,6 @@ app.put("/admin/consultores/:id", requireAccess({ roles: ["Administrador", "Coor
   if (!isValidEmailFormat(emailVal)) {
     return res.status(400).json({ error: "El email no tiene un formato valido" });
   }
-  if (tipoPersonaVal && !tipoPersonaNormalizada) {
-    return res.status(400).json({ error: "Tipo de persona invalido" });
-  }
   if (tipoConsultorVal && !tipoConsultorNormalizado) {
     return res.status(400).json({ error: "Tipo de consultor invalido" });
   }
@@ -10390,8 +10437,10 @@ app.put("/admin/consultores/:id", requireAccess({ roles: ["Administrador", "Coor
       SELECT
         u.id,
         u.persona_id,
+        COALESCE(p.tipo_persona, u.tipo_persona) AS tipo_persona_actual,
         ${buildGestionConsultoresVisibleExpression("$2", "$3")} AS gestion_consultores_visible
       FROM usuarios u
+      LEFT JOIN personas p ON p.id = u.persona_id
       WHERE u.public_id = $1
       LIMIT 1
     `, [id, req.user?.id || null, scoped]);
@@ -10402,6 +10451,7 @@ app.put("/admin/consultores/:id", requireAccess({ roles: ["Administrador", "Coor
     }
 
     const usuario = usuarioRes.rows[0];
+    const tipoPersonaPersistida = usuario.tipo_persona_actual || null;
     if (scoped && !usuario.gestion_consultores_visible) {
       await client.query("ROLLBACK");
       return res.status(403).json({ error: "No autorizado para actualizar este consultor" });
@@ -10458,7 +10508,7 @@ app.put("/admin/consultores/:id", requireAccess({ roles: ["Administrador", "Coor
         nombreVal,
         apellidosVal,
         emailVal,
-        tipoPersonaNormalizada,
+        tipoPersonaPersistida,
         facturaEnColombiaNormalizada,
         telefonoVal,
         direccionVal,
@@ -10477,7 +10527,7 @@ app.put("/admin/consultores/:id", requireAccess({ roles: ["Administrador", "Coor
           nombre                 = $3,
           apellidos              = $4,
           correo_electronico     = $5,
-          tipo_persona           = $6::tipo_persona,
+          tipo_persona           = COALESCE($6::tipo_persona, tipo_persona),
           factura_en_colombia    = $7,
           numero_contacto        = $8,
           direccion_residencia   = $9,
@@ -10493,7 +10543,7 @@ app.put("/admin/consultores/:id", requireAccess({ roles: ["Administrador", "Coor
         nombreVal,
         apellidosVal,
         emailVal,
-        tipoPersonaNormalizada,
+        tipoPersonaPersistida,
         facturaEnColombiaNormalizada,
         telefonoVal,
         direccionVal,
@@ -10515,7 +10565,7 @@ app.put("/admin/consultores/:id", requireAccess({ roles: ["Administrador", "Coor
         telefono                = $5,
         direccion               = $6,
         ciudad                  = $7,
-        tipo_persona            = $8::tipo_persona,
+        tipo_persona            = COALESCE($8::tipo_persona, tipo_persona),
         factura_en_colombia     = $9,
         moneda_cobro            = $10::tipo_moneda,
         nro_cuenta_bancaria     = $11,
@@ -10536,7 +10586,7 @@ app.put("/admin/consultores/:id", requireAccess({ roles: ["Administrador", "Coor
       telefonoVal,
       direccionVal,
       ciudadVal,
-      tipoPersonaNormalizada,
+      tipoPersonaPersistida,
       facturaEnColombiaNormalizada,
       monedaNormalizada,
       numeroCuentaVal,
@@ -10909,7 +10959,6 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "Tipo de persona inválido" });
     }
-
     const sexoNormalizado = toNullableTrimmedString(sexo);
     const validSexos = ["Hombre", "Mujer", "Otro"];
     if (sexoNormalizado && !validSexos.includes(sexoNormalizado)) {
@@ -10918,15 +10967,53 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
     }
 
     // Obtener usuario y su persona_id (nombre_usuario para poblar persona.nombre si se crea desde aquí)
-    const usuarioRes = await client.query(
-      "SELECT id, persona_id, nombre_usuario FROM usuarios WHERE public_id = $1",
-      [id]
-    );
+    const usuarioRes = await client.query(`
+      SELECT
+        u.id,
+        u.persona_id,
+        u.nombre_usuario,
+        COALESCE(p.tipo_persona, u.tipo_persona) AS tipo_persona_actual,
+        p.razon_social,
+        p.nit_empresa,
+        p.representante_legal,
+        p.tipo_documento_representante,
+        p.numero_documento_representante
+      FROM usuarios u
+      LEFT JOIN personas p ON p.id = u.persona_id
+      WHERE u.public_id = $1
+    `, [id]);
     if (usuarioRes.rowCount === 0) {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Persona no encontrada" });
     }
     const usuario = usuarioRes.rows[0];
+    const tipoPersonaEfectiva = tipo_persona === undefined
+      ? normalizeTipoPersonaForUsuariosInput(usuario.tipo_persona_actual)
+      : tipoPersonaNormalizada;
+    const personaJuridica = tipo_persona === undefined
+      ? {
+          values: {
+            razon_social: usuario.razon_social || null,
+            nit_empresa: usuario.nit_empresa || null,
+            representante_legal: usuario.representante_legal || null,
+            tipo_documento_representante: usuario.tipo_documento_representante || null,
+            numero_documento_representante: usuario.numero_documento_representante || null
+          },
+          missing: []
+        }
+      : normalizePersonaJuridicaInput(tipoPersonaEfectiva, {
+          razon_social,
+          nit_empresa,
+          representante_legal,
+          tipo_documento_representante,
+          numero_documento_representante
+        });
+    if (personaJuridica.missing.length) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        error: `Para una persona jurídica son obligatorios: ${personaJuridica.missing.join(", ")}`
+      });
+    }
     let personaId = usuario.persona_id;
 
     if (!personaId) {
@@ -10947,7 +11034,7 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
         usuario.nombre_usuario,
         toNullableTrimmedString(cedula),
         tipoDocumentoRef.id,
-        tipoPersonaNormalizada ?? null,
+        tipoPersonaEfectiva ?? null,
         toNullableTrimmedString(telefono),
         toNullableTrimmedString(direccion),
         toNullableTrimmedString(ciudad),
@@ -10956,11 +11043,11 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
         sexoNormalizado,
         toNullableTrimmedString(departamento_pais),
         toNullableTrimmedString(titulo_profesional),
-        toNullableTrimmedString(razon_social),
-        toNullableTrimmedString(nit_empresa),
-        toNullableTrimmedString(representante_legal),
-        toNullableTrimmedString(tipo_documento_representante),
-        toNullableTrimmedString(numero_documento_representante),
+        personaJuridica.values.razon_social,
+        personaJuridica.values.nit_empresa,
+        personaJuridica.values.representante_legal,
+        personaJuridica.values.tipo_documento_representante,
+        personaJuridica.values.numero_documento_representante,
         usuario.id
       ]);
       personaId = newPersona.rows[0].id;
@@ -10993,7 +11080,7 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
       `, [
         toNullableTrimmedString(cedula),
         tipoDocumentoRef.id,
-        tipoPersonaNormalizada ?? null,
+        tipoPersonaEfectiva ?? null,
         toNullableTrimmedString(telefono),
         toNullableTrimmedString(direccion),
         toNullableTrimmedString(ciudad),
@@ -11002,13 +11089,20 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
         sexoNormalizado,
         toNullableTrimmedString(departamento_pais),
         toNullableTrimmedString(titulo_profesional),
-        toNullableTrimmedString(razon_social),
-        toNullableTrimmedString(nit_empresa),
-        toNullableTrimmedString(representante_legal),
-        toNullableTrimmedString(tipo_documento_representante),
-        toNullableTrimmedString(numero_documento_representante),
+        personaJuridica.values.razon_social,
+        personaJuridica.values.nit_empresa,
+        personaJuridica.values.representante_legal,
+        personaJuridica.values.tipo_documento_representante,
+        personaJuridica.values.numero_documento_representante,
         personaId
       ]);
+    }
+
+    if (tipo_persona !== undefined) {
+      await client.query(
+        "UPDATE usuarios SET tipo_persona = $1::tipo_persona, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+        [tipoPersonaEfectiva ?? null, usuario.id]
+      );
     }
 
     await client.query("COMMIT");

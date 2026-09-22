@@ -24,7 +24,13 @@ window.gestionPersonasApp = function () {
             apellidos: "",
             email: "",
             tipo_documento_id: "",
-            numero_documento: ""
+            numero_documento: "",
+            tipo_persona: "Natural",
+            razon_social: "",
+            nit_empresa: "",
+            representante_legal: "",
+            tipo_documento_representante: "",
+            numero_documento_representante: ""
         },
 
         personas: [],
@@ -115,7 +121,13 @@ window.gestionPersonasApp = function () {
                 apellidos: "",
                 email: "",
                 tipo_documento_id: "",
-                numero_documento: ""
+                numero_documento: "",
+                tipo_persona: "Natural",
+                razon_social: "",
+                nit_empresa: "",
+                representante_legal: "",
+                tipo_documento_representante: "",
+                numero_documento_representante: ""
             };
             this.usuarioSeleccionado = "";
             this.addError = "";
@@ -211,6 +223,11 @@ window.gestionPersonasApp = function () {
             try {
                 const payload = { ...this.addForm };
                 delete payload.azure_oid;
+                const errorJuridica = this.prepararDatosJuridicos(payload);
+                if (errorJuridica) {
+                    this.addError = errorJuridica;
+                    return;
+                }
                 await axios.post(`${API}/admin/personas`, payload, this.getAuthConfig());
                 this.modalAddPersonaOpen = false;
                 alert("Persona creada correctamente");
@@ -414,7 +431,12 @@ window.gestionPersonasApp = function () {
                     telefono: this.ficha?.telefono || "",
                     direccion: this.ficha?.direccion || "",
                     ciudad: this.ficha?.ciudad || "",
-                    tipo_persona: this.ficha?.tipo_persona || ""
+                    tipo_persona: this.valorTipoPersonaForm(this.ficha?.tipo_persona),
+                    razon_social: this.ficha?.razon_social || "",
+                    nit_empresa: this.ficha?.nit_empresa || "",
+                    representante_legal: this.ficha?.representante_legal || "",
+                    tipo_documento_representante: this.ficha?.tipo_documento_representante || "",
+                    numero_documento_representante: this.ficha?.numero_documento_representante || ""
                 };
                 return;
             }
@@ -479,6 +501,15 @@ window.gestionPersonasApp = function () {
                 }
             }
 
+            if (seccion === "personal") {
+                const errorJuridica = this.prepararDatosJuridicos(payload);
+                if (errorJuridica) {
+                    this.errores.personal = errorJuridica;
+                    this.guardando.personal = false;
+                    return;
+                }
+            }
+
             Object.keys(payload).forEach((k) => {
                 if (payload[k] === "") payload[k] = null;
             });
@@ -528,6 +559,46 @@ window.gestionPersonasApp = function () {
                 "Talento Humano": "bg-rose-500"
             };
             return mapa[rol] || "bg-slate-400";
+        },
+
+        valorTipoPersonaForm(value) {
+            const normalized = String(value || "")
+                .trim()
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase();
+            if (normalized === "natural") return "Natural";
+            if (normalized === "juridica") return "Jurídica";
+            return "";
+        },
+
+        esPersonaJuridica(value) {
+            return this.valorTipoPersonaForm(value) === "Jurídica";
+        },
+
+        prepararDatosJuridicos(payload) {
+            payload.tipo_persona = this.valorTipoPersonaForm(payload.tipo_persona) || null;
+            const campos = [
+                ["razon_social", "razón social"],
+                ["nit_empresa", "NIT de la empresa"],
+                ["representante_legal", "representante legal"],
+                ["tipo_documento_representante", "tipo de documento del representante"],
+                ["numero_documento_representante", "número de documento del representante"]
+            ];
+
+            if (!this.esPersonaJuridica(payload.tipo_persona)) {
+                campos.forEach(([campo]) => { payload[campo] = null; });
+                return "";
+            }
+
+            const faltantes = [];
+            campos.forEach(([campo, etiqueta]) => {
+                payload[campo] = String(payload[campo] || "").trim();
+                if (!payload[campo]) faltantes.push(etiqueta);
+            });
+            return faltantes.length
+                ? `Para una persona jurídica completa: ${faltantes.join(", ")}.`
+                : "";
         },
 
         formatFechaHora(ts) {

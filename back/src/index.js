@@ -3651,6 +3651,8 @@ async function getUsuarioAnexoIndividualById(userInput) {
         u.tipo_consultor,
         COALESCE(di_p.titulo, di_u.titulo) AS tipo_documento_titulo,
         COALESCE(di_p.codigo, di_u.codigo) AS tipo_documento_codigo,
+        p.razon_social,
+        p.nit_empresa,
         p.representante_legal,
         p.tipo_documento_representante,
         p.numero_documento_representante
@@ -3689,6 +3691,8 @@ async function getUsuarioAnexoIndividualById(userInput) {
       NULL AS tipo_consultor,
       di.titulo AS tipo_documento_titulo,
       di.codigo AS tipo_documento_codigo,
+      p.razon_social,
+      p.nit_empresa,
       p.representante_legal,
       p.tipo_documento_representante,
       p.numero_documento_representante,

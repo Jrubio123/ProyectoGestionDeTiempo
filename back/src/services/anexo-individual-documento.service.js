@@ -32,6 +32,8 @@ function buildAnexoIndividualDocumentContext({ userRow, items = [], correoFirman
   const nombreCompleto = personaJuridica
     ? text(userRow?.representante_legal)
     : text(userRow?.nombre_usuario);
+  const razonSocial = personaJuridica ? text(userRow?.razon_social) : "";
+  const nitEmpresa = personaJuridica ? text(userRow?.nit_empresa) : "";
   const correoPersonal = text(correoFirmante || userRow?.email);
   const direccion = text(userRow?.direccion);
   const ciudad = text(userRow?.ciudad);
@@ -40,6 +42,8 @@ function buildAnexoIndividualDocumentContext({ userRow, items = [], correoFirman
   if (!nombreCompleto) missing.push(personaJuridica ? "Nombre del representante legal" : "Nombre completo");
   if (!tipoDocumento) missing.push(personaJuridica ? "Tipo de documento del representante legal" : "Tipo de documento");
   if (!numeroDocumento) missing.push(personaJuridica ? "Número de documento del representante legal" : "Número de documento");
+  if (personaJuridica && !razonSocial) missing.push("Razón social");
+  if (personaJuridica && !nitEmpresa) missing.push("NIT de la empresa");
   if (!correoPersonal) missing.push("Correo del firmante");
   if (!rows.length) missing.push("Ítems activos del anexo");
 
@@ -77,6 +81,11 @@ function buildAnexoIndividualDocumentContext({ userRow, items = [], correoFirman
       direccion,
       ciudad,
       tipoPersona: text(userRow?.tipo_persona),
+      razonSocial,
+      nitEmpresa,
+      representanteLegalContratista: personaJuridica ? nombreCompleto : "",
+      tipoDocumentoRepresentante: personaJuridica ? tipoDocumento : "",
+      numeroDocumentoRepresentante: personaJuridica ? numeroDocumento : "",
       facturaEnColombia: userRow?.factura_en_colombia ?? null
     },
     proceso: {
@@ -183,11 +192,29 @@ function generateAnexoIndividualManualPdfFromItems({ userRow, items, correoFirma
 
     const persona = context.personaContext;
     const documentLabel = [persona.tipoDocumento, persona.numeroDocumento].filter(Boolean).join(" ");
-    doc.font("Helvetica-Bold").fontSize(10).fillColor(textColor)
-      .text(persona.nombreCompleto, left, 90, { width: 300, lineBreak: false });
-    doc.font("Helvetica").fontSize(8).fillColor("#526575")
-      .text(`Documento: ${documentLabel || "-"}`, left, 108, { width: 300, lineBreak: false });
-    doc.text(`Correo: ${persona.correoPersonal || "-"}`, left + 320, 108, { width: 300, lineBreak: false });
+    if (isPersonaJuridica(persona.tipoPersona)) {
+      doc.font("Helvetica-Bold").fontSize(10).fillColor(textColor)
+        .text(`Razón social: ${persona.razonSocial}`, left, 90, { width: 300, lineBreak: false });
+      doc.font("Helvetica").fontSize(8).fillColor("#526575")
+        .text(`NIT: ${persona.nitEmpresa}`, left, 108, { width: 300, lineBreak: false });
+      doc.font("Helvetica-Bold").fontSize(9).fillColor(textColor)
+        .text(`Representante legal: ${persona.representanteLegalContratista}`, left + 320, 90, {
+          width: 290,
+          lineBreak: false
+        });
+      doc.font("Helvetica").fontSize(8).fillColor("#526575")
+        .text(`Documento representante: ${documentLabel || "-"}`, left + 320, 108, {
+          width: 290,
+          lineBreak: false
+        });
+      doc.text(`Correo: ${persona.correoPersonal || "-"}`, left, 122, { width: 300, lineBreak: false });
+    } else {
+      doc.font("Helvetica-Bold").fontSize(10).fillColor(textColor)
+        .text(persona.nombreCompleto, left, 90, { width: 300, lineBreak: false });
+      doc.font("Helvetica").fontSize(8).fillColor("#526575")
+        .text(`Documento: ${documentLabel || "-"}`, left, 108, { width: 300, lineBreak: false });
+      doc.text(`Correo: ${persona.correoPersonal || "-"}`, left + 320, 108, { width: 300, lineBreak: false });
+    }
     doc.text(`Generado: ${formatDate(fecha)}`, pageWidth - 190, 90, { width: 160, align: "right", lineBreak: false });
 
     const tableTop = 136;

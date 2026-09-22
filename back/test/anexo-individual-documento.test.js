@@ -88,6 +88,8 @@ test("el anexo individual de persona juridica usa la identidad del representante
     nombre_usuario: "Empresa Ejemplo SAS",
     cedula: "900123456-1",
     tipo_documento_codigo: "NIT",
+    razon_social: "Empresa Ejemplo SAS",
+    nit_empresa: "900123456-1",
     representante_legal: "Laura Representante",
     tipo_documento_representante: "CC",
     numero_documento_representante: "52123456"
@@ -98,7 +100,33 @@ test("el anexo individual de persona juridica usa la identidad del representante
   assert.equal(result.personaContext.nombreCompleto, "Laura Representante");
   assert.equal(result.personaContext.tipoDocumento, "CC");
   assert.equal(result.personaContext.numeroDocumento, "52123456");
+  assert.equal(result.personaContext.razonSocial, "Empresa Ejemplo SAS");
+  assert.equal(result.personaContext.nitEmpresa, "900123456-1");
+  assert.equal(result.personaContext.representanteLegalContratista, "Laura Representante");
+  assert.equal(result.personaContext.tipoDocumentoRepresentante, "CC");
+  assert.equal(result.personaContext.numeroDocumentoRepresentante, "52123456");
   assert.equal(result.proceso.nombre_persona, "Laura Representante");
+});
+
+test("el anexo individual juridico exige razon social y NIT además del representante", () => {
+  const input = buildValidInput();
+  input.userRow = {
+    ...input.userRow,
+    tipo_persona: "Juridica",
+    representante_legal: "Laura Representante",
+    tipo_documento_representante: "CC",
+    numero_documento_representante: "52123456"
+  };
+
+  assert.throws(
+    () => buildAnexoIndividualDocumentContext(input),
+    (err) => {
+      assert.equal(err?.status, 422);
+      assert.ok(err?.missing.includes("Razón social"));
+      assert.ok(err?.missing.includes("NIT de la empresa"));
+      return true;
+    }
+  );
 });
 
 test("el anexo individual consulta los datos del representante legal", () => {
@@ -108,9 +136,20 @@ test("el anexo individual consulta los datos del representante legal", () => {
   const querySource = indexSource.slice(queryStart, queryEnd);
 
   assert.match(querySource, /tipo_persona/);
+  assert.match(querySource, /razon_social/);
+  assert.match(querySource, /nit_empresa/);
   assert.match(querySource, /representante_legal/);
   assert.match(querySource, /tipo_documento_representante/);
   assert.match(querySource, /numero_documento_representante/);
+
+  const serviceSource = fs.readFileSync(
+    path.resolve(__dirname, "../src/services/anexo-individual-documento.service.js"),
+    "utf8"
+  );
+  assert.match(serviceSource, /Razón social: \$\{persona\.razonSocial\}/);
+  assert.match(serviceSource, /NIT: \$\{persona\.nitEmpresa\}/);
+  assert.match(serviceSource, /Representante legal: \$\{persona\.representanteLegalContratista\}/);
+  assert.match(serviceSource, /Documento representante: \$\{documentLabel/);
 });
 
 test("rechaza el anexo cuando falta la identidad requerida", () => {

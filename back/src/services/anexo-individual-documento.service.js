@@ -13,19 +13,33 @@ function text(value) {
   return String(value || "").trim();
 }
 
+function isPersonaJuridica(value) {
+  return text(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase() === "juridica";
+}
+
 function buildAnexoIndividualDocumentContext({ userRow, items = [], correoFirmante = "" } = {}) {
   const rows = Array.isArray(items) ? items : [];
-  const tipoDocumento = text(userRow?.tipo_documento_codigo || userRow?.tipo_documento_titulo);
-  const numeroDocumento = text(userRow?.cedula);
-  const nombreCompleto = text(userRow?.nombre_usuario);
+  const personaJuridica = isPersonaJuridica(userRow?.tipo_persona);
+  const tipoDocumento = personaJuridica
+    ? text(userRow?.tipo_documento_representante)
+    : text(userRow?.tipo_documento_codigo || userRow?.tipo_documento_titulo);
+  const numeroDocumento = personaJuridica
+    ? text(userRow?.numero_documento_representante)
+    : text(userRow?.cedula);
+  const nombreCompleto = personaJuridica
+    ? text(userRow?.representante_legal)
+    : text(userRow?.nombre_usuario);
   const correoPersonal = text(correoFirmante || userRow?.email);
   const direccion = text(userRow?.direccion);
   const ciudad = text(userRow?.ciudad);
   const missing = [];
 
-  if (!nombreCompleto) missing.push("Nombre completo");
-  if (!tipoDocumento) missing.push("Tipo de documento");
-  if (!numeroDocumento) missing.push("Número de documento");
+  if (!nombreCompleto) missing.push(personaJuridica ? "Nombre del representante legal" : "Nombre completo");
+  if (!tipoDocumento) missing.push(personaJuridica ? "Tipo de documento del representante legal" : "Tipo de documento");
+  if (!numeroDocumento) missing.push(personaJuridica ? "Número de documento del representante legal" : "Número de documento");
   if (!correoPersonal) missing.push("Correo del firmante");
   if (!rows.length) missing.push("Ítems activos del anexo");
 
@@ -62,6 +76,7 @@ function buildAnexoIndividualDocumentContext({ userRow, items = [], correoFirman
       correoPersonal,
       direccion,
       ciudad,
+      tipoPersona: text(userRow?.tipo_persona),
       facturaEnColombia: userRow?.factura_en_colombia ?? null
     },
     proceso: {

@@ -75,8 +75,42 @@ test("construye el contexto contractual del anexo individual", () => {
 
   assert.equal(result.personaContext.nombreCompleto, "Ana Consultora");
   assert.equal(result.personaContext.tipoDocumento, "CC");
+  assert.equal(result.personaContext.numeroDocumento, "123456789");
   assert.equal(result.personaContext.correoPersonal, "firma@example.com");
   assert.equal(result.items.length, 1);
+});
+
+test("el anexo individual de persona juridica usa la identidad del representante legal", () => {
+  const input = buildValidInput();
+  input.userRow = {
+    ...input.userRow,
+    tipo_persona: "Jurídica",
+    nombre_usuario: "Empresa Ejemplo SAS",
+    cedula: "900123456-1",
+    tipo_documento_codigo: "NIT",
+    representante_legal: "Laura Representante",
+    tipo_documento_representante: "CC",
+    numero_documento_representante: "52123456"
+  };
+
+  const result = buildAnexoIndividualDocumentContext(input);
+
+  assert.equal(result.personaContext.nombreCompleto, "Laura Representante");
+  assert.equal(result.personaContext.tipoDocumento, "CC");
+  assert.equal(result.personaContext.numeroDocumento, "52123456");
+  assert.equal(result.proceso.nombre_persona, "Laura Representante");
+});
+
+test("el anexo individual consulta los datos del representante legal", () => {
+  const indexSource = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
+  const queryStart = indexSource.indexOf("async function getUsuarioAnexoIndividualById");
+  const queryEnd = indexSource.indexOf("async function resolveSuggestedAnexoFirmanteEmailForUser", queryStart);
+  const querySource = indexSource.slice(queryStart, queryEnd);
+
+  assert.match(querySource, /tipo_persona/);
+  assert.match(querySource, /representante_legal/);
+  assert.match(querySource, /tipo_documento_representante/);
+  assert.match(querySource, /numero_documento_representante/);
 });
 
 test("rechaza el anexo cuando falta la identidad requerida", () => {

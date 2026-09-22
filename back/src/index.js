@@ -3647,9 +3647,13 @@ async function getUsuarioAnexoIndividualById(userInput) {
         u.moneda_cobro,
         COALESCE(u.activo, false) AS activo,
         COALESCE(p.factura_en_colombia, u.factura_en_colombia) AS factura_en_colombia,
+        COALESCE(p.tipo_persona, u.tipo_persona) AS tipo_persona,
         u.tipo_consultor,
         COALESCE(di_p.titulo, di_u.titulo) AS tipo_documento_titulo,
-        COALESCE(di_p.codigo, di_u.codigo) AS tipo_documento_codigo
+        COALESCE(di_p.codigo, di_u.codigo) AS tipo_documento_codigo,
+        p.representante_legal,
+        p.tipo_documento_representante,
+        p.numero_documento_representante
       FROM usuarios u
       LEFT JOIN personas p               ON u.persona_id        = p.id
       LEFT JOIN documento_identidad di_p ON di_p.id = p.tipo_documento_id
@@ -3679,11 +3683,15 @@ async function getUsuarioAnexoIndividualById(userInput) {
       p.direccion_residencia AS direccion,
       p.ciudad_residencia AS ciudad,
       p.factura_en_colombia,
+      p.tipo_persona,
       (p.estado = 'activo') AS activo,
       NULL AS moneda_cobro,
       NULL AS tipo_consultor,
       di.titulo AS tipo_documento_titulo,
       di.codigo AS tipo_documento_codigo,
+      p.representante_legal,
+      p.tipo_documento_representante,
+      p.numero_documento_representante,
       'persona' AS source
     FROM personas p
     LEFT JOIN documento_identidad di ON di.id = p.tipo_documento_id

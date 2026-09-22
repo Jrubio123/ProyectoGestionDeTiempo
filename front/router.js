@@ -37,7 +37,7 @@ const viewScripts = {
 // Guardar la promesa (no solo el resultado) evita inyectar el mismo
 // archivo dos veces si llegan dos navegaciones rápidas antes del onload.
 const _scriptPromises = new Map();
-const APP_ASSET_VERSION = "20260909-capacidad-historial";
+const APP_ASSET_VERSION = "20260922-persona-juridica";
 
 function loadScript(src) {
     if (_scriptPromises.has(src)) return _scriptPromises.get(src);

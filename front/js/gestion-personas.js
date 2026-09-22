@@ -435,7 +435,9 @@ window.gestionPersonasApp = function () {
                     razon_social: this.ficha?.razon_social || "",
                     nit_empresa: this.ficha?.nit_empresa || "",
                     representante_legal: this.ficha?.representante_legal || "",
-                    tipo_documento_representante: this.ficha?.tipo_documento_representante || "",
+                    tipo_documento_representante: this.valorTipoDocumentoRepresentanteForm(
+                        this.ficha?.tipo_documento_representante
+                    ),
                     numero_documento_representante: this.ficha?.numero_documento_representante || ""
                 };
                 return;
@@ -576,6 +578,30 @@ window.gestionPersonasApp = function () {
             return this.valorTipoPersonaForm(value) === "Jurídica";
         },
 
+        resolverTipoDocumentoRepresentante(value) {
+            const normalized = String(value || "")
+                .trim()
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase();
+            if (!normalized) return null;
+
+            return this.cat.tiposDocumento.find((documento) =>
+                [documento?.id, documento?.codigo, documento?.titulo]
+                    .some((candidate) => String(candidate || "")
+                        .trim()
+                        .normalize("NFD")
+                        .replace(/[\u0300-\u036f]/g, "")
+                        .toLowerCase() === normalized)
+            ) || null;
+        },
+
+        valorTipoDocumentoRepresentanteForm(value) {
+            const raw = String(value || "").trim();
+            const documento = this.resolverTipoDocumentoRepresentante(raw);
+            return documento ? String(documento.id || "").trim() : raw;
+        },
+
         prepararDatosJuridicos(payload) {
             payload.tipo_persona = this.valorTipoPersonaForm(payload.tipo_persona) || null;
             const campos = [
@@ -596,6 +622,15 @@ window.gestionPersonasApp = function () {
                 payload[campo] = String(payload[campo] || "").trim();
                 if (!payload[campo]) faltantes.push(etiqueta);
             });
+            if (payload.tipo_documento_representante && this.cat.tiposDocumento.length) {
+                const documento = this.resolverTipoDocumentoRepresentante(
+                    payload.tipo_documento_representante
+                );
+                if (!documento) {
+                    return "Selecciona un tipo de documento válido para el representante.";
+                }
+                payload.tipo_documento_representante = String(documento.id || "").trim();
+            }
             return faltantes.length
                 ? `Para una persona jurídica completa: ${faltantes.join(", ")}.`
                 : "";

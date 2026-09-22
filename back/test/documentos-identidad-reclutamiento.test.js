@@ -3,7 +3,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { resolveDocumentoIdentidadId } = require("../src/services/documento-identidad.service");
+const {
+  resolveDocumentoIdentidad,
+  resolveDocumentoIdentidadId
+} = require("../src/services/documento-identidad.service");
 
 const documentos = [
   { id: 1, public_id: "11111111-1111-4111-8111-111111111111", titulo: "Cédula", codigo: "CC" },
@@ -28,6 +31,7 @@ function fakeDb() {
 test("resuelve cualquier documento activo por UUID, título o código", async () => {
   const db = fakeDb();
   for (const documento of documentos) {
+    assert.deepEqual(await resolveDocumentoIdentidad(db, documento.codigo), documento);
     assert.equal(await resolveDocumentoIdentidadId(db, documento.public_id), documento.id);
     assert.equal(await resolveDocumentoIdentidadId(db, documento.titulo), documento.id);
     assert.equal(await resolveDocumentoIdentidadId(db, documento.codigo), documento.id);

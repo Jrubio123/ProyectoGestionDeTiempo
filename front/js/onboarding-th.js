@@ -74,6 +74,7 @@ window.onboardingThApp = function () {
         preregistros: [],
         bancos: [],
         tiposCuenta: [],
+        tiposDocumento: [],
         filtro: "all",
         busqueda: "",
         modalDetalle: false,
@@ -187,15 +188,18 @@ window.onboardingThApp = function () {
 
         async cargarCatalogosLegales() {
             try {
-                const [bancosRes, tiposCuentaRes] = await Promise.all([
+                const [bancosRes, tiposCuentaRes, tiposDocumentoRes] = await Promise.all([
                     axios.get(`${API}/bancos`, this.getAuthConfig()),
-                    axios.get(`${API}/tipos-cuenta-bancaria`, this.getAuthConfig())
+                    axios.get(`${API}/tipos-cuenta-bancaria`, this.getAuthConfig()),
+                    axios.get(`${API}/documentos-identidad`, this.getAuthConfig())
                 ]);
                 this.bancos = Array.isArray(bancosRes.data) ? bancosRes.data : [];
                 this.tiposCuenta = Array.isArray(tiposCuentaRes.data) ? tiposCuentaRes.data : [];
+                this.tiposDocumento = Array.isArray(tiposDocumentoRes.data) ? tiposDocumentoRes.data : [];
             } catch (_) {
                 this.bancos = [];
                 this.tiposCuenta = [];
+                this.tiposDocumento = [];
             }
         },
 
@@ -430,6 +434,21 @@ window.onboardingThApp = function () {
             ) || null;
         },
 
+        resolverTipoDocumentoRepresentante(value) {
+            const normalized = this.normalizar(value);
+            if (!normalized) return null;
+            return this.tiposDocumento.find((documento) =>
+                [documento?.id, documento?.codigo, documento?.titulo]
+                    .some((candidate) => this.normalizar(candidate) === normalized)
+            ) || null;
+        },
+
+        valorTipoDocumentoRepresentante(value) {
+            const raw = String(value || "").trim();
+            const documento = this.resolverTipoDocumentoRepresentante(raw);
+            return documento ? String(documento.id || "").trim() : raw;
+        },
+
         normalizarId(value) {
             return String(value || "")
                 .trim()
@@ -569,7 +588,9 @@ window.onboardingThApp = function () {
                 razon_social: item?.razon_social || "",
                 nit_empresa: item?.nit_empresa || "",
                 representante_legal: item?.representante_legal || "",
-                tipo_documento_representante: item?.tipo_documento_representante || "",
+                tipo_documento_representante: this.valorTipoDocumentoRepresentante(
+                    item?.tipo_documento_representante
+                ),
                 numero_documento_representante: item?.numero_documento_representante || "",
                 correo_silver: item?.correo_silver || ""
             };
@@ -615,7 +636,7 @@ window.onboardingThApp = function () {
             return !!String(form.razon_social || "").trim()
                 && !!String(form.nit_empresa || "").trim()
                 && !!String(form.representante_legal || "").trim()
-                && !!String(form.tipo_documento_representante || "").trim()
+                && !!this.resolverTipoDocumentoRepresentante(form.tipo_documento_representante)
                 && !!String(form.numero_documento_representante || "").trim();
         },
 
@@ -645,7 +666,9 @@ window.onboardingThApp = function () {
                 razon_social: juridica ? String(this.formS3.razon_social || "").trim() : null,
                 nit_empresa: juridica ? String(this.formS3.nit_empresa || "").trim() : null,
                 representante_legal: juridica ? String(this.formS3.representante_legal || "").trim() : null,
-                tipo_documento_representante: juridica ? String(this.formS3.tipo_documento_representante || "").trim() : null,
+                tipo_documento_representante: juridica
+                    ? this.valorTipoDocumentoRepresentante(this.formS3.tipo_documento_representante)
+                    : null,
                 numero_documento_representante: juridica ? String(this.formS3.numero_documento_representante || "").trim() : null
             };
         },

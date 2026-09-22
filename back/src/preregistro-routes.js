@@ -4,7 +4,10 @@ const {
   resolveTipoCuentaBancaria,
   toLegacyTipoCuentaValue
 } = require("./services/tipo-cuenta-bancaria.service");
-const { resolveDocumentoIdentidadId } = require("./services/documento-identidad.service");
+const {
+  resolveDocumentoIdentidad,
+  resolveDocumentoIdentidadId
+} = require("./services/documento-identidad.service");
 
 module.exports = function registerPreregistroRoutes(deps) {
   const {
@@ -58,7 +61,6 @@ module.exports = function registerPreregistroRoutes(deps) {
     return null;
   }
 
-  const TIPOS_PERSONA = new Set(["Natural", "Juridica", "Jurídica"]);
   const MONEDAS = new Set(["COP", "USD", "EUR"]);
   const GRUPOS_DISTRIBUCION_CONTRATACION = new Set(["Todos Silver", "Vinculados"]);
 
@@ -161,14 +163,14 @@ module.exports = function registerPreregistroRoutes(deps) {
   }
 
   function normalizeTipoPersonaForUsuarios(value) {
-    const raw = normalizeValue(value);
+    const raw = normalizeValue(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     if (raw === "natural") return "Natural";
     if (raw === "juridica") return "Jurídica";
     return null;
   }
 
   function normalizeTipoPersonaForPreregistro(value) {
-    const raw = normalizeValue(value);
+    const raw = normalizeValue(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     if (raw === "natural") return "Natural";
     if (raw === "juridica") return "Jurídica";
     return null;
@@ -1191,11 +1193,12 @@ module.exports = function registerPreregistroRoutes(deps) {
     if (!direccion || !tipo_persona || !banco_id || (!tipo_cuenta_id && !tipo_cuenta) || !numero_cuenta) {
       return res.status(400).json({ error: "Faltan campos obligatorios de la seccion 3" });
     }
-    if (!TIPOS_PERSONA.has(String(tipo_persona || "").trim())) {
+    const tipoPersonaNorm = normalizeTipoPersonaForPreregistro(tipo_persona);
+    if (!tipoPersonaNorm) {
       return res.status(400).json({ error: "tipo_persona no valido" });
     }
     if (
-      normalizeValue(tipo_persona) === "juridica" &&
+      tipoPersonaNorm === "Jurídica" &&
       (!razon_social || !nit_empresa || !representante_legal ||
         !tipo_documento_representante || !numero_documento_representante)
     ) {
@@ -1224,6 +1227,16 @@ module.exports = function registerPreregistroRoutes(deps) {
         tipoCuentaNombre: tipo_cuenta,
         required: true
       });
+      let tipoDocumentoRepresentanteNorm = null;
+      if (tipoPersonaNorm === "Jurídica") {
+        const documentoRepresentante = await resolveDocumentoIdentidad(client, tipo_documento_representante);
+        if (!documentoRepresentante) {
+          return res.status(400).json({ error: "Tipo de documento del representante inválido" });
+        }
+        tipoDocumentoRepresentanteNorm = String(
+          documentoRepresentante.codigo || documentoRepresentante.titulo || ""
+        ).trim();
+      }
       const correoSilverNorm = correo_silver ? String(correo_silver).trim().toLowerCase() : null;
       if (correoSilverNorm) {
         const [dupUser, dupPre] = await Promise.all([
@@ -1239,7 +1252,6 @@ module.exports = function registerPreregistroRoutes(deps) {
       const nextState = correoSilverNorm || !debeCrearUsuario
         ? ESTADOS.pendienteRevisionTh
         : ESTADOS.pendienteCorreoSilver;
-      const tipoPersonaNorm = normalizeTipoPersonaForPreregistro(tipo_persona);
       await client.query("BEGIN");
       transactionStarted = true;
       await client.query(
@@ -1257,7 +1269,7 @@ module.exports = function registerPreregistroRoutes(deps) {
           razon_social ? String(razon_social).trim() : null,
           nit_empresa ? String(nit_empresa).trim() : null,
           representante_legal ? String(representante_legal).trim() : null,
-          tipo_documento_representante ? String(tipo_documento_representante).trim() : null,
+          tipoDocumentoRepresentanteNorm,
           numero_documento_representante ? String(numero_documento_representante).trim() : null,
           tipoCuenta.id
         ]

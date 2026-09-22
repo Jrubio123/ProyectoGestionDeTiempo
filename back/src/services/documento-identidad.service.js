@@ -33,7 +33,7 @@ function matchesLegacyType(row, type) {
   return false;
 }
 
-async function resolveDocumentoIdentidadId(db, value) {
+async function resolveDocumentoIdentidad(db, value) {
   if (value === undefined || value === null || value === "") return null;
 
   const result = await db.query(
@@ -49,26 +49,32 @@ async function resolveDocumentoIdentidadId(db, value) {
   const numeric = Number(raw);
   if (Number.isInteger(numeric) && numeric > 0) {
     const byInternalId = rows.find((row) => Number(row.id) === numeric);
-    if (byInternalId) return byInternalId.id;
+    if (byInternalId) return byInternalId;
   }
 
   if (isUuid(raw)) {
     const byPublicId = rows.find((row) => String(row.public_id || "").toLowerCase() === raw.toLowerCase());
-    if (byPublicId) return byPublicId.id;
+    if (byPublicId) return byPublicId;
   }
 
   const key = normalizeDocumentoKey(raw);
   const exact = rows.find((row) =>
     normalizeDocumentoKey(row.titulo) === key || normalizeDocumentoKey(row.codigo) === key
   );
-  if (exact) return exact.id;
+  if (exact) return exact;
 
   const legacyType = legacyDocumentoType(raw);
   const legacyMatch = legacyType ? rows.find((row) => matchesLegacyType(row, legacyType)) : null;
-  return legacyMatch?.id || null;
+  return legacyMatch || null;
+}
+
+async function resolveDocumentoIdentidadId(db, value) {
+  const documento = await resolveDocumentoIdentidad(db, value);
+  return documento?.id || null;
 }
 
 module.exports = {
   normalizeDocumentoKey,
+  resolveDocumentoIdentidad,
   resolveDocumentoIdentidadId
 };

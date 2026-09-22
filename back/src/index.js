@@ -50,6 +50,7 @@ const {
   resolvePerfilModuloConsultoria
 } = require("./services/contrato-perfil-modulo.service");
 const { resolveTipoCuentaBancaria } = require("./services/tipo-cuenta-bancaria.service");
+const { resolveDocumentoIdentidad } = require("./services/documento-identidad.service");
 const { env } = require("./config/env");
 const { requireAccess, requireAuthenticated, hasAccess } = require("./middlewares/access");
 const registerPreregistroRoutes = require("./preregistro-routes");
@@ -9039,11 +9040,30 @@ function isValidEmailFormat(value) {
 }
 
 function normalizeTipoPersonaForUsuariosInput(value) {
-  const raw = normalizeValue(value);
+  const raw = normalizeValue(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
   if (!raw) return null;
   if (raw === "natural") return "Natural";
   if (raw === "juridica") return "Jurídica";
   return null;
+}
+
+async function normalizeTipoDocumentoRepresentanteFromCatalog(db, tipoPersona, personaJuridica) {
+  if (tipoPersona !== "Jurídica") return;
+
+  const documento = await resolveDocumentoIdentidad(
+    db,
+    personaJuridica?.values?.tipo_documento_representante
+  );
+  if (!documento) {
+    const err = new Error("Tipo de documento del representante inválido");
+    err.status = 400;
+    throw err;
+  }
+
+  personaJuridica.values.tipo_documento_representante =
+    toNullableTrimmedString(documento.codigo) || toNullableTrimmedString(documento.titulo);
 }
 
 function normalizePersonaJuridicaInput(tipoPersona, payload = {}) {
@@ -9317,6 +9337,7 @@ app.put("/admin/personas/p/:personaId/personal", requireAccess({ roles: ["Admini
         error: `Para una persona jurídica son obligatorios: ${personaJuridica.missing.join(", ")}`
       });
     }
+    await normalizeTipoDocumentoRepresentanteFromCatalog(pool, tipoPersonaNormalizada, personaJuridica);
     const sexoNormalizado = toNullableTrimmedString(sexo);
     if (sexoNormalizado && !["Hombre", "Mujer", "Otro"].includes(sexoNormalizado)) {
       return res.status(400).json({ error: "Sexo inválido. Debe ser Hombre, Mujer u Otro" });
@@ -9596,6 +9617,7 @@ app.post("/admin/personas", requireAccess({ roles: ["Administrador", "Talento Hu
         error: `Para una persona jurídica son obligatorios: ${personaJuridica.missing.join(", ")}`
       });
     }
+    await normalizeTipoDocumentoRepresentanteFromCatalog(client, tipoPersonaNormalizada, personaJuridica);
     const sexoNormalizado = toNullableTrimmedString(sexo);
     const validSexos = ["Hombre", "Mujer", "Otro"];
     if (sexoNormalizado && !validSexos.includes(sexoNormalizado)) {
@@ -11013,6 +11035,9 @@ app.put("/admin/personas/:id/personal", requireAccess({ roles: ["Administrador",
       return res.status(400).json({
         error: `Para una persona jurídica son obligatorios: ${personaJuridica.missing.join(", ")}`
       });
+    }
+    if (tipo_persona !== undefined) {
+      await normalizeTipoDocumentoRepresentanteFromCatalog(client, tipoPersonaEfectiva, personaJuridica);
     }
     let personaId = usuario.persona_id;
 

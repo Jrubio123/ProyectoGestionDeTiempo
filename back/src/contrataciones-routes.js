@@ -5,6 +5,7 @@ const {
   resolveTipoCuentaBancaria,
   toLegacyTipoCuentaValue
 } = require("./services/tipo-cuenta-bancaria.service");
+const { resolveDocumentoIdentidad } = require("./services/documento-identidad.service");
 
 module.exports = function registerContratacionesRoutes(deps) {
   const {
@@ -487,14 +488,14 @@ module.exports = function registerContratacionesRoutes(deps) {
   }
 
   function normalizeTipoPersonaForUsuarios(value) {
-    const raw = normalizeValue(value);
+    const raw = normalizeValue(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     if (raw === "natural") return "Natural";
     if (raw === "juridica") return "Jurídica";
     return null;
   }
 
   function normalizeTipoPersonaForPreregistro(value) {
-    const raw = normalizeValue(value);
+    const raw = normalizeValue(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     if (raw === "natural") return "Natural";
     if (raw === "juridica") return "Jurídica";
     return null;
@@ -3532,6 +3533,16 @@ module.exports = function registerContratacionesRoutes(deps) {
             error: "Para persona juridica son obligatorios razon social, NIT y datos del representante legal"
           });
         }
+        let tipoDocumentoRepresentanteNorm = null;
+        if (tipoPersona === "Juridica") {
+          const documentoRepresentante = await resolveDocumentoIdentidad(client, tipoDocumentoRepresentante);
+          if (!documentoRepresentante) {
+            return res.status(400).json({ error: "Tipo de documento del representante inválido" });
+          }
+          tipoDocumentoRepresentanteNorm = String(
+            documentoRepresentante.codigo || documentoRepresentante.titulo || ""
+          ).trim();
+        }
         if (correoSilver) {
           return res.status(422).json({
             error: "El correo Silver debe registrarlo el solicitante original desde su bandeja de contrataciones"
@@ -3576,7 +3587,7 @@ module.exports = function registerContratacionesRoutes(deps) {
               razon_social: razonSocial,
               nit_empresa: nitEmpresa,
               representante_legal: representanteLegal,
-              tipo_documento_representante: tipoDocumentoRepresentante,
+              tipo_documento_representante: tipoDocumentoRepresentanteNorm,
               numero_documento_representante: numeroDocumentoRepresentante
             }),
             nextEstado,

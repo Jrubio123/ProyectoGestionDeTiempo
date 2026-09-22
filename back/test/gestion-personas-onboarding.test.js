@@ -54,18 +54,27 @@ test("onboarding precarga el ID de catálogo desde un valor histórico", (t) => 
   require(frontPath);
   const app = global.window.onboardingThApp();
   app.tiposCuenta = [{ id: "uuid-ahorros", titulo: "Cuenta de Ahorros" }];
+  app.tiposDocumento = [{ id: "uuid-cc", titulo: "Cédula de Ciudadanía", codigo: "CC" }];
   app.abrirDetalle({
     banco: { id: "banco-1" },
     direccion: "Calle 1",
-    tipo_persona: "Natural",
+    tipo_persona: "Juridica",
     tipo_cuenta: "Ahorros",
-    numero_cuenta: "123"
+    numero_cuenta: "123",
+    razon_social: "Empresa SAS",
+    nit_empresa: "900123456-1",
+    representante_legal: "Ana Pérez",
+    tipo_documento_representante: "CC",
+    numero_documento_representante: "123456"
   });
 
   assert.equal(app.formS3.tipo_cuenta_id, "uuid-ahorros");
+  assert.equal(app.formS3.tipo_documento_representante, "uuid-cc");
+  assert.equal(app.s3BaseValida, true);
   const payload = app.buildS3Payload();
   assert.equal(payload.tipo_cuenta_id, "uuid-ahorros");
   assert.equal(payload.tipo_cuenta, "Cuenta de Ahorros");
+  assert.equal(payload.tipo_documento_representante, "uuid-cc");
 });
 
 test("anexo individual precarga correo y propone una fecha fin editable", (t) => {
@@ -197,5 +206,5 @@ test("el banner del anexo depende del estado de firma y no de updated_at", () =>
 
   assert.match(dashboardSource, /ultimoFirmado && activos\.some\(\(item\) => item\.estado_firma !== "firmado"\)/);
   assert.doesNotMatch(dashboardSource, /updatedAt > firmadoAt/);
-  assert.match(routerSource, /20260909-capacidad-historial/);
+  assert.match(routerSource, /20260922-persona-juridica/);
 });

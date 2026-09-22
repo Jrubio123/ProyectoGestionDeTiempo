@@ -555,8 +555,14 @@
                             placeholder="NIT de la empresa *">
                         <input class="prereg-input" x-model="formS3.representante_legal" :disabled="!seccion3Editable"
                             placeholder="Representante legal *">
-                        <input class="prereg-input" x-model="formS3.tipo_documento_representante"
-                            :disabled="!seccion3Editable" placeholder="Tipo documento representante *">
+                        <select class="prereg-input" x-model="formS3.tipo_documento_representante"
+                            :disabled="!seccion3Editable">
+                            <option value="">Tipo documento representante *</option>
+                            <template x-for="documento in tiposDocumento" :key="documento.id">
+                                <option :value="documento.id"
+                                    x-text="documento.codigo ? `${documento.codigo} - ${documento.titulo}` : documento.titulo"></option>
+                            </template>
+                        </select>
                         <input class="prereg-input" x-model="formS3.numero_documento_representante"
                             :disabled="!seccion3Editable" placeholder="Numero documento representante *">
                     </div>

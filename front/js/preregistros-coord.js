@@ -423,6 +423,27 @@ window.preregistrosCoordApp = function () {
             return hasData ? base : null;
         },
 
+        labelTipoAsignacion(value) {
+            return ({
+                full_time: "Full time",
+                medio_tiempo: "Medio tiempo",
+                horas: "Por horas",
+                capacitacion: "Capacitacion",
+                proyecto: "Proyecto"
+            })[String(value || "").trim()] || "";
+        },
+
+        tarifasDesdeAnexo(anexo) {
+            const tipo = String(anexo?.tipo_asignacion || "").trim();
+            const valor = anexo?.valor_tarifa ?? null;
+            return {
+                tarifa_hora: tipo === "horas" ? valor : null,
+                tarifa_mes: ["full_time", "proyecto"].includes(tipo) ? valor : null,
+                tarifa_medio_tiempo: tipo === "medio_tiempo" ? valor : null,
+                tarifa_capacitacion: tipo === "capacitacion" ? valor : null
+            };
+        },
+
         combinarBasesExtension(primary, secondary) {
             const first = primary || null;
             const fallback = secondary || null;
@@ -451,24 +472,29 @@ window.preregistrosCoordApp = function () {
         construirBaseExtensionDesdePersona(persona) {
             if (!persona) return null;
             const anexo = persona?.anexo_activo || null;
+            const tarifasAnexo = this.tarifasDesdeAnexo(anexo);
             const current = this.construirBaseExtensionDesdeDatos({
-                tipo_asignacion: persona?.tipo_asignacion || anexo?.tipo_asignacion || null,
-                tipo_asignacion_label: persona?.tipo_asignacion_label || anexo?.tipo_asignacion_label || null,
-                cliente_id: persona?.cliente_id || anexo?.cliente_id || null,
-                cliente_nombre: persona?.cliente_nombre || anexo?.cliente_nombre || null,
+                tipo_asignacion: anexo?.tipo_asignacion || persona?.tipo_asignacion || null,
+                tipo_asignacion_label:
+                    anexo?.tipo_asignacion_label ||
+                    this.labelTipoAsignacion(anexo?.tipo_asignacion) ||
+                    persona?.tipo_asignacion_label ||
+                    null,
+                cliente_id: anexo?.cliente_id || persona?.cliente_id || null,
+                cliente_nombre: anexo?.cliente_nombre || persona?.cliente_nombre || null,
                 supervisor_id: persona?.supervisor_id || null,
                 supervisor_nombre: persona?.supervisor_nombre || null,
                 supervisor_azure_oid: persona?.supervisor_azure_oid || null,
-                perfil: persona?.perfil || persona?.modulo_nombre || anexo?.modulo_nombre || null,
-                modulo_id: persona?.modulo_id || anexo?.modulo_id || null,
-                modulo_nombre: persona?.modulo_nombre || anexo?.modulo_nombre || null,
-                moneda: persona?.moneda || anexo?.moneda || null,
-                fecha_inicio: persona?.fecha_inicio_actual || anexo?.fecha_inicio || null,
-                fecha_fin: persona?.fecha_fin_actual || anexo?.fecha_fin || null,
-                tarifa_hora: persona?.tarifa_hora ?? null,
-                tarifa_mes: persona?.tarifa_mes ?? null,
-                tarifa_medio_tiempo: persona?.tarifa_medio_tiempo ?? null,
-                tarifa_capacitacion: persona?.tarifa_capacitacion ?? null
+                perfil: anexo?.modulo_nombre || persona?.perfil || persona?.modulo_nombre || null,
+                modulo_id: anexo?.modulo_id || persona?.modulo_id || null,
+                modulo_nombre: anexo?.modulo_nombre || persona?.modulo_nombre || null,
+                moneda: anexo?.moneda || persona?.moneda || null,
+                fecha_inicio: anexo?.fecha_inicio || persona?.fecha_inicio_actual || null,
+                fecha_fin: anexo?.fecha_fin || persona?.fecha_fin_actual || null,
+                tarifa_hora: anexo ? tarifasAnexo.tarifa_hora : (persona?.tarifa_hora ?? null),
+                tarifa_mes: anexo ? tarifasAnexo.tarifa_mes : (persona?.tarifa_mes ?? null),
+                tarifa_medio_tiempo: anexo ? tarifasAnexo.tarifa_medio_tiempo : (persona?.tarifa_medio_tiempo ?? null),
+                tarifa_capacitacion: anexo ? tarifasAnexo.tarifa_capacitacion : (persona?.tarifa_capacitacion ?? null)
             });
             const anexoBase = this.construirBaseExtensionDesdeDatos({
                 tipo_asignacion: anexo?.tipo_asignacion || null,
@@ -498,7 +524,7 @@ window.preregistrosCoordApp = function () {
             const tipoAsignacion = item?.datos_extra?.tipo_asignacion || base?.tipo_asignacion || null;
             const anexoBase = base
                 ? {
-                    id: null,
+                    id: item?.datos_extra?.anexo_item_id || null,
                     tipo_asignacion: base.tipo_asignacion || null,
                     tipo_asignacion_label: base.tipo_asignacion_label || null,
                     cliente_id: base.cliente_id || null,
@@ -652,6 +678,7 @@ window.preregistrosCoordApp = function () {
                 tarifa_medio_tiempo: item?.tarifa_medio_tiempo ?? "",
                 tarifa_capacitacion: item?.tarifa_capacitacion ?? "",
                 tipo_asignacion: item?.datos_extra?.tipo_asignacion || item?.tipo_asignacion || "",
+                anexo_item_id: item?.datos_extra?.anexo_item_id || "",
                 modalidad_contrato: item?.modalidad_contrato || "",
                 fecha_inicio: this.toDateInput(item?.fecha_inicio),
                 fecha_fin: this.toDateInput(item?.fecha_fin),
@@ -670,6 +697,8 @@ window.preregistrosCoordApp = function () {
             this.personasEncontradas = [];
             this.mostrarSugerenciasPersona = false;
             this.personaSeleccionada = null;
+            this.anexosActivos = [];
+            this.anexoSeleccionadoId = "";
 
             if (item) {
                 this.modoEdicion = true;
@@ -681,6 +710,10 @@ window.preregistrosCoordApp = function () {
                         : {};
                 this.observacionesThActivas = item?.observaciones_th || "";
                 this.personaSeleccionada = this.construirPersonaDesdeSolicitud(item);
+                this.anexosActivos = this.personaSeleccionada?.anexo_activo?.id
+                    ? [this.personaSeleccionada.anexo_activo]
+                    : [];
+                this.anexoSeleccionadoId = this.form.anexo_item_id || "";
                 this.busquedaPersona = this.personaSeleccionada?.nombre_usuario || item?.persona?.nombre || "";
                 this.busquedaSupervisor = this.form.supervisor_nombre || this.form.supervisor_email || "";
                 return;
@@ -749,7 +782,10 @@ window.preregistrosCoordApp = function () {
             const q = String(this.busquedaPersona || "").trim();
             this.form.persona_usuario_id = "";
             this.form.persona_id = "";
+            this.form.anexo_item_id = "";
             this.personaSeleccionada = null;
+            this.anexosActivos = [];
+            this.anexoSeleccionadoId = "";
 
             if (this.debounceBusquedaPersona) {
                 clearTimeout(this.debounceBusquedaPersona);
@@ -806,6 +842,20 @@ window.preregistrosCoordApp = function () {
             this.anexoSeleccionadoId = this.anexosActivos.length === 1 ? this.anexosActivos[0].id : "";
             if (this.anexoSeleccionadoId) this.form.anexo_item_id = this.anexoSeleccionadoId;
             this.poblarFormularioDesdePersona(persona);
+            if (this.tipoModal === "Extension") {
+                if (this.anexosActivos.length === 1) {
+                    this.seleccionarAnexo(this.anexosActivos[0]);
+                } else if (!this.anexosActivos.length) {
+                    this.form.anexo_item_id = "";
+                    this.form.tipo_asignacion = "";
+                    this.form.fecha_extension_desde = "";
+                    this.form.fecha_extension_hasta = "";
+                    this.form.tarifa_hora = "";
+                    this.form.tarifa_mes = "";
+                    this.form.tarifa_medio_tiempo = "";
+                    this.form.tarifa_capacitacion = "";
+                }
+            }
             this.busquedaPersona = String(persona.nombre_usuario || persona.nombre || "").trim() || this.busquedaPersona;
             this.personasEncontradas = [];
             this.mostrarSugerenciasPersona = false;
@@ -816,12 +866,27 @@ window.preregistrosCoordApp = function () {
             this.anexoSeleccionadoId = anexo.id;
             this.form.anexo_item_id = anexo.id;
             if (this.tipoModal === "Extension") {
-                if (anexo.cliente_id) this.form.cliente_id = anexo.cliente_id;
-                if (anexo.moneda) this.form.moneda = anexo.moneda;
-                if (anexo.modulo_id) this.form.modulo_id = anexo.modulo_id;
-                if (anexo.modulo_nombre) this.form.perfil = anexo.modulo_nombre;
-                if (anexo.fecha_inicio) this.form.fecha_extension_desde = this.toDateInput(anexo.fecha_inicio);
-                if (anexo.fecha_fin) this.form.fecha_extension_hasta = this.toDateInput(anexo.fecha_fin);
+                const tarifas = this.tarifasDesdeAnexo(anexo);
+                this.form.tipo_asignacion = anexo.tipo_asignacion || "";
+                if (anexo.cliente_id) {
+                    this.form.cliente_id = anexo.cliente_id;
+                    this.form.cliente_nombre_prospecto = "";
+                } else if (anexo.cliente_nombre) {
+                    this.form.cliente_id = "__prospecto__";
+                    this.form.cliente_nombre_prospecto = anexo.cliente_nombre;
+                } else {
+                    this.form.cliente_id = "";
+                    this.form.cliente_nombre_prospecto = "";
+                }
+                this.form.moneda = anexo.moneda || this.form.moneda;
+                this.form.modulo_id = anexo.modulo_id || (anexo.modulo_nombre ? "otros" : "");
+                this.form.perfil = anexo.modulo_nombre || "";
+                this.form.fecha_extension_desde = this.toDateInput(anexo.fecha_inicio);
+                this.form.fecha_extension_hasta = this.toDateInput(anexo.fecha_fin);
+                this.form.tarifa_hora = tarifas.tarifa_hora ?? "";
+                this.form.tarifa_mes = tarifas.tarifa_mes ?? "";
+                this.form.tarifa_medio_tiempo = tarifas.tarifa_medio_tiempo ?? "";
+                this.form.tarifa_capacitacion = tarifas.tarifa_capacitacion ?? "";
             }
         },
 
@@ -849,10 +914,15 @@ window.preregistrosCoordApp = function () {
 
             const base = this.extensionBaseActual;
             const perfilActual = this.perfilFormularioActual();
-            const clienteId = String(this.form.cliente_id || "").trim() || null;
+            const clienteIdRaw = String(this.form.cliente_id || "").trim();
+            const clienteId = clienteIdRaw && clienteIdRaw !== "__prospecto__" ? clienteIdRaw : null;
+            const clienteNombre = clienteIdRaw === "__prospecto__"
+                ? (String(this.form.cliente_nombre_prospecto || "").trim() || null)
+                : null;
             const supervisorId = String(this.form.supervisor_id || "").trim() || null;
             const supervisorRef = supervisorId || String(this.form.supervisor_azure_oid || "").trim() || null;
             const moneda = String(this.form.moneda || "").trim().toUpperCase() || null;
+            const tipoAsignacion = String(this.form.tipo_asignacion || "").trim() || null;
             const fechaDesde = String(this.form.fecha_extension_desde || "").trim() || null;
             const fechaHasta = String(this.form.fecha_extension_hasta || "").trim() || null;
 
@@ -861,9 +931,11 @@ window.preregistrosCoordApp = function () {
                     fechaDesde ||
                     fechaHasta ||
                     clienteId ||
+                    clienteNombre ||
                     supervisorRef ||
                     perfilActual ||
                     moneda ||
+                    tipoAsignacion ||
                     this.normalizarNumero(this.form.tarifa_hora) !== null ||
                     this.normalizarNumero(this.form.tarifa_mes) !== null ||
                     this.normalizarNumero(this.form.tarifa_medio_tiempo) !== null ||
@@ -875,12 +947,17 @@ window.preregistrosCoordApp = function () {
                 return true;
             }
             if (clienteId && clienteId !== String(base.cliente_id || "")) return true;
+            if (
+                clienteNombre &&
+                this.normalizarTexto(clienteNombre) !== this.normalizarTexto(base.cliente_nombre || "")
+            ) return true;
             const supervisorBaseRef = String(base.supervisor_id || base.supervisor_azure_oid || "") || null;
             if (supervisorRef && supervisorRef !== supervisorBaseRef) return true;
             if (perfilActual && this.normalizarTexto(perfilActual) !== this.normalizarTexto(base.perfil || base.modulo_nombre || "")) {
                 return true;
             }
             if (moneda && moneda !== String(base.moneda || "").trim().toUpperCase()) return true;
+            if (tipoAsignacion && tipoAsignacion !== String(base.tipo_asignacion || "").trim()) return true;
             if (!this.sonNumerosIguales(this.form.tarifa_hora, base.tarifa_hora)) return true;
             if (!this.sonNumerosIguales(this.form.tarifa_mes, base.tarifa_mes)) return true;
             if (!this.sonNumerosIguales(this.form.tarifa_medio_tiempo, base.tarifa_medio_tiempo)) return true;
@@ -948,7 +1025,7 @@ window.preregistrosCoordApp = function () {
 
             if (this.tipoModal === "Extension") {
                 if (this.anexosActivos.length > 1 && !this.anexoSeleccionadoId) {
-                    errors.push("Selecciona el contrato que se va a modificar");
+                    errors.push("Selecciona el anexo que se va a modificar");
                 }
                 if (!String(this.form.numero_documento || "").trim() && !String(this.form.persona_usuario_id || "").trim()) {
                     errors.push("Busca una persona existente o digita el numero de documento");
@@ -957,14 +1034,52 @@ window.preregistrosCoordApp = function () {
                     errors.push("Correo personal o correo empresarial");
                 }
                 if (!String(this.form.moneda || "").trim()) errors.push("Moneda");
+                if (!String(this.form.tipo_asignacion || "").trim()) errors.push("Tipo de asignacion");
                 if (!String(this.form.modulo_id || "").trim() && !String(this.form.perfil || "").trim()) {
                     errors.push("Perfil / Modulo");
                 }
                 if (this.form.modulo_id === "otros" && !String(this.form.perfil || "").trim()) {
                     errors.push("Especifique el perfil");
                 }
+                const tarifaPorTipo = {
+                    full_time: [this.form.tarifa_mes, "Tarifa mes"],
+                    proyecto: [this.form.tarifa_mes, "Tarifa mes"],
+                    medio_tiempo: [this.form.tarifa_medio_tiempo, "Tarifa medio tiempo"],
+                    horas: [this.form.tarifa_hora, "Tarifa hora"],
+                    capacitacion: [this.form.tarifa_capacitacion, "Tarifa capacitacion"]
+                }[String(this.form.tipo_asignacion || "").trim()];
+                if (tarifaPorTipo && !(Number.isFinite(Number(tarifaPorTipo[0])) && Number(tarifaPorTipo[0]) > 0)) {
+                    errors.push(tarifaPorTipo[1]);
+                }
+                if (this.extensionSinAnexoActivo && !String(this.form.fecha_extension_desde || "").trim()) {
+                    errors.push("Fecha de inicio del anexo");
+                }
+                if (this.extensionSinAnexoActivo && this.extensionRequiereFechas && !String(this.form.fecha_extension_hasta || "").trim()) {
+                    errors.push("Fecha fin del anexo");
+                }
+                if (
+                    this.form.fecha_extension_desde &&
+                    this.form.fecha_extension_hasta &&
+                    this.form.fecha_extension_hasta < this.form.fecha_extension_desde
+                ) {
+                    errors.push("Fecha fin del anexo no puede ser anterior a fecha inicio");
+                }
+                if (
+                    this.extensionSinAnexoActivo &&
+                    ["full_time", "medio_tiempo", "proyecto"].includes(String(this.form.tipo_asignacion || "").trim()) &&
+                    !String(this.form.cliente_id || "").trim()
+                ) {
+                    errors.push("Cliente para crear el anexo");
+                }
+                if (
+                    this.extensionSinAnexoActivo &&
+                    this.form.cliente_id === "__prospecto__" &&
+                    !String(this.form.cliente_nombre_prospecto || "").trim()
+                ) {
+                    errors.push("Nombre del cliente prospecto");
+                }
                 if (!this.tieneCambioExtensionSolicitado()) {
-                    errors.push("Indica al menos un cambio en tarifas, fechas, cliente, responsable o perfil");
+                    errors.push("Indica al menos un cambio en tipo, tarifas, fechas, cliente, responsable o perfil");
                 }
             }
 
@@ -1042,6 +1157,10 @@ window.preregistrosCoordApp = function () {
             return this.anexosActivos.find((a) => a.id === this.anexoSeleccionadoId) || null;
         },
 
+        get extensionSinAnexoActivo() {
+            return this.tipoModal === "Extension" && this.anexosActivos.length === 0;
+        },
+
         get extensionBaseActual() {
             const selectedAnexo = this.anexoSeleccionado;
             const personaBase = selectedAnexo
@@ -1067,6 +1186,8 @@ window.preregistrosCoordApp = function () {
 
         get extensionRequiereFechas() {
             const tipo = String(
+                this.form.tipo_asignacion ||
+                this.anexoSeleccionado?.tipo_asignacion ||
                 this.personaSeleccionada?.tipo_asignacion ||
                 this.extensionBaseActual?.tipo_asignacion ||
                 ""
@@ -1075,7 +1196,17 @@ window.preregistrosCoordApp = function () {
         },
 
         get extensionHelperFechas() {
-            const tipo = this.personaSeleccionada?.tipo_asignacion_label || this.extensionBaseActual?.tipo_asignacion_label || "este contrato";
+            const tipo =
+                this.labelTipoAsignacion(this.form.tipo_asignacion) ||
+                this.anexoSeleccionado?.tipo_asignacion_label ||
+                this.personaSeleccionada?.tipo_asignacion_label ||
+                this.extensionBaseActual?.tipo_asignacion_label ||
+                "este contrato";
+            if (this.extensionSinAnexoActivo) {
+                return this.extensionRequiereFechas
+                    ? `No hay anexo activo. Se creara uno de tipo ${tipo}; indica fecha de inicio y fecha fin.`
+                    : `No hay anexo activo. Se creara uno de tipo ${tipo}; indica al menos la fecha de inicio.`;
+            }
             if (this.extensionRequiereFechas) {
                 return `Para ${tipo}, estas fechas ayudan a sincronizar el anexo tecnico.`;
             }
@@ -1117,6 +1248,28 @@ window.preregistrosCoordApp = function () {
 
             if (this.tipoModal === "Extension" || this.tipoModal === "Retiro") {
                 if (this.form.anexo_item_id) datosExtra.anexo_item_id = this.form.anexo_item_id;
+                base.datos_extra = datosExtra;
+            }
+
+            if (this.tipoModal === "Extension") {
+                if (this.form.tipo_asignacion) {
+                    datosExtra.tipo_asignacion = this.form.tipo_asignacion;
+                }
+                const modalidadPorTipoAsignacion = {
+                    full_time: "Full time",
+                    medio_tiempo: "Medio tiempo",
+                    horas: "Por horas",
+                    capacitacion: "Por horas"
+                };
+                const modalidadContrato = modalidadPorTipoAsignacion[this.form.tipo_asignacion];
+                if (modalidadContrato) base.modalidad_contrato = modalidadContrato;
+                else delete base.modalidad_contrato;
+
+                const esProspecto = this.form.cliente_id === "__prospecto__";
+                if (esProspecto) {
+                    base.cliente_id = null;
+                    datosExtra.cliente_nombre = String(this.form.cliente_nombre_prospecto || "").trim() || null;
+                }
                 base.datos_extra = datosExtra;
             }
 

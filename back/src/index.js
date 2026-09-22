@@ -2773,12 +2773,15 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
 
   let fechaFinTarget = null;
   let fechaFinCalculadaTarget = false;
-  if (tipoBase === "horas" || tipoBase === "capacitacion") {
+  const fechaFinExtension = normalizeDateOnlyInput(personaContext?.fecha_extension_hasta);
+  if (fechaFinExtension) {
+    fechaFinTarget = fechaFinExtension;
+    fechaFinCalculadaTarget = false;
+  } else if (tipoBase === "horas" || tipoBase === "capacitacion") {
     fechaFinTarget = computeYearEndDate(fechaInicioTarget);
     fechaFinCalculadaTarget = true;
   } else {
     fechaFinTarget =
-      normalizeDateOnlyInput(personaContext?.fecha_extension_hasta) ||
       normalizeDateOnlyInput(personaContext?.fecha_fin) ||
       normalizeDateOnlyInput(baseItem?.fecha_fin) ||
       computeYearEndDate(fechaInicioTarget) ||
@@ -2870,11 +2873,6 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
         ? cierreAnterior
         : currentItem.fecha_fin;
 
-    // horas/capacitacion: constraint check2 exige fecha_fin = 31-dic; no cambiar
-    const isCurrentCorteAnual =
-      currentItem.tipo_asignacion === "horas" || currentItem.tipo_asignacion === "capacitacion";
-    const fechaFinParaSplit = isCurrentCorteAnual ? null : fechaFinAnterior;
-
     await pool.query(
       `
       UPDATE anexo_tecnico_items
@@ -2886,7 +2884,7 @@ async function syncExtensionAnexoFromContext({ proceso, personaContext, createdB
         updated_at = NOW()
       WHERE id = $1
       `,
-      [currentItem.id, fechaFinParaSplit, createdBy || null]
+      [currentItem.id, fechaFinAnterior, createdBy || null]
     );
 
     const inserted = await insertAnexoTecnicoItem({

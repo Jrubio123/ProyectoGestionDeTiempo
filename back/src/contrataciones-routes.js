@@ -1256,6 +1256,11 @@ module.exports = function registerContratacionesRoutes(deps) {
       : null;
 
     const changes = [];
+    if (requestedTipoAsignacion && requestedTipoAsignacion !== currentContext?.tipo_asignacion) {
+      changes.push(
+        `Tipo de asignacion: ${currentContext?.tipo_asignacion_label || "Sin tipo"} -> ${anexoTipoLabel(requestedTipoAsignacion)}`
+      );
+    }
     const requestedFrom = requestedValues?.fecha_extension_desde || null;
     const requestedTo = requestedValues?.fecha_extension_hasta || null;
     const baseFrom = currentContext?.fecha_inicio_actual || null;
@@ -1315,6 +1320,65 @@ module.exports = function registerContratacionesRoutes(deps) {
       extension_base: base,
       extension_cambios: changes
     };
+  }
+
+  function validateExtensionAnexoRequest(currentContext, requestedValues = {}) {
+    const requestedTipoRaw = requestedValues?.tipo_asignacion || requestedValues?.modalidad_contrato || null;
+    const requestedTipo = normalizeAnexoTipo(requestedTipoRaw);
+    if (requestedTipoRaw && !requestedTipo) {
+      return { error: "tipo_asignacion invalido para la Extension" };
+    }
+
+    const tipoAsignacion = requestedTipo || normalizeAnexoTipo(currentContext?.tipo_asignacion);
+    if (!tipoAsignacion) {
+      return { error: "Selecciona el tipo de asignacion para crear o modificar el anexo tecnico" };
+    }
+
+    const tieneAnexoActivo = Boolean(currentContext?.anexo_activo);
+    if (!tieneAnexoActivo && !requestedTipo) {
+      return { error: "La persona no tiene un anexo activo; debes seleccionar el tipo de asignacion" };
+    }
+
+    const tarifaConfig = {
+      full_time: ["tarifa_mes", "tarifa_mes"],
+      proyecto: ["tarifa_mes", "tarifa_mes"],
+      medio_tiempo: ["tarifa_medio_tiempo", "tarifa_medio_tiempo"],
+      horas: ["tarifa_hora", "tarifa_hora"],
+      capacitacion: ["tarifa_capacitacion", "tarifa_capacitacion"]
+    }[tipoAsignacion];
+    const [tarifaField, tarifaLabel] = tarifaConfig;
+    const tarifaSolicitada = requestedValues?.[tarifaField];
+    const tarifa = tarifaSolicitada !== undefined
+      ? toNullableNumber(tarifaSolicitada)
+      : toNullableNumber(currentContext?.[tarifaField]);
+    if (tarifa === null || tarifa <= 0) {
+      return { error: `${tarifaLabel} es obligatoria y debe ser mayor que cero para la Extension` };
+    }
+
+    const fechaDesde = requestedValues?.fecha_extension_desde || null;
+    const fechaHasta = requestedValues?.fecha_extension_hasta || null;
+    if (!tieneAnexoActivo && !fechaDesde) {
+      return { error: "fecha_extension_desde es obligatoria para crear el primer anexo tecnico" };
+    }
+    if (!tieneAnexoActivo && extensionTipoRequiereFechas(tipoAsignacion) && !fechaHasta) {
+      return { error: "fecha_extension_hasta es obligatoria para este tipo de asignacion" };
+    }
+    if (fechaDesde && fechaHasta && fechaHasta < fechaDesde) {
+      return { error: "fecha_extension_hasta no puede ser anterior a fecha_extension_desde" };
+    }
+
+    const clienteId = requestedValues?.cliente_id || currentContext?.cliente_id || null;
+    const clienteNombre = requestedValues?.cliente_nombre || currentContext?.cliente_nombre || null;
+    if (
+      !tieneAnexoActivo &&
+      extensionTipoRequiereFechas(tipoAsignacion) &&
+      !clienteId &&
+      !clienteNombre
+    ) {
+      return { error: "cliente_id o cliente_nombre es obligatorio para crear este tipo de anexo tecnico" };
+    }
+
+    return { tipo_asignacion: tipoAsignacion, tiene_anexo_activo: tieneAnexoActivo };
   }
 
   function summarizeExtensionBase(base) {
@@ -2652,9 +2716,10 @@ module.exports = function registerContratacionesRoutes(deps) {
               correoEmpresarial,
               preferAnexoItemId: toNullableString(datosExtra?.anexo_item_id)
             });
-          const extensionExtra = buildExtensionExtraContext(extensionContext, {
+          const extensionRequestedValues = {
+            tipo_asignacion: datosExtra?.tipo_asignacion || payload.tipo_asignacion || modalidadContrato,
             cliente_id: payload.cliente_id || null,
-            cliente_nombre: clienteNombre || extensionContext?.cliente_nombre || null,
+            cliente_nombre: clienteNombre || toNullableString(datosExtra?.cliente_nombre) || extensionContext?.cliente_nombre || null,
             supervisor_id: supervisorSeleccionadoMeta?.public_id || payload.supervisor_id || datosExtra.supervisor_azure_oid || null,
             supervisor_nombre: supervisorSeleccionadoMeta?.nombre_usuario || datosExtra.supervisor_nombre || extensionContext?.supervisor_nombre || null,
             supervisor_azure_oid: supervisorSeleccionadoMeta?.azure_oid || datosExtra.supervisor_azure_oid || null,
@@ -2667,7 +2732,13 @@ module.exports = function registerContratacionesRoutes(deps) {
             tarifa_mes: payload.tarifa_mes,
             tarifa_medio_tiempo: payload.tarifa_medio_tiempo,
             tarifa_capacitacion: payload.tarifa_capacitacion
-          });
+          };
+          const extensionValidation = validateExtensionAnexoRequest(extensionContext, extensionRequestedValues);
+          if (extensionValidation.error) {
+            return res.status(422).json({ error: extensionValidation.error });
+          }
+          datosExtra.tipo_asignacion = extensionValidation.tipo_asignacion;
+          const extensionExtra = buildExtensionExtraContext(extensionContext, extensionRequestedValues);
           if (extensionExtra?.tipo_asignacion && !datosExtra.tipo_asignacion) {
             datosExtra.tipo_asignacion = extensionExtra.tipo_asignacion;
           }
@@ -2810,7 +2881,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         let created;
         try {
           created = await syncAnexoDesdeSolicitud(createdId, req.user?.id, {
-            strict: tipoSolicitud === TIPO_NUEVO
+            strict: tipoSolicitud === TIPO_NUEVO || tipoSolicitud === TIPO_EXTENSION
           });
         } catch (anexoError) {
           await pool.query(`DELETE FROM solicitudes_contratacion WHERE id = $1`, [createdId]);
@@ -3147,9 +3218,10 @@ module.exports = function registerContratacionesRoutes(deps) {
               correoEmpresarial,
               preferAnexoItemId: toNullableString(datosExtra?.anexo_item_id)
             });
-          const extensionExtra = buildExtensionExtraContext(extensionContext, {
+          const extensionRequestedValues = {
+            tipo_asignacion: datosExtra?.tipo_asignacion || payload.tipo_asignacion || modalidadContrato,
             cliente_id: clientePublicId || null,
-            cliente_nombre: clienteNombre || extensionContext?.cliente_nombre || null,
+            cliente_nombre: clienteNombre || toNullableString(datosExtra?.cliente_nombre) || extensionContext?.cliente_nombre || null,
             supervisor_id: supervisorSeleccionadoMeta?.public_id || supervisorPublicId || datosExtra.supervisor_azure_oid || null,
             supervisor_nombre: supervisorSeleccionadoMeta?.nombre_usuario || datosExtra.supervisor_nombre || extensionContext?.supervisor_nombre || null,
             supervisor_azure_oid: supervisorSeleccionadoMeta?.azure_oid || datosExtra.supervisor_azure_oid || null,
@@ -3164,7 +3236,13 @@ module.exports = function registerContratacionesRoutes(deps) {
               payload.tarifa_medio_tiempo !== undefined ? payload.tarifa_medio_tiempo : current.tarifa_medio_tiempo,
             tarifa_capacitacion:
               payload.tarifa_capacitacion !== undefined ? payload.tarifa_capacitacion : current.tarifa_capacitacion
-          });
+          };
+          const extensionValidation = validateExtensionAnexoRequest(extensionContext, extensionRequestedValues);
+          if (extensionValidation.error) {
+            return res.status(422).json({ error: extensionValidation.error });
+          }
+          datosExtra.tipo_asignacion = extensionValidation.tipo_asignacion;
+          const extensionExtra = buildExtensionExtraContext(extensionContext, extensionRequestedValues);
           if (extensionExtra?.tipo_asignacion && !datosExtra.tipo_asignacion) {
             datosExtra.tipo_asignacion = extensionExtra.tipo_asignacion;
           }
@@ -3295,7 +3373,7 @@ module.exports = function registerContratacionesRoutes(deps) {
         );
 
         await syncAnexoDesdeSolicitud(internalId, req.user?.id, {
-          strict: tipoSolicitud === TIPO_NUEVO
+          strict: tipoSolicitud === TIPO_NUEVO || tipoSolicitud === TIPO_EXTENSION
         });
 
         const shouldRedispatchOnlyTh =

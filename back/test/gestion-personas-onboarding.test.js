@@ -69,12 +69,12 @@ test("onboarding precarga el ID de catálogo desde un valor histórico", (t) => 
   });
 
   assert.equal(app.formS3.tipo_cuenta_id, "uuid-ahorros");
-  assert.equal(app.formS3.tipo_documento_representante, "uuid-cc");
+  assert.equal(app.formS3.tipo_documento_representante, "CC");
   assert.equal(app.s3BaseValida, true);
   const payload = app.buildS3Payload();
   assert.equal(payload.tipo_cuenta_id, "uuid-ahorros");
   assert.equal(payload.tipo_cuenta, "Cuenta de Ahorros");
-  assert.equal(payload.tipo_documento_representante, "uuid-cc");
+  assert.equal(payload.tipo_documento_representante, "CC");
 });
 
 test("anexo individual precarga correo y propone una fecha fin editable", (t) => {
@@ -206,5 +206,5 @@ test("el banner del anexo depende del estado de firma y no de updated_at", () =>
 
   assert.match(dashboardSource, /ultimoFirmado && activos\.some\(\(item\) => item\.estado_firma !== "firmado"\)/);
   assert.doesNotMatch(dashboardSource, /updatedAt > firmadoAt/);
-  assert.match(routerSource, /20260922-persona-juridica/);
+  assert.match(routerSource, /20260922-persona-juridica-v2/);
 });

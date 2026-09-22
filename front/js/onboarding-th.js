@@ -446,7 +446,7 @@ window.onboardingThApp = function () {
         valorTipoDocumentoRepresentante(value) {
             const raw = String(value || "").trim();
             const documento = this.resolverTipoDocumentoRepresentante(raw);
-            return documento ? String(documento.id || "").trim() : raw;
+            return documento ? String(documento.codigo || documento.titulo || "").trim() : raw;
         },
 
         normalizarId(value) {

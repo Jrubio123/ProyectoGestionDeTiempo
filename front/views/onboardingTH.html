@@ -559,7 +559,7 @@
                             :disabled="!seccion3Editable">
                             <option value="">Tipo documento representante *</option>
                             <template x-for="documento in tiposDocumento" :key="documento.id">
-                                <option :value="documento.id"
+                                <option :value="documento.codigo || documento.titulo"
                                     x-text="documento.codigo ? `${documento.codigo} - ${documento.titulo}` : documento.titulo"></option>
                             </template>
                         </select>

@@ -570,12 +570,14 @@ window.gestionPersonasApp = function () {
                 .replace(/[\u0300-\u036f]/g, "")
                 .toLowerCase();
             if (normalized === "natural") return "Natural";
-            if (normalized === "juridica") return "Jurídica";
+            // El API histórico solo reconocía el valor sin tilde. La etiqueta
+            // visible conserva "Jurídica", pero el contrato HTTP usa "Juridica".
+            if (normalized === "juridica") return "Juridica";
             return "";
         },
 
         esPersonaJuridica(value) {
-            return this.valorTipoPersonaForm(value) === "Jurídica";
+            return this.valorTipoPersonaForm(value) === "Juridica";
         },
 
         resolverTipoDocumentoRepresentante(value) {
@@ -599,7 +601,7 @@ window.gestionPersonasApp = function () {
         valorTipoDocumentoRepresentanteForm(value) {
             const raw = String(value || "").trim();
             const documento = this.resolverTipoDocumentoRepresentante(raw);
-            return documento ? String(documento.id || "").trim() : raw;
+            return documento ? String(documento.codigo || documento.titulo || "").trim() : raw;
         },
 
         prepararDatosJuridicos(payload) {
@@ -629,7 +631,9 @@ window.gestionPersonasApp = function () {
                 if (!documento) {
                     return "Selecciona un tipo de documento válido para el representante.";
                 }
-                payload.tipo_documento_representante = String(documento.id || "").trim();
+                payload.tipo_documento_representante = String(
+                    documento.codigo || documento.titulo || ""
+                ).trim();
             }
             return faltantes.length
                 ? `Para una persona jurídica completa: ${faltantes.join(", ")}.`

@@ -9041,8 +9041,11 @@ function isValidEmailFormat(value) {
 
 function normalizeTipoPersonaForUsuariosInput(value) {
   const raw = normalizeValue(value)
+    .replace(/&(?:iacute|#0*237|#x0*ed);/gi, "i")
+    .replace(/\u00c3\u00ad/gi, "i")
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z]/g, "");
   if (!raw) return null;
   if (raw === "natural") return "Natural";
   if (raw === "juridica") return "Jurídica";

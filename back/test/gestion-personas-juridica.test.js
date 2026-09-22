@@ -24,9 +24,9 @@ test("gestion de personas normaliza y valida los datos de persona juridica", (t)
     { id: "doc-ce", titulo: "Cédula de Extranjería", codigo: "CE" }
   ];
 
-  assert.equal(app.valorTipoPersonaForm("Juridica"), "Jurídica");
-  assert.equal(app.valorTipoPersonaForm("Jurídica"), "Jurídica");
-  assert.equal(app.valorTipoDocumentoRepresentanteForm("Cédula de Ciudadanía"), "doc-cc");
+  assert.equal(app.valorTipoPersonaForm("Juridica"), "Juridica");
+  assert.equal(app.valorTipoPersonaForm("Jurídica"), "Juridica");
+  assert.equal(app.valorTipoDocumentoRepresentanteForm("Cédula de Ciudadanía"), "CC");
   assert.equal(app.addForm.tipo_persona, "Natural");
 
   app.ficha = {
@@ -35,13 +35,13 @@ test("gestion de personas normaliza y valida los datos de persona juridica", (t)
     tipo_documento_representante: "Cédula de Ciudadanía"
   };
   app.abrirEdicion("personal");
-  assert.equal(app.draft.personal.tipo_persona, "Jurídica");
+  assert.equal(app.draft.personal.tipo_persona, "Juridica");
   assert.equal(app.draft.personal.razon_social, "Empresa existente SAS");
-  assert.equal(app.draft.personal.tipo_documento_representante, "doc-cc");
+  assert.equal(app.draft.personal.tipo_documento_representante, "CC");
 
   const incompleto = { tipo_persona: "Juridica", razon_social: "Empresa SAS" };
   assert.match(app.prepararDatosJuridicos(incompleto), /NIT de la empresa/);
-  assert.equal(incompleto.tipo_persona, "Jurídica");
+  assert.equal(incompleto.tipo_persona, "Juridica");
 
   const completo = {
     tipo_persona: "Jurídica",
@@ -53,7 +53,7 @@ test("gestion de personas normaliza y valida los datos de persona juridica", (t)
   };
   assert.equal(app.prepararDatosJuridicos(completo), "");
   assert.equal(completo.razon_social, "Empresa SAS");
-  assert.equal(completo.tipo_documento_representante, "doc-cc");
+  assert.equal(completo.tipo_documento_representante, "CC");
 
   completo.tipo_persona = "Natural";
   assert.equal(app.prepararDatosJuridicos(completo), "");
@@ -72,7 +72,7 @@ test("la edicion juridica queda centralizada en gestion de personas", () => {
   assert.match(personasHtml, /x-model="draft\.personal\.representante_legal"/);
   assert.match(personasHtml, /x-model="draft\.personal\.tipo_documento_representante"/);
   assert.match(personasHtml, /x-model="draft\.personal\.numero_documento_representante"/);
-  assert.match(personasHtml, /:value="d\.id"/);
+  assert.match(personasHtml, /:value="d\.codigo \|\| d\.titulo"/);
 
   assert.doesNotMatch(consultoresHtml, /x-model="(?:addForm|draft\.personal)\.tipo_persona"/);
   assert.match(consultoresHtml, /se administran desde Gesti&oacute;n de Personas/);
@@ -95,6 +95,10 @@ test("el backend persiste y exige los campos juridicos desde gestion de personas
   const personaNormalizerStart = index.indexOf("function normalizeTipoPersonaForUsuariosInput");
   const personaNormalizerEnd = index.indexOf("async function normalizeTipoDocumentoRepresentanteFromCatalog", personaNormalizerStart);
   const personaNormalizerSource = index.slice(personaNormalizerStart, personaNormalizerEnd);
+  const normalizeTipoPersona = Function(
+    "normalizeValue",
+    `"use strict"; ${personaNormalizerSource}; return normalizeTipoPersonaForUsuariosInput;`
+  )((value) => String(value || "").toLowerCase().trim());
 
   assert.ok(createStart >= 0 && listStart > createStart);
   assert.match(createSource, /normalizePersonaJuridicaInput/);
@@ -102,6 +106,10 @@ test("el backend persiste y exige los campos juridicos desde gestion de personas
   assert.match(createSource, /tipo_documento_representante, numero_documento_representante/);
   assert.match(personaNormalizerSource, /normalize\("NFD"\)/);
   assert.match(personaNormalizerSource, /raw === "juridica"/);
+  assert.equal(normalizeTipoPersona("Juridica"), "Jurídica");
+  assert.equal(normalizeTipoPersona("Jurídica"), "Jurídica");
+  assert.equal(normalizeTipoPersona("JurÃ­dica"), "Jurídica");
+  assert.equal(normalizeTipoPersona("Jur&iacute;dica"), "Jurídica");
   assert.match(index, /normalizeTipoDocumentoRepresentanteFromCatalog/);
   assert.match(linkedEditSource, /personaJuridica\.missing\.length/);
   assert.match(linkedEditSource, /tipo_persona === undefined/);
